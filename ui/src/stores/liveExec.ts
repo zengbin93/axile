@@ -1,0 +1,125 @@
+import { create } from 'zustand'
+import type { AccountDashboardItem } from '@/types/api'
+
+/**
+ * 实时执行态 store —— 「哪个账户此刻在跑、跑到哪个阶段」的单一读取源。
+ *
+ * 第一性原理：运行态的唯一真源是后端并发锁（registry）。前端不再靠本地 runner
+ * 猜测，而是把两路服务端信号汇进这里，让所有视图从一处读：
+ *   - **SSE**（热增量，秒级）：`applySnapshot`（连上/重连时的权威全量）+ `applyEvent`（逐帧）。
+ *   - **仪表盘轮询**（冷兜底，5s）：`reconcile`，在 SSE 断线时仍能播种/清理。
+ *
+ * 对账避免抖动：轮询是 5s 陈旧快照，只用来「补 SSE 缺的」和「清理已陈旧的」，不会
+ * 覆盖刚由 SSE 点亮、尚新鲜的条目（见 `reconcile` 的 STALE 守卫）。
+ */
+
+/** 单账户在途执行条目。 */
+export interface RunEntry {
+  executionId: string
+  kind: string | null
+  /** 阶段键（见 execProgress.PHASES）。 */
+  phase: string
+  /** running | done | failed | terminated。 */
+  status: string
+  /** 本地最近更新时刻（ms），供对账 STALE 守卫。 */
+  updatedAt: number
+}
+
+/** SSE 帧（snapshot 列表项 / event 单帧同构）。 */
+export interface RunFrame {
+  account_id: number
+  execution_id: string
+  kind: string | null
+  phase: string
+  status: string
+}
+
+/** 终态标记：命中即视为「已结束」，从运行集移除。 */
+const TERMINAL = new Set(['done', 'failed', 'terminated'])
+
+/** 轮询对账时，超过该时长（ms）未收到 SSE 更新的条目才允许被「未在跑」的轮询清除。 */
+const STALE_MS = 6500
+
+interface LiveExecState {
+  /** account_id → 在途执行；不在跑的账户不出现在表中。 */
+  running: Map<number, RunEntry>
+  /** SSE 连上/重连的权威全量快照，直接替换运行集。 */
+  applySnapshot: (frames: RunFrame[]) => void
+  /** SSE 单帧增量：终态移除，否则 upsert。 */
+  applyEvent: (frame: RunFrame) => void
+  /** 仪表盘轮询兜底对账（SSE 断线时仍正确）。 */
+  reconcile: (accounts: AccountDashboardItem[]) => void
+}
+
+function toEntry(frame: RunFrame, updatedAt: number): RunEntry {
+  return {
+    executionId: frame.execution_id,
+    kind: frame.kind,
+    phase: frame.phase,
+    status: frame.status,
+    updatedAt,
+  }
+}
+
+export const useLiveExecStore = create<LiveExecState>((set) => ({
+  running: new Map(),
+
+  applySnapshot: (frames) =>
+    set(() => {
+      const now = Date.now()
+      const next = new Map<number, RunEntry>()
+      for (const f of frames) {
+        if (!TERMINAL.has(f.status)) next.set(f.account_id, toEntry(f, now))
+      }
+      return { running: next }
+    }),
+
+  applyEvent: (frame) =>
+    set((s) => {
+      const next = new Map(s.running)
+      if (TERMINAL.has(frame.status)) {
+        next.delete(frame.account_id)
+      } else {
+        // SSE 帧 kind 常为 null（tap 不便引 registry）；同一执行沿用已知 kind，避免
+        // 清仓类被误显为「执行」。kind 由轮询兜底回填（见 reconcile）。
+        const prev = next.get(frame.account_id)
+        const kind = frame.kind ?? (prev?.executionId === frame.execution_id ? prev.kind : null)
+        next.set(frame.account_id, { ...toEntry(frame, Date.now()), kind })
+      }
+      return { running: next }
+    }),
+
+  reconcile: (accounts) =>
+    set((s) => {
+      const now = Date.now()
+      const next = new Map(s.running)
+      for (const a of accounts) {
+        const existing = next.get(a.account_id)
+        if (a.running_execution_id) {
+          if (!existing || existing.executionId !== a.running_execution_id) {
+            // 缺失或换了执行：以轮询快照播种。
+            next.set(a.account_id, {
+              executionId: a.running_execution_id,
+              kind: a.running_kind ?? null,
+              phase: a.running_phase ?? 'triggered',
+              status: 'running',
+              updatedAt: now,
+            })
+          } else if (existing.kind == null && a.running_kind != null) {
+            // 同一执行、SSE 已点亮但 kind 未知：用轮询已知的 kind 回填（阶段仍以 SSE 为准）。
+            next.set(a.account_id, { ...existing, kind: a.running_kind })
+          }
+        } else if (existing && now - existing.updatedAt > STALE_MS) {
+          // 轮询说没在跑，且该条目已陈旧（SSE 多半断了）→ 清除。新鲜条目不动，避免
+          // 覆盖刚由 SSE 点亮、而轮询快照还没赶上的执行。
+          next.delete(a.account_id)
+        }
+      }
+      return { running: next }
+    }),
+}))
+
+/** 便捷选择器：读某账户的在途执行条目（无则 null）。 */
+export function useRunning(accountId: number): RunEntry | null {
+  return useLiveExecStore((s) => s.running.get(accountId) ?? null)
+}

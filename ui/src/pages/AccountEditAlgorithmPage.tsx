@@ -1,0 +1,168 @@
+/**
+ * 账户执行算法子页 /accounts/:id/edit/algorithm。
+ *
+ * 主交易 + 清仓算法完整编辑器；保存只 PATCH 算法相关字段，成功后回到编辑总览。
+ */
+
+import { useCallback, useEffect, useState } from 'react'
+import { useParams } from 'react-router'
+import { useNavigate } from '@/components/ui/nav'
+import { Chip } from '@/components/ui/Card'
+import { getAccount, updateAccount } from '@/lib/api/accounts'
+import { usePolling } from '@/lib/hooks/usePolling'
+import { useDomainStore } from '@/stores/domain'
+import { useToastStore } from '@/stores/ui'
+import { channelLabel } from '@/features/dashboard/display'
+import { marketForChannel } from '@/features/setup/cron'
+import { getChannelDescriptor } from '@/stores/channels'
+import {
+  defaultAlgorithm,
+  describeAlgorithmRef,
+  validateAlgorithmParams,
+  type AlgorithmRef,
+} from '@/features/setup/algorithms'
+import { AlgorithmEditor } from '@/features/setup/AlgorithmEditor'
+import {
+  EditBreadcrumb,
+  EditError,
+  EditLoading,
+  EditSaveBar,
+  EditWorktopBar,
+  Row,
+  Section,
+  editShellVtName,
+} from '@/features/account/editUi'
+import type { Account, AlgorithmSlot } from '@/types/api'
+
+function refFromAccount(algo: unknown): AlgorithmRef | null {
+  if (!algo || typeof algo !== 'object') return null
+  const v = algo as { method?: unknown; params?: unknown }
+  if (typeof v.method !== 'string') return null
+  return { method: v.method, params: (v.params ?? {}) as Record<string, unknown> }
+}
+
+function norm(v: unknown): string {
+  return JSON.stringify(v ?? null)
+}
+
+function algoParamError(algo: AlgorithmRef | null): string | null {
+  if (!algo) return null
+  return validateAlgorithmParams(algo.params)
+}
+
+export function AccountEditAlgorithmPage() {
+  const { id } = useParams()
+  const accountId = Number(id)
+  const navigate = useNavigate()
+  const toast = useToastStore((s) => s.toast)
+  const refreshAccounts = useDomainStore((s) => s.refreshAccounts)
+  const account = usePolling(useCallback((s: AbortSignal) => getAccount(accountId, s), [accountId]), 0)
+  const acc = account.data
+
+  const [ready, setReady] = useState(false)
+  const [trade, setTrade] = useState<AlgorithmRef | null>(null)
+  const [empty, setEmpty] = useState<AlgorithmRef | null>(null)
+  const [saving, setSaving] = useState(false)
+
+  useEffect(() => {
+    if (!acc || ready) return
+    const market = marketForChannel(acc.trade_channel)
+    setTrade(refFromAccount(acc.algorithm) ?? getChannelDescriptor(acc.trade_channel)?.defaults.trade_algorithm ?? defaultAlgorithm(market, 'trade'))
+    setEmpty(refFromAccount(acc.empty_positions_algorithm))
+    setReady(true)
+  }, [acc, ready])
+
+  if (account.error && !acc)
+    return <EditError id={accountId} message={account.error.message} />
+
+  if (account.loading || !ready || !acc || !trade)
+    return <EditLoading id={accountId} leaf="执行算法" />
+
+  const market = marketForChannel(acc.trade_channel)
+  const origTrade = refFromAccount(acc.algorithm) ?? getChannelDescriptor(acc.trade_channel)?.defaults.trade_algorithm ?? defaultAlgorithm(market, 'trade')
+  const origEmpty = refFromAccount(acc.empty_positions_algorithm)
+
+  const tradeChanged = norm(trade) !== norm(origTrade)
+  const emptyChanged = norm(empty) !== norm(origEmpty)
+  const dirty = tradeChanged || emptyChanged
+
+  const err = algoParamError(trade) ?? algoParamError(empty)
+  const changes: string[] = []
+  if (tradeChanged) changes.push('下单算法已改')
+  if (emptyChanged) changes.push(empty ? '清仓算法已改' : '清仓算法已清除')
+
+  // 与总览入口同构摘要（随草稿变，FLIP 中列语义连续）。
+  const tradeSum = describeAlgorithmRef(trade, market)
+  const emptySum = describeAlgorithmRef(empty, market)
+  const algoSummary = emptySum === '未设置' ? tradeSum : `${tradeSum} · 清仓 ${emptySum}`
+
+  const save = async () => {
+    if (err) return toast(`算法参数非法：${err}`)
+    if (!dirty) return toast('没有改动')
+    const patch: Partial<Account> = {}
+    if (tradeChanged) patch.algorithm = trade as unknown as Record<string, unknown>
+    if (emptyChanged) {
+      patch.empty_positions_algorithm = empty
+        ? (empty as unknown as Record<string, unknown>)
+        : null
+    }
+    setSaving(true)
+    try {
+      await updateAccount(accountId, patch)
+      toast('执行算法已更新')
+      void refreshAccounts()
+      account.refresh()
+      navigate(`/accounts/${accountId}/edit`)
+    } catch (e) {
+      toast(`更新失败：${e instanceof Error ? e.message : String(e)}`)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const slotRow = (
+    slot: AlgorithmSlot,
+    label: string,
+    value: AlgorithmRef | null,
+    onChange: (v: AlgorithmRef | null) => void,
+  ) => (
+    <Row label={label} top span>
+      <AlgorithmEditor
+        slot={slot}
+        channel={acc.trade_channel}
+        value={slot === 'trade' ? (value ?? defaultAlgorithm(market, 'trade')) : value}
+        allowClear={slot === 'empty'}
+        onChange={onChange}
+      />
+    </Row>
+  )
+
+  return (
+    <section className="pb-24">
+      <EditBreadcrumb id={accountId} name={acc.name} leaf="执行算法" />
+      <EditWorktopBar
+        label="执行算法"
+        hint="下单 / 清仓"
+        summary={algoSummary}
+        trailing={<Chip>{channelLabel(acc.trade_channel, acc.market)}</Chip>}
+        shellVtName={editShellVtName(accountId, 'algorithm')}
+        lead={`${acc.name} · 主交易与清仓分槽配置。保存只更新算法引用，不影响定时与启停。`}
+      />
+
+      <Section label="主交易">
+        {slotRow('trade', '下单算法', trade, (v) => setTrade(v ?? defaultAlgorithm(market, 'trade')))}
+      </Section>
+      <Section label="清仓">
+        {slotRow('empty', '清仓算法', empty, setEmpty)}
+      </Section>
+
+      <EditSaveBar
+        changes={changes}
+        blocked={Boolean(err)}
+        cancelTo={`/accounts/${accountId}/edit`}
+        onSave={() => void save()}
+        saving={saving}
+      />
+    </section>
+  )
+}

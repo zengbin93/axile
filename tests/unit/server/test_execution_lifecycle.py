@@ -1,0 +1,441 @@
+"""执行生命周期重构后的回归测试。"""
+
+from __future__ import annotations
+
+import asyncio
+from types import SimpleNamespace
+
+import pytest
+
+from axile.common.trade_channel import TradeChannel
+from axile.domain.execution import ExecutionKind, ExecutionTaskStatus, ExecutionTerminateMode
+from axile.executor.termination import ExecutionTerminated
+from axile.server.execution import lifecycle as execution_lifecycle
+from axile.server.execution import registry as execution_registry
+
+
+def test_handle_inline_execution_terminated_persists_record_and_updates_state(monkeypatch) -> None:
+    """内联 terminate 应复用统一收尾逻辑，并同步更新状态与事件。"""
+    execution_id = "exec-inline-terminated-1"
+    state = execution_registry.ExecutionTaskState(
+        execution_id=execution_id,
+        account_id=1,
+        execution_kind=ExecutionKind.REBALANCE,
+        status=ExecutionTaskStatus.RUNNING,
+        created_at="2026-03-27T10:00:00",
+        cancel_requested_at="2026-03-27T10:00:01",
+        channel=TradeChannel.CTP,
+        algorithm="SINGLE-MAKER",
+    )
+    captured: dict[str, object] = {"events": []}
+    execution_registry.set_execution_task_state(execution_id, state)
+
+    async def fake_append_terminated_execute_record(**kwargs: object) -> SimpleNamespace:
+        captured["record_kwargs"] = kwargs
+        return SimpleNamespace(id=321, is_success=0)
+
+    async def fake_append_execution_event(**kwargs: object) -> None:
+        events = captured["events"]
+        assert isinstance(events, list)
+        events.append(kwargs)
+
+    monkeypatch.setattr(execution_lifecycle, "append_terminated_execute_record", fake_append_terminated_execute_record)
+    monkeypatch.setattr(execution_lifecycle, "append_execution_event", fake_append_execution_event)
+    monkeypatch.setattr(execution_lifecycle, "now_str", lambda: "2026-03-27T10:00:05")
+
+    try:
+        record = asyncio.run(
+            execution_lifecycle.handle_inline_execution_terminated(
+                account_id=1,
+                execution_id=execution_id,
+                execution_kind=ExecutionKind.REBALANCE,
+                exc=ExecutionTerminated(
+                    reason="manual stop",
+                    mode=ExecutionTerminateMode.GRACEFUL.value,
+                    acked_at="2026-03-27T10:00:03",
+                    cancel_failed_order_ids=["order-1"],
+                ),
+            )
+        )
+        current_state = execution_registry.get_execution_task_state(execution_id)
+    finally:
+        execution_registry._clear_execution_task_state(execution_id)
+
+    assert record.id == 321
+    assert captured["record_kwargs"] == {
+        "account_id": 1,
+        "execution_id": execution_id,
+        "execution_kind": ExecutionKind.REBALANCE,
+        "reason": "manual stop",
+        "mode": ExecutionTerminateMode.GRACEFUL.value,
+        "requested_at": "2026-03-27T10:00:01",
+        "acked_at": "2026-03-27T10:00:03",
+        "finished_at": "2026-03-27T10:00:05",
+        "cancel_attempted": False,
+        "cancel_failed_order_ids": ["order-1"],
+        # 人工终止的默认来源；超时终止会在同一位置落 "timeout"。
+        "trigger": "operator",
+    }
+    assert captured["events"] == [
+        {
+            "execution_id": execution_id,
+            "account_id": 1,
+            "channel": TradeChannel.CTP,
+            "algorithm": "SINGLE-MAKER",
+            "event_type": execution_lifecycle.ExecutionEventType.EXECUTION_TERMINATED,
+            "status": execution_lifecycle.ExecutionEventStatus.WARNING,
+            "reason_family": execution_lifecycle.ExecutionReasonFamily.SYSTEM,
+            "reason_code": "COMMON.EXECUTION_TERMINATED",
+            "details": {
+                "termination": {
+                    "reason": "manual stop",
+                    "mode": ExecutionTerminateMode.GRACEFUL.value,
+                    "trigger": "operator",
+                    "execution_kind": ExecutionKind.REBALANCE.value,
+                    "cancel_failed_order_ids": ["order-1"],
+                }
+            },
+        }
+    ]
+    assert current_state is not None
+    assert current_state.status == ExecutionTaskStatus.TERMINATED
+    assert current_state.finished_at == "2026-03-27T10:00:05"
+    assert current_state.record_id == 321
+    assert current_state.is_success == 0
+
+
+def test_run_execution_task_uses_state_termination_fallbacks(monkeypatch) -> None:
+    """后台 terminate 分支应回退到内存状态中的 reason/mode。"""
+    execution_id = "exec-queued-terminated-1"
+    state = execution_registry.ExecutionTaskState(
+        execution_id=execution_id,
+        account_id=1,
+        execution_kind=ExecutionKind.REBALANCE,
+        status=ExecutionTaskStatus.QUEUED,
+        created_at="2026-03-27T11:00:00",
+        cancel_requested_at="2026-03-27T11:00:01",
+        cancel_reason="risk stop",
+        terminate_mode=ExecutionTerminateMode.CANCEL_PENDING,
+        channel=TradeChannel.CTP,
+        algorithm="SINGLE-MAKER",
+    )
+    captured: dict[str, object] = {"events": []}
+    execution_registry.set_execution_task_state(execution_id, state)
+    execution_registry.try_register_running_execution(1, execution_id)
+
+    async def fake_append_terminated_execute_record(**kwargs: object) -> SimpleNamespace:
+        captured["record_kwargs"] = kwargs
+        return SimpleNamespace(id=654, is_success=0)
+
+    async def fake_append_execution_event(**kwargs: object) -> None:
+        events = captured["events"]
+        assert isinstance(events, list)
+        events.append(kwargs)
+
+    async def fake_runner(_tracked_execution_id: str) -> SimpleNamespace:
+        raise ExecutionTerminated(
+            reason=None,
+            mode=None,
+            acked_at="2026-03-27T11:00:02",
+            cancel_failed_order_ids=["order-9"],
+        )
+
+    monkeypatch.setattr(execution_lifecycle, "append_terminated_execute_record", fake_append_terminated_execute_record)
+    monkeypatch.setattr(execution_lifecycle, "append_execution_event", fake_append_execution_event)
+    monkeypatch.setattr(execution_lifecycle, "now_str", lambda: "2026-03-27T11:00:05")
+
+    try:
+        asyncio.run(
+            execution_lifecycle._run_execution_task(
+                account_id=1,
+                execution_id=execution_id,
+                execution_kind=ExecutionKind.REBALANCE,
+                runner=fake_runner,
+            )
+        )
+        current_state = execution_registry.get_execution_task_state(execution_id)
+    finally:
+        execution_registry._clear_execution_task_state(execution_id)
+        execution_registry.clear_running_execution(1, execution_id)
+
+    assert captured["record_kwargs"] == {
+        "account_id": 1,
+        "execution_id": execution_id,
+        "execution_kind": ExecutionKind.REBALANCE,
+        "reason": "risk stop",
+        "mode": ExecutionTerminateMode.CANCEL_PENDING.value,
+        "requested_at": "2026-03-27T11:00:01",
+        "acked_at": "2026-03-27T11:00:02",
+        "finished_at": "2026-03-27T11:00:05",
+        "cancel_attempted": True,
+        "cancel_failed_order_ids": ["order-9"],
+        "trigger": "operator",
+    }
+    assert captured["events"] == [
+        {
+            "execution_id": execution_id,
+            "account_id": 1,
+            "channel": TradeChannel.CTP,
+            "algorithm": "SINGLE-MAKER",
+            "event_type": execution_lifecycle.ExecutionEventType.EXECUTION_TERMINATED,
+            "status": execution_lifecycle.ExecutionEventStatus.WARNING,
+            "reason_family": execution_lifecycle.ExecutionReasonFamily.SYSTEM,
+            "reason_code": "COMMON.EXECUTION_TERMINATED",
+            "details": {
+                "termination": {
+                    "reason": "risk stop",
+                    "mode": ExecutionTerminateMode.CANCEL_PENDING.value,
+                    "trigger": "operator",
+                    "execution_kind": ExecutionKind.REBALANCE.value,
+                    "cancel_failed_order_ids": ["order-9"],
+                }
+            },
+        }
+    ]
+    assert current_state is not None
+    assert current_state.status == ExecutionTaskStatus.TERMINATED
+    assert current_state.finished_at == "2026-03-27T11:00:05"
+    assert current_state.record_id == 654
+    assert current_state.is_success == 0
+
+
+class _FakeAccountSession:
+    """伪造账户查询会话，供入队路径读取账户对象。"""
+
+    def __init__(self, account: object) -> None:
+        self._account = account
+
+    async def __aenter__(self) -> "_FakeAccountSession":
+        return self
+
+    async def __aexit__(self, *_args: object) -> bool:
+        return False
+
+    async def get(self, _model: object, _account_id: object) -> object:
+        return self._account
+
+
+def test_enqueue_empty_positions_registers_clear_task(monkeypatch) -> None:
+    """入队清仓应登记 QUEUED 的 CLEAR_POSITIONS 任务并占用账户运行位。"""
+    account = SimpleNamespace(id=71, trade_channel=TradeChannel.CTP)
+    captured: dict[str, object] = {}
+
+    async def fake_run_empty_positions_task(
+        account_id: int,
+        execution_id: str,
+        algorithm: dict[str, object] | None,
+    ) -> None:
+        captured["task_args"] = (account_id, execution_id, algorithm)
+
+    monkeypatch.setattr(execution_lifecycle, "SessionLocal", lambda: _FakeAccountSession(account))
+    monkeypatch.setattr(execution_lifecycle, "resolve_execution_algorithm_name", lambda *_a, **_k: "SINGLE-MAKER")
+    monkeypatch.setattr(execution_lifecycle, "_run_empty_positions_task", fake_run_empty_positions_task)
+
+    async def _run() -> str:
+        execution_id = await execution_lifecycle.enqueue_empty_positions(71, algorithm={"method": "SINGLE-MAKER"})
+        # 让入队后创建的后台任务获得一次调度机会，以便捕获其入参。
+        await asyncio.sleep(0)
+        return execution_id
+
+    execution_id = asyncio.run(_run())
+    try:
+        state = execution_registry.get_execution_task_state(execution_id)
+        running_id = execution_registry.get_running_execution_id(71)
+    finally:
+        execution_registry._clear_execution_task_state(execution_id)
+        execution_registry.clear_running_execution(71, execution_id)
+
+    assert execution_id
+    assert running_id == execution_id
+    assert state is not None
+    assert state.execution_kind == ExecutionKind.CLEAR_POSITIONS
+    assert state.status == ExecutionTaskStatus.QUEUED
+    assert state.channel == TradeChannel.CTP
+    assert state.algorithm == "SINGLE-MAKER"
+    assert captured["task_args"] == (71, execution_id, {"method": "SINGLE-MAKER"})
+
+
+def test_enqueue_empty_positions_conflicts_when_running(monkeypatch) -> None:
+    """账户已有运行中的执行时，入队清仓应抛出冲突错误。"""
+    account = SimpleNamespace(id=72, trade_channel=TradeChannel.CTP)
+
+    monkeypatch.setattr(execution_lifecycle, "SessionLocal", lambda: _FakeAccountSession(account))
+
+    execution_registry.try_register_running_execution(72, "exec-running-72")
+    try:
+        with pytest.raises(execution_registry.AccountExecutionAlreadyRunningError):
+            asyncio.run(execution_lifecycle.enqueue_empty_positions(72))
+    finally:
+        execution_registry.clear_running_execution(72, "exec-running-72")
+
+
+def test_timeout_termination_is_distinguishable_from_operator(monkeypatch) -> None:
+    """总超时终止必须在落库与审计里与人工终止区分开（trigger=timeout）。"""
+    execution_id = "exec-inline-terminated-timeout"
+    state = execution_registry.ExecutionTaskState(
+        execution_id=execution_id,
+        account_id=1,
+        execution_kind=ExecutionKind.REBALANCE,
+        status=ExecutionTaskStatus.RUNNING,
+        created_at="2026-07-27T10:00:00",
+        channel=TradeChannel.CTP,
+        algorithm="SINGLE-MAKER",
+    )
+    captured: dict[str, object] = {"events": []}
+    execution_registry.set_execution_task_state(execution_id, state)
+
+    async def fake_append_terminated_execute_record(**kwargs: object) -> SimpleNamespace:
+        captured["record_kwargs"] = kwargs
+        return SimpleNamespace(id=777, is_success=0)
+
+    async def fake_append_execution_event(**kwargs: object) -> None:
+        events = captured["events"]
+        assert isinstance(events, list)
+        events.append(kwargs)
+
+    monkeypatch.setattr(execution_lifecycle, "append_terminated_execute_record", fake_append_terminated_execute_record)
+    monkeypatch.setattr(execution_lifecycle, "append_execution_event", fake_append_execution_event)
+    monkeypatch.setattr(execution_lifecycle, "now_str", lambda: "2026-07-27T10:03:00")
+
+    try:
+        asyncio.run(
+            execution_lifecycle.handle_inline_execution_terminated(
+                account_id=1,
+                execution_id=execution_id,
+                execution_kind=ExecutionKind.REBALANCE,
+                exc=ExecutionTerminated(
+                    reason="执行总超时（180s）",
+                    mode=ExecutionTerminateMode.CANCEL_PENDING.value,
+                    acked_at="2026-07-27T10:03:00",
+                    trigger="timeout",
+                ),
+            )
+        )
+    finally:
+        execution_registry._clear_execution_task_state(execution_id)
+
+    record_kwargs = captured["record_kwargs"]
+    assert isinstance(record_kwargs, dict)
+    assert record_kwargs["trigger"] == "timeout"
+    # 超时同样按 cancel_pending 收尾，因此 mode 不能用来区分二者。
+    assert record_kwargs["mode"] == ExecutionTerminateMode.CANCEL_PENDING.value
+    assert record_kwargs["cancel_attempted"] is True
+
+    events = captured["events"]
+    assert isinstance(events, list)
+    assert events[0]["details"]["termination"]["trigger"] == "timeout"
+
+
+def test_worker_backend_terminated_response_round_trips_trigger() -> None:
+    """worker 进程内触发的超时，需经跨进程响应还原为 trigger=timeout 的异常。"""
+    from axile.server.execution.worker_backend.manager import WorkerBackendManager
+    from axile.server.execution.worker_backend.protocol import WorkerBackendResponse
+    from axile.server.execution.worker_backend.worker_responses import _build_terminated_response
+
+    response = _build_terminated_response(
+        request_id="req-1",
+        account=SimpleNamespace(trade_channel=TradeChannel.GM),  # type: ignore[arg-type]
+        exc=ExecutionTerminated(
+            reason="执行总超时（180s）",
+            mode=ExecutionTerminateMode.CANCEL_PENDING.value,
+            acked_at="2026-07-27T10:03:00",
+            trigger="timeout",
+        ),
+    )
+    assert isinstance(response, WorkerBackendResponse)
+    assert response.trigger == "timeout"
+
+    with pytest.raises(ExecutionTerminated) as exc_info:
+        WorkerBackendManager._handle_response(response)
+
+    assert exc_info.value.trigger == "timeout"
+    assert exc_info.value.mode == ExecutionTerminateMode.CANCEL_PENDING.value
+
+
+def test_worker_backend_terminated_response_defaults_trigger_to_operator() -> None:
+    """缺省 trigger 的历史响应应按人工终止兜底，避免误标成超时。"""
+    from axile.server.execution.worker_backend.manager import WorkerBackendManager
+    from axile.server.execution.worker_backend.protocol import WorkerBackendResponse
+
+    response = WorkerBackendResponse(
+        request_id="req-2",
+        kind="terminated",
+        channel_type=TradeChannel.GM,
+        reason="manual stop",
+        mode=ExecutionTerminateMode.GRACEFUL.value,
+    )
+
+    with pytest.raises(ExecutionTerminated) as exc_info:
+        WorkerBackendManager._handle_response(response)
+
+    assert exc_info.value.trigger == "operator"
+
+
+def test_timeout_termination_sends_alert(monkeypatch) -> None:
+    """总超时终止必须告警：它是「没人知道」的那种终止，静默等于兜底白装。"""
+    from axile.server.db.models import Account
+
+    execution_id = "exec-timeout-alert"
+    execution_registry.set_execution_task_state(
+        execution_id,
+        execution_registry.ExecutionTaskState(
+            execution_id=execution_id,
+            account_id=1,
+            execution_kind=ExecutionKind.REBALANCE,
+            status=ExecutionTaskStatus.RUNNING,
+            created_at="2026-07-27T10:00:00",
+            channel=TradeChannel.CTP,
+            algorithm="SINGLE-MAKER",
+        ),
+    )
+    sent: list[str] = []
+
+    async def fake_append_terminated_execute_record(**_: object) -> SimpleNamespace:
+        return SimpleNamespace(id=888, is_success=0)
+
+    async def fake_append_execution_event(**_: object) -> None:
+        return None
+
+    async def fake_send_feishu_error(error: Exception, _account: object, _key: object) -> None:
+        sent.append(str(error))
+
+    class _FakeSession:
+        async def __aenter__(self) -> "_FakeSession":
+            return self
+
+        async def __aexit__(self, *_: object) -> None:
+            return None
+
+        async def get(self, _model: object, _pk: object) -> object:
+            return Account.model_construct(id=1, name="acc-1")
+
+    monkeypatch.setattr(execution_lifecycle, "append_terminated_execute_record", fake_append_terminated_execute_record)
+    monkeypatch.setattr(execution_lifecycle, "append_execution_event", fake_append_execution_event)
+    monkeypatch.setattr(execution_lifecycle, "send_feishu_error", fake_send_feishu_error)
+    monkeypatch.setattr(execution_lifecycle, "SessionLocal", lambda: _FakeSession())
+    monkeypatch.setattr(execution_lifecycle, "now_str", lambda: "2026-07-27T10:03:00")
+
+    def _run_termination(trigger: str) -> None:
+        asyncio.run(
+            execution_lifecycle.handle_inline_execution_terminated(
+                account_id=1,
+                execution_id=execution_id,
+                execution_kind=ExecutionKind.REBALANCE,
+                exc=ExecutionTerminated(
+                    reason="执行总超时（180s）" if trigger == "timeout" else "manual stop",
+                    mode=ExecutionTerminateMode.CANCEL_PENDING.value,
+                    trigger=trigger,
+                ),
+            )
+        )
+
+    try:
+        _run_termination("timeout")
+        assert len(sent) == 1
+        assert "总超时" in sent[0]
+
+        # 人工终止不该再打扰运维——发起的人本来就知道。
+        _run_termination("operator")
+        assert len(sent) == 1
+    finally:
+        execution_registry._clear_execution_task_state(execution_id)

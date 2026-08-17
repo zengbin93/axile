@@ -1,0 +1,96 @@
+import { useEffect, useState } from 'react'
+import { Link } from '@/components/ui/nav'
+import { useDomainStore } from '@/stores/domain'
+import { integrityOf } from '@/lib/derive'
+import { ThemeToggle } from '@/components/ThemeToggle'
+import { timeAgo } from '@/lib/format'
+
+/**
+ * 顶栏 —— 品牌、后端活性点、设置入口。
+ *
+ * 活性点/新鲜度直接来自共享账户数据的刷新（比单独 ping health 更诚实）：
+ * 有数据且最近一次刷新无误=绿+「数据 N 秒前」；刷新出错=红「与服务器失联」。
+ */
+export function TopBar() {
+  const updatedAt = useDomainStore((s) => s.accountsUpdatedAt)
+  const error = useDomainStore((s) => s.accountsError)
+  const accounts = useDomainStore((s) => s.accounts)
+  const online = error == null && updatedAt != null
+  // 全舰队「偏离」计数（风险轴）：常驻顶栏、跟着翻页；随 5s 轮询自动增减，账户对回目标即清零。
+  // 只由 integrity 派生，不看档位——暂停的账户照样计入（暂停+偏离最坏，绝不因暂停漏计）。
+  const offCount = (accounts ?? []).filter((a) => integrityOf(a).integrity === 'off').length
+
+  // 让「N 秒前」随时间走动，每秒重算一次。
+  const [, force] = useState(0)
+  useEffect(() => {
+    const t = setInterval(() => force((n) => n + 1), 1000)
+    return () => clearInterval(t)
+  }, [])
+
+  const statusText = online
+    ? `数据 ${timeAgo(updatedAt)} · 服务正常`
+    : '与服务器失联'
+
+  return (
+    <header className="sticky top-0 z-20 flex flex-wrap items-center gap-3 border-b border-line bg-surface/75 px-6 py-3 backdrop-blur-md">
+      <Link to="/" className="text-[15px] font-[650] tracking-wide">
+        axile
+      </Link>
+      <span className="flex items-center gap-1.5 text-[13px] text-ink-2">
+        {/* 活性点离开红绿（红绿专供行情涨跌）：连通=中性点(安静即好)，失联=琥珀点。 */}
+        <span
+          className={`h-2 w-2 flex-none rounded-full ${
+            online
+              ? 'bg-ink-3 shadow-[0_0_0_3px_var(--color-fill)]'
+              : 'bg-warn shadow-[0_0_0_3px_var(--color-warn-soft)]'
+          }`}
+        />
+        {statusText}
+      </span>
+      {/* 偏离计数：风险从单页抬到全局。琥珀（偏离色）、仅 N>0 才现身（安静即好），点击回舰队。 */}
+      {offCount > 0 && (
+        <Link
+          to="/"
+          title={`${offCount} 个账户偏离目标 · 需要看看`}
+          className="inline-flex items-center gap-1.5 rounded-chip border border-warn/45 bg-warn-tint px-2.5 py-1 text-[13px] font-medium text-warn hover:border-warn/70"
+        >
+          ⚠ {offCount} 个偏离
+        </Link>
+      )}
+      <span className="flex-1" />
+      <ThemeToggle />
+      <Link
+        to="/settings"
+        aria-label="系统配置"
+        title="系统配置"
+        className="flex items-center rounded-chip border border-line px-2.5 py-1.5 text-ink-2 hover:border-ink-3/40 hover:text-ink-1"
+      >
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <path
+            d="M12 15.5a3.5 3.5 0 100-7 3.5 3.5 0 000 7z"
+            stroke="currentColor"
+            strokeWidth="1.6"
+          />
+          <path
+            d="M19.4 13a7.6 7.6 0 000-2l2-1.6-2-3.4-2.4 1a7.6 7.6 0 00-1.7-1l-.4-2.5h-4l-.4 2.5a7.6 7.6 0 00-1.7 1l-2.4-1-2 3.4L4.6 11a7.6 7.6 0 000 2l-2 1.6 2 3.4 2.4-1c.5.4 1.1.7 1.7 1l.4 2.5h4l.4-2.5c.6-.3 1.2-.6 1.7-1l2.4 1 2-3.4-2-1.6z"
+            stroke="currentColor"
+            strokeWidth="1.6"
+            strokeLinejoin="round"
+          />
+        </svg>
+      </Link>
+      <Link
+        to="/portfolios"
+        className="rounded-chip border border-line px-3 py-1.5 text-[13px] text-ink-2 hover:border-ink-3/40 hover:text-ink-1"
+      >
+        组合
+      </Link>
+      <Link
+        to="/setup"
+        className="rounded-chip border border-line px-3 py-1.5 text-[13px] text-ink-2 hover:border-ink-3/40 hover:text-ink-1"
+      >
+        新建
+      </Link>
+    </header>
+  )
+}

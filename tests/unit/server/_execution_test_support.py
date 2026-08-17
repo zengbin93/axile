@@ -1,0 +1,282 @@
+"""服务端 execution 测试的共享伪对象与辅助函数。"""
+
+from datetime import datetime
+from types import SimpleNamespace, TracebackType
+
+from axile.common.trade_channel import TradeChannel
+from axile.domain.strategy import Strategy
+from axile.executor.models.execution_result import AlgorithmResult
+from axile.executor.models.unified_account_assets import UnifiedAccountAssets
+from axile.executor.models.unified_input import UnifiedStandardInput
+from axile.executor.models.unified_output import ExecutionStatus, UnifiedStandardOutput
+from axile.server.db.models import Account
+
+
+class FakeSession:
+    """用于替代异步 Session 的最小测试桩。"""
+
+    record: object | None
+
+    def __init__(self, record: object | None = None) -> None:
+        self.record = record
+
+    async def __aenter__(self) -> "FakeSession":
+        return self
+
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        tb: TracebackType | None,
+    ) -> None:
+        return None
+
+    async def execute(self, _statement: object) -> SimpleNamespace:
+        return SimpleNamespace(
+            scalar_one_or_none=lambda: self.record,
+            scalars=lambda: [],
+        )
+
+
+class AccountSession:
+    """用于按账户 ID 回放 ``session.get`` 的测试桩。"""
+
+    account: Account | None
+
+    def __init__(self, account: Account | None) -> None:
+        self.account = account
+
+    async def __aenter__(self) -> "AccountSession":
+        return self
+
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        tb: TracebackType | None,
+    ) -> None:
+        return None
+
+    async def get(self, _model: object, account_id: int) -> Account | None:
+        if self.account and self.account.id == account_id:
+            return self.account
+        return None
+
+
+class FakeExecutor:
+    """可记录输入、审计序列与账户控制 guard 的执行器桩。"""
+
+    audit_context: dict[str, object]
+    audit_sink: object | None
+    _audit_seq: int
+    account_control_guard: object | None
+    cleanup: bool
+    empty_kwargs: dict[str, object]
+    execute_input: object | None
+
+    def __init__(self) -> None:
+        self.audit_context = {}
+        self.audit_sink = None
+        self._audit_seq = 0
+        self.account_control_guard = None
+        self.cleanup = True
+        self.empty_kwargs = {}
+        self.execute_input = None
+
+    def set_audit_context(self, context: dict[str, object]) -> None:
+        self.audit_context = dict(context)
+        self._audit_seq = 0
+
+    def next_audit_seq(self) -> int:
+        self._audit_seq += 1
+        return self._audit_seq
+
+    def get_account_assets(self) -> UnifiedAccountAssets:
+        """返回执行前账户快照桩（真实来源、无持仓、总权益 1000）。"""
+        return UnifiedAccountAssets(
+            available_cash=1000.0,
+            total_asset=1000.0,
+            market_value=0.0,
+            positions=[],
+        )
+
+    def set_account_control_guard(self, guard: object | None) -> None:
+        self.account_control_guard = guard
+
+    def set_audit_sink(self, sink: object | None) -> None:
+        self.audit_sink = sink
+
+    def set_termination_controller(self, _controller: object | None) -> None:
+        return None
+
+    def execute(
+        self,
+        _standard_input: object,
+        cleanup: bool = True,  # noqa: FBT002
+        retain_runtime: bool = False,  # noqa: FBT001, FBT002
+    ) -> UnifiedStandardOutput:
+        _ = retain_runtime
+        self.execute_input = _standard_input
+        self.cleanup = cleanup
+        return UnifiedStandardOutput(
+            account_assets=UnifiedAccountAssets(
+                available_cash=1000.0,
+                total_asset=1000.0,
+                market_value=0.0,
+                positions=[],
+            ),
+            memory={"ts": datetime(2026, 3, 11, 21, 20, 13)},
+            inputs=None,
+            execution_time=0.1,
+            channel_type=TradeChannel.CTP,
+            symbol_results={
+                "ETHUSDT": AlgorithmResult(
+                    symbol="ETHUSDT",
+                    algorithm="SINGLE-MAKER",
+                    status=ExecutionStatus.SUCCEEDED,
+                    orders=[],
+                    target_volume=0.1,
+                    first_tick=None,
+                    memory={"status": "done"},
+                )
+            },
+            status=ExecutionStatus.SUCCEEDED,
+            success=True,
+        )
+
+    def empty_positions(self, cleanup: bool = True, **kwargs: object) -> UnifiedStandardOutput:  # noqa: FBT002
+        self.cleanup = cleanup
+        self.empty_kwargs = kwargs
+        return UnifiedStandardOutput(
+            account_assets=UnifiedAccountAssets(
+                available_cash=1000.0,
+                total_asset=1000.0,
+                market_value=0.0,
+                positions=[],
+            ),
+            memory={"ts": datetime(2026, 3, 11, 21, 20, 13)},
+            inputs=None,
+            execution_time=0.1,
+            channel_type=TradeChannel.CTP,
+            symbol_results={},
+            status=ExecutionStatus.SUCCEEDED,
+            success=True,
+        )
+
+
+class FakeWorkerBackendManager:
+    """记录多进程 worker 调用参数的管理器桩。"""
+
+    def __init__(
+        self,
+        *,
+        trade_output: UnifiedStandardOutput | None = None,
+        empty_output: UnifiedStandardOutput | None = None,
+    ) -> None:
+        self.trade_calls: list[dict[str, object]] = []
+        self.empty_calls: list[dict[str, object]] = []
+        self._trade_output = trade_output
+        self._empty_output = empty_output
+
+    async def execute_trade(
+        self,
+        *,
+        account: Account,
+        standard_input: UnifiedStandardInput,
+        standard_input_dict: dict[str, object],
+        audit_input: dict[str, object],
+        strategy_config: list[Strategy],
+        execution_id: str | None,
+        trigger_source: str,
+        cleanup: bool,
+    ) -> UnifiedStandardOutput:
+        self.trade_calls.append(
+            {
+                "account": account,
+                "standard_input": standard_input,
+                "standard_input_dict": standard_input_dict,
+                "audit_input": audit_input,
+                "strategy_config": strategy_config,
+                "execution_id": execution_id,
+                "trigger_source": trigger_source,
+                "cleanup": cleanup,
+            }
+        )
+        if self._trade_output is not None:
+            return self._trade_output
+        return FakeExecutor().execute(standard_input, cleanup=cleanup, retain_runtime=True)
+
+    async def empty_positions(
+        self,
+        *,
+        account: Account,
+        empty_kwargs: dict[str, object],
+        audit_input: dict[str, object],
+        execution_id: str,
+    ) -> UnifiedStandardOutput:
+        self.empty_calls.append(
+            {
+                "account": account,
+                "empty_kwargs": empty_kwargs,
+                "audit_input": audit_input,
+                "execution_id": execution_id,
+            }
+        )
+        if self._empty_output is not None:
+            return self._empty_output
+        return FakeExecutor().empty_positions(cleanup=True, retain_runtime=True, **empty_kwargs)
+
+
+class WarningLogger:
+    """记录 warning 文本的轻量 logger 桩。"""
+
+    def __init__(self) -> None:
+        self.messages: list[str] = []
+
+    def warning(self, message: str) -> None:
+        self.messages.append(message)
+
+
+def build_account(**overrides: object) -> Account:
+    """构造默认测试账户。"""
+    payload: dict[str, object] = {
+        "id": 1,
+        "name": "ctp-sim",
+        "market": "期货",
+        "trade_channel": TradeChannel.CTP,
+        "account_control_preset": "default",
+        "account_control_override": None,
+        "account_config": {"broker_id": "9999", "investor_id": "test", "password": "test"},
+        "is_started": True,
+        "cron_expr": "3,6,9 * * * *",
+        "remark": None,
+        "brokerage": "ctp",
+        "weight_precision": 0.001,
+        "long_leverage": 1.0,
+        "short_leverage": 1.0,
+        "algorithm": {"method": "SINGLE-MAKER", "params": {}},
+        "empty_positions_algorithm": None,
+        "trade_rules": {},
+        "forbidden_symbols": [],
+        "risk_symbols": [],
+        "feishu_key": None,
+        "portfolio_id": 1,
+        "write_empty_record": 0,
+    }
+    payload.update(overrides)
+    return Account(**payload)
+
+
+async def noop_account_control_guard(*_args: object, **_kwargs: object) -> object:
+    """返回占位 guard。"""
+    return object()
+
+
+async def noop_append_execution_event(**_kwargs: object) -> bool:
+    """吞掉 execution event 写入。"""
+    return True
+
+
+async def noop_append_execution_artifact(**_kwargs: object) -> bool:
+    """吞掉 execution artifact 写入。"""
+    return True

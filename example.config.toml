@@ -1,0 +1,24 @@
+# example.config.toml —— axile 主服务端配置示例（参考用）
+#
+# 正常无需手写本文件：首次启动若未配置，axile 会进入 Web 初始化向导，
+# 填写后自动在项目根目录生成受管的 `config.toml`（已被 .gitignore 忽略）。
+# 配置优先级：config.toml > 代码默认值。主服务端刻意不读取进程环境变量，
+# 也不读取 `.env`（仿真服务端仍使用其自身的 `.env`）。
+#
+# 键名须与 Settings 字段名一致（小写），否则 TOML 源不会匹配。
+
+# 数据库连接（默认本地 SQLite；仅支持 sqlite+aiosqlite）
+sqlalchemy_database_uri = "sqlite+aiosqlite:///./axile.db"
+
+# 上游量化数据源（必填项，向导要求手填并测试连通；二者均非空才视为已初始化）
+quant_data_token = "your token"
+quant_data_api = "http://127.0.0.1:18000"
+
+# 高级项（一般保持默认）
+environment = "local"
+app_log_dir = "./logs"
+axile_log_rotation = "1 day"
+algorithm_modules = []
+
+# 执行异常飞书通知密钥（向导暂不露出；可留空）
+exe_err_feishu_key = ""

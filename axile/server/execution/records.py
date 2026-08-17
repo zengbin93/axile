@@ -1,0 +1,258 @@
+"""
+执行记录持久化辅助函数.
+
+按执行场景统一封装成功、失败与 terminated 三类 ``ExecuteRecord`` 的落库逻辑。
+"""
+
+from __future__ import annotations
+
+from collections.abc import Callable
+from typing import Protocol, cast
+
+import loguru
+
+from axile.domain.execution import ExecutionKind, ExecutionTaskStatus, ExecutionTerminateMode
+from axile.domain.strategy import Strategy
+from axile.executor.termination import TERMINATION_TRIGGER_OPERATOR
+from axile.server.core.db import SessionLocal
+from axile.server.db.models import Account, ExecuteRecord
+
+
+class _WriteSessionProtocol(Protocol):
+    """描述执行记录写入时需要的最小 session 能力."""
+
+    async def __aenter__(self) -> "_WriteSessionProtocol":
+        """进入异步会话上下文."""
+
+    async def __aexit__(self, exc_type: object, exc: object, tb: object) -> None:
+        """退出异步会话上下文."""
+
+    def add(self, obj: object) -> None:
+        """将对象加入当前会话."""
+
+    async def commit(self) -> None:
+        """提交当前事务."""
+
+    async def refresh(self, obj: object) -> None:
+        """刷新指定对象."""
+
+
+type SessionFactory = Callable[[], _WriteSessionProtocol]
+
+
+def _sanitize_execute_record_input(raw_input: dict[str, object] | None) -> dict[str, object]:
+    """移除执行记录输入中的敏感账户配置."""
+    persisted_raw_input = dict(raw_input or {})
+    persisted_raw_input.pop("account_config", None)
+    return persisted_raw_input
+
+
+async def _persist_execute_record(
+    *,
+    account_id: int,
+    execution_id: str | None,
+    strategy_config: list[Strategy] | None,
+    raw_input: dict[str, object] | None,
+    raw_result: dict[str, object],
+    is_success: int,
+    session_factory: SessionFactory,
+) -> ExecuteRecord:
+    """将执行记录写入数据库并返回刷新后的记录对象."""
+    async with session_factory() as session:
+        record = ExecuteRecord(
+            account_id=account_id,
+            execution_id=execution_id,
+            strategy_config=strategy_config,
+            raw_input=_sanitize_execute_record_input(raw_input),
+            raw_result=raw_result,
+            is_success=is_success,
+        )
+        session.add(record)
+        await session.commit()
+        await session.refresh(record)
+        return record
+
+
+async def append_error_execute_record(
+    account_id: int | None,
+    strategy_config: list[Strategy] | None = None,
+    raw_input: dict[str, object] | None = None,
+    raw_result: dict[str, object] | None = None,
+    msg: str = "",
+    execution_id: str | None = None,
+    logger: "loguru.Logger" = loguru.logger,
+    session_factory: SessionFactory = SessionLocal,
+) -> ExecuteRecord:
+    """
+    添加失败的执行记录.
+
+    Parameters
+    ----------
+    account_id : int | None
+        本次执行对应的账户 ID。
+    strategy_config : list[Strategy] | None, optional
+        本次执行关联的策略配置快照。
+    raw_input : dict[str, object] | None, optional
+        需要持久化的输入快照。
+    raw_result : dict[str, object] | None, optional
+        需要持久化的结果快照；为空时会回填 ``msg``。
+    msg : str, default=""
+        错误日志和默认结果消息。
+    execution_id : str | None, optional
+        当前执行 ID。
+    logger : loguru.Logger, optional
+        用于输出错误日志的 logger。
+    session_factory : SessionFactory, optional
+        创建数据库写会话的工厂函数。
+
+    Returns
+    -------
+    ExecuteRecord
+        已写入数据库的失败执行记录。
+    """
+    persisted_raw_result = dict(raw_result or {"msg": msg})
+    logger.error(msg)
+    return await _persist_execute_record(
+        account_id=cast("int", account_id),
+        execution_id=execution_id,
+        strategy_config=strategy_config,
+        raw_input=raw_input,
+        raw_result=persisted_raw_result,
+        is_success=0,
+        session_factory=session_factory,
+    )
+
+
+async def append_success_execute_record(
+    account: Account,
+    strategy_config: list[Strategy] | None,
+    raw_input: dict[str, object],
+    result: dict[str, object],
+    execution_id: str | None = None,
+    execution_kind: ExecutionKind | None = None,
+    session_factory: SessionFactory = SessionLocal,
+) -> ExecuteRecord:
+    """
+    添加成功的执行记录.
+
+    Parameters
+    ----------
+    account : Account
+        本次执行对应的账户对象。
+    strategy_config : list[Strategy] | None
+        本次执行关联的策略配置快照。
+    raw_input : dict[str, object]
+        需要持久化的输入快照。
+    result : dict[str, object]
+        需要持久化的结果快照。
+    execution_id : str | None, optional
+        当前执行 ID。
+    execution_kind : ExecutionKind | None, optional
+        本次执行类型（``rebalance`` / ``clear_positions``）。写入 ``raw_result`` 供上层区分，
+        避免成功清仓被按调仓口径误判为「空跑」。
+    session_factory : SessionFactory, optional
+        创建数据库写会话的工厂函数。
+
+    Returns
+    -------
+    ExecuteRecord
+        已写入数据库的成功执行记录。
+    """
+    persisted_raw_result = dict(result)
+    persisted_raw_result["task_status"] = ExecutionTaskStatus.SUCCEEDED.value
+    if execution_kind is not None:
+        persisted_raw_result["execution_kind"] = execution_kind.value
+    return await _persist_execute_record(
+        account_id=cast("int", account.id),
+        execution_id=execution_id,
+        strategy_config=strategy_config,
+        raw_input=raw_input,
+        raw_result=persisted_raw_result,
+        is_success=1,
+        session_factory=session_factory,
+    )
+
+
+async def append_terminated_execute_record(
+    *,
+    account_id: int,
+    execution_id: str,
+    execution_kind: ExecutionKind,
+    reason: str | None,
+    mode: str | ExecutionTerminateMode,
+    requested_at: str,
+    acked_at: str | None,
+    finished_at: str,
+    cancel_attempted: bool,
+    cancel_failed_order_ids: list[str],
+    trigger: str = TERMINATION_TRIGGER_OPERATOR,
+    raw_input: dict[str, object] | None = None,
+    raw_result: dict[str, object] | None = None,
+    strategy_config: list[Strategy] | None = None,
+    session_factory: SessionFactory = SessionLocal,
+) -> ExecuteRecord:
+    """
+    添加 terminated 状态的执行记录.
+
+    Parameters
+    ----------
+    account_id : int
+        本次执行对应的账户 ID。
+    execution_id : str
+        当前执行 ID。
+    execution_kind : ExecutionKind
+        当前执行类型。
+    reason : str | None
+        终止原因。
+    mode : str | ExecutionTerminateMode
+        终止模式。
+    requested_at : str
+        发起终止请求的时间。
+    acked_at : str | None
+        终止请求被执行侧确认的时间。
+    finished_at : str
+        执行真正结束的时间。
+    cancel_attempted : bool
+        是否尝试过撤单。
+    cancel_failed_order_ids : list[str]
+        撤单失败的订单 ID 列表。
+    trigger : str, optional
+        终止来源：``operator``（人工请求）或 ``timeout``（执行层总超时）。与 ``mode``
+        正交——``mode`` 只表示是否撤单，人工终止两种 mode 都可能取，因此不能靠它区分二者。
+    raw_input : dict[str, object] | None, optional
+        需要持久化的输入快照。
+    raw_result : dict[str, object] | None, optional
+        需要持久化的结果快照。
+    strategy_config : list[Strategy] | None, optional
+        本次执行关联的策略配置快照。
+    session_factory : SessionFactory, optional
+        创建数据库写会话的工厂函数。
+
+    Returns
+    -------
+    ExecuteRecord
+        已写入数据库的 terminated 执行记录。
+    """
+    persisted_raw_result = dict(raw_result or {})
+    persisted_raw_result["task_status"] = ExecutionTaskStatus.TERMINATED.value
+    persisted_raw_result["execution_kind"] = execution_kind.value
+    mode_value = mode.value if isinstance(mode, ExecutionTerminateMode) else mode
+    persisted_raw_result["termination"] = {
+        "reason": reason,
+        "mode": mode_value,
+        "trigger": trigger,
+        "requested_at": requested_at,
+        "acked_at": acked_at,
+        "finished_at": finished_at,
+        "cancel_attempted": cancel_attempted,
+        "cancel_failed_order_ids": list(cancel_failed_order_ids),
+    }
+    return await _persist_execute_record(
+        account_id=account_id,
+        execution_id=execution_id,
+        strategy_config=strategy_config,
+        raw_input=raw_input,
+        raw_result=persisted_raw_result,
+        is_success=0,
+        session_factory=session_factory,
+    )

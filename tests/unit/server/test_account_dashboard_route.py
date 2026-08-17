@@ -1,0 +1,165 @@
+"""账户 dashboard 聚合路由测试。"""
+
+from __future__ import annotations
+
+from collections.abc import AsyncGenerator
+from datetime import datetime
+from types import SimpleNamespace
+
+import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+
+from axile.server.api.deps import get_db, get_scheduler
+from axile.server.api.routes import account as account_routes
+from axile.server.api.routes import account_crud
+from tests.unit.server._execution_test_support import build_account
+
+
+class _Result:
+    def __init__(self, items: list[object]) -> None:
+        self._items = items
+
+    def scalars(self) -> "_Result":
+        return self
+
+    def all(self) -> list[object]:
+        return self._items
+
+
+class _Session:
+    def __init__(self, accounts: list[object]) -> None:
+        self._accounts = accounts
+
+    async def execute(self, _stmt: object) -> _Result:
+        return _Result(self._accounts)
+
+
+class _Job:
+    def __init__(self, next_run_time: datetime | None) -> None:
+        self.next_run_time = next_run_time
+
+
+class _Scheduler:
+    def __init__(self, job: _Job | None = None) -> None:
+        self._job = job
+
+    def get_job(self, _job_id: str) -> _Job | None:
+        return self._job
+
+
+def _build_app(session: _Session, scheduler: _Scheduler) -> FastAPI:
+    app = FastAPI()
+    app.include_router(account_routes.router)
+
+    async def _override_get_db() -> AsyncGenerator[_Session, None]:
+        yield session
+
+    app.dependency_overrides[get_db] = _override_get_db
+    app.dependency_overrides[get_scheduler] = lambda: scheduler
+    return app
+
+
+def _record(
+    total_asset: float,
+    positions: list[dict[str, object]],
+    currency: str,
+    is_success: int,
+    created_at: str,
+) -> SimpleNamespace:
+    return SimpleNamespace(
+        raw_result={
+            "account_assets": {
+                "total_asset": total_asset,
+                "positions": positions,
+                "currency": currency,
+            }
+        },
+        raw_input={},
+        is_success=is_success,
+        created_at=created_at,
+    )
+
+
+def test_dashboard_aggregates_account(monkeypatch: pytest.MonkeyPatch) -> None:
+    """聚合最新权益/持仓/权益序列/绑定/下次执行/上次成败。"""
+    account = build_account(id=1, name="acc", is_started=True)
+    recent = [
+        _record(
+            102.0,
+            [
+                {"symbol": "BTC", "market_value": 60000},
+                {"symbol": "ETH", "market_value": 40000},
+            ],
+            "USDT",
+            1,
+            "2026-07-02 09:03:00",
+        ),
+        _record(100.0, [{"symbol": "BTC", "market_value": 50000}], "USDT", 1, "2026-07-02 09:00:00"),
+    ]
+
+    async def _bindings(_session: object) -> dict[int, int]:
+        return {1: 7}
+
+    async def _recent(_session: object, _account_ids: object, limit: int = 20) -> dict[int, list[object]]:
+        return {1: list(recent)}
+
+    async def _no_baseline_records(*_args: object, **_kwargs: object) -> dict[int, list[object]]:
+        return {}
+
+    monkeypatch.setattr(account_crud, "get_portfolios_every_account", _bindings)
+    monkeypatch.setattr(account_crud, "get_recent_execute_records_for_accounts", _recent)
+    # 「今日涨跌」的基准查询走独立数据访问函数；假 session 对任意查询都返回账户对象，
+    # 故在数据访问层桩掉基准记录（本用例不校验 today_pct）。
+    monkeypatch.setattr(account_crud, "get_execute_records_before_for_accounts", _no_baseline_records)
+    monkeypatch.setattr(account_crud, "get_earliest_execute_records_since_for_accounts", _no_baseline_records)
+
+    app = _build_app(_Session([account]), _Scheduler(_Job(None)))
+    response = TestClient(app).get("/account/dashboard")
+
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert len(data) == 1
+    item = data[0]
+    assert item["account_id"] == 1
+    assert item["portfolio_id"] == 7
+    assert item["total_asset"] == 102.0
+    assert item["currency"] == "CNY"  # CTP 渠道币种由渠道决定
+    assert item["holdings_count"] == 2
+    assert item["position_weights"] == [60000.0, 40000.0]  # 降序
+    assert item["equity_series"] == [100.0, 102.0]  # 升序:旧→新
+    assert item["last_is_success"] == 1
+    assert item["is_scheduled"] is True
+    assert item["next_run_time"] is None
+
+
+def test_dashboard_handles_account_without_records(monkeypatch: pytest.MonkeyPatch) -> None:
+    """无执行记录的账户回退为零权益/空持仓/渠道币种。"""
+    account = build_account(id=2, name="empty", is_started=False)
+
+    async def _bindings(_session: object) -> dict[int, int]:
+        return {}
+
+    async def _recent(_session: object, _account_ids: object, limit: int = 20) -> dict[int, list[object]]:
+        return {}
+
+    async def _no_baseline_records(*_args: object, **_kwargs: object) -> dict[int, list[object]]:
+        return {}
+
+    monkeypatch.setattr(account_crud, "get_portfolios_every_account", _bindings)
+    monkeypatch.setattr(account_crud, "get_recent_execute_records_for_accounts", _recent)
+    monkeypatch.setattr(account_crud, "get_execute_records_before_for_accounts", _no_baseline_records)
+    monkeypatch.setattr(account_crud, "get_earliest_execute_records_since_for_accounts", _no_baseline_records)
+
+    app = _build_app(_Session([account]), _Scheduler(job=None))
+    response = TestClient(app).get("/account/dashboard")
+
+    assert response.status_code == 200
+    item = response.json()["data"][0]
+    assert item["total_asset"] == 0.0
+    assert item["currency"] == "CNY"  # 无执行记录也由 CTP 渠道决定币种
+    assert item["holdings_count"] == 0
+    assert item["position_weights"] == []
+    assert item["equity_series"] == []
+    assert item["last_is_success"] is None
+    assert item["is_scheduled"] is False

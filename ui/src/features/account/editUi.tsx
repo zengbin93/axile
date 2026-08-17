@@ -1,0 +1,332 @@
+/**
+ * 账户编辑壳：总览与子页共用的排版原子（小节 / 行 / 面包屑 / 底栏）。
+ *
+ * 动效：页内仍偏静（α）；进/出子系统做「整卡 → 工作台顶栏」共享元素 FLIP
+ * （同构壳几何连续，不共享文案内容 morph）。底栏仅 opacity。
+ */
+
+import type { CSSProperties, ReactNode } from 'react'
+import { Link } from '@/components/ui/nav'
+import { Breadcrumb } from '@/components/ui/Breadcrumb'
+import { Skeleton } from '@/components/ui/Skeleton'
+import { MOTION_LAYOUT } from '@/lib/viewTransition'
+
+/** 入口卡 ↔ 子页顶栏 共享容器名（同构壳 FLIP，非文案内容 morph）。 */
+export function editShellVtName(accountId: number, kind: 'timer' | 'algorithm'): string {
+  return `edit-shell-${kind}-${accountId}`
+}
+
+/** 与入口卡 / 工作台顶栏同款的壳（圆角·边·底·内边距）。 */
+const SHELL =
+  'rounded-[12px] border border-line bg-surface px-4 py-3.5'
+
+export const TEXT =
+  'w-full rounded-[9px] border border-ink-3/25 bg-surface px-3 py-2 text-[14px] outline-none focus:border-ink-2'
+export const NUM =
+  'w-24 rounded-[9px] border border-ink-3/25 bg-surface px-3 py-1.5 num text-right text-[14px] outline-none focus:border-ink-2'
+export const AREA =
+  'w-full rounded-[9px] border border-ink-3/25 bg-surface px-3 py-2 font-mono text-[13px] leading-6 outline-none focus:border-ink-2'
+
+/** 面包屑：账户 → 编辑（→ 子页）。 */
+export function EditBreadcrumb({
+  id,
+  name,
+  leaf,
+}: {
+  id: number
+  name?: string
+  leaf?: string
+}) {
+  const trail = [
+    { label: name ?? `账户 #${id}`, to: `/accounts/${id}` },
+    leaf
+      ? { label: '编辑', to: `/accounts/${id}/edit` }
+      : { label: '编辑' },
+    ...(leaf ? [{ label: leaf }] : []),
+  ]
+  return <Breadcrumb trail={trail} />
+}
+
+/** 加载骨架。 */
+export function EditLoading({
+  id,
+  name,
+  leaf,
+  /** 为真时不渲染 section/面包屑/标题骨架（外层已挂真实标题做 FLIP）。 */
+  bare = false,
+}: {
+  id: number
+  name?: string
+  leaf?: string
+  bare?: boolean
+}) {
+  const body = (
+    <>
+      {!bare && <Skeleton className="mt-3 h-6 w-44" />}
+      <Skeleton className="mt-6 h-4 w-16" />
+      <div className="mt-2 flex flex-col gap-3">
+        {Array.from({ length: 4 }, (_, i) => (
+          <Skeleton key={i} className="h-9 w-full" />
+        ))}
+      </div>
+    </>
+  )
+  if (bare) return body
+  return (
+    <section>
+      <EditBreadcrumb id={id} name={name} leaf={leaf} />
+      {body}
+    </section>
+  )
+}
+
+/** 加载失败。 */
+export function EditError({ id, name, message }: { id: number; name?: string; message: string }) {
+  return (
+    <section>
+      <EditBreadcrumb id={id} name={name} />
+      <p className="mt-3 text-[14px] text-bad">账户加载失败：{message}</p>
+    </section>
+  )
+}
+
+/**
+ * 小节：eyebrow 标题 + 发丝线，正文两列网格。
+ */
+export function Section({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className="mt-7">
+      <div className="mb-2 flex items-center gap-3">
+        <span className="text-[11px] font-semibold tracking-wide text-ink-3">{label}</span>
+        <span className="h-px flex-1 bg-line" />
+      </div>
+      <div className="grid grid-cols-1 gap-x-8 gap-y-3 md:grid-cols-2">{children}</div>
+    </div>
+  )
+}
+
+/** 设置行：左标签 / 右控件。 */
+export function Row({
+  label,
+  hint,
+  top,
+  span,
+  children,
+}: {
+  label: string
+  hint?: string
+  top?: boolean
+  span?: boolean
+  children: ReactNode
+}) {
+  return (
+    <div className={`flex gap-4 ${span ? 'md:col-span-2' : ''} ${top ? 'items-start' : 'items-center'}`}>
+      <div className={`w-24 flex-none text-[13px] text-ink-2 ${top ? 'pt-2' : ''}`}>
+        {label}
+        {hint && <span className="block text-[11px] text-ink-3">{hint}</span>}
+      </div>
+      <div className="min-w-0 flex-1">{children}</div>
+    </div>
+  )
+}
+
+/** 紧凑数字格。 */
+export function NumCell({
+  label,
+  hint,
+  value,
+  onChange,
+  bad,
+}: {
+  label: string
+  hint?: string
+  value: string
+  onChange: (v: string) => void
+  /** 越界时为真：标题旁标「超范围」（琥珀），并由上层禁用保存。 */
+  bad?: boolean
+}) {
+  return (
+    <label className="flex flex-col gap-1">
+      <span className="text-[13px] text-ink-2">
+        {label}
+        {hint && <span className="ml-1.5 text-[11px] text-ink-3">{hint}</span>}
+        {bad && <span className="ml-1.5 text-[11px] text-warn">超范围</span>}
+      </span>
+      <input className={NUM} value={value} onChange={(e) => onChange(e.target.value)} />
+    </label>
+  )
+}
+
+/** 开关（中性轨；开=accent，成败不走红绿）。 */
+export function Toggle({ on, onClick }: { on: boolean; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      className={`relative h-[26px] w-[44px] flex-none cursor-pointer rounded-full border-0 transition ${
+        on ? 'bg-accent' : 'bg-border-strong'
+      }`}
+      onClick={onClick}
+      aria-pressed={on}
+    >
+      <span
+        className={`absolute top-[3px] h-[20px] w-[20px] rounded-full bg-surface shadow transition-all ${
+          on ? 'left-[21px]' : 'left-[3px]'
+        }`}
+      />
+    </button>
+  )
+}
+
+/**
+ * 入口 / 工作台同构三列：左标签 · 中摘要 · 右操作位。
+ * FLIP 时排版族一致，避免「列表行 → 大标题」假连续。
+ */
+function ShellColumns({
+  label,
+  hint,
+  summary,
+  trailing,
+}: {
+  label: string
+  hint?: string
+  summary: string
+  trailing: ReactNode
+}) {
+  return (
+    <div className="flex items-center gap-4">
+      <div className="w-24 flex-none text-[13px] text-ink-2">
+        {label}
+        {hint && <span className="block text-[11px] text-ink-3">{hint}</span>}
+      </div>
+      <div className="min-w-0 flex-1 truncate text-[14px] font-medium text-ink-1">{summary}</div>
+      <div className="flex-none">{trailing}</div>
+    </div>
+  )
+}
+
+/**
+ * 总览入口卡：整块挂 ``shellVtName``，与 :func:`EditWorktopBar` 做同构壳 FLIP。
+ */
+export function EntryRow({
+  label,
+  hint,
+  summary,
+  to,
+  shellVtName,
+}: {
+  label: string
+  hint?: string
+  summary: string
+  to: string
+  /** 与子页工作台顶栏配对的 view-transition-name。 */
+  shellVtName: string
+}) {
+  const shellVtStyle: CSSProperties = { viewTransitionName: shellVtName }
+  return (
+    <Link
+      to={to}
+      style={shellVtStyle}
+      className={`${SHELL} transition-[border-color] duration-100 ease-[cubic-bezier(0.4,0,0.2,1)] hover:border-ink-3/40 motion-reduce:transition-none md:col-span-2`}
+    >
+      <ShellColumns
+        label={label}
+        hint={hint}
+        summary={summary}
+        trailing={<span className="text-[12.5px] font-semibold text-accent">调整 ›</span>}
+      />
+    </Link>
+  )
+}
+
+/**
+ * 子页工作台顶栏：与入口卡同壳、同三列，挂同一 ``shellVtName``。
+ * 右槽放 chip（或静默占位），不用大标题；说明文案在壳外。
+ */
+export function EditWorktopBar({
+  label,
+  hint,
+  summary,
+  trailing,
+  shellVtName,
+  lead,
+}: {
+  /** 与入口左列一致，如「执行算法」「定时」。 */
+  label: string
+  hint?: string
+  /** 与入口中列一致的人话摘要（可随草稿更新）。 */
+  summary: string
+  /** 右列：渠道 chip 等；勿放「调整」。 */
+  trailing?: ReactNode
+  shellVtName: string
+  lead?: string
+}) {
+  const shellVtStyle: CSSProperties = { viewTransitionName: shellVtName }
+  return (
+    <div className="mt-3">
+      <div style={shellVtStyle} className={SHELL}>
+        <ShellColumns
+          label={label}
+          hint={hint}
+          summary={summary}
+          trailing={
+            trailing ?? (
+              // 与入口「调整 ›」近似占位宽，减轻 FLIP 时右缘伸缩
+              <span className="invisible text-[12.5px] font-semibold" aria-hidden>
+                调整 ›
+              </span>
+            )
+          }
+        />
+      </div>
+      {lead && <p className="mt-2 text-[13px] text-ink-2">{lead}</p>}
+    </div>
+  )
+}
+
+/**
+ * 子页底栏：常挂载；有改动时仅 opacity 到位（不 slide，方向 α）。
+ */
+export function EditSaveBar({
+  changes,
+  blocked,
+  cancelTo,
+  onSave,
+  saving,
+}: {
+  changes: string[]
+  blocked?: boolean
+  cancelTo: string
+  onSave: () => void
+  saving?: boolean
+}) {
+  const open = changes.length > 0
+  return (
+    <div
+      className={`fixed inset-x-0 bottom-0 z-30 border-t border-line bg-surface/85 backdrop-blur-md transition-opacity ${MOTION_LAYOUT} ${
+        open ? 'opacity-100' : 'pointer-events-none opacity-0'
+      }`}
+      aria-hidden={!open}
+    >
+      <div className="mx-auto flex max-w-[860px] items-center gap-4 px-6 py-3">
+        <div className="min-w-0 flex-1">
+          <div className="text-[11px] font-semibold tracking-wide text-ink-3">
+            待保存 · {changes.length} 项{blocked && <span className="text-bad"> · 有错误</span>}
+          </div>
+          <div className="num truncate text-[13px] text-ink-1">{changes.join('  ·  ')}</div>
+        </div>
+        <Link to={cancelTo} className="flex-none text-[13px] text-ink-2 hover:text-ink-1" tabIndex={open ? 0 : -1}>
+          取消
+        </Link>
+        <button
+          type="button"
+          className="flex-none cursor-pointer rounded-[9px] border-0 bg-ink-1 px-5 py-2 text-[13.5px] font-semibold text-surface disabled:opacity-45"
+          onClick={onSave}
+          disabled={blocked || saving || !open}
+          tabIndex={open ? 0 : -1}
+        >
+          {saving ? '保存中…' : '保存'}
+        </button>
+      </div>
+    </div>
+  )
+}

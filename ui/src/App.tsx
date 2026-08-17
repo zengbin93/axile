@@ -1,0 +1,135 @@
+import { useEffect, useState } from 'react'
+import { createBrowserRouter, Navigate, Outlet, RouterProvider, ScrollRestoration } from 'react-router'
+import { AppShell } from '@/components/AppShell'
+import { InitWizard } from '@/features/init/InitWizard'
+import { initStatus, type InitValues } from '@/lib/api/init'
+import { useDomainSync } from '@/stores/domain'
+import { useChannelCatalogSync } from '@/stores/channels'
+import { useLiveExecSync } from '@/lib/api/executionStream'
+import { DashboardPage } from '@/pages/DashboardPage'
+import { AccountDetailPage } from '@/pages/AccountDetailPage'
+import { AccountEditPage } from '@/pages/AccountEditPage'
+import { AccountEditTimerPage } from '@/pages/AccountEditTimerPage'
+import { AccountEditAlgorithmPage } from '@/pages/AccountEditAlgorithmPage'
+import { AccountHoldingsPage } from '@/pages/AccountHoldingsPage'
+import { ExecutionDetailPage } from '@/pages/ExecutionDetailPage'
+import { ScratchHoldings } from '@/pages/_ScratchHoldings'
+import { AccountHistoryPage } from '@/pages/AccountHistoryPage'
+import { PortfoliosPage } from '@/pages/PortfoliosPage'
+import { PortfolioDetailPage } from '@/pages/PortfolioDetailPage'
+import { PortfolioEditPage } from '@/pages/PortfolioEditPage'
+import { Placeholder } from '@/pages/Placeholder'
+import { SystemConfigPage } from '@/pages/SystemConfigPage'
+import { WizardLayout } from '@/features/setup/WizardLayout'
+import { SetupHub } from '@/pages/setup/SetupHub'
+import { PfName, PfDefine, PfDone } from '@/pages/setup/PortfolioSteps'
+import { CustomCalcDocPage } from '@/pages/docs/CustomCalcDocPage'
+import {
+  AcctChannel,
+  AcctConnect,
+  AcctPortfolio,
+  AcctTrade,
+  AcctTimer,
+  AcctConfirm,
+} from '@/pages/setup/AccountSteps'
+
+/** 已完成初始化后的正常应用：单点驱动共享领域状态轮询 + 执行实时态 SSE + 滚动复位/恢复。跨两个布局分支。 */
+function ConfiguredApp() {
+  useChannelCatalogSync()
+  useDomainSync()
+  useLiveExecSync()
+  return (
+    <>
+      <ScrollRestoration />
+      <Outlet />
+    </>
+  )
+}
+
+/** 全屏启动占位。 */
+function Splash() {
+  return (
+    <div className="grid h-screen place-items-center bg-bg text-ink-3">
+      <div className="text-[15px] tracking-wide">axile 启动中…</div>
+    </div>
+  )
+}
+
+/**
+ * 应用根：首屏先探测初始化状态。
+ * 未完成初始化时整屏渲染初始化向导；否则进入正常应用。
+ */
+function AppRoot() {
+  const [phase, setPhase] = useState<'loading' | 'setup' | 'ready'>('loading')
+  const [initial, setInitial] = useState<InitValues | null>(null)
+
+  useEffect(() => {
+    let alive = true
+    initStatus()
+      .then((s) => {
+        if (!alive) return
+        setInitial(s.values)
+        setPhase(s.configured ? 'ready' : 'setup')
+      })
+      .catch(() => {
+        // 探测失败（如后端重启中）时退回正常应用，由其自身错误提示处理。
+        if (alive) setPhase('ready')
+      })
+    return () => {
+      alive = false
+    }
+  }, [])
+
+  if (phase === 'loading') return <Splash />
+  if (phase === 'setup' && initial) return <InitWizard initial={initial} />
+  return <ConfiguredApp />
+}
+
+const router = createBrowserRouter([
+  {
+    element: <AppRoot />,
+    children: [
+      {
+        element: <AppShell />,
+        children: [
+          { index: true, element: <DashboardPage /> },
+          { path: 'accounts/:id', element: <AccountDetailPage /> },
+          { path: 'accounts/:id/edit', element: <AccountEditPage /> },
+          { path: 'accounts/:id/edit/timer', element: <AccountEditTimerPage /> },
+          { path: 'accounts/:id/edit/algorithm', element: <AccountEditAlgorithmPage /> },
+          { path: 'accounts/:id/holdings', element: <AccountHoldingsPage /> },
+          { path: 'accounts/:id/history', element: <AccountHistoryPage /> },
+          { path: 'accounts/:id/executions/:executionId', element: <ExecutionDetailPage /> },
+          { path: 'portfolios', element: <PortfoliosPage /> },
+          { path: 'portfolios/:id', element: <PortfolioDetailPage /> },
+          { path: 'portfolios/:id/edit', element: <PortfolioEditPage /> },
+          { path: '*', element: <Placeholder title="页面不存在" milestone="—" /> },
+        ],
+      },
+      { path: 'settings', element: <SystemConfigPage /> },
+      { path: 'docs/custom-calc', element: <CustomCalcDocPage /> },
+      {
+        path: 'setup',
+        element: <WizardLayout />,
+        children: [
+          { index: true, element: <SetupHub /> },
+          { path: 'pf/name', element: <PfName /> },
+          { path: 'pf/define', element: <PfDefine /> },
+          { path: 'pf/done', element: <PfDone /> },
+          { path: 'acct/channel', element: <AcctChannel /> },
+          { path: 'acct/connect', element: <AcctConnect /> },
+          { path: 'acct/portfolio', element: <AcctPortfolio /> },
+          { path: 'acct/trade', element: <AcctTrade /> },
+          { path: 'acct/timer', element: <AcctTimer /> },
+          { path: 'acct/confirm', element: <AcctConfirm /> },
+          { path: '*', element: <Navigate to="/setup" replace /> },
+        ],
+      },
+    ],
+  },
+  { path: 'dev/holdings-scratch', element: <ScratchHoldings /> },
+])
+
+export default function App() {
+  return <RouterProvider router={router} />
+}

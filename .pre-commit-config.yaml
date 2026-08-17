@@ -1,0 +1,42 @@
+minimum_pre_commit_version: 3.7.0
+
+repos:
+  - repo: local
+    hooks:
+      - id: ruff-check
+        name: ruff check --fix
+        entry: uv run ruff check --fix
+        language: system
+        types_or: [python, pyi]
+        require_serial: true
+
+      - id: ruff-format
+        name: ruff format
+        entry: uv run ruff format
+        language: system
+        types_or: [python, pyi]
+        require_serial: true
+
+      - id: basedpyright
+        name: basedpyright
+        entry: uv run basedpyright
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-push]
+
+      - id: ruff-complexity
+        name: ruff complexity gate
+        entry: uv run ruff check axile/executor/algorithms --select C901
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-push]
+
+      - id: pytest-offline
+        name: pytest offline suite
+        entry: uv run pytest tests/ -v --ignore=tests/live --cov=axile --cov-report=term-missing --cov-fail-under=69
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-push]

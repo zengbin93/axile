@@ -1,0 +1,733 @@
+"""
+编排调仓 execution 的输入解析与入口流程.
+
+该模块负责把账户、组合、策略和历史执行快照整理成后端执行层可消费的
+标准请求，并处理 inline execution 的注册、收尾与异常桥接。真正的下单
+与审计落库由相邻的 backend 与 lifecycle 模块负责。
+"""
+
+import asyncio
+from dataclasses import dataclass
+from typing import cast
+
+import loguru
+
+from axile.domain.execution import ExecutionKind
+from axile.domain.strategy import Strategy
+from axile.executor.models.unified_input import UnifiedStandardInput
+from axile.executor.termination import ExecutionTerminated
+from axile.server.core.db import SessionLocal
+from axile.server.core.log_config import execution_log_context
+from axile.server.db.models import Account, ExecuteRecord, Portfolio
+from axile.server.execution import backend as execution_backend
+from axile.server.execution import lifecycle as execution_lifecycle
+from axile.server.execution.execution_algorithms import (
+    resolve_account_leverages,
+    resolve_execution_algorithm_name,
+)
+from axile.server.execution.execution_records_output import sanitize_standard_input_for_audit
+from axile.server.execution.records import append_error_execute_record
+from axile.server.execution.registry import (
+    AccountExecutionAlreadyRunningError,
+    clear_running_execution,
+    register_inline_execution,
+)
+from axile.server.repositories import (
+    get_latest_portfolio_id_by_account_id,
+    get_latest_strategies_by_portfolio_id,
+    get_latest_success_execute_record_by_account_id,
+)
+from axile.server.utils import trade_channel_check
+from axile.server.weights import get_latest_weights, get_target_balance, run_portfolio_calc_code
+
+
+@dataclass(frozen=True)
+class _ResolvedRebalanceRequest:
+    """
+    承载调仓准备阶段解析出的目标权重与策略快照.
+
+    Notes
+    -----
+    当账户配置了 ``custom_calc_py_code`` 时，``curr_target`` 来自用户脚本，
+    此时 ``strategy_config`` 会保持为空，避免把数据库中的旧策略误记为本次
+    执行输入。
+
+    Attributes
+    ----------
+    curr_target : dict[str, float]
+        本次调仓目标权重。
+    strategy_config : list[Strategy]
+        本次调仓对应的策略快照。
+    target_update_time : str | None
+        目标策略数据最旧的 ``update_time``（ISO8601 字符串）；自定义脚本路径
+        无策略数据来源，保持为 ``None``。
+    """
+
+    curr_target: dict[str, float]
+    strategy_config: list[Strategy]
+    target_update_time: str | None = None
+
+
+async def _load_bound_portfolio(
+    account: Account,
+    account_id: int,
+    execution_id: str | None,
+) -> tuple[int, Portfolio]:
+    """
+    加载账户当前绑定的最新组合，必要时先落库错误记录.
+
+    Parameters
+    ----------
+    account : Account
+        当前待执行的账户对象。
+    account_id : int
+        账户 ID。
+    execution_id : str | None
+        当前 execution 标识；用于关联错误审计。
+
+    Returns
+    -------
+    tuple[int, Portfolio]
+        已解析出的组合 ID 与组合对象。
+
+    Raises
+    ------
+    ValueError
+        当账户未绑定组合或绑定记录已失效时抛出。
+    """
+    async with SessionLocal() as session:
+        curr_portfolio_id = await get_latest_portfolio_id_by_account_id(session, account_id)
+        if curr_portfolio_id is None:
+            msg = "无法调仓，该账户未绑定组合"
+            await append_error_execute_record(
+                account_id=account.id,
+                msg=msg,
+                execution_id=execution_id,
+            )
+            raise ValueError(msg)
+
+        portfolio = await session.get(Portfolio, curr_portfolio_id)
+
+    if portfolio is None:
+        msg = f"无法调仓，该账户绑定的组合不存在, 组合id: {curr_portfolio_id}"
+        await append_error_execute_record(
+            account_id=account.id,
+            msg=msg,
+            execution_id=execution_id,
+        )
+        raise ValueError(msg)
+
+    return curr_portfolio_id, portfolio
+
+
+async def _execute_custom_calc_if_configured(
+    account: Account,
+    portfolio: Portfolio,
+    execution_id: str | None,
+    logger: "loguru.Logger",
+) -> dict[str, float] | None:
+    """
+    执行账户绑定的自定义组合代码，并返回覆盖后的目标权重.
+
+    Parameters
+    ----------
+    account : Account
+        当前待执行的账户对象。
+    portfolio : Portfolio
+        账户当前绑定的组合。
+    execution_id : str | None
+        当前 execution 标识；用于关联错误审计。
+    logger : loguru.Logger
+        当前执行使用的日志对象。
+
+    Returns
+    -------
+    dict[str, float] | None
+        用户脚本计算出的目标权重；未配置脚本时返回 ``None``。
+
+    Raises
+    ------
+    ValueError
+        当自定义脚本执行失败时抛出。
+
+    Notes
+    -----
+    脚本在**受限子进程**中执行（见 :mod:`axile.server.sandbox`）。这条路径在持有
+    账户执行锁的上下文里跑用户脚本，此前脚本卡死会一直占用该账户的执行槽（协程
+    取消杀不掉线程）；改为子进程后超时可直接强杀，执行槽随之释放。
+
+    上下文快照在**进入子进程前**于当前会话内采集完成——``Context`` 持有数据库
+    会话，无法跨进程传递。
+    """
+    custom_calc_py_code = portfolio.custom_calc_py_code
+    if not custom_calc_py_code:
+        return None
+
+    try:
+        from axile.server.context import Context
+
+        async with SessionLocal() as session:
+            context = None
+            if account.id is not None:
+                context = Context(session=session, account_id=account.id)
+            else:
+                logger.warning("无法获取账户上下文, 原因: account.id为None")
+
+            # 快照采集与脚本执行都放进线程池：Context 的属性读取内部以 asyncio.run
+            # 触发自身查询，不能在当前事件循环线程里直接调用。
+            result = await asyncio.to_thread(run_portfolio_calc_code, custom_calc_py_code, context)
+
+        if not result.ok or result.target is None:
+            raise result.error or ValueError("自定义组合脚本执行失败")
+        return result.target
+    except Exception as e:
+        msg = f"执行自定义Python脚本失败 | 错误原因={str(e)}"
+        await append_error_execute_record(
+            account_id=account.id,
+            msg=msg,
+            execution_id=execution_id,
+        )
+        raise ValueError(msg)
+
+
+async def _load_strategy_rows(
+    account: Account,
+    portfolio_id: int,
+    execution_id: str | None,
+) -> list[Strategy]:
+    """
+    加载组合最新一版策略配置记录.
+
+    Parameters
+    ----------
+    account : Account
+        当前待执行的账户对象。
+    portfolio_id : int
+        组合 ID。
+    execution_id : str | None
+        当前 execution 标识；用于关联错误审计。
+
+    Returns
+    -------
+    list[Strategy]
+        组合最新的策略配置快照。
+
+    Raises
+    ------
+    ValueError
+        当组合缺少策略配置时抛出。
+    """
+    async with SessionLocal() as session:
+        strategies = await get_latest_strategies_by_portfolio_id(session, portfolio_id)
+
+    if strategies is None:
+        msg = f"无法调仓，该账户绑定的组合没有策略配置, 组合id: {portfolio_id}"
+        await append_error_execute_record(
+            account_id=account.id,
+            msg=msg,
+            execution_id=execution_id,
+        )
+        raise ValueError(msg)
+
+    return strategies.strategies
+
+
+def _build_strategy_maps(strategy_rows: list[Strategy]) -> tuple[dict[str, float], dict[str, str]]:
+    """
+    将持久化策略记录拆分为权重映射和可选频率映射.
+
+    Parameters
+    ----------
+    strategy_rows : list[Strategy]
+        数据库存储的策略配置列表。
+
+    Returns
+    -------
+    tuple[dict[str, float], dict[str, str]]
+        策略权重映射与 ``base_freq`` 映射。
+    """
+    strategy_config: dict[str, float] = {}
+    strategy_freqs: dict[str, str] = {}
+
+    for strategy in strategy_rows:
+        strategy_config[strategy["name"]] = strategy["weight"]
+        base_freq = strategy.get("base_freq")
+        if base_freq:
+            strategy_freqs[strategy["name"]] = base_freq
+
+    return strategy_config, strategy_freqs
+
+
+async def _compute_trade_target(
+    account: Account,
+    strategy_rows: list[Strategy],
+    execution_id: str | None,
+) -> tuple[dict[str, float], str | None]:
+    """
+    根据最新策略权重计算本次调仓目标.
+
+    Parameters
+    ----------
+    account : Account
+        当前待执行的账户对象。
+    strategy_rows : list[Strategy]
+        组合最新的策略配置快照。
+    execution_id : str | None
+        当前 execution 标识；用于关联错误审计。
+
+    Returns
+    -------
+    tuple[dict[str, float], str | None]
+        二元组：计算得到的目标权重，以及目标策略数据最旧的 ``update_time``
+        （ISO8601 字符串，无有效时间时为 ``None``）。
+
+    Raises
+    ------
+    ValueError
+        当策略配置为空、权重拉取失败或目标权重计算失败时抛出。
+    """
+    strategy_config, strategy_freqs = _build_strategy_maps(strategy_rows)
+    if len(strategy_config) == 0:
+        msg = "策略配置为空，退出任务"
+        await append_error_execute_record(
+            account_id=account.id,
+            strategy_config=strategy_rows,
+            msg=msg,
+            execution_id=execution_id,
+        )
+        raise ValueError(msg)
+
+    try:
+        total_df, target_update_time = await get_latest_weights(
+            strategy_config.keys(),
+            strategy_freqs=strategy_freqs if strategy_freqs else None,
+        )
+    except Exception as e:
+        msg = f"获取最新持仓权重失败 | 错误原因={str(e)}"
+        await append_error_execute_record(
+            account_id=account.id,
+            strategy_config=strategy_rows,
+            msg=msg,
+            execution_id=execution_id,
+        )
+        raise ValueError(msg)
+
+    try:
+        curr_target = get_target_balance(
+            dfw=total_df,
+            strategy_config=strategy_config,
+            trade_channel=account.trade_channel,
+        )
+    except Exception as e:
+        msg = f"计算本次调仓目标权重失败 | 错误原因={str(e)}"
+        await append_error_execute_record(
+            account_id=account.id,
+            strategy_config=strategy_rows,
+            msg=msg,
+        )
+        raise ValueError(msg)
+
+    return curr_target, target_update_time
+
+
+async def _load_rebalance_account(
+    account_id: int,
+    logger: "loguru.Logger",
+) -> Account:
+    """加载待执行的账户对象."""
+    async with SessionLocal() as session:
+        account = await session.get(Account, account_id)
+        if not account:
+            msg = f"无法执行任务 账户id: {account_id} 不存在"
+            logger.error(msg)
+            raise ValueError(msg)
+    return account
+
+
+async def _resolve_rebalance_request(
+    account: Account,
+    execution_id: str | None,
+    logger: "loguru.Logger",
+) -> _ResolvedRebalanceRequest:
+    """解析本次调仓实际要执行的目标权重与策略快照."""
+    curr_portfolio_id, portfolio = await _load_bound_portfolio(account, cast("int", account.id), execution_id)
+    curr_target = await _execute_custom_calc_if_configured(account, portfolio, execution_id, logger)
+    if curr_target is not None:
+        return _ResolvedRebalanceRequest(curr_target=curr_target, strategy_config=[])
+
+    strategy_rows = await _load_strategy_rows(account, curr_portfolio_id, execution_id)
+    curr_target, target_update_time = await _compute_trade_target(account, strategy_rows, execution_id)
+    return _ResolvedRebalanceRequest(
+        curr_target=curr_target,
+        strategy_config=strategy_rows,
+        target_update_time=target_update_time,
+    )
+
+
+def _normalize_rebalance_target(
+    account: Account,
+    curr_target: dict[str, float],
+) -> dict[str, float]:
+    """
+    根据账户杠杆与精度约束规范化调仓目标权重.
+
+    Parameters
+    ----------
+    account : Account
+        当前待执行的账户对象。
+    curr_target : dict[str, float]
+        原始目标权重。
+
+    Returns
+    -------
+    dict[str, float]
+        已按账户杠杆和 ``weight_precision`` 规整后的目标权重。
+
+    Notes
+    -----
+    这里必须先按多空杠杆缩放，再按账户精度离散化；否则审计看到的目标、
+    执行器实际收到的目标以及账户界面展示值会产生漂移。
+    """
+    weight_precision = account.weight_precision
+    long_leverage, short_leverage = resolve_account_leverages(account)
+
+    def _normalize_weight(weight: float) -> float:
+        scaled = weight * long_leverage if weight > 0 else weight * short_leverage
+        return round(round(scaled / weight_precision) * weight_precision, 6)
+
+    return {symbol: _normalize_weight(weight) for symbol, weight in curr_target.items()}
+
+
+async def _load_last_target_snapshot(account: Account) -> dict[str, object]:
+    """加载上一次成功调仓记录中的目标快照."""
+    try:
+        async with SessionLocal() as session:
+            last_record = await get_latest_success_execute_record_by_account_id(session, account.id)
+    except Exception as e:
+        loguru.logger.exception(e)
+        raise
+
+    if last_record is None or last_record.is_success != 1:
+        return {}
+    return cast("dict[str, object]", last_record.raw_input.get("curr_target", {}))
+
+
+def _build_rebalance_standard_input(
+    *,
+    account: Account,
+    curr_target: dict[str, float],
+    last_target: dict[str, object],
+    execution_id: str | None,
+    trigger_source: str,
+    target_update_time: str | None = None,
+) -> UnifiedStandardInput:
+    """
+    构造调仓执行器所需的标准输入模型.
+
+    Parameters
+    ----------
+    account : Account
+        当前待执行的账户对象。
+    curr_target : dict[str, float]
+        已规范化的目标权重。
+    last_target : dict[str, object]
+        上一次成功执行记录中的目标快照。
+    execution_id : str | None
+        当前 execution 标识。
+    trigger_source : str
+        触发来源。
+    target_update_time : str | None, optional
+        目标策略数据最旧的 ``update_time``（ISO8601 字符串）；随 ``extra`` 透传，
+        供审计快照记录目标数据时效。
+
+    Returns
+    -------
+    UnifiedStandardInput
+        传递给执行器的统一标准输入。
+    """
+    feishu_key = account.feishu_key if account.feishu_key and len(account.feishu_key) else None
+    return UnifiedStandardInput.from_dict(
+        {
+            "curr_target": curr_target,
+            "last_target": last_target,
+            "account_config": account.account_config,
+            "algorithm": account.algorithm,
+            "trade_rules": account.trade_rules,
+            "forbidden_symbols": account.forbidden_symbols,
+            "risk_symbols": account.risk_symbols,
+            "feishu_key": feishu_key,
+            "execution_timeout": account.execution_timeout,
+            "channel_type": account.trade_channel.value,
+            "extra": {
+                "audit": {
+                    "execution_id": execution_id,
+                    "account_id": account.id,
+                    "channel": account.trade_channel.value,
+                    "algorithm": resolve_execution_algorithm_name(account, ExecutionKind.REBALANCE),
+                    "trigger_source": trigger_source,
+                    "execution_kind": "rebalance",
+                },
+                "target_update_time": target_update_time,
+            },
+        }
+    )
+
+
+async def _build_rebalance_backend_request(
+    *,
+    account: Account,
+    curr_target: dict[str, float],
+    strategy_config: list[Strategy],
+    execution_id: str | None,
+    trigger_source: str,
+    logger: "loguru.Logger",
+    cleanup: bool,
+    target_update_time: str | None = None,
+) -> execution_backend.RebalanceBackendRequest:
+    """
+    组装后端执行调仓所需的请求对象.
+
+    Parameters
+    ----------
+    account : Account
+        当前待执行的账户对象。
+    curr_target : dict[str, float]
+        原始目标权重。
+    strategy_config : list[Strategy]
+        本次调仓对应的策略快照。
+    execution_id : str | None
+        当前 execution 标识。
+    trigger_source : str
+        触发来源。
+    logger : loguru.Logger
+        当前执行使用的日志对象。
+    cleanup : bool
+        是否在执行结束后执行底层清理逻辑。
+    target_update_time : str | None, optional
+        目标策略数据最旧的 ``update_time``（ISO8601 字符串），随标准输入透传。
+
+    Returns
+    -------
+    execution_backend.RebalanceBackendRequest
+        可直接交给 backend 执行层的请求对象。
+    """
+    normalized_target = _normalize_rebalance_target(account, curr_target)
+    last_target = await _load_last_target_snapshot(account)
+    # 审计输入、执行器输入与回传给调用方的 curr_target 必须共享同一份
+    # 规范化结果，避免回放执行时出现“显示目标”和“实际下单目标”不一致。
+    standard_input = _build_rebalance_standard_input(
+        account=account,
+        curr_target=normalized_target,
+        last_target=last_target,
+        execution_id=execution_id,
+        trigger_source=trigger_source,
+        target_update_time=target_update_time,
+    )
+    return execution_backend.RebalanceBackendRequest(
+        account=account,
+        standard_input=standard_input,
+        standard_input_dict=standard_input.to_dict(),
+        audit_input=sanitize_standard_input_for_audit(standard_input),
+        strategy_config=strategy_config,
+        execution_id=execution_id,
+        trigger_source=trigger_source,
+        cleanup=cleanup,
+        curr_target=normalized_target,
+        last_target=last_target,
+        logger=logger,
+    )
+
+
+async def _run_account_rebalance(
+    account_id: int,
+    execution_id: str | None = None,
+    trigger_source: str = "scheduler",
+    logger: "loguru.Logger | None" = None,
+) -> ExecuteRecord:
+    """
+    加载账户并执行一次调仓主流程.
+
+    Parameters
+    ----------
+    account_id : int
+        目标账户 ID。
+    execution_id : str | None, optional
+        当前 execution 标识；为空时表示未显式跟踪。
+    trigger_source : str, optional
+        本次执行的触发来源。
+    logger : loguru.Logger | None, optional
+        用于输出日志的 logger；未提供时使用全局 logger。
+
+    Returns
+    -------
+    ExecuteRecord
+        本次调仓完成后持久化的执行记录。
+    """
+    if logger is None:
+        logger = loguru.logger
+
+    account = await _load_rebalance_account(account_id, logger)
+    logger.info("执行任务")
+    await trade_channel_check(account)
+    request = await _resolve_rebalance_request(account, execution_id, logger)
+
+    return await trade(
+        account,
+        request.curr_target,
+        request.strategy_config,
+        execution_id=execution_id,
+        trigger_source=trigger_source,
+        logger=logger,
+        target_update_time=request.target_update_time,
+    )
+
+
+async def trade(
+    account: Account,
+    curr_target: dict[str, float],
+    strategy_config: list[Strategy],
+    execution_id: str | None = None,
+    trigger_source: str = "scheduler",
+    logger: "loguru.Logger | None" = None,
+    cleanup: bool = True,
+    target_update_time: str | None = None,
+) -> ExecuteRecord:
+    """
+    为账户执行一次调仓任务，并持久化结果.
+
+    Parameters
+    ----------
+    account : Account
+        待执行的账户对象。
+    curr_target : dict[str, float]
+        本次调仓目标权重。
+    strategy_config : list[Strategy]
+        参与本次调仓的策略配置快照。
+    execution_id : str | None, optional
+        当前 execution 标识。
+    trigger_source : str, optional
+        本次执行的触发来源。
+    logger : loguru.Logger | None, optional
+        用于输出日志的 logger；未提供时使用全局 logger。
+    cleanup : bool, optional
+        是否在执行结束后执行底层清理逻辑。
+    target_update_time : str | None, optional
+        目标策略数据最旧的 ``update_time``（ISO8601 字符串），随标准输入透传至审计快照。
+
+    Returns
+    -------
+    ExecuteRecord
+        本次调仓对应的执行记录。
+    """
+    if logger is None:
+        logger = loguru.logger
+
+    request = await _build_rebalance_backend_request(
+        account=account,
+        curr_target=curr_target,
+        strategy_config=strategy_config,
+        execution_id=execution_id,
+        trigger_source=trigger_source,
+        logger=logger,
+        cleanup=cleanup,
+        target_update_time=target_update_time,
+    )
+    return await execution_backend.run_rebalance_via_backend(request=request)
+
+
+async def execute_trade(
+    account_id: int,
+    execution_id: str | None = None,
+    trigger_source: str = "scheduler",
+    *,
+    lock_acquired: bool = False,
+) -> ExecuteRecord:
+    """
+    立即为指定账户执行一次交易任务.
+
+    Parameters
+    ----------
+    account_id : int
+        目标账户 ID。
+    execution_id : str | None, optional
+        指定的 execution 标识；为空时按当前流程生成或注册。
+    trigger_source : str, optional
+        本次执行的触发来源。
+    lock_acquired : bool, optional
+        调用方是否已完成运行中任务互斥注册。
+
+    Returns
+    -------
+    ExecuteRecord
+        本次调仓对应的执行记录。
+    """
+    account: Account | None = None
+    tracked_execution_id = execution_id
+    if not lock_acquired:
+        async with SessionLocal() as session:
+            account = await session.get(Account, account_id)
+        if not account:
+            msg = f"无法执行任务 账户id: {account_id} 不存在"
+            loguru.logger.error(msg)
+            raise ValueError(msg)
+        tracked_execution_id = register_inline_execution(
+            account=account,
+            execution_kind=ExecutionKind.REBALANCE,
+            execution_id=execution_id,
+            algorithm_name=resolve_execution_algorithm_name(account, ExecutionKind.REBALANCE),
+        )
+
+    try:
+        # 当调用方已持有运行锁时，这里只复用既有 execution 上下文，不重复做
+        # 注册和释放；否则会打乱上层对 execution 生命周期的单点管理。
+        if account is None:
+            async with SessionLocal() as session:
+                account = await session.get(Account, account_id)
+                if not account:
+                    msg = f"无法执行任务 账户id: {account_id} 不存在"
+                    loguru.logger.error(msg)
+                    raise ValueError(msg)
+
+        with loguru.logger.contextualize(
+            **execution_log_context(
+                account_id=account_id,
+                account_name=account.name,
+                channel=account.trade_channel,
+                execution_id=tracked_execution_id,
+            )
+        ):
+            record = await _run_account_rebalance(
+                account_id,
+                execution_id=tracked_execution_id,
+                trigger_source=trigger_source,
+            )
+        if not lock_acquired:
+            await execution_lifecycle.mark_inline_execution_succeeded(
+                cast("str", tracked_execution_id),
+                record,
+            )
+        return record
+    except ExecutionTerminated as exc:
+        if not lock_acquired:
+            await execution_lifecycle.handle_inline_execution_terminated(
+                account_id=account_id,
+                execution_id=cast("str", tracked_execution_id),
+                execution_kind=ExecutionKind.REBALANCE,
+                exc=exc,
+            )
+        raise
+    except Exception as e:
+        if isinstance(e, AccountExecutionAlreadyRunningError):
+            raise
+        if not lock_acquired:
+            await execution_lifecycle.handle_inline_execution_failure(
+                account=account,
+                execution_id=cast("str", tracked_execution_id),
+                error=e,
+            )
+        raise
+    finally:
+        if not lock_acquired:
+            # inline execution 的兜底清理始终在本层完成，确保注册成功后无论
+            # 成功、失败还是终止都能释放账户级运行占位。
+            clear_running_execution(account_id, cast("str", tracked_execution_id))

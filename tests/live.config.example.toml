@@ -1,0 +1,44 @@
+# tests/live.config.example.toml —— 联机/手工测试凭据示例
+#
+# 用法：复制为 tests/live.config.toml（已被 .gitignore 忽略）后按需填写。
+# 解析优先级：同名环境变量（SECTION_KEY 全大写，如 CTP_PASSWORD）> 本文件 > 代码默认值。
+# 是否运行由各自的 RUN_LIVE_* 开关（环境变量）控制，本文件只提供凭据。
+#
+# 注意：这里**只放测试专属凭据**。量化数据源（quant_data_token / quant_data_api）属于
+# 应用配置，住在 config.toml（见 example.config.toml），数据 API 联机测试直接读它，不在此重复。
+
+# CTP 真实/联机环境（tests/live/test_ctp_live.py）
+# 开关：RUN_LIVE_CTP_TESTS=1；以下全部必填
+[ctp]
+host = ""          # 交易前置地址，如 "tcp://180.168.146.187:10130"
+md_front = ""      # 行情前置地址
+broker = ""        # 期货公司/经纪商 ID
+account = ""       # 投资者账户
+password = ""      # 账户密码
+appid = ""         # 应用程序 ID
+authcode = ""      # 授权码
+
+# CTP SimNow 7x24 模拟（tests/live/test_ctp_7x24_smoke.py）
+# 开关：RUN_LIVE_CTP_SIMNOW_7X24=1；仅 investor_id/password 必填，其余留空走代码默认。
+[ctp_simnow_7x24]
+investor_id = ""   # 必填
+password = ""      # 必填
+# 以下留空即用默认：td_front/md_front（180.168.146.187:10130/10131）、
+# broker_id（9999）、app_id（simnow_client_test）、auth_code（0000000000000000）
+td_front = ""
+md_front = ""
+broker_id = ""
+app_id = ""
+auth_code = ""
+
+# openctp TTS 7x24 模拟（tests/live/test_ctp_7x24_smoke.py）
+# 开关：RUN_LIVE_CTP_OPENCTP_7X24=1；仅 investor_id/password 必填，其余留空走代码默认。
+[ctp_openctp_7x24]
+investor_id = ""   # 必填
+password = ""      # 必填
+# 以下留空即用默认：td_front/md_front（trading.openctp.cn:30001/30011）、broker_id（9999）
+td_front = ""
+md_front = ""
+broker_id = ""
+app_id = ""
+auth_code = ""

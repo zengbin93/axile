@@ -1,0 +1,848 @@
+"""执行生命周期与后台任务编排."""
+
+import asyncio
+from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
+from threading import Event
+
+import loguru
+
+from axile.domain.execution import (
+    ExecutionArtifactType,
+    ExecutionEventStatus,
+    ExecutionEventType,
+    ExecutionKind,
+    ExecutionReasonFamily,
+    ExecutionTaskStatus,
+    ExecutionTerminateMode,
+)
+from axile.executor.termination import (
+    TERMINATION_TRIGGER_TIMEOUT,
+    ExecutionTerminated,
+)
+from axile.server.core.db import SessionLocal
+from axile.server.db.models import (
+    Account,
+    ExecuteRecord,
+    new_execution_id,
+    now_str,
+)
+from axile.server.error_notifications import send_feishu_error
+from axile.server.execution.audit_sink import build_server_execution_audit_sink
+from axile.server.execution.execution_account_control import (
+    build_account_control_guard,
+    flush_account_control_records,
+)
+from axile.server.execution.execution_algorithms import resolve_execution_algorithm_name
+from axile.server.execution.execution_summaries import (
+    build_execution_summary_from_symbol_results,
+    build_symbol_reconciliation,
+    count_orders_from_symbol_results,
+)
+from axile.server.execution.factory import create_executor_instance
+from axile.server.execution.records import append_terminated_execute_record
+from axile.server.execution.registry import (
+    AccountExecutionAlreadyRunningError,
+    ExecutionTaskState,
+    clear_running_execution,
+    create_termination_controller,
+    finalize_execution_task_state,
+    get_execution_task_state,
+    set_execution_task_state,
+    transition_execution_task_to_running,
+    try_register_running_execution,
+    update_execution_task_state,
+)
+from axile.server.execution_audit import append_execution_artifact, append_execution_event
+
+type ExecutionRunner = Callable[[str], Awaitable[ExecuteRecord | None]]
+
+_TIMEOUT_ALERT_BUDGET_SECONDS = 5.0
+"""总超时告警的发送预算（秒）。.
+
+Notes
+-----
+告警发生在终止收尾里，而账户的运行位要等收尾返回才释放，所以这里的耗时会直接推迟
+下一次调度。取值与单个外网探测的超时同量级：够一个健康服务应答，又不至于让整条
+串行探测链把运行位拖住几十秒。
+"""
+
+
+@dataclass(frozen=True, slots=True)
+class _TerminationSnapshot:
+    """收敛 execution terminated 异常中的关键字段。"""
+
+    reason: str | None
+    mode: str | None
+    acked_at: str | None
+    cancel_failed_order_ids: list[str]
+    trigger: str
+
+
+def _resolve_termination_snapshot(
+    exc: ExecutionTerminated,
+    current_state: ExecutionTaskState | None,
+) -> _TerminationSnapshot:
+    """
+    将终止异常与当前内存态合并为最终终止快照.
+
+    Parameters
+    ----------
+    exc : ExecutionTerminated
+        上层捕获到的终止异常对象。
+    current_state : ExecutionTaskState | None
+        当前 execution 的内存状态快照，用于补齐异常里缺失的 reason / mode。
+
+    Returns
+    -------
+    _TerminationSnapshot
+        统一收敛后的终止快照。
+    """
+    state_mode = (
+        None if current_state is None or current_state.terminate_mode is None else current_state.terminate_mode.value
+    )
+    return _TerminationSnapshot(
+        reason=exc.reason if exc.reason is not None else None if current_state is None else current_state.cancel_reason,
+        mode=exc.mode if exc.mode is not None else state_mode,
+        acked_at=exc.acked_at,
+        cancel_failed_order_ids=exc.cancel_failed_order_ids,
+        trigger=exc.trigger,
+    )
+
+
+async def _load_account(account_id: int) -> Account | None:
+    """
+    按 ID 读取账户；不存在时返回 ``None``.
+
+    Parameters
+    ----------
+    account_id : int
+        目标账户 ID。
+
+    Returns
+    -------
+    Account | None
+        命中时返回账户对象；否则返回 ``None``。
+    """
+    async with SessionLocal() as session:
+        return await session.get(Account, account_id)
+
+
+async def _require_account(account_id: int) -> Account:
+    """
+    按 ID 读取账户；不存在时直接拒绝本次执行.
+
+    Parameters
+    ----------
+    account_id : int
+        目标账户 ID。
+
+    Returns
+    -------
+    Account
+        命中的账户对象。
+
+    Raises
+    ------
+    ValueError
+        目标账户不存在。
+    """
+    account = await _load_account(account_id)
+    if account is None:
+        raise ValueError(f"无法执行任务 账户id: {account_id} 不存在")
+    return account
+
+
+def _resolve_termination_requested_at(
+    current_state: ExecutionTaskState | None,
+    finished_at: str,
+) -> str:
+    """解析终止记录应写入的 requested_at。"""
+    if current_state is None or current_state.cancel_requested_at is None:
+        return finished_at
+    return current_state.cancel_requested_at
+
+
+def _resolve_completion_status(record: ExecuteRecord | None) -> ExecutionTaskStatus:
+    """根据执行记录解析后台任务的最终状态。"""
+    if record is not None and record.is_success == 1:
+        return ExecutionTaskStatus.SUCCEEDED
+    return ExecutionTaskStatus.FAILED
+
+
+def _mark_execution_finished(
+    execution_id: str,
+    *,
+    status: ExecutionTaskStatus,
+    finished_at: str,
+    record: ExecuteRecord | None = None,
+    error: Exception | None = None,
+) -> None:
+    """统一更新后台任务的完成态字段。"""
+    update_execution_task_state(
+        execution_id,
+        status=status,
+        finished_at=finished_at,
+        record_id=None if record is None else record.id,
+        is_success=0 if error is not None else None if record is None else record.is_success,
+        error=None if error is None else str(error),
+    )
+
+
+async def _notify_timeout_termination_if_needed(
+    account_id: int,
+    execution_id: str,
+    termination: _TerminationSnapshot,
+) -> None:
+    """
+    在执行被总超时兜底截断时发出告警.
+
+    Parameters
+    ----------
+    account_id : int
+        当前 execution 所属账户 ID。
+    execution_id : str
+        当前 execution 标识。
+    termination : _TerminationSnapshot
+        已规范化的终止元信息。
+
+    Returns
+    -------
+    None
+        该函数仅发送通知，不返回结果。
+
+    Notes
+    -----
+    人工终止不通知：发起的人本来就知道。总超时正相反——它恰恰是「没人知道」的那种，
+    而终止在前端被归为「提前收尾」而非失败，一个每次都超时的账户看上去会毫无异常。
+    通知失败不影响终止收尾本身。
+    """
+    if termination.trigger != TERMINATION_TRIGGER_TIMEOUT:
+        return
+
+    try:
+        from axile.common.config import settings
+
+        account = await _load_account(account_id)
+        if account is None:
+            return
+        await send_feishu_error(
+            RuntimeError(f"执行被总超时终止（execution_id={execution_id}）：{termination.reason}"),
+            account,
+            settings.exe_err_feishu_key,
+        )
+    except Exception as exc:  # noqa: BLE001
+        loguru.logger.warning(f"总超时告警发送失败 execution_id={execution_id}: {exc}")
+
+
+async def _record_terminated_execution(
+    *,
+    account_id: int,
+    execution_id: str,
+    execution_kind: ExecutionKind,
+    current_state: ExecutionTaskState | None,
+    requested_at: str,
+    finished_at: str,
+    termination: _TerminationSnapshot,
+) -> ExecuteRecord:
+    """
+    持久化 terminated 执行记录并同步更新内存态.
+
+    Parameters
+    ----------
+    account_id : int
+        当前 execution 所属账户 ID。
+    execution_id : str
+        当前 execution 标识。
+    execution_kind : ExecutionKind
+        当前执行类型。
+    current_state : ExecutionTaskState | None
+        当前 execution 的内存状态快照。
+    requested_at : str
+        terminate 请求生效时间。
+    finished_at : str
+        终止完成时间。
+    termination : _TerminationSnapshot
+        已规范化的终止元信息。
+
+    Returns
+    -------
+    ExecuteRecord
+        持久化后的 terminated 执行记录。
+    """
+    record = await append_terminated_execute_record(
+        account_id=account_id,
+        execution_id=execution_id,
+        execution_kind=execution_kind,
+        reason=termination.reason,
+        mode=termination.mode or ExecutionTerminateMode.GRACEFUL.value,
+        requested_at=requested_at,
+        acked_at=termination.acked_at,
+        finished_at=finished_at,
+        cancel_attempted=bool(termination.mode == ExecutionTerminateMode.CANCEL_PENDING.value),
+        cancel_failed_order_ids=termination.cancel_failed_order_ids,
+        trigger=termination.trigger,
+    )
+    if current_state is not None and current_state.channel is not None and current_state.algorithm:
+        await append_execution_event(
+            execution_id=execution_id,
+            account_id=account_id,
+            channel=current_state.channel,
+            algorithm=current_state.algorithm,
+            event_type=ExecutionEventType.EXECUTION_TERMINATED,
+            status=ExecutionEventStatus.WARNING,
+            reason_family=ExecutionReasonFamily.SYSTEM,
+            reason_code="COMMON.EXECUTION_TERMINATED",
+            details={
+                "termination": {
+                    "reason": termination.reason,
+                    "mode": termination.mode,
+                    "trigger": termination.trigger,
+                    "execution_kind": execution_kind.value,
+                    "cancel_failed_order_ids": termination.cancel_failed_order_ids,
+                }
+            },
+        )
+    # 先落内存态再发告警：告警链路里的 get_external_ip 会串行探测多个外网服务，
+    # 而超时终止恰恰常发生在网络劣化时——放在前面会把 TERMINATED 的可见时间拖上几十秒。
+    update_execution_task_state(
+        execution_id,
+        status=ExecutionTaskStatus.TERMINATED,
+        finished_at=finished_at,
+        record_id=record.id,
+        is_success=record.is_success,
+    )
+    # 同一条外网探测链路还会占住账户的运行位：调用方要等这里返回才走到 finally 里的
+    # clear_running_execution，探测全超时的话下一次定时调仓会被判为「已在运行」而直接失败。
+    # 六个服务各 5s 串行 = 最坏 30s，故在这里单独封顶；超时由内部 except 吞掉，不影响收尾。
+    try:
+        await asyncio.wait_for(
+            _notify_timeout_termination_if_needed(account_id, execution_id, termination),
+            timeout=_TIMEOUT_ALERT_BUDGET_SECONDS,
+        )
+    except TimeoutError:
+        loguru.logger.warning(f"总超时告警发送超时，已放弃 execution_id={execution_id}")
+    return record
+
+
+async def prepare_executor_runtime(
+    account: Account,
+    *,
+    execution_id: str | None,
+    audit_context: dict[str, object],
+) -> object:
+    """
+    创建执行器并挂接审计、账户控制与终止控制.
+
+    Parameters
+    ----------
+    account : Account
+        当前执行对应的账户。
+    execution_id : str | None
+        当前 execution 标识；为空时仅挂接基础 runtime。
+    audit_context : dict[str, object]
+        传递给执行器的审计上下文。
+
+    Returns
+    -------
+    object
+        已完成 runtime 初始化的执行器实例。
+    """
+    executor = create_executor_instance(account)
+    executor.set_audit_context(audit_context)
+    executor.set_audit_sink(build_server_execution_audit_sink())
+    executor.set_account_control_guard(await build_account_control_guard(account, execution_id))
+
+    if execution_id:
+        execution_state = get_execution_task_state(execution_id)
+        if execution_state is not None and execution_state.cancel_event is not None:
+            executor.set_termination_controller(
+                create_termination_controller(execution_id, execution_state.cancel_event)
+            )
+
+    prepare_execution_runtime = getattr(executor, "prepare_execution_runtime", None)
+    if callable(prepare_execution_runtime):
+        prepare_execution_runtime()
+    return executor
+
+
+async def cleanup_executor_runtime(executor: object | None) -> None:
+    """
+    回收执行器 runtime 并刷入账户控制记录.
+
+    Parameters
+    ----------
+    executor : object | None
+        需要清理的执行器实例；为空时直接返回。
+
+    Returns
+    -------
+    None
+        该函数仅负责资源回收，不返回结果。
+    """
+    if executor is None:
+        return
+
+    await flush_account_control_records(executor)
+    clear_execution_runtime = getattr(executor, "clear_execution_runtime", None)
+    if callable(clear_execution_runtime):
+        clear_execution_runtime()
+
+
+async def append_execution_result_artifacts(
+    execution_id: str,
+    result: dict[str, object],
+    before_account_assets: dict[str, object] | None = None,
+) -> None:
+    """
+    写入执行后账户快照与执行摘要附件.
+
+    Parameters
+    ----------
+    execution_id : str
+        当前 execution 标识。
+    result : dict[str, object]
+        执行结果的 JSON 化内容（含执行后 ``account_assets`` 与 ``symbol_results``）。
+    before_account_assets : dict[str, object] | None, optional
+        执行前账户快照的 JSON 化内容，用于逐只对账；``None`` 表示读取不可用。
+
+    Returns
+    -------
+    None
+        该函数仅负责附件落库，不返回结果。
+    """
+    await append_execution_artifact(
+        execution_id=execution_id,
+        artifact_type=ExecutionArtifactType.ACCOUNT_SNAPSHOT,
+        content={
+            "account_assets": result.get("account_assets", {}),
+            "orders_count": count_orders_from_symbol_results(result),
+        },
+    )
+    await append_execution_artifact(
+        execution_id=execution_id,
+        artifact_type=ExecutionArtifactType.EXECUTION_SUMMARY,
+        content={
+            "summary": build_execution_summary_from_symbol_results(result),
+            "success": result.get("success", True),
+            "execution_time": result.get("execution_time"),
+            "reconciliation": build_symbol_reconciliation(result, before_account_assets),
+        },
+    )
+
+
+def build_rebalance_completed_details(
+    *,
+    record: ExecuteRecord,
+    output_success: bool,
+    output_status: str,
+    result: dict[str, object],
+) -> dict[str, object]:
+    """
+    构造调仓完成事件的详情内容.
+
+    Parameters
+    ----------
+    record : ExecuteRecord
+        已持久化的执行记录。
+    output_success : bool
+        执行器返回的成功标记。
+    output_status : str
+        执行器返回的状态值。
+    result : dict[str, object]
+        执行结果的 JSON 化内容。
+
+    Returns
+    -------
+    dict[str, object]
+        可直接写入 execution event 的详情字段。
+    """
+    return {
+        "debug": {
+            "record_id": record.id,
+            "success": output_success,
+            "execution_status": output_status,
+        },
+        "order": {
+            "orders_count": count_orders_from_symbol_results(result),
+        },
+    }
+
+
+def build_clear_positions_completed_details(
+    *,
+    record: ExecuteRecord,
+    output_success: bool,
+    output_status: str,
+) -> dict[str, object]:
+    """
+    构造清仓完成事件的详情内容.
+
+    Parameters
+    ----------
+    record : ExecuteRecord
+        已持久化的执行记录。
+    output_success : bool
+        执行器返回的成功标记。
+    output_status : str
+        执行器返回的状态值。
+
+    Returns
+    -------
+    dict[str, object]
+        可直接写入 execution event 的详情字段。
+    """
+    return {
+        "debug": {
+            "record_id": record.id,
+            "success": output_success,
+            "execution_status": output_status,
+        }
+    }
+
+
+async def mark_inline_execution_succeeded(execution_id: str, record: ExecuteRecord) -> None:
+    """
+    将内联 execution 标记为成功或失败完成.
+
+    Parameters
+    ----------
+    execution_id : str
+        当前 execution 标识。
+    record : ExecuteRecord
+        已持久化的执行记录。
+
+    Returns
+    -------
+    None
+        该函数仅更新内存状态，不返回结果。
+    """
+    update_execution_task_state(
+        execution_id,
+        status=ExecutionTaskStatus.SUCCEEDED if record.is_success == 1 else ExecutionTaskStatus.FAILED,
+        finished_at=now_str(),
+        record_id=record.id,
+        is_success=record.is_success,
+    )
+
+
+async def handle_inline_execution_terminated(
+    *,
+    account_id: int,
+    execution_id: str,
+    execution_kind: ExecutionKind,
+    exc: ExecutionTerminated,
+) -> ExecuteRecord:
+    """
+    持久化内联 execution 的终止结果并更新内存状态.
+
+    Parameters
+    ----------
+    account_id : int
+        当前 execution 所属账户 ID。
+    execution_id : str
+        当前 execution 标识。
+    execution_kind : ExecutionKind
+        当前执行类型。
+    exc : ExecutionTerminated
+        上层捕获到的终止异常对象。
+
+    Returns
+    -------
+    ExecuteRecord
+        持久化后的终止执行记录。
+    """
+    current_state = get_execution_task_state(execution_id)
+    finished_at = now_str()
+    termination = _resolve_termination_snapshot(exc, current_state)
+    return await _record_terminated_execution(
+        account_id=account_id,
+        execution_id=execution_id,
+        execution_kind=execution_kind,
+        current_state=current_state,
+        requested_at=_resolve_termination_requested_at(current_state, finished_at),
+        finished_at=finished_at,
+        termination=termination,
+    )
+
+
+async def handle_inline_execution_failure(
+    *,
+    account: Account | None,
+    execution_id: str,
+    error: Exception,
+) -> None:
+    """
+    将内联 execution 标记为失败并发送飞书告警.
+
+    Parameters
+    ----------
+    account : Account | None
+        当前执行所属账户；为空时仅更新内存状态。
+    execution_id : str
+        当前 execution 标识。
+    error : Exception
+        触发失败收尾的异常对象。
+
+    Returns
+    -------
+    None
+        该函数仅更新状态并发出告警，不返回结果。
+    """
+    update_execution_task_state(
+        execution_id,
+        status=ExecutionTaskStatus.FAILED,
+        finished_at=now_str(),
+        error=str(error),
+        is_success=0,
+    )
+    if account is None:
+        return
+
+    from axile.common.config import settings
+
+    await send_feishu_error(error, account, settings.exe_err_feishu_key)
+
+
+async def _run_execution_task(
+    *,
+    account_id: int,
+    execution_id: str,
+    execution_kind: ExecutionKind,
+    runner: ExecutionRunner,
+) -> None:
+    """
+    运行已入队的后台 execution，并收敛任务生命周期状态.
+
+    Parameters
+    ----------
+    account_id : int
+        当前执行所属账户 ID。
+    execution_id : str
+        当前 execution 标识。
+    execution_kind : ExecutionKind
+        当前执行类型。
+    runner : ExecutionRunner
+        真正执行任务的异步回调。
+
+    Returns
+    -------
+    None
+        该函数仅推进任务状态，不返回结果。
+    """
+    state = transition_execution_task_to_running(execution_id)
+    if state is None or state.status == ExecutionTaskStatus.TERMINATED:
+        clear_running_execution(account_id, execution_id)
+        finalize_execution_task_state(execution_id)
+        return
+
+    try:
+        record = await runner(execution_id)
+        _mark_execution_finished(
+            execution_id,
+            status=_resolve_completion_status(record),
+            finished_at=now_str(),
+            record=record,
+        )
+    except ExecutionTerminated as exc:
+        current_state = get_execution_task_state(execution_id)
+        requested_at = None if current_state is None else current_state.cancel_requested_at
+        finished_at = now_str()
+        termination = _resolve_termination_snapshot(exc, current_state)
+        await _record_terminated_execution(
+            account_id=account_id,
+            execution_id=execution_id,
+            execution_kind=execution_kind,
+            current_state=current_state,
+            requested_at=requested_at or _resolve_termination_requested_at(current_state, finished_at),
+            finished_at=finished_at,
+            termination=termination,
+        )
+    except Exception as e:
+        _mark_execution_finished(
+            execution_id,
+            status=ExecutionTaskStatus.FAILED,
+            finished_at=now_str(),
+            error=e,
+        )
+    finally:
+        clear_running_execution(account_id, execution_id)
+        finalize_execution_task_state(execution_id)
+
+
+async def _run_execute_trade_task(account_id: int, execution_id: str, trigger_source: str) -> None:
+    """
+    运行后台调仓任务.
+
+    Parameters
+    ----------
+    account_id : int
+        目标账户 ID。
+    execution_id : str
+        当前 execution 标识。
+    trigger_source : str
+        本次执行的触发来源。
+
+    Returns
+    -------
+    None
+        该函数仅负责任务调度，不返回结果。
+    """
+    from axile.server.execution import rebalance as rebalance_execution
+
+    async def _runner(tracked_execution_id: str) -> ExecuteRecord:
+        return await rebalance_execution.execute_trade(
+            account_id,
+            execution_id=tracked_execution_id,
+            trigger_source=trigger_source,
+            lock_acquired=True,
+        )
+
+    await _run_execution_task(
+        account_id=account_id,
+        execution_id=execution_id,
+        execution_kind=ExecutionKind.REBALANCE,
+        runner=_runner,
+    )
+
+
+async def enqueue_execute_trade(account_id: int, trigger_source: str = "manual") -> str:
+    """
+    为账户创建并跟踪一个后台 execution 任务.
+
+    Parameters
+    ----------
+    account_id : int
+        目标账户 ID。
+    trigger_source : str, optional
+        触发来源标识，默认值为 ``"manual"``。
+
+    Returns
+    -------
+    str
+        新创建的 execution ID。
+
+    Raises
+    ------
+    ValueError
+        当目标账户不存在时抛出。
+    AccountExecutionAlreadyRunningError
+        当账户已有执行任务在运行时抛出。
+    """
+    account = await _require_account(account_id)
+
+    execution_id = new_execution_id()
+    if not try_register_running_execution(account_id, execution_id):
+        msg = f"账户 {account_id} 已有调仓任务在执行中"
+        loguru.logger.warning(msg)
+        raise AccountExecutionAlreadyRunningError(msg)
+
+    task = asyncio.create_task(_run_execute_trade_task(account_id, execution_id, trigger_source))
+    state = ExecutionTaskState(
+        execution_id=execution_id,
+        account_id=account_id,
+        execution_kind=ExecutionKind.REBALANCE,
+        status=ExecutionTaskStatus.QUEUED,
+        created_at=now_str(),
+        channel=account.trade_channel,
+        algorithm=resolve_execution_algorithm_name(account, ExecutionKind.REBALANCE),
+        task=task,
+        cancel_event=Event(),
+    )
+    set_execution_task_state(execution_id, state)
+    return execution_id
+
+
+async def _run_empty_positions_task(
+    account_id: int,
+    execution_id: str,
+    algorithm: dict[str, object] | None,
+) -> None:
+    """
+    运行后台清仓任务.
+
+    Parameters
+    ----------
+    account_id : int
+        目标账户 ID。
+    execution_id : str
+        当前 execution 标识。
+    algorithm : dict[str, object] | None
+        显式指定的清仓算法配置；为空时使用账户级默认配置。
+
+    Returns
+    -------
+    None
+        该函数仅负责任务调度，不返回结果。
+    """
+    from axile.server.execution import clear_positions as clear_positions_execution
+
+    async def _runner(tracked_execution_id: str) -> ExecuteRecord:
+        account = await _require_account(account_id)
+        return await clear_positions_execution.empty_positions(
+            account,
+            algorithm=algorithm,
+            execution_id=tracked_execution_id,
+            lock_acquired=True,
+        )
+
+    await _run_execution_task(
+        account_id=account_id,
+        execution_id=execution_id,
+        execution_kind=ExecutionKind.CLEAR_POSITIONS,
+        runner=_runner,
+    )
+
+
+async def enqueue_empty_positions(
+    account_id: int,
+    algorithm: dict[str, object] | None = None,
+) -> str:
+    """
+    为账户创建并跟踪一个后台清仓任务.
+
+    Parameters
+    ----------
+    account_id : int
+        目标账户 ID。
+    algorithm : dict[str, object] | None, optional
+        显式指定的清仓算法配置；为空时使用账户级默认配置。
+
+    Returns
+    -------
+    str
+        新创建的 execution ID。
+
+    Raises
+    ------
+    ValueError
+        当目标账户不存在时抛出。
+    AccountExecutionAlreadyRunningError
+        当账户已有执行任务在运行时抛出。
+    """
+    account = await _require_account(account_id)
+
+    execution_id = new_execution_id()
+    if not try_register_running_execution(account_id, execution_id):
+        msg = f"账户 {account_id} 已有调仓任务在执行中"
+        loguru.logger.warning(msg)
+        raise AccountExecutionAlreadyRunningError(msg)
+
+    task = asyncio.create_task(_run_empty_positions_task(account_id, execution_id, algorithm))
+    state = ExecutionTaskState(
+        execution_id=execution_id,
+        account_id=account_id,
+        execution_kind=ExecutionKind.CLEAR_POSITIONS,
+        status=ExecutionTaskStatus.QUEUED,
+        created_at=now_str(),
+        channel=account.trade_channel,
+        algorithm=resolve_execution_algorithm_name(
+            account,
+            ExecutionKind.CLEAR_POSITIONS,
+            algorithm_override=algorithm,
+        ),
+        task=task,
+        cancel_event=Event(),
+    )
+    set_execution_task_state(execution_id, state)
+    return execution_id

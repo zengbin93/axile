@@ -1,0 +1,147 @@
+[project]
+name = "axile"
+version = "0.1.0"
+description = "通过 Web UI 配置和运行的多渠道交易执行服务"
+readme = "README.md"
+requires-python = "==3.12.*"
+dependencies = [
+    "aiohttp>=3.10.11",
+    "aiosqlite>=0.21.0",
+    "alembic>=1.15.2",
+    "apscheduler>=3.11.0",
+    "bs4>=0.0.2",
+    "croniter>=5.0.0",
+    "czsc>=0.9.64",
+    "fastapi[standard]>=0.115.12",
+    "greenlet>=3.3.0",
+    "loguru>=0.7.3",
+    "numpy==2.3.2",
+    "pandas>=2.2.3",
+    "polars>=1.37.1",
+    "pydantic-settings>=2.8.1",
+    "pygetwindow>=0.0.9",
+    "python-dotenv>=1.1.0",
+    "sqlalchemy>=2.0.46",
+    "sqlmodel>=0.0.24",
+    "streamlit>=1.41.0",
+    "tenacity>=9.0.0",
+    "typer>=0.20.1",
+    "rs-czsc>=0.1.25",
+    "tomlkit>=0.15.0",
+]
+
+
+[project.optional-dependencies]
+# QMT版本依赖
+qmt = ["pyautogui>=0.9.54", "xtquant>=250516.1.1"]
+# CTP交易所版本依赖
+ctp = ["openctp-ctp==6.7.7.*"]
+gm = ["gm>=3.0.183"]
+all = ["axile[qmt]", "axile[ctp]", "axile[gm]"]
+
+[dependency-groups]
+dev = [
+    "basedpyright>=1.29.1",
+    "commitizen>=4.11.1",
+    "hatchling>=1.27.0",
+    "ipython>=9.4.0",
+    "jupyter>=1.1.1",
+    "pandas-stubs>=2.3.3.251201",
+    "pre-commit>=4.2.0",
+    "psutil>=7.0.0",
+    "pytest>=8.4.1",
+    "pytest-cov>=7.0.0",
+    "requests>=2.32.3",
+    "ruff>=0.11.0",
+]
+
+[project.scripts]
+axile = "axile.cli.main:main"
+
+[[tool.uv.index]]
+url = "https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple"
+default = true
+
+# 官方源：仅供显式绑定的包兜底
+[[tool.uv.index]]
+name = "pypi"
+url = "https://pypi.org/simple/"
+explicit = true
+
+[tool.uv.sources]
+rs-czsc = { index = "pypi" }
+
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build]
+artifacts = [
+    "axile/server/_static/**",
+]
+
+[tool.commitizen]
+name = "cz_conventional_commits"
+version_provider = "pep621"
+tag_format = "v$version"
+major_version_zero = true
+
+[tool.ruff]
+target-version = "py312"
+line-length = 120
+extend-exclude = [
+    ".git",
+    ".venv",
+    "build",
+    "dist",
+]
+
+[tool.ruff.lint]
+select = ["D", "E", "F", "I", "W"]
+ignore = ["D400", "E203", "E501"]
+task-tags = ["TODO", "FIXME", "HACK", "NOTE", "SAFETY", "PERF", "COMPAT"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = ["D", "E402"]
+"stubs/openctp_ctp/*.pyi" = ["D"]
+"axile/server/execution/factory.py" = ["E402"]
+
+
+[tool.ruff.lint.pydocstyle]
+convention = "numpy"
+
+[tool.ruff.lint.isort]
+known-first-party = ["axile"]
+
+[tool.ruff.lint.mccabe]
+max-complexity = 15
+
+[tool.basedpyright]
+pythonVersion = "3.12"
+typeCheckingMode = "basic"
+reportMissingTypeStubs = false
+stubPath = "stubs"
+venvPath = "."
+venv = ".venv"
+include = [
+    "axile/common",
+    "axile/executor/algorithms",
+    "axile/executor/models",
+    "axile/server/api",
+    "axile/server/app.py",
+    "axile/server/core",
+    "axile/server/execution_audit.py",
+]
+exclude = [
+    ".venv",
+    ".git",
+]
+
+[tool.coverage.run]
+branch = true
+source = ["axile"]
+
+[tool.coverage.report]
+fail_under = 69
+show_missing = true

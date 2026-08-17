@@ -1,0 +1,392 @@
+"""`AbstractExecutor` 的默认能力实现.
+
+本文件放置渠道执行器可复用、可重写的通用能力，
+例如输入校验、目标仓位计算、持仓读取与符号集合推导。
+"""
+
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, cast
+
+from axile.channels import get_channel
+from axile.executor.models.execution_result import ExecutionStatus
+from axile.executor.models.unified_account_assets import Position, PositionDirection, UnifiedAccountAssets
+from axile.executor.models.unified_input import UnifiedStandardInput
+from axile.executor.models.unified_output import UnifiedStandardOutput
+from axile.executor.models.unified_price import UnifiedPriceData
+
+if TYPE_CHECKING:
+    from axile.executor.abstract_executor.base import AbstractExecutor
+
+
+def _executor(owner: object) -> AbstractExecutor:
+    return cast("AbstractExecutor", owner)
+
+
+class AbstractExecutorCapabilityMixin:
+    """承载渠道可复用、可重写的默认能力实现."""
+
+    def get_all_symbols(
+        self,
+        curr_target: dict[str, float] | None = None,
+        last_target: dict[str, float] | None = None,
+    ) -> list[str]:
+        """
+        获取当前执行涉及的全部品种列表.
+
+        Parameters
+        ----------
+        curr_target : dict[str, float] | None, default=None
+            当前目标仓位映射。
+        last_target : dict[str, float] | None, default=None
+            上一次目标仓位映射。
+
+        Returns
+        -------
+        list[str]
+            当前执行涉及的全部品种代码列表。
+
+        Raises
+        ------
+        ValueError
+            当 ``curr_target`` 或 ``last_target`` 未提供时抛出。
+        """
+        if curr_target is None or last_target is None:
+            raise ValueError("curr_target和last_target参数必须提供")
+        symbols = list(curr_target.keys())
+        for symbol in last_target:
+            if symbol not in curr_target:
+                symbols.append(symbol)
+        return symbols
+
+    def _create_non_trading_output(self, standard_input: UnifiedStandardInput) -> UnifiedStandardOutput:
+        """
+        创建非交易时间场景下的阻断输出.
+
+        Parameters
+        ----------
+        standard_input : UnifiedStandardInput
+            当前执行使用的统一输入对象。
+
+        Returns
+        -------
+        UnifiedStandardOutput
+            状态为 ``BLOCKED`` 的统一输出对象。
+        """
+        executor = _executor(self)
+        runtime = executor.require_execution_runtime()
+        empty_assets = UnifiedAccountAssets(available_cash=0.0, total_asset=0.0, market_value=0.0, positions=[])
+
+        return UnifiedStandardOutput(
+            account_assets=empty_assets,
+            memory={"message": "当前不在交易时间"},
+            symbol_results={},
+            status=ExecutionStatus.BLOCKED,
+            error="当前不在交易时间",
+            execution_time=runtime.elapsed_seconds(),
+            channel_type=executor.channel_type,
+            inputs=standard_input,
+        )
+
+    def _supports_parallel_symbol_dispatch(self) -> bool:
+        """
+        返回当前执行器是否支持安全的按品种并行调度.
+
+        Returns
+        -------
+        bool
+            支持安全并行调度时返回 ``True``。
+        """
+        return self._max_parallel_symbol_workers() > 1
+
+    def _max_parallel_symbol_workers(self) -> int:
+        """
+        返回当前渠道允许的最大品种并发数.
+
+        Returns
+        -------
+        int
+            渠道插件声明的并发上限；渠道未注册时安全回退为 ``1``。
+        """
+        executor = _executor(self)
+        try:
+            return get_channel(executor.channel_type).max_parallel_symbols
+        except KeyError:
+            return 1
+
+    def _validate_input(self, standard_input: UnifiedStandardInput) -> None:
+        """
+        执行通用输入验证.
+
+        Parameters
+        ----------
+        standard_input : UnifiedStandardInput
+            待校验的统一输入对象。
+
+        Raises
+        ------
+        ValueError
+            当目标仓位或账户配置缺失时抛出。
+        """
+        executor = _executor(self)
+
+        if not standard_input.curr_target:
+            raise ValueError("当前目标持仓权重不能为空")
+
+        if not standard_input.account_config:
+            raise ValueError("账户配置不能为空")
+
+        executor.logger.info(f"输入参数验证通过 - 目标持仓: {standard_input.curr_target}")
+
+    def _calculate_target_volume_base(
+        self,
+        curr_target: dict[str, float],
+        account_assets: UnifiedAccountAssets,
+        market_data: dict[str, UnifiedPriceData],
+        trade_rules: dict[str, dict[str, object]],
+        last_target: dict[str, float],
+        forbidden_symbols: list[str] | None = None,
+    ) -> dict[str, int | float]:
+        """
+        执行通用目标持仓数量计算.
+
+        Parameters
+        ----------
+        curr_target : dict[str, float]
+            当前目标仓位权重映射。
+        account_assets : UnifiedAccountAssets
+            当前账户资产快照。
+        market_data : dict[str, UnifiedPriceData]
+            品种到最新行情快照的映射。
+        trade_rules : dict[str, dict[str, object]]
+            各品种交易规则映射。
+        last_target : dict[str, float]
+            上次目标仓位权重映射。
+        forbidden_symbols : list[str] | None, default=None
+            禁止交易的品种列表。
+
+        Returns
+        -------
+        dict[str, int | float]
+            各品种计算后的目标持仓数量。
+        """
+        executor = _executor(self)
+        forbidden_symbol_set = set(forbidden_symbols or [])
+        working_target = dict(curr_target)
+
+        for symbol in last_target:
+            if symbol in forbidden_symbol_set:
+                continue
+            if symbol not in working_target:
+                working_target[symbol] = 0.0
+
+        target_volume: dict[str, int | float] = {}
+
+        for symbol, weight in working_target.items():
+            if weight == 0:
+                target_volume[symbol] = 0
+                continue
+
+            if symbol not in market_data:
+                executor.logger.warning(f"品种 {symbol} 没有价格数据，跳过")
+                continue
+
+            price = market_data[symbol].last_price
+            if price <= 0:
+                executor.logger.warning(f"品种 {symbol} 价格无效: {price}")
+                continue
+
+            trade_rule = trade_rules.get(symbol, {})
+            volume = executor._calculate_generic_volume(
+                weight,
+                price,
+                account_assets,
+                trade_rule,
+                symbol=symbol,
+            )
+            target_volume[symbol] = volume
+
+        return target_volume
+
+    calculate_target_volume_base = _calculate_target_volume_base
+
+    def _calculate_generic_volume(
+        self,
+        weight: float,
+        price: float,
+        account_assets: UnifiedAccountAssets,
+        trade_rule: dict[str, object],
+        *,
+        symbol: str | None = None,
+    ) -> float:
+        """
+        执行通用持仓数量计算.
+
+        Parameters
+        ----------
+        weight : float
+            目标仓位权重。
+        price : float
+            当前价格。
+        account_assets : UnifiedAccountAssets
+            当前账户资产快照。
+        trade_rule : dict[str, object]
+            品种交易规则；渠道实现可通过 ``contract_multiplier`` 等键
+            注入合约乘数，避免在路由元数据中夹带业务字段。
+        symbol : str | None, optional
+            正在计算目标手数的品种代码，由调度层透传。
+            通用基类不依赖 symbol，渠道 override 可用它读取合约缓存
+            （例如 CTP 的 ``InstrumentField.VolumeMultiple``）。
+
+        Returns
+        -------
+        float
+            计算得到的目标持仓数量。
+
+        Notes
+        -----
+        渠道 override 中的目标手数语义可通过 ``trade_rule['sizing_mode']``
+        切换：``weight``（默认）/ ``lots``（直接当目标手数）/
+        ``premium_weight``（按权利金权重换算，期权专用）。
+        """
+        del symbol  # 通用基类不依赖 symbol；渠道 override 才需要它读合约缓存。
+        total_asset = account_assets.total_asset
+        min_volume_raw = trade_rule.get("最小交易单位", 1)
+        min_volume = (
+            float(min_volume_raw)
+            if isinstance(min_volume_raw, int | float) and not isinstance(min_volume_raw, bool)
+            else 1.0
+        )
+        precision_raw = trade_rule.get("quantity_precision")
+        precision = precision_raw if isinstance(precision_raw, int) and not isinstance(precision_raw, bool) else None
+
+        target_volume = total_asset * weight / price
+        if precision is not None:
+            target_volume = round(target_volume, precision)
+        elif min_volume > 1:
+            target_volume = int(target_volume / min_volume) * min_volume
+
+        return target_volume
+
+    def get_current_volume(self, symbol: str, account_assets: UnifiedAccountAssets) -> float:
+        """
+        获取指定品种的当前净持仓数量.
+
+        Parameters
+        ----------
+        symbol : str
+            品种代码。
+        account_assets : UnifiedAccountAssets
+            当前账户资产快照。
+
+        Returns
+        -------
+        float
+            将多头与空头方向合并后的净持仓数量。
+        """
+        net_volume = 0.0
+        for position in account_assets.positions:
+            if position.symbol == symbol:
+                if position.direction == PositionDirection.LONG:
+                    net_volume += position.volume
+                elif position.direction == PositionDirection.SHORT:
+                    net_volume -= position.volume
+        return net_volume
+
+    def get_positions_for_symbol(
+        self, symbol: str, account_assets: UnifiedAccountAssets
+    ) -> list[tuple[float, PositionDirection]]:
+        """
+        获取指定品种的所有方向持仓.
+
+        Parameters
+        ----------
+        symbol : str
+            品种代码。
+        account_assets : UnifiedAccountAssets
+            当前账户资产快照。
+
+        Returns
+        -------
+        list[tuple[float, PositionDirection]]
+            该品种各方向持仓数量与方向的列表。
+        """
+        result: list[tuple[float, PositionDirection]] = []
+        for position in account_assets.positions:
+            if position.symbol == symbol and position.volume > 0:
+                result.append((position.volume, position.direction))
+        return result
+
+    def calculate_target_volume(
+        self,
+        curr_target: dict[str, float],
+        account_assets: UnifiedAccountAssets,
+        market_data: dict[str, UnifiedPriceData],
+        trade_rules: dict[str, dict[str, object]],
+        last_target: dict[str, float],
+        forbidden_symbols: list[str] | None = None,
+    ) -> dict[str, int | float]:
+        """
+        执行默认的目标仓位数量计算逻辑.
+
+        Parameters
+        ----------
+        curr_target : dict[str, float]
+            当前目标仓位权重映射。
+        account_assets : UnifiedAccountAssets
+            当前账户资产快照。
+        market_data : dict[str, UnifiedPriceData]
+            品种到最新行情快照的映射。
+        trade_rules : dict[str, dict[str, object]]
+            各品种交易规则映射。
+        last_target : dict[str, float]
+            上次目标仓位权重映射。
+        forbidden_symbols : list[str] | None, default=None
+            禁止交易的品种列表。
+
+        Returns
+        -------
+        dict[str, int | float]
+            各品种计算后的目标持仓数量。
+        """
+        executor = _executor(self)
+        return executor._calculate_target_volume_base(
+            curr_target,
+            account_assets,
+            market_data,
+            trade_rules,
+            last_target,
+            forbidden_symbols,
+        )
+
+    def _calculate_last_target_unified(self, positions: list[Position]) -> dict[str, float]:
+        """
+        基于当前持仓市值占比计算统一 ``last_target``.
+
+        Parameters
+        ----------
+        positions : list[Position]
+            当前持仓列表。
+
+        Returns
+        -------
+        dict[str, float]
+            各品种的历史目标权重映射。
+        """
+        empty_result: dict[str, float] = {}
+        if not positions:
+            return empty_result
+
+        total_asset = sum(pos.market_value for pos in positions)
+        if total_asset <= 0:
+            return empty_result
+
+        last_target: dict[str, float] = {}
+        for pos in positions:
+            if pos.volume > 0 and pos.market_value > 0:
+                weight = pos.market_value / total_asset
+                if hasattr(pos, "direction") and pos.direction == PositionDirection.SHORT:
+                    weight = -weight
+                last_target[pos.symbol] = weight
+
+        return last_target
