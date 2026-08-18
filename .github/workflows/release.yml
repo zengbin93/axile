@@ -1,0 +1,47 @@
+name: release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/axile
+    permissions:
+      contents: read
+      id-token: write # PyPI Trusted Publishing (OIDC)，无需 PYPI_API_TOKEN
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.12'
+
+    - name: Install uv
+      run: |
+        curl -LsSf https://astral.sh/uv/install.sh | sh
+        echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+    - name: Verify tag matches project version
+      run: |
+        TAG_VERSION="${GITHUB_REF_NAME#v}"
+        PROJECT_VERSION=$(python -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")
+        echo "tag: ${TAG_VERSION}, pyproject: ${PROJECT_VERSION}"
+        if [ "${TAG_VERSION}" != "${PROJECT_VERSION}" ]; then
+          echo "::error::tag 版本 (${GITHUB_REF_NAME}) 与 pyproject.toml 版本 (${PROJECT_VERSION}) 不一致"
+          exit 1
+        fi
+
+    - name: Build distributions
+      run: |
+        uv build
+
+    - name: Publish to PyPI
+      uses: pypa/gh-action-pypi-publish@release/v1
