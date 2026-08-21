@@ -46,7 +46,7 @@ class _FakeWorkerExecutor:
                 positions=[],
             ),
             memory={"ts": datetime(2026, 3, 27, 10, 0, 0)},
-            inputs=None,
+            inputs=standard_input,
             execution_time=0.1,
             channel_type=TradeChannel.GM,
             symbol_results={
@@ -178,6 +178,8 @@ def test_handle_execute_trade_returns_result_payload(
 
     assert response.kind == "result"
     assert response.output_payload is not None
+    assert "inputs" not in response.output_payload
+    assert UnifiedStandardOutput.model_validate(response.output_payload).inputs is None
     assert fake_executor.execute_input is not None
     assert fake_executor.execute_input.curr_target == {"SHSE.600000": 0.12}
     assert cast(dict[str, object], captured["pre_execute"])["strategy_count"] == 1

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from axile.common.trade_channel import TradeChannel
 from axile.server.channel_capabilities import missing_packages
 from axile.server.cron import is_blank_cron_expr, parse_cron_expr
 from axile.server.db.models import Account
@@ -55,7 +56,7 @@ async def trade_channel_check(account: Account) -> None:
         当账户渠道存在未安装的依赖时抛出。
     """
     if missing_packages(account.trade_channel):
-        msg = f"请先安装 {account.trade_channel.name} 对应的依赖"
+        msg = f"请先安装 {TradeChannel(account.trade_channel).name} 对应的依赖"
         await execution_records.append_error_execute_record(
             account_id=account.id,
             msg=msg,

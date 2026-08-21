@@ -57,6 +57,22 @@ def test_empty_positions_uses_default_algorithm_when_not_provided(
     assert result["memory"]["ts"] == "2026-03-11T21:20:13"
 
 
+def test_clear_positions_request_accepts_database_trade_channel_string() -> None:
+    """Text 列读回普通 str 时，清仓审计输入仍应能正常构造。"""
+    account = build_account()
+    account.trade_channel = cast("TradeChannel", "gm")
+
+    request = clear_positions_execution._build_clear_positions_backend_request(
+        account=account,
+        algorithm=None,
+        execution_id="exec-db-channel-empty-1",
+        logger=clear_positions_execution.loguru.logger,
+    )
+
+    audit = cast("dict[str, object]", request.empty_kwargs["extra"])["audit"]
+    assert cast("dict[str, object]", audit)["channel"] == "gm"
+
+
 def test_empty_positions_uses_account_level_algorithm_when_present(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

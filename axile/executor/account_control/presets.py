@@ -284,7 +284,7 @@ def ensure_account_control_preset_compatible(preset_key: str, trade_channel: Tra
     """
     preset = get_account_control_preset(preset_key)
     if preset.compatible_trade_channels is not None and trade_channel not in preset.compatible_trade_channels:
-        raise ValueError(f"账户控制 preset `{preset_key}` 与 trade_channel `{trade_channel.value}` 不兼容")
+        raise ValueError(f"账户控制 preset `{preset_key}` 与 trade_channel `{trade_channel}` 不兼容")
 
 
 def _copy_rule(rule: AccountControlRule | None) -> AccountControlRule | None:

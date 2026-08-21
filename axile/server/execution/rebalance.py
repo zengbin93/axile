@@ -457,12 +457,12 @@ def _build_rebalance_standard_input(
             "risk_symbols": account.risk_symbols,
             "feishu_key": feishu_key,
             "execution_timeout": account.execution_timeout,
-            "channel_type": account.trade_channel.value,
+            "channel_type": str(account.trade_channel),
             "extra": {
                 "audit": {
                     "execution_id": execution_id,
                     "account_id": account.id,
-                    "channel": account.trade_channel.value,
+                    "channel": str(account.trade_channel),
                     "algorithm": resolve_execution_algorithm_name(account, ExecutionKind.REBALANCE),
                     "trigger_source": trigger_source,
                     "execution_kind": "rebalance",

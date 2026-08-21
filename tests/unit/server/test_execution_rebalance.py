@@ -981,6 +981,25 @@ def test_target_update_time_survives_standard_input_serialization() -> None:
     assert restored.extra.get("target_update_time") == "2026-07-02T09:00:00"
 
 
+def test_standard_input_accepts_database_trade_channel_string() -> None:
+    """Text 列读回普通 str 时，调仓输入仍应能正常构造。"""
+    account = build_account(
+        account_config={"account_id": "gm-account", "token": "token", "serv_addr": "127.0.0.1:7001"}
+    )
+    account.trade_channel = cast("TradeChannel", "gm")
+
+    standard_input = rebalance_execution._build_rebalance_standard_input(
+        account=account,
+        curr_target={"SHSE.600000": 0.1},
+        last_target={},
+        execution_id="exec-db-channel-1",
+        trigger_source="scheduler",
+    )
+
+    assert standard_input.channel_type == TradeChannel.GM
+    assert cast("dict[str, object]", standard_input.extra["audit"])["channel"] == "gm"
+
+
 def test_target_update_time_defaults_to_none_when_absent() -> None:
     """未提供 target_update_time 时，extra 中该键为 None 且往返保持 None。"""
     account = build_account()

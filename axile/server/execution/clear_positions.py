@@ -169,7 +169,7 @@ def _build_clear_positions_backend_request(
             "audit": {
                 "execution_id": execution_id,
                 "account_id": account.id,
-                "channel": account.trade_channel.value,
+                "channel": str(account.trade_channel),
                 "algorithm": resolved_algorithm.get("method", "SINGLE-MAKER"),
                 "trigger_source": "empty_positions",
                 "execution_kind": "clear_positions",

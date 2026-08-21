@@ -100,7 +100,10 @@ def _dump_output_payload(output: UnifiedStandardOutput) -> dict[str, object]:
     dict[str, object]
         适合跨进程传输和审计落盘的 JSON 兼容字典。
     """
-    return cast("dict[str, object]", output.model_dump(mode="json"))
+    # inputs 是主进程已持有的请求副本，其中包含账户凭据。Pydantic 还会按
+    # BaseAccountConfig 声明类型截断渠道子类字段，导致主进程无法重新校验该副本。
+    # 审计输入使用独立的脱敏 audit_input，因此 worker 响应无需回传 inputs。
+    return cast("dict[str, object]", output.model_dump(mode="json", exclude={"inputs"}))
 
 
 def _build_result_response(*, request_id: str, result: dict[str, object]) -> WorkerBackendResponse:
