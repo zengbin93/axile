@@ -2,7 +2,7 @@
 GM 回调分发器.
 
 管理订单、成交和价格数据的回调注册和分发。
-与 QMTCallbackDispatcher 保持一致的接口设计。
+提供线程安全的统一回调接口。
 """
 
 import threading

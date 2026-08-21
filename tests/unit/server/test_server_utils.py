@@ -135,7 +135,7 @@ def test_get_target_balance_aggregates_contributions_by_symbol() -> None:
     result = server_utils.get_target_balance(
         dfw=dfw,
         strategy_config={"alpha": 0.6, "beta": 0.4},
-        trade_channel=TradeChannel.QMT,
+        trade_channel=TradeChannel.CTP,
     )
 
     assert result == {"BTCUSDT": 0.4, "ETHUSDT": 0.3}

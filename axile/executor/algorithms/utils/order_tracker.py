@@ -726,7 +726,7 @@ class OrderTracker:
 
                 # 必须确认旧单真的进入终态后才能下新单。``cancel_order`` 返回 True
                 # 各渠道语义并不一致：同步 REST 可能表示交易所已受理，而部分渠道只是
-                # 「撤单请求已投递到 bridge」、QMT 只是提交结果码——后两者在撤单尚未
+                # 「撤单请求已投递到 bridge」；在撤单尚未
                 # 生效时就下新单，会出现新旧单同时在场的双份敞口。
                 if not self._await_cancel_confirmed(order_id):
                     self.executor.logger.warning(
@@ -1241,7 +1241,7 @@ class OrderTracker:
         在首次检查就命中，不会多付一次往返。
 
         ``cancel_order`` 的返回值**不能**作为确认依据：它在 GM 上只表示「撤单请求
-        已投递到 bridge」，在 QMT 上只是提交结果码，都不代表订单已经撤掉。
+        已投递到 bridge」，不代表订单已经撤掉。
         """
         timeout = self.chase_config.cancel_confirm_timeout if self.chase_config else 0.0
         if timeout <= 0:

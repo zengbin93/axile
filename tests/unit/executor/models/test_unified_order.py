@@ -300,8 +300,8 @@ class TestUnifiedOrderChannelSpecific:
         assert order.extra["time_in_force"] == "GTC"
         assert order.extra["reduce_only"] is True
 
-    def test_qmt_order_with_specific_fields(self) -> None:
-        """测试QMT订单特定字段."""
+    def test_external_order_with_strategy_fields(self) -> None:
+        """测试外部渠道订单的扩展字段."""
         order = UnifiedOrder.create(
             "Q001",
             "000001.SZ",
@@ -309,12 +309,12 @@ class TestUnifiedOrderChannelSpecific:
             "LIMIT",
             100,
             10.50,
-            channel_type=TradeChannel.QMT,
+            channel_type=TradeChannel("external"),
             order_source="策略",
             order_kind="限价单",
         )
 
-        assert order.extra["channel_type"] == TradeChannel.QMT
+        assert order.extra["channel_type"] == TradeChannel("external")
         assert order.extra["order_source"] == "策略"
         assert order.extra["order_kind"] == "限价单"
 

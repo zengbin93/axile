@@ -1,4 +1,4 @@
-"""声明公开包内置的 CTP、QMT 与 GM 渠道插件."""
+"""声明公开包内置的 CTP 与 GM 渠道插件."""
 
 from __future__ import annotations
 
@@ -21,7 +21,6 @@ from axile.executor.models.unified_input_accounts import (
     BaseAccountConfig,
     CTPAccountConfig,
     GMAccountConfig,
-    QMTAccountConfig,
 )
 
 _LEVERAGE = ChannelLeverage(min=0, max=125, step=0.1)
@@ -50,15 +49,6 @@ def _create_ctp_executor(config: BaseAccountConfig):
     if not isinstance(config, CTPAccountConfig):
         raise TypeError("CTP 渠道需要 CTPAccountConfig")
     return CTPExecutor(TradeChannel.CTP, config)
-
-
-def _create_qmt_executor(config: BaseAccountConfig):
-    """根据已验证的 QMT 配置创建执行器."""
-    from axile.executor.qmt.qmt_execute import QMTExecutor
-
-    if not isinstance(config, QMTAccountConfig):
-        raise TypeError("QMT 渠道需要 QMTAccountConfig")
-    return QMTExecutor(config)
 
 
 def _create_gm_executor(config: BaseAccountConfig):
@@ -110,53 +100,6 @@ def _ctp_plugin() -> ChannelPlugin:
         target_transform=_contribution_target,
         required_modules=("openctp_ctp",),
         install_extra="ctp",
-    )
-
-
-def _qmt_plugin() -> ChannelPlugin:
-    """构造 QMT 内置渠道插件."""
-    return ChannelPlugin(
-        descriptor=ChannelDescriptor(
-            channel="qmt",
-            label="QMT",
-            description="连接本机 QMT 客户端执行 A 股交易",
-            icon="monitor",
-            market="ashare",
-            currency="CNY",
-            units=ChannelUnits(
-                quantity_kind="share",
-                quantity_label="股",
-                quantity_max_decimals=0,
-            ),
-            ui=ChannelUi(
-                leverage_note="A 股仅多头，是投入权益比例",
-                long_leverage_label="仓位系数（做多）",
-                show_short_leverage=False,
-            ),
-            defaults=ChannelDefaults(
-                long_leverage=1,
-                short_leverage=0,
-                execution_timeout=180,
-                trade_algorithm=_SINGLE_MAKER,
-                empty_positions_algorithm=_SINGLE_MAKER,
-            ),
-            leverage=_LEVERAGE,
-            account_form=ChannelAccountForm(
-                fields=(
-                    ChannelAccountField(name="账号", label="账号"),
-                    ChannelAccountField(name="密码", label="密码", input="password"),
-                    ChannelAccountField(name="应用路径", label="应用路径"),
-                    ChannelAccountField(name="数据路径", label="数据路径"),
-                    ChannelAccountField(name="窗口标题", label="窗口标题", required=False, default=""),
-                    ChannelAccountField(name="会话ID", label="会话 ID", input="number", default=0),
-                )
-            ),
-        ),
-        account_config_model=QMTAccountConfig,
-        create_executor=_create_qmt_executor,
-        target_transform=_contribution_target,
-        required_modules=("pyautogui", "xtquant"),
-        install_extra="qmt",
     )
 
 
@@ -215,6 +158,6 @@ def builtin_channel_plugins() -> tuple[ChannelPlugin, ...]:
     Returns
     -------
     tuple[ChannelPlugin, ...]
-        依次为 CTP、QMT 与掘金渠道插件。
+        依次为 CTP 与掘金渠道插件。
     """
-    return (_ctp_plugin(), _qmt_plugin(), _gm_plugin())
+    return (_ctp_plugin(), _gm_plugin())

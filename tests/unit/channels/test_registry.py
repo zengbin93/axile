@@ -109,7 +109,7 @@ def _isolated_registry(monkeypatch: pytest.MonkeyPatch):
 def test_builtin_channels_have_stable_order_and_descriptor_shape() -> None:
     plugins = list_channels()
 
-    assert [plugin.descriptor.channel for plugin in plugins] == ["ctp", "qmt", "gm"]
+    assert [plugin.descriptor.channel for plugin in plugins] == ["ctp", "gm"]
     assert plugins[0].descriptor.account_form.fields
     assert plugins[0].descriptor.defaults.trade_algorithm.method == "TARGET-POS-TASK"
     assert plugins[0].descriptor.units.quantity_label == "手"

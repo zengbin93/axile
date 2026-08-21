@@ -19,4 +19,4 @@ uv run axile
 
 启动后访问 <http://127.0.0.1:8000>。
 
-使用 CTP、QMT 或 GM 渠道时，分别在同步依赖时添加 `--extra ctp`、`--extra qmt` 或 `--extra gm`。
+使用 CTP 或 GM 渠道时，分别在同步依赖时添加 `--extra ctp` 或 `--extra gm`。

@@ -26,5 +26,4 @@ def test_trade_channel_json_schema_is_open_string() -> None:
 
 def test_builtin_channel_constants_remain_string_compatible() -> None:
     assert TradeChannel.CTP == "ctp"
-    assert TradeChannel.QMT == "qmt"
     assert TradeChannel.GM == "gm"

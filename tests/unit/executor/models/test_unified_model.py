@@ -413,7 +413,7 @@ class TestUnifiedAccountAssetsCreate:
             available_cash=5000.0,
             total_asset=6050.0,
             positions_data=positions_data,
-            channel_type=TradeChannel.QMT,
+            channel_type=TradeChannel("external"),
         )
 
         position = assets.positions[0]
@@ -437,7 +437,6 @@ class TestUnifiedAccountAssetsCreate:
         # 测试不同渠道
         channels = [
             TradeChannel("external"),
-            TradeChannel.QMT,
             TradeChannel.GM,
             TradeChannel.CTP,
         ]

@@ -137,7 +137,7 @@ class _ChaseExecutor(_FakeExecutor):
 
     ``cancel_order`` 会把订单推进终态（经 tracker 的订单回调），模拟撤单**确实生效**
     的渠道。追价换单要求撤单确认后才下新单，因此替身必须提供这一步；只返回 ``True``
-    而不推终态的替身对应的是 GM/QMT 那种「仅提交成功」的语义，见
+    而不推终态的替身对应的是 GM 那种「仅提交成功」的语义，见
     ``test_chase_skipped_when_cancel_unconfirmed``。
     """
 
@@ -591,10 +591,10 @@ def test_pending_chase_symbols_dedup() -> None:
 
 
 class _UnconfirmedCancelExecutor(_ChaseExecutor):
-    """模拟 GM/QMT：``cancel_order`` 返回 ``True`` 但订单并未进入终态。
+    """模拟 GM：``cancel_order`` 返回 ``True`` 但订单并未进入终态。
 
-    GM 的 ``_cancel_order_impl`` 只表示「撤单请求已投递到 bridge」，QMT 只是提交
-    结果码——都不代表交易所已经撤掉这笔单。
+    GM 的 ``_cancel_order_impl`` 只表示「撤单请求已投递到 bridge」，不代表交易所
+    已经撤掉这笔单。
     """
 
     def cancel_order(self, order_id: str) -> bool:
@@ -620,7 +620,7 @@ def _wide_spread_price(symbol: str) -> UnifiedPriceData:
 def test_chase_skipped_when_cancel_unconfirmed() -> None:
     """核心回归：撤单未确认时**不得**下新单。
 
-    GM/QMT 的 ``cancel_order`` 返回 True 只代表请求已提交。若据此立即下新单，
+    GM 的 ``cancel_order`` 返回 True 只代表请求已提交。若据此立即下新单，
     撤单尚未生效的窗口内新旧单会同时在场，形成双份敞口。
     """
     executor = _UnconfirmedCancelExecutor()

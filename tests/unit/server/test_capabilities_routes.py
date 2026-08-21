@@ -47,12 +47,12 @@ def test_channels_reports_missing_dependency_with_install_extra(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """某渠道依赖缺失时，标记不可用并给出缺失包与安装 extra."""
-    # 仅 QMT 依赖（pyautogui / xtquant）缺失，其余渠道依赖视为已安装。
-    qmt_pkgs = {"pyautogui", "xtquant"}
+    # 仅 GM 依赖缺失，其余渠道依赖视为已安装。
+    gm_pkgs = {"gm"}
     monkeypatch.setattr(
         channel_capabilities.importlib.util,
         "find_spec",
-        lambda name: None if name in qmt_pkgs else object(),
+        lambda name: None if name in gm_pkgs else object(),
     )
 
     resp = client.get("/api/v1/capabilities/channels")
@@ -60,10 +60,10 @@ def test_channels_reports_missing_dependency_with_install_extra(
     assert resp.status_code == 200
     by_channel = {item["channel"]: item for item in resp.json()}
 
-    qmt = by_channel[TradeChannel.QMT.value]
-    assert qmt["available"] is False
-    assert sorted(qmt["missing_packages"]) == ["pyautogui", "xtquant"]
-    assert qmt["install_extra"] == "qmt"
+    gm = by_channel[TradeChannel.GM.value]
+    assert gm["available"] is False
+    assert gm["missing_packages"] == ["gm"]
+    assert gm["install_extra"] == "gm"
 
     ctp = by_channel[TradeChannel.CTP.value]
     assert ctp["available"] is True

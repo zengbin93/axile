@@ -65,14 +65,6 @@ const PUBLIC_CONNECT_FIELDS: Record<string, ChannelAccountField[]> = {
     { name: 'app_id', label: '应用 ID appid（看穿式认证，可选）', input: 'text', required: false, placeholder: '如 client_xxx' },
     { name: 'auth_code', label: '授权码 authcode（看穿式认证，可选）', input: 'text', required: false },
   ],
-  qmt: [
-    { name: '账号', label: '账号', input: 'text', required: true },
-    { name: '密码', label: '密码', input: 'password', required: true },
-    { name: '应用路径', label: '应用路径', input: 'text', required: true, placeholder: 'C:\\...\\XtItClient.exe' },
-    { name: '数据路径', label: '数据路径', input: 'text', required: true, placeholder: 'C:\\...\\userdata_mini' },
-    { name: '窗口标题', label: '窗口标题（可选，留空则不自动启动客户端）', input: 'text', required: false, placeholder: '如 国金证券QMT交易端' },
-    { name: '会话ID', label: '会话 ID', input: 'number', required: false, placeholder: '默认 0', default: 0 },
-  ],
   gm: [
     { name: 'account_id', label: '账号 ID', input: 'text', required: true },
     { name: 'token', label: 'Token', input: 'password', required: true },
@@ -654,8 +646,6 @@ export function AcctConfirm() {
         account_control_override: null,
         account_config: {
           ...(acct.channel === 'gm' ? normalizeGMConnection(acct.config as Record<string, string>, acct.gmConnectionMode) : acct.config),
-          // QMT 模型要求 会话ID(int) 与 窗口标题(str) 均存在：未填时补默认（会话 0 / 空标题），并把会话 ID 转成数值。
-          ...(acct.channel === 'qmt' ? { 会话ID: Number(acct.config['会话ID']) || 0, 窗口标题: acct.config['窗口标题'] ?? '' } : {}),
         },
         is_started: acct.autoOn,
         cron_expr: cronExpr,

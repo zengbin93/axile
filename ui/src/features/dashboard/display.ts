@@ -54,7 +54,6 @@ export const INTEGRITY_ORDER: Record<Integrity, number> = {
 /** 渠道简称（胶囊用）。 */
 export const CHANNEL_TAG: Record<TradeChannel, string> = {
   ctp: 'CTP',
-  qmt: 'QMT',
   gm: '掘金 GM',
 }
 

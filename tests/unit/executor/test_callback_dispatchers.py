@@ -25,13 +25,6 @@ GMCallbackDispatcher = _load_dispatcher_class(
     "axile/executor/gm/core/callback_dispatcher.py",
     "GMCallbackDispatcher",
 )
-QMTCallbackDispatcher = _load_dispatcher_class(
-    "test_qmt_callback_dispatcher_module",
-    "axile/executor/qmt/core/callback_dispatcher.py",
-    "QMTCallbackDispatcher",
-)
-
-
 def _build_order(symbol: str) -> UnifiedOrder:
     return UnifiedOrder(
         order_id=f"order-{symbol}",
@@ -73,7 +66,6 @@ def _build_price(symbol: str) -> UnifiedPriceData:
     ("dispatcher_cls", "has_stats"),
     [
         (GMCallbackDispatcher, True),
-        (QMTCallbackDispatcher, False),
     ],
 )
 def test_dispatchers_register_broadcast_isolate_errors_and_clear_callbacks(

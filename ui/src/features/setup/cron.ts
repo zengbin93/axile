@@ -20,7 +20,6 @@ export type Anchor = 'open' | 'close'
 export const CHANNEL_MARKET: Record<string, Market> = {
   ctp: 'ctp',
   gm: 'ashare',
-  qmt: 'ashare',
 }
 
 /** 从运行时渠道目录解析市场；目录未就绪时兼容公开内置渠道。 */
