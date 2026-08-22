@@ -11,6 +11,7 @@ import { AccountDetailPage } from '@/pages/AccountDetailPage'
 import { AccountEditPage } from '@/pages/AccountEditPage'
 import { AccountEditTimerPage } from '@/pages/AccountEditTimerPage'
 import { AccountEditAlgorithmPage } from '@/pages/AccountEditAlgorithmPage'
+import { AccountEditControlPage } from '@/pages/AccountEditControlPage'
 import { AccountHoldingsPage } from '@/pages/AccountHoldingsPage'
 import { ExecutionDetailPage } from '@/pages/ExecutionDetailPage'
 import { ScratchHoldings } from '@/pages/_ScratchHoldings'
@@ -97,6 +98,7 @@ const router = createBrowserRouter([
           { path: 'accounts/:id/edit', element: <AccountEditPage /> },
           { path: 'accounts/:id/edit/timer', element: <AccountEditTimerPage /> },
           { path: 'accounts/:id/edit/algorithm', element: <AccountEditAlgorithmPage /> },
+          { path: 'accounts/:id/edit/control', element: <AccountEditControlPage /> },
           { path: 'accounts/:id/holdings', element: <AccountHoldingsPage /> },
           { path: 'accounts/:id/history', element: <AccountHistoryPage /> },
           { path: 'accounts/:id/executions/:executionId', element: <ExecutionDetailPage /> },

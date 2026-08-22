@@ -54,6 +54,7 @@ describe('editShellVtName', () => {
   it('生成 edit-shell 前缀的同构壳共享名', () => {
     expect(editShellVtName(7, 'timer')).toBe('edit-shell-timer-7')
     expect(editShellVtName(12, 'algorithm')).toBe('edit-shell-algorithm-12')
+    expect(editShellVtName(9, 'control')).toBe('edit-shell-control-9')
   })
 })
 

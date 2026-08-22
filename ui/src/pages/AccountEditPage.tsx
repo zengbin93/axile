@@ -52,9 +52,7 @@ interface Draft {
   weightPrecision: string
   executionTimeout: string
   writeEmpty: boolean
-  controlPreset: string
   tradeRules: string
-  controlOverride: string
   newConfig: string
 }
 
@@ -98,6 +96,22 @@ function jsonText(v: Record<string, unknown> | null | undefined): string {
   return JSON.stringify(v, null, 2)
 }
 
+function controlOverrideCount(value: Record<string, unknown> | null): number {
+  if (!value) return 0
+  const countScope = (scope: unknown) =>
+    scope && typeof scope === 'object' ? Object.values(scope).filter(Boolean).length : 0
+  const operations = value.operations && typeof value.operations === 'object'
+    ? Object.values(value.operations).reduce<number>((sum, operation) => {
+        if (!operation || typeof operation !== 'object') return sum
+        return sum + Object.values(operation).reduce<number>((scopeSum, scope) => scopeSum + countScope(scope), 0)
+      }, 0)
+    : 0
+  const groups = value.groups && typeof value.groups === 'object'
+    ? Object.values(value.groups).reduce<number>((sum, scope) => sum + countScope(scope), 0)
+    : 0
+  return operations + groups
+}
+
 function refOf(algo: Record<string, unknown> | null | undefined): AlgorithmRef | null {
   if (!algo || typeof algo.method !== 'string') return null
   return { method: algo.method, params: (algo.params ?? {}) as Record<string, unknown> }
@@ -116,9 +130,7 @@ function draftOf(acc: Account): Draft {
     weightPrecision: String(acc.weight_precision ?? ''),
     executionTimeout: String(acc.execution_timeout ?? ''),
     writeEmpty: Boolean(acc.write_empty_record),
-    controlPreset: acc.account_control_preset ?? '',
     tradeRules: jsonText(acc.trade_rules),
-    controlOverride: jsonText(acc.account_control_override),
     newConfig: '',
   }
 }
@@ -163,14 +175,8 @@ function buildPatch(draft: Draft, acc: Account, showShortLeverage: boolean): Par
   const we = draft.writeEmpty ? 1 : 0
   if (we !== (acc.write_empty_record ?? 0)) patch.write_empty_record = we
 
-  if (draft.controlPreset.trim() !== (acc.account_control_preset ?? '')) {
-    patch.account_control_preset = draft.controlPreset.trim()
-  }
-
   const tr = jsonDiff(draft.tradeRules, acc.trade_rules)
   if (tr.changed) patch.trade_rules = tr.value as Record<string, unknown> | null
-  const co = jsonDiff(draft.controlOverride, acc.account_control_override)
-  if (co.changed) patch.account_control_override = co.value as Record<string, unknown> | null
 
   if (draft.newConfig.trim()) {
     const cfg = parseJson(draft.newConfig)
@@ -191,9 +197,7 @@ const FIELD_LABEL: Record<string, string> = {
   forbidden_symbols: '禁投',
   risk_symbols: '风险品种',
   write_empty_record: '空仓记录',
-  account_control_preset: '控制预设',
   trade_rules: '交易规则',
-  account_control_override: '控制覆盖',
   account_config: '连接密钥',
 }
 
@@ -302,7 +306,7 @@ export function AccountEditPage() {
   )
   const algoSummary = emptySum === '未设置' ? tradeSum : `${tradeSum} · 清仓 ${emptySum}`
 
-  const jsonEntries: string[] = [d.tradeRules, d.controlOverride, d.newConfig]
+  const jsonEntries: string[] = [d.tradeRules, d.newConfig]
   const jsonErr = jsonEntries.map((t) => (t.trim() ? parseJson(t).error : undefined)).find(Boolean) ?? null
 
   // 杠杆边界校验由渠道目录给出；空=不改，0=该方向不启用。与服务端同口径，
@@ -335,7 +339,7 @@ export function AccountEditPage() {
     }
   }
 
-  const jsonRow = (key: 'tradeRules' | 'controlOverride', label: string) => {
+  const jsonRow = (key: 'tradeRules', label: string) => {
     const text = d[key]
     const err = text.trim() ? parseJson(text).error : undefined
     return (
@@ -457,6 +461,13 @@ export function AccountEditPage() {
           shellVtName={editShellVtName(accountId, 'timer')}
         />
         <EntryRow
+          label="流控"
+          hint="请求节奏"
+          summary={`${acc.account_control_preset === 'ctp' ? 'CTP' : '默认'} · ${controlOverrideCount(acc.account_control_override) ? `${controlOverrideCount(acc.account_control_override)} 处自定义` : '全部使用预设值'}`}
+          to={`/accounts/${accountId}/edit/control`}
+          shellVtName={editShellVtName(accountId, 'control')}
+        />
+        <EntryRow
           label="执行算法"
           hint="下单 / 清仓"
           summary={algoSummary}
@@ -531,11 +542,7 @@ export function AccountEditPage() {
       </button>
       {advanced && (
         <div className="mt-2 grid grid-cols-1 gap-x-8 gap-y-3 md:grid-cols-2">
-          <Row label="控制预设" hint="服务端命名">
-            <input className={TEXT} value={d.controlPreset} onChange={(e) => set({ controlPreset: e.target.value })} />
-          </Row>
           {jsonRow('tradeRules', 'trade_rules')}
-          {jsonRow('controlOverride', 'control_override')}
           <Row label="换连接密钥" hint="只写 · 不回显" top span>
             <textarea
               className={AREA}
