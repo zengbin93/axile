@@ -4,6 +4,7 @@ import type {
   Account,
   AccountDashboard,
   AccountNextRun,
+  AccountControlPolicyEditorModel,
   ExecuteRecordList,
   LatestWeights,
   Message,
@@ -18,6 +19,16 @@ export function getDashboard(signal?: AbortSignal): Promise<AccountDashboard> {
 /** 账户详情。 */
 export function getAccount(id: number, signal?: AbortSignal): Promise<Account> {
   return apiGet<Account>(`/account/${id}`, signal)
+}
+
+/** 读取账户流控编辑模型；presetKey 用于无副作用预览另一预设方案。 */
+export function getAccountControlPolicy(
+  id: number,
+  presetKey?: string,
+  signal?: AbortSignal,
+): Promise<AccountControlPolicyEditorModel> {
+  const query = presetKey ? `?preset_key=${encodeURIComponent(presetKey)}` : ''
+  return apiGet<AccountControlPolicyEditorModel>(`/account/${id}/control/policy${query}`, signal)
 }
 
 /** 账户下次调度执行时间。 */

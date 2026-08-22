@@ -136,6 +136,84 @@ export interface Account {
   created_at: string
 }
 
+export type AccountControlTrigger = 'wait' | 'block'
+
+export interface AccountControlRule {
+  limit: number
+  on_trigger: AccountControlTrigger
+}
+
+export interface AccountControlRuleOverride {
+  limit?: number | null
+  on_trigger?: AccountControlTrigger | null
+}
+
+export interface AccountControlScope {
+  per_minute?: AccountControlRule | null
+  per_day?: AccountControlRule | null
+  min_interval_ms?: AccountControlRule | null
+}
+
+export interface AccountControlScopeOverride {
+  per_minute?: AccountControlRuleOverride | null
+  per_day?: AccountControlRuleOverride | null
+  min_interval_ms?: AccountControlRuleOverride | null
+}
+
+export interface AccountControlOperationPolicy {
+  account: AccountControlScope
+  symbol?: AccountControlScope | null
+}
+
+export interface AccountControlOperationOverride {
+  account?: AccountControlScopeOverride | null
+  symbol?: AccountControlScopeOverride | null
+}
+
+export interface AccountControlOverride {
+  timezone?: string | null
+  operations: Record<string, AccountControlOperationOverride>
+  groups: Record<string, AccountControlScopeOverride>
+}
+
+export interface AccountControlPolicy {
+  timezone: string
+  operations: Record<string, AccountControlOperationPolicy>
+  groups: Record<string, AccountControlScope>
+}
+
+export interface AccountControlPresetOption {
+  key: string
+  display_name: string
+  description: string
+}
+
+export interface AccountControlOperationMeta {
+  key: string
+  display_name: string
+  description: string
+  category: string
+  groups: string[]
+}
+
+export interface AccountControlGroupMeta {
+  key: string
+  display_name: string
+  description: string
+}
+
+export interface AccountControlPolicyEditorModel {
+  preset_key: string
+  preset_display_name: string
+  compatible_presets: AccountControlPresetOption[]
+  timezone_display_name: string
+  override: AccountControlOverride | null
+  preset_policy: AccountControlPolicy
+  effective_policy: AccountControlPolicy
+  operations: AccountControlOperationMeta[]
+  groups: AccountControlGroupMeta[]
+}
+
 /** 仪表盘聚合中的单账户项，对应 `AccountDashboardItemPublic`。 */
 export interface AccountDashboardItem {
   account_id: number
