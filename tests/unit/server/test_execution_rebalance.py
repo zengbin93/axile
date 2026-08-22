@@ -50,6 +50,16 @@ class _VolumeCalcStub:
         return weight * account_assets.total_asset / price
 
 
+@pytest.fixture(autouse=True)
+def _keep_inline_scenarios_in_process(monkeypatch: pytest.MonkeyPatch) -> None:
+    """本文件测试编排；仅显式 GM 场景走独立 worker 测试桩。"""
+    monkeypatch.setattr(
+        execution_backend,
+        "resolve_execution_backend_kind",
+        lambda channel: ExecutionBackendKind.PROCESS if channel == TradeChannel.GM else ExecutionBackendKind.THREAD,
+    )
+
+
 def test_calculate_target_volume_does_not_restore_forbidden_symbols_from_last_target() -> None:
     """不应从上一次目标快照中恢复被禁止交易的品种。"""
     logger = WarningLogger()

@@ -1,0 +1,43 @@
+"""CTP 渠道使用的公共账户控制操作声明。"""
+
+from axile.executor.account_control.decorator_registry import (
+    build_registered_operation,
+    register_operation_bootstrap,
+    register_or_validate_operation,
+)
+from axile.executor.account_control.registry import (
+    get_default_account_control_registry,
+    register_default_registry_bootstrap,
+)
+
+_GROUP = "ctp_td_global"
+_OPERATIONS = {
+    "insert_order",
+    "query_instruments",
+    "query_account",
+    "query_positions",
+    "query_orders",
+    "query_settlement_info",
+    "option_exercise",
+    "option_abandon",
+    "option_self_close",
+}
+
+
+def _register_group() -> None:
+    registry = get_default_account_control_registry()
+    if not registry.is_frozen and registry.get_group(_GROUP) is None:
+        registry.register_group(_GROUP)
+
+
+def register_ctp_account_control_operations() -> None:
+    """登记 CTP 操作与共享柜台节流组。"""
+    _register_group()
+    register_default_registry_bootstrap(_register_group)
+    for key in _OPERATIONS:
+        operation = build_registered_operation(key, groups=(_GROUP,))
+        register_or_validate_operation(operation)
+        register_default_registry_bootstrap(lambda value=operation: register_operation_bootstrap(value))
+
+
+register_ctp_account_control_operations()

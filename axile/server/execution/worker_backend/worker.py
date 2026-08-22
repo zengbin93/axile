@@ -15,7 +15,9 @@ from loguru import logger
 from axile.executor.models.unified_account_assets import UnifiedAccountAssets
 from axile.executor.models.unified_output import UnifiedStandardOutput
 from axile.executor.termination import ExecutionTerminated
+from axile.server.db.models import Account
 from axile.server.execution.worker_backend.protocol import (
+    WorkerBackendErrorPayload,
     WorkerBackendRequest,
     WorkerBackendResponse,
 )
@@ -36,10 +38,35 @@ from axile.server.execution.worker_backend.worker_responses import (
     _handle_worker_command_failure,
 )
 from axile.server.execution.worker_backend.worker_state import (
+    _close_executor,
     _finalize_executor,
+    _resolve_executor,
     _resolve_prepared_executor,
     _WorkerBackendState,
 )
+
+
+def _handle_prepare(request: WorkerBackendRequest, state: _WorkerBackendState) -> WorkerBackendResponse:
+    """创建或复用账户执行器，并返回通道准备结果。"""
+    account = Account.model_validate(request.account_payload)
+    expected = str(request.payload.get("expected_trading_day", "") or "") or None
+    try:
+        executor = _resolve_executor(state, account, expected)
+        return WorkerBackendResponse(
+            request_id=request.request_id,
+            kind="result",
+            output_payload={
+                "ready": True,
+                "trading_day": str(getattr(executor, "_trading_day", "") or ""),
+            },
+        )
+    except Exception as exc:  # noqa: BLE001 - IPC 边界统一返回结构化错误
+        return WorkerBackendResponse(
+            request_id=request.request_id,
+            kind="error",
+            channel_type=account.trade_channel,
+            error=WorkerBackendErrorPayload(type="channel_not_ready", message=str(exc), retryable=True),
+        )
 
 
 def _capture_before_account_snapshot(executor: object) -> dict[str, object] | None:
@@ -112,7 +139,7 @@ def _handle_execute_trade(
             UnifiedStandardOutput,
             execute(
                 context.standard_input,
-                cleanup=context.cleanup,
+                cleanup=False,
                 retain_runtime=True,
             ),
         )
@@ -188,7 +215,7 @@ def _handle_empty_positions(
         empty_positions = getattr(executor, "empty_positions")
         output = cast(
             UnifiedStandardOutput,
-            empty_positions(cleanup=True, retain_runtime=True, **context.empty_kwargs),
+            empty_positions(cleanup=False, retain_runtime=True, **context.empty_kwargs),
         )
         result = _dump_output_payload(output)
         _append_success_audit(
@@ -244,8 +271,9 @@ def _handle_shutdown(
     """
     reason = str(request.payload.get("reason", "manager_shutdown"))
     if state.executor is not None:
-        _finalize_executor(state.executor)
+        _close_executor(state.executor)
         state.executor = None
+        state.account_id = None
         state.config_signature = None
     return WorkerBackendResponse(
         request_id=request.request_id,
@@ -272,6 +300,8 @@ def _handle_worker_request(
     WorkerBackendResponse
         对应响应对象。
     """
+    if request.command == "prepare":
+        return _handle_prepare(request, state)
     if request.command == "execute_trade":
         return _handle_execute_trade(request, state)
     if request.command == "empty_positions":
@@ -308,6 +338,6 @@ def run_worker_backend_loop(connection: Connection, account_id: int) -> None:
             if request.command == "shutdown":
                 break
     finally:
-        _finalize_executor(state.executor)
+        _close_executor(state.executor)
         connection.close()
         logger.info("[WORKER-BACKEND] worker 退出 | account_id={}", account_id)

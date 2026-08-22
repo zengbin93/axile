@@ -206,4 +206,5 @@ start_local_server.bat
 start_local_server.ps1
 启动本地服务器.bat
 *.db.bk
+*.db
 .claude/settings.local.json

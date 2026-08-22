@@ -5,7 +5,15 @@ import { ConfirmModal, type ConfirmSpec } from '@/components/ui/ConfirmModal'
 import { Select } from '@/components/ui/Select'
 import { WizardPage } from '@/features/setup/WizardNav'
 import { ApiError } from '@/lib/api/client'
-import { initStatus, saveInit, testQuantData, testDb, testFeishu, type InitValues } from '@/lib/api/init'
+import {
+  initStatus,
+  saveInit,
+  testQuantData,
+  testDb,
+  testFeishu,
+  testTradingCalendar,
+  type InitValues,
+} from '@/lib/api/init'
 import { useToastStore } from '@/stores/ui'
 
 /** 向导运行模式：首启初始化 vs 已配置后从主页进入的系统配置。 */
@@ -16,6 +24,8 @@ const inputCls =
 const labelCls = 'mb-1.5 mt-4 block text-[13px] text-ink-2 first:mt-0'
 
 const DEFAULT_DB_URI = 'sqlite+aiosqlite:///./axile.db'
+const DEFAULT_CALENDAR_API = 'https://api.shengkezhi.com/open/v1/market/trading-calendar'
+const DEFAULT_QUANT_DATA_API = 'https://api.shengkezhi.com/open/v1/research/strategies/positions/latest'
 
 /** 随模式切换的文案；`init`=首启初始化，`edit`=已配置后的系统配置。 */
 interface Copy {
@@ -60,15 +70,17 @@ const COPY: Record<WizardMode, Copy> = {
   },
 }
 
-// 两个可选集成各自成步（都带「测试」按钮，需要按钮+结果的横向空间）：量化数据源、执行告警飞书。
+// 三个可选集成各自成步（都带「测试」按钮，需要按钮+结果的横向空间）：量化数据源、交易日历、执行告警飞书。
 // 数据库/环境/日志等有可用默认值、无需连通性自检，收进确认页的「高级选项」。
-const STEP_LABELS = ['量化数据源', '执行告警'] as const
+const STEP_LABELS = ['量化数据源', '交易日历', '执行告警'] as const
 
 /** 表单草稿；`algorithm_modules` / `algorithm_directories` 以每行一项的文本承载，保存时切分为数组。 */
 interface Draft {
   sqlalchemy_database_uri: string
   quant_data_token: string
   quant_data_api: string
+  trading_calendar_token: string
+  trading_calendar_api: string
   exe_err_feishu_key: string
   environment: string
   app_log_dir: string
@@ -206,13 +218,16 @@ export function InitWizard({
   const [saving, setSaving] = useState(false)
   const [dbTest, setDbTest] = useState<TestState>(null)
   const [quantDataTest, setQuantDataTest] = useState<TestState>(null)
+  const [calendarTest, setCalendarTest] = useState<TestState>(null)
   const [feishuTest, setFeishuTest] = useState<TestState>(null)
   const [confirm, setConfirm] = useState<ConfirmSpec | null>(null)
 
   const [draft, setDraft] = useState<Draft>({
     sqlalchemy_database_uri: initial.sqlalchemy_database_uri || DEFAULT_DB_URI,
     quant_data_token: initial.quant_data_token,
-    quant_data_api: initial.quant_data_api,
+    quant_data_api: initial.quant_data_api || DEFAULT_QUANT_DATA_API,
+    trading_calendar_token: initial.trading_calendar_token ?? '',
+    trading_calendar_api: initial.trading_calendar_api || DEFAULT_CALENDAR_API,
     exe_err_feishu_key: initial.exe_err_feishu_key ?? '',
     environment: initial.environment || 'local',
     app_log_dir: initial.app_log_dir || './logs',
@@ -246,6 +261,15 @@ export function InitWizard({
       setFeishuTest(await testFeishu(draft.exe_err_feishu_key))
     } catch (e) {
       setFeishuTest({ ok: false, message: errText(e) })
+    }
+  }
+
+  const runCalendarTest = async () => {
+    setCalendarTest('busy')
+    try {
+      setCalendarTest(await testTradingCalendar(draft.trading_calendar_token, draft.trading_calendar_api))
+    } catch (e) {
+      setCalendarTest({ ok: false, message: errText(e) })
     }
   }
 
@@ -310,7 +334,8 @@ export function InitWizard({
   // 数据源半填（只填其一）后端必 422；edit 态可从任意节直接保存，故在此统一拦截。
   const dataSourceHalf =
     Boolean(draft.quant_data_token.trim()) !== Boolean(draft.quant_data_api.trim())
-  const saveDisabled = saving || !draft.sqlalchemy_database_uri.trim() || dataSourceHalf
+  const calendarHalf = Boolean(draft.trading_calendar_token.trim()) && !draft.trading_calendar_api.trim()
+  const saveDisabled = saving || !draft.sqlalchemy_database_uri.trim() || dataSourceHalf || calendarHalf
 
   // edit 态是设置页而非向导：kicker 去掉「n / N」序号，只留分节标签。
   const kickerOf = (n: number) => (isEdit ? copy.kicker : `${copy.kicker} · ${n} / ${steps.length}`)
@@ -366,7 +391,7 @@ export function InitWizard({
                     className={inputCls}
                     value={draft.quant_data_api}
                     onChange={(e) => set({ quant_data_api: e.target.value })}
-                    placeholder="http://127.0.0.1:18000"
+                    placeholder={DEFAULT_QUANT_DATA_API}
                   />
                   <label className={labelCls}>访问令牌</label>
                   <input
@@ -383,6 +408,37 @@ export function InitWizard({
             {step === 1 && (
               <WizardPage
                 kicker={kickerOf(2)}
+                title="交易日历（选填）"
+                lead="配置与胜可知交易日历契约兼容的接口后，axile 会把 SSE 与 CFFEX 日历保存到本地数据库，并在覆盖不足时自动补齐。留空令牌则关闭自动同步。"
+              >
+                <div className="max-w-[560px]">
+                  <label className={labelCls}>交易日历接口</label>
+                  <input
+                    className={inputCls}
+                    value={draft.trading_calendar_api}
+                    onChange={(e) => set({ trading_calendar_api: e.target.value })}
+                    placeholder={DEFAULT_CALENDAR_API}
+                  />
+                  <label className={labelCls}>开放平台令牌</label>
+                  <input
+                    className={inputCls}
+                    type="password"
+                    value={draft.trading_calendar_token}
+                    onChange={(e) => set({ trading_calendar_token: e.target.value })}
+                    placeholder="sk_xxx；留空则不自动同步"
+                  />
+                  <TestRow
+                    state={calendarTest}
+                    onTest={runCalendarTest}
+                    disabled={!draft.trading_calendar_token.trim() || !draft.trading_calendar_api.trim()}
+                  />
+                </div>
+              </WizardPage>
+            )}
+
+            {step === 2 && (
+              <WizardPage
+                kicker={kickerOf(3)}
                 title="执行错误告警（选填）"
                 lead="任一账户执行异常时，axile 会把错误卡片推送到此飞书机器人；系统级，区别于各账户自己的「飞书通知」。留空则不推送，可先「测试推送」发一张示例卡片确认联通。"
               >
@@ -404,7 +460,7 @@ export function InitWizard({
               </WizardPage>
             )}
 
-            {step === 2 && (
+            {step === 3 && (
               <WizardPage
                 kicker={kickerOf(steps.length)}
                 title={copy.confirmTitle}
@@ -415,6 +471,7 @@ export function InitWizard({
                     {[
                       ['数据接口', draft.quant_data_api || '（未配置 · 仅自定义组合）'],
                       ['数据令牌', draft.quant_data_token ? '已填写' : '（空）'],
+                      ['交易日历', draft.trading_calendar_token ? '已配置自动同步' : '（未配置 · 工作日回退）'],
                       ['执行告警', draft.exe_err_feishu_key ? '已配置飞书推送' : '（未配置 · 不推送）'],
                     ].map(([k, v]) => (
                       <div key={k} className="flex justify-between gap-4 border-b border-line py-2.5 last:border-0">

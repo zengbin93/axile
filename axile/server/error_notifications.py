@@ -12,6 +12,7 @@ from datetime import datetime
 import aiohttp
 import loguru
 
+from axile.common.feishu import push_feishu_card
 from axile.server.db.models import Account
 
 
@@ -173,8 +174,6 @@ async def send_feishu_error(
     feishu_key : str
         飞书机器人 webhook key。
     """
-    from czsc.fsa import push_card  # type: ignore[import-not-found]
-
     if feishu_key == "":
         return
 
@@ -185,6 +184,6 @@ async def send_feishu_error(
         account_name = None if account is None else account.name
         external_ip = await get_external_ip()
         card_dict = build_error_card(error_msg, account_name, external_ip)
-        await asyncio.to_thread(push_card, card_dict, feishu_key)  # type: ignore[arg-type]
+        await asyncio.to_thread(push_feishu_card, card_dict, feishu_key)
     except Exception as feishu_error:
         loguru.logger.error(f"发送飞书错误通知失败: {feishu_error}")

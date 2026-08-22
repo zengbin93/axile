@@ -7,7 +7,7 @@ from sqlalchemy import ColumnElement
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import and_, col, desc, func, select
 
-from axile.domain.strategy import Strategy
+from axile.domain.strategy import Strategy, WeightType
 from axile.server.db.models import ExecuteRecord, Portfolio, PortfolioAccount, StrategyConfig
 
 
@@ -34,7 +34,10 @@ async def get_latest_strategies_by_portfolio_id(session: AsyncSession, portfolio
 
 
 def add_strategies_by_portfolio_id(
-    session: AsyncSession, portfolio_id: Optional[int], strategies: List[Strategy]
+    session: AsyncSession,
+    portfolio_id: Optional[int],
+    strategies: List[Strategy],
+    weight_type: WeightType | None,
 ) -> StrategyConfig:
     """
     新增组合/策略记录.
@@ -45,6 +48,7 @@ def add_strategies_by_portfolio_id(
     new_strategies = StrategyConfig(
         portfolio_id=portfolio_id,
         strategies=strategies,
+        weight_type=weight_type,
     )
     session.add(new_strategies)
     return new_strategies
@@ -386,10 +390,12 @@ async def get_earliest_execute_records_since_for_accounts(
 
 async def get_portfolio_strategies_and_account(
     session: AsyncSession, portfolio_id: int
-) -> tuple[list[Strategy], Optional[int]]:
+) -> tuple[list[Strategy], WeightType | None, Optional[int]]:
     """获取组合当前策略配置和当前绑定账户ID."""
     strategy_config = await get_latest_strategies_by_portfolio_id(session, portfolio_id)
 
     account_id = await get_latest_account_id_by_portfolio_id(session, portfolio_id)
 
-    return [] if strategy_config is None else strategy_config.strategies, account_id
+    if strategy_config is None:
+        return [], None, account_id
+    return strategy_config.strategies, strategy_config.weight_type, account_id

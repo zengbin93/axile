@@ -58,8 +58,12 @@ class Settings(BaseSettings):
         代码均用它）；缺省为空串。为空即以「仅自定义组合」模式运行——策略权重组合不可用，
         自定义组合（``custom_calc_py_code``）不受影响。
     quant_data_api : str
-        上游量化数据服务的接口地址（czsc 格式的数据服务）；缺省为空串。是否具备该数据源
+        上游最新仓位资源的完整接口地址；缺省为空串。是否具备该数据源
         是运行时能力位（见 :func:`is_configured` 的 Notes），为空即仅允许自定义组合。
+    trading_calendar_api : str
+        与胜可知交易日历契约兼容的上游接口地址。
+    trading_calendar_token : str
+        交易日历上游访问令牌；为空时不执行自动同步。
     exe_err_feishu_key : str
         执行异常通知使用的飞书机器人密钥。
     app_log_dir : Path
@@ -93,6 +97,8 @@ class Settings(BaseSettings):
     # 上游量化数据服务；为空表示尚未完成初始化（缺省不再抛错，改由向导补齐）。
     quant_data_token: str = ""
     quant_data_api: str = ""
+    trading_calendar_api: str = "https://api.shengkezhi.com/open/v1/market/trading-calendar"
+    trading_calendar_token: str = ""
     exe_err_feishu_key: str = ""
     app_log_dir: Path = Path("./logs")
     axile_log_rotation: str = "1 day"

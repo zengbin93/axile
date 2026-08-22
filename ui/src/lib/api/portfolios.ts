@@ -9,6 +9,7 @@ import type {
   Strategy,
   TradeChannel,
   ValidateCustomCalcResult,
+  WeightType,
 } from '@/types/api'
 
 /** 组合列表（不含策略）。 */
@@ -50,10 +51,12 @@ export function getLatestWeights(
 export function previewWeights(
   strategies: Strategy[],
   channel: TradeChannel,
+  weightType: WeightType,
 ): Promise<LatestWeights> {
   return apiSend<LatestWeights>('POST', '/portfolio/preview_weights', {
     strategies,
     trade_channel: channel,
+    weight_type: weightType,
   })
 }
 
@@ -80,6 +83,7 @@ export function createPortfolio(body: {
   status?: string | null
   tag?: string | null
   strategies: Strategy[]
+  weight_type?: WeightType | null
 }): Promise<Portfolio> {
   // 后端 PortfolioCreate 要求这些字段「存在」（即便为 null），补齐默认值。
   return apiSend<Portfolio>('POST', '/portfolio/', {
@@ -102,6 +106,7 @@ export function updatePortfolio(
     status: string | null
     tag: string | null
     strategies: Strategy[]
+    weight_type: WeightType | null
   }>,
 ): Promise<Portfolio> {
   return apiSend<Portfolio>('PATCH', `/portfolio/${id}`, patch)

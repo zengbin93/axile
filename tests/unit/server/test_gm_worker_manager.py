@@ -201,7 +201,7 @@ def test_execute_trade_worker_timeout_follows_standard_input(monkeypatch: pytest
     )
 
     assert result is expected
-    assert captured_timeouts == [240.0]
+    assert captured_timeouts == [60.0, 240.0]
 
 
 def test_empty_positions_worker_timeout_follows_clear_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -231,7 +231,7 @@ def test_empty_positions_worker_timeout_follows_clear_timeout(monkeypatch: pytes
     )
 
     assert result is expected
-    assert captured_timeouts == [150.0]
+    assert captured_timeouts == [60.0, 150.0]
 
 
 def test_dispose_handle_shutdown_timeout_falls_back_to_terminate() -> None:
@@ -270,3 +270,41 @@ def test_manager_maps_structured_error_to_failed_output() -> None:
         "message": "boom",
         "retryable": False,
     }
+
+
+def test_prepare_account_sends_expected_trading_day(monkeypatch: pytest.MonkeyPatch) -> None:
+    manager = WorkerBackendManager()
+    account = build_account(id=2)
+    captured: list[WorkerBackendRequest] = []
+
+    async def fake_to_thread(func: object, *args: object) -> WorkerBackendResponse:
+        del func
+        request = args[-2]
+        assert isinstance(request, WorkerBackendRequest)
+        captured.append(request)
+        return WorkerBackendResponse(
+            request_id=request.request_id,
+            kind="result",
+            output_payload={"ready": True, "trading_day": "20260824"},
+        )
+
+    monkeypatch.setattr(asyncio, "to_thread", fake_to_thread)
+
+    result = asyncio.run(manager.prepare_account(account, "20260824"))
+
+    assert result["trading_day"] == "20260824"
+    assert captured[0].command == "prepare"
+    assert captured[0].payload == {"expected_trading_day": "20260824"}
+
+
+def test_drop_account_disposes_registered_worker(monkeypatch: pytest.MonkeyPatch) -> None:
+    manager = WorkerBackendManager()
+    handle = _FakeHandle()
+    manager._workers[2] = handle
+    disposed: list[object] = []
+    monkeypatch.setattr(manager, "_dispose_handle", disposed.append)
+
+    asyncio.run(manager.drop_account(2))
+
+    assert manager._workers == {}
+    assert disposed == [handle]

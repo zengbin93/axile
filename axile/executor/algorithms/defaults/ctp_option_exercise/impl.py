@@ -1,7 +1,7 @@
 """``CTP_OPTION_EXERCISE`` 算法实现.
 
 针对单一期权 symbol 提交行权 / 放弃 / 自对冲指令，并轮询
-``CtpTrader.option_action_tracker`` 状态机直至进入终态。
+``CTPExecutor`` 的轻量期权记录直至进入终态。
 
 Notes
 -----
@@ -25,7 +25,7 @@ target_volume 表示要行权 / 放弃 / 自对冲的张数（必须为非负整
 
 from __future__ import annotations
 
-from typing import Any, cast
+from typing import Any, Protocol, cast
 
 from pydantic import Field
 
@@ -37,7 +37,28 @@ from axile.executor.algorithms.core.base import (
     register_algorithm,
 )
 from axile.executor.algorithms.utils.clock import get_default_clock
+from axile.executor.ctp.options import OptionActionRecord
 from axile.executor.models.execution_result import AlgorithmResult, ExecutionStatus
+
+
+class CtpOptionExecutorProtocol(ExecutorProtocol, Protocol):
+    """期权算法依赖的 CTP 扩展契约。"""
+
+    def submit_option_action(self, symbol: str, action: str, volume: int, **kwargs: object) -> OptionActionRecord:
+        """提交期权指令。"""
+        ...
+
+    def cancel_option_action(self, order_ref: str) -> bool:
+        """撤销期权指令。"""
+        ...
+
+    def get_option_action_status(self, order_ref: str) -> OptionActionRecord | None:
+        """查询期权指令状态。"""
+        ...
+
+    def is_exercise_valuable(self, symbol: str) -> bool:
+        """判断期权是否有行权价值。"""
+        ...
 
 
 class CTPOptionExerciseParams(BaseAlgorithmParams):
@@ -79,18 +100,15 @@ def _resolve_params(raw: object | None) -> CTPOptionExerciseParams:
 
 
 def _wait_for_terminal(
-    executor: ExecutorProtocol,
+    executor: CtpOptionExecutorProtocol,
     order_ref: str,
     max_wait_seconds: float,
     poll_interval_seconds: float,
 ):
     """轮询行权指令状态机，超时或终态返回最新 record。"""
-    # 使用 cast 让 Protocol 可访问 CTP 专属方法；运行时由 CTPExecutor 提供。
-    get_status = cast(Any, executor).get_option_action_status
-
     clock = get_default_clock()
     deadline = clock.time() + max_wait_seconds
-    record = get_status(order_ref)
+    record = executor.get_option_action_status(order_ref)
     while record is not None and not _is_terminal(record):
         if executor.is_termination_requested():
             executor.handle_termination_checkpoint()
@@ -99,7 +117,7 @@ def _wait_for_terminal(
             executor.logger.warning(f"⏱ 行权指令 ref={order_ref} 在 {max_wait_seconds}s 内未进入终态，结束等待")
             break
         executor.sleep_or_terminate(poll_interval_seconds)
-        record = get_status(order_ref)
+        record = executor.get_option_action_status(order_ref)
     return record
 
 
@@ -155,7 +173,8 @@ def ctp_option_exercise_algorithm(executor: ExecutorProtocol, algorithm_input: A
 
     # 行权前的内在价值检查：避免无价值行权造成账户损失
     if params.action == "exercise" and params.require_value_check:
-        valuable = cast(Any, executor).is_exercise_valuable(symbol)
+        option_executor = cast(CtpOptionExecutorProtocol, executor)
+        valuable = option_executor.is_exercise_valuable(symbol)
         if not valuable:
             executor.logger.warning(f"⚠️ 期权 {symbol} 当前无内在价值，跳过行权（如确需行权请关闭 require_value_check）")
             return AlgorithmResult(
@@ -166,7 +185,8 @@ def ctp_option_exercise_algorithm(executor: ExecutorProtocol, algorithm_input: A
             )
 
     try:
-        record = cast(Any, executor).submit_option_action(
+        option_executor = cast(CtpOptionExecutorProtocol, executor)
+        record = option_executor.submit_option_action(
             symbol=symbol,
             action=params.action,
             volume=target,
@@ -182,7 +202,7 @@ def ctp_option_exercise_algorithm(executor: ExecutorProtocol, algorithm_input: A
         )
 
     final = _wait_for_terminal(
-        executor,
+        cast(CtpOptionExecutorProtocol, executor),
         record.order_ref,
         max_wait_seconds=float(params.max_wait_seconds),
         poll_interval_seconds=float(params.poll_interval_seconds),

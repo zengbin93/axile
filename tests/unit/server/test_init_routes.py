@@ -40,6 +40,9 @@ class _FakeResp:
     async def json(self) -> Any:
         return self._payload
 
+    def raise_for_status(self) -> None:
+        """模拟成功 HTTP 响应。"""
+
 
 class _FakeSession:
     """伪造的 aiohttp 会话上下文."""
@@ -54,6 +57,9 @@ class _FakeSession:
         return False
 
     def post(self, _url: str, json: Any = None) -> _FakeResp:  # noqa: A002 - 匹配 aiohttp 签名
+        return _FakeResp(self._payload)
+
+    def get(self, _url: str, **_kwargs: Any) -> _FakeResp:
         return _FakeResp(self._payload)
 
 
@@ -76,6 +82,8 @@ def test_init_status_returns_prefill_keys(client: TestClient) -> None:
         "sqlalchemy_database_uri",
         "quant_data_token",
         "quant_data_api",
+        "trading_calendar_token",
+        "trading_calendar_api",
         "exe_err_feishu_key",
         "environment",
         "app_log_dir",
@@ -96,7 +104,7 @@ def test_init_status_reports_data_source_available(client: TestClient, monkeypat
 
 def test_test_quant_data_success(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
     """量化数据源响应含 data.items 时判定成功."""
-    _patch_aiohttp_response(monkeypatch, {"data": {"items": [1, 2, 3]}})
+    _patch_aiohttp_response(monkeypatch, {"code": 0, "msg": "ok", "data": {"items": [1, 2, 3]}})
 
     resp = client.post("/api/v1/init/test-quant-data", json={"token": "t", "data_api": "http://x"})
 
@@ -106,11 +114,26 @@ def test_test_quant_data_success(client: TestClient, monkeypatch: pytest.MonkeyP
 
 def test_test_quant_data_missing_items(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
     """量化数据源响应缺少 data.items 时判定失败."""
-    _patch_aiohttp_response(monkeypatch, {"data": {}})
+    _patch_aiohttp_response(monkeypatch, {"code": 0, "msg": "ok", "data": {}})
 
     resp = client.post("/api/v1/init/test-quant-data", json={"token": "t", "data_api": "http://x"})
 
     assert resp.json()["ok"] is False
+
+
+def test_test_trading_calendar_success(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    """交易日历测试应校验胜可知兼容字段。"""
+    _patch_aiohttp_response(
+        monkeypatch,
+        [{"exchange": "SSE", "calDate": "2026-08-22", "isOpen": False, "pretradeDate": "2026-08-21"}],
+    )
+
+    resp = client.post(
+        "/api/v1/init/test-trading-calendar",
+        json={"token": "sk_test", "api": "https://calendar.test"},
+    )
+
+    assert resp.json()["ok"] is True
 
 
 def test_test_db_success(client: TestClient, tmp_path: Path) -> None:
@@ -219,6 +242,7 @@ def test_init_save_accepts_empty_quant_data_custom_only(
     assert toml_path.exists()
     written = toml_path.read_text(encoding="utf-8")
     assert 'quant_data_api = ""' in written
+    assert 'trading_calendar_token = ""' in written
     # 未提供告警 key 时应落盘为空串（默认不推送）。
     assert 'exe_err_feishu_key = ""' in written
 

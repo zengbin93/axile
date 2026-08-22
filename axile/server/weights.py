@@ -22,6 +22,7 @@ from tenacity import (
 from axile.channels import get_channel
 from axile.common.config import settings
 from axile.common.trade_channel import TradeChannel
+from axile.domain.strategy import WeightType
 from axile.server.context import Context
 from axile.server.sandbox import ScriptExecutionError, ScriptResult, run_portfolio_script, snapshot_context
 
@@ -184,17 +185,40 @@ def get_target_balance(
     return cast("dict[str, float]", curr_target.set_index("symbol")["contribution"].to_dict())
 
 
-async def _fetch_latest_weights_frame(url: str) -> pd.DataFrame:
-    """从标准权重接口拉取完整权重数据表."""
-    req_params = {
-        "api_name": "get_latest_weights",
-        "token": settings.quant_data_token,
-        "params": {"v": 2, "ttl": 0},
-    }
+async def _fetch_latest_weights_frame(url: str, weight_type: WeightType) -> pd.DataFrame:
+    """从开放平台拉取指定类型的完整最新仓位表。"""
+    headers = {"Authorization": f"Bearer {settings.quant_data_token.strip()}"}
+    params = {"weight_type": weight_type}
     async with aiohttp.ClientSession() as session:
-        async with session.post(url, json=req_params) as res:
+        async with session.get(url, params=params, headers=headers) as res:
+            res.raise_for_status()
             result = await res.json()
-            return pd.DataFrame(result["data"]["items"])
+    if not isinstance(result, dict) or result.get("code") != 0:
+        raise ValueError(f"权重服务返回失败: {result!r}")
+    data = result.get("data")
+    items = data.get("items") if isinstance(data, dict) else None
+    if not isinstance(items, list):
+        raise ValueError("权重服务响应缺少 data.items")
+
+    required = {"dt", "symbol", "weight", "strategy"}
+    for index, item in enumerate(items):
+        if not isinstance(item, dict) or not required.issubset(item):
+            raise ValueError(f"权重服务第 {index} 行缺少必要字段")
+        if not all(isinstance(item[field], str) and item[field] for field in ("dt", "symbol", "strategy")):
+            raise ValueError(f"权重服务第 {index} 行的 dt/symbol/strategy 必须为非空字符串")
+        if isinstance(item["weight"], bool) or not isinstance(item["weight"], (int, float)):
+            raise ValueError(f"权重服务第 {index} 行的 weight 必须为数字")
+        if item.get("update_time") is not None and not isinstance(item["update_time"], str):
+            raise ValueError(f"权重服务第 {index} 行的 update_time 必须为字符串或 null")
+    return pd.DataFrame(items, columns=["dt", "symbol", "weight", "strategy", "update_time"])
+
+
+def _effective_update_times(frame: pd.DataFrame) -> pd.Series:
+    """返回逐行有效时间，优先更新时间，缺失时回退到仓位业务时间。"""
+    empty_times = pd.Series(pd.NaT, index=frame.index, dtype="datetime64[ns]")
+    update_times = pd.to_datetime(frame["update_time"], errors="coerce") if "update_time" in frame else empty_times
+    position_times = pd.to_datetime(frame["dt"], errors="coerce") if "dt" in frame else empty_times
+    return update_times.fillna(position_times)
 
 
 def _validate_strategy_freshness(
@@ -210,8 +234,11 @@ def _validate_strategy_freshness(
         if strategy_data.empty:
             continue
 
-        update_time_str = str(strategy_data["update_time"].iloc[0])
-        update_time = pd.to_datetime(update_time_str)
+        effective_times = _effective_update_times(strategy_data).dropna()
+        if effective_times.empty:
+            raise ValueError(f"策略 {strategy_name} 缺少有效的 dt/update_time")
+        update_time = min(effective_times.tolist())
+        update_time_str = update_time.isoformat()
         age_seconds = float((now - update_time).total_seconds())
         freq_seconds = parse_freq(freq)
         if age_seconds > freq_seconds:
@@ -250,9 +277,9 @@ def _extract_target_update_time(filtered_df: pd.DataFrame) -> str | None:
     多策略各自 ``update_time`` 可能不同，取最旧值以反映最差数据新鲜度，
     供审计与前端展示「目标是基于多久前的数据算出的」。
     """
-    if "update_time" not in filtered_df.columns or filtered_df.empty:
+    if filtered_df.empty:
         return None
-    times = pd.to_datetime(filtered_df["update_time"], errors="coerce").dropna()
+    times = _effective_update_times(filtered_df).dropna()
     if times.empty:
         return None
     # 用 Python 的 min 而非 pandas 的 .min() 归约：后者在 numpy 被重复 import
@@ -271,6 +298,7 @@ def _extract_target_update_time(filtered_df: pd.DataFrame) -> str | None:
 )
 async def get_latest_weights(
     strategies: Iterable[str],
+    weight_type: WeightType,
     logger: "loguru.Logger" = loguru.logger,
     strategy_freqs: dict[str, str] | None = None,
 ) -> tuple[pd.DataFrame, str | None]:
@@ -281,6 +309,8 @@ async def get_latest_weights(
     ----------
     strategies : Iterable[str]
         需要查询的策略名称列表。
+    weight_type : WeightType
+        仓位类型，``ts`` 为时序策略，``cs`` 为截面策略。
     logger : loguru.Logger, optional
         用于记录加载过程的 logger。
     strategy_freqs : dict[str, str] | None, optional
@@ -304,7 +334,7 @@ async def get_latest_weights(
     if not url:
         raise DataSourceUnavailableError
     strategy_list = list(strategies)
-    full_df = await _fetch_latest_weights_frame(url)
+    full_df = await _fetch_latest_weights_frame(url, weight_type)
 
     available_strategies = set(full_df["strategy"].unique())
     target_strategies = set(strategy_list)
@@ -323,7 +353,7 @@ async def get_latest_weights(
     target_update_time = _extract_target_update_time(filtered_df)
     result_df: pd.DataFrame = filtered_df.loc[:, ["strategy", "symbol", "weight"]]
     logger.info(
-        f"权重数据加载完成: source={url}, strategies={len(strategy_list)}, "
+        f"权重数据加载完成: source={url}, weight_type={weight_type}, strategies={len(strategy_list)}, "
         f"missing={len(missing_strategies)}, total_rows={len(full_df)}, matched_rows={len(result_df)}"
     )
     return result_df, target_update_time

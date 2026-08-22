@@ -8,6 +8,9 @@
 /** 运行时注册的交易渠道标识。 */
 export type TradeChannel = string
 
+/** 数据源仓位类型：时序或截面。 */
+export type WeightType = 'ts' | 'cs'
+
 /** 算法引用。 */
 export interface AlgorithmRef {
   method: string
@@ -190,6 +193,8 @@ export interface Portfolio {
   created_at: string
   /** 当前策略配置。 */
   strategy_config: Strategy[]
+  /** 当前策略配置版本的仓位类型；自定义逻辑组合为空。 */
+  weight_type: WeightType | null
   /** 当前绑定该组合的账户 ID（可空）。 */
   account_id: number | null
 }
@@ -217,6 +222,7 @@ export interface StrategyConfigRecord {
   id: number | null
   created_at: string
   strategies: Strategy[]
+  weight_type: WeightType | null
 }
 
 /** `GET /portfolio/strategies_records/{id}` 响应。 */

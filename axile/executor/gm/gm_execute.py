@@ -148,10 +148,7 @@ class GMExecutor(AbstractExecutor, UnifiedCallbackClient):
 
     def _check_trading_time(self) -> bool:
         """检查是否在交易时间."""
-        # from ...executor.common_functions import is_trading_time
-        #
-        # return is_trading_time()
-        return True
+        return self._is_exchange_open("SSE")
 
     # ==================== 回调模式方法 ====================
 

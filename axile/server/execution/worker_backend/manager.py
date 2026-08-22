@@ -52,6 +52,9 @@ _EXECUTION_TIMEOUT_GRACE_SECONDS = 60.0
 _DEFAULT_SHUTDOWN_RECV_TIMEOUT_SECONDS = 5.0
 """关闭请求等待 worker 确认的默认超时（秒）。."""
 
+_DEFAULT_PREPARE_RECV_TIMEOUT_SECONDS = 60.0
+"""账户通道登录与准备的默认等待时限（秒）。."""
+
 _worker_backend_manager: "WorkerBackendManager | None" = None
 
 
@@ -244,6 +247,12 @@ class WorkerBackendManager:
                 self._workers.pop(account_id, None)
         self._terminate_process(handle)
 
+    def _drop_account_blocking(self, account_id: int) -> None:
+        with self._lock:
+            handle = self._workers.pop(account_id, None)
+        if handle is not None:
+            self._dispose_handle(handle)
+
     @staticmethod
     def _is_handle_healthy(handle: _WorkerBackendHandle) -> bool:
         return handle.process.is_alive() and not handle.connection.closed
@@ -374,6 +383,30 @@ class WorkerBackendManager:
             )
         raise WorkerBackendExecutionError("worker backend 返回了未知响应状态")
 
+    async def prepare_account(self, account: Account, expected_trading_day: str | None = None) -> dict[str, object]:
+        """创建或复用账户 Worker 中的长连接执行器。"""
+        request = WorkerBackendRequest(
+            request_id=uuid4().hex,
+            command="prepare",
+            account_payload=account.model_dump(mode="json"),
+            execution_id=None,
+            payload={"expected_trading_day": expected_trading_day or ""},
+        )
+        response = await asyncio.to_thread(
+            self._request_blocking,
+            _require_account_id(account),
+            request,
+            _DEFAULT_PREPARE_RECV_TIMEOUT_SECONDS,
+        )
+        if response.kind != "result" or response.output_payload is None:
+            message = response.error.message if response.error is not None else "账户通道准备失败"
+            raise WorkerBackendExecutionError(message)
+        return response.output_payload
+
+    async def drop_account(self, account_id: int) -> None:
+        """关闭并移除指定账户的常驻 Worker。"""
+        await asyncio.to_thread(self._drop_account_blocking, account_id)
+
     async def execute_trade(
         self,
         *,
@@ -413,6 +446,7 @@ class WorkerBackendManager:
         UnifiedStandardOutput
             多进程 worker 返回并经统一封装后的执行结果。
         """
+        await self.prepare_account(account)
         request = WorkerBackendRequest(
             request_id=uuid4().hex,
             command="execute_trade",
@@ -464,6 +498,7 @@ class WorkerBackendManager:
         UnifiedStandardOutput
             多进程 worker 返回并经统一封装后的清仓结果。
         """
+        await self.prepare_account(account)
         request = WorkerBackendRequest(
             request_id=uuid4().hex,
             command="empty_positions",
@@ -483,7 +518,10 @@ class WorkerBackendManager:
                 fallback=self._execute_recv_timeout,
             ),
         )
-        return self._handle_response(response)
+        result = self._handle_response(response)
+        if not account.is_started:
+            await self.drop_account(_require_account_id(account))
+        return result
 
     def shutdown_all(self) -> None:
         """显式关闭所有多进程 worker。."""

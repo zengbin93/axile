@@ -23,6 +23,16 @@ from tests.unit.server._execution_test_support import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _keep_inline_scenarios_in_process(monkeypatch: pytest.MonkeyPatch) -> None:
+    """本文件测试编排；仅显式 GM 场景走独立 worker 测试桩。"""
+    monkeypatch.setattr(
+        execution_backend,
+        "resolve_execution_backend_kind",
+        lambda channel: ExecutionBackendKind.PROCESS if channel == TradeChannel.GM else ExecutionBackendKind.THREAD,
+    )
+
+
 def test_empty_positions_uses_default_algorithm_when_not_provided(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

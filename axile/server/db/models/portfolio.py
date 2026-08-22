@@ -9,7 +9,7 @@ from sqlalchemy.orm import Mapper, relationship
 from sqlmodel import Field, Relationship, SQLModel
 
 from axile.common.trade_channel import TradeChannel
-from axile.domain.strategy import Strategy
+from axile.domain.strategy import Strategy, WeightType
 from axile.server.db.models.base import now_str
 
 if TYPE_CHECKING:
@@ -22,6 +22,11 @@ class StrategyConfigBase(SQLModel):
     strategies: List[Strategy] = Field(
         sa_column=Column(SA_JSON, nullable=False),
         description="策略组合",
+    )
+    weight_type: Optional[WeightType] = Field(
+        default=None,
+        sa_column=Column(Text, nullable=True),
+        description="仓位类型：ts 为时序策略，cs 为截面策略；自定义组合为空",
     )
 
 
@@ -112,16 +117,18 @@ class PortfolioUpdate(SQLModel):
     name: Optional[str] = None
     market: Optional[str] = None
     description: Optional[str] = None
-    custom_calc_py_code: Optional[str]
+    custom_calc_py_code: Optional[str] = None
     status: Optional[str] = None
     tag: Optional[str] = None
     strategies: Optional[List[Strategy]] = None
+    weight_type: Optional[WeightType] = None
 
 
 class PortfolioCreate(PortfolioBase):
     """创建组合及其初始策略配置时使用的载荷."""
 
     strategies: List[Strategy]
+    weight_type: Optional[WeightType] = None
 
 
 class PortfolioPreviewRequest(SQLModel):
@@ -139,6 +146,7 @@ class PortfolioPreviewRequest(SQLModel):
     """
 
     strategies: List[Strategy]
+    weight_type: WeightType
     trade_channel: TradeChannel
 
 
@@ -201,6 +209,7 @@ class PortfolioPublic(PortfolioBase):
     updated_at: str
     created_at: str
     strategy_config: List[Strategy]
+    weight_type: Optional[WeightType]
     account_id: Optional[int]
 
 

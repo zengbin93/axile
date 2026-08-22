@@ -209,6 +209,62 @@ def test_resolve_executor_uses_factory_and_caches_non_gm_executor(
     assert created == [account]
 
 
+def test_resolve_executor_recreates_disconnected_executor(monkeypatch: pytest.MonkeyPatch) -> None:
+    account = build_account()
+    stale = _FakeWorkerExecutor()
+    stale._verify_connection = lambda: False  # type: ignore[attr-defined]
+    replacement = _FakeWorkerExecutor()
+    state = worker_backend_entry._WorkerBackendState(
+        executor=stale,
+        account_id=account.id,
+        config_signature=worker_state._config_signature(account),
+    )
+    closed: list[object] = []
+
+    monkeypatch.setattr(worker_state, "_close_executor", closed.append)
+    monkeypatch.setattr(worker_state, "create_executor_instance", lambda _account: replacement)
+
+    assert worker_state._resolve_executor(state, account) is replacement
+    assert closed == [stale]
+
+
+def test_resolve_executor_rejects_wrong_expected_trading_day(monkeypatch: pytest.MonkeyPatch) -> None:
+    account = build_account()
+    executor = _FakeWorkerExecutor()
+    executor._trading_day = "20260821"  # type: ignore[attr-defined]
+    state = worker_backend_entry._WorkerBackendState()
+    closed: list[object] = []
+
+    monkeypatch.setattr(worker_state, "_close_executor", closed.append)
+    monkeypatch.setattr(worker_state, "create_executor_instance", lambda _account: executor)
+
+    with pytest.raises(RuntimeError, match="expected=20260824"):
+        worker_state._resolve_executor(state, account, "20260824")
+
+    assert closed == [executor]
+    assert state.executor is None
+    assert state.account_id is None
+
+
+def test_handle_prepare_returns_cached_trading_day(monkeypatch: pytest.MonkeyPatch) -> None:
+    account = build_account()
+    executor = _FakeWorkerExecutor()
+    executor._trading_day = "20260824"  # type: ignore[attr-defined]
+    monkeypatch.setattr(worker_backend_entry, "_resolve_executor", lambda *_args: executor)
+    request = WorkerBackendRequest(
+        request_id="req-prepare",
+        command="prepare",
+        account_payload=account.model_dump(mode="json"),
+        execution_id=None,
+        payload={"expected_trading_day": "20260824"},
+    )
+
+    response = worker_backend_entry._handle_prepare(request, worker_backend_entry._WorkerBackendState())
+
+    assert response.kind == "result"
+    assert response.output_payload == {"ready": True, "trading_day": "20260824"}
+
+
 def test_handle_empty_positions_returns_result_payload(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -317,7 +373,7 @@ def test_handle_worker_shutdown_command_returns_ack(
     finalized: list[object | None] = []
     state = worker_backend_entry._WorkerBackendState(executor=object(), account_id=2, config_signature="sig")
 
-    monkeypatch.setattr(worker_backend_entry, "_finalize_executor", lambda executor: finalized.append(executor))
+    monkeypatch.setattr(worker_backend_entry, "_close_executor", lambda executor: finalized.append(executor))
 
     response = worker_backend_entry._handle_worker_request(
         WorkerBackendRequest.shutdown("req-shutdown", reason="test"),

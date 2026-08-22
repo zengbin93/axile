@@ -3,9 +3,7 @@
 from __future__ import annotations
 
 import queue
-import sys
 import threading
-from types import ModuleType
 
 from axile.common.trade_channel import TradeChannel
 from axile.executor import feishu_notifications as feishu_module
@@ -313,17 +311,14 @@ def test_empty_positions_uses_extracted_sender(monkeypatch) -> None:
     assert sent[0][2] == "hook-empty"
 
 
-def test_send_execute_results_to_feishu_builds_expected_card() -> None:
+def test_send_execute_results_to_feishu_builds_expected_card(monkeypatch) -> None:
     """飞书通知模块应构造卡片并发送到指定 webhook。"""
     pushed: list[tuple[dict[str, object], str]] = []
-
-    fsa_module = ModuleType("czsc.fsa")
 
     def _push_card(card: dict[str, object], feishu_key: str) -> None:
         pushed.append((card, feishu_key))
 
-    fsa_module.push_card = _push_card  # type: ignore[attr-defined]
-    sys.modules["czsc.fsa"] = fsa_module
+    monkeypatch.setattr(feishu_module, "push_feishu_card", _push_card)
 
     order = UnifiedOrder(
         order_id="order-1",

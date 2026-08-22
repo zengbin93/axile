@@ -3,7 +3,7 @@ import { defaultExecutionTimeoutForChannel } from '@/features/account/executionT
 import { defaultAlgorithm, type AlgorithmRef } from '@/features/setup/algorithms'
 import { getChannelDescriptor } from '@/stores/channels'
 import type { GMConnectionMode } from '@/features/setup/gmConnection'
-import type { TradeChannel } from '@/types/api'
+import type { TradeChannel, WeightType } from '@/types/api'
 import {
   defaultScheduleRule,
   type ScheduleRule,
@@ -15,6 +15,7 @@ export interface PortfolioDraft {
   name: string
   market: string
   mode: 'compose' | 'custom'
+  weightType: WeightType
   /** 策略名 → 权重（%）。 */
   strategies: { name: string; weight: number }[]
   customCode: string
@@ -76,6 +77,7 @@ const initialPf: PortfolioDraft = {
   name: '我的趋势组合',
   market: '加密货币',
   mode: 'compose',
+  weightType: 'ts',
   strategies: [],
   customCode: 'def calculate_portfolio(context):\n    # 返回 {品种: 目标权重}\n    return {"BTCUSDT": 0.5, "ETHUSDT": 0.5}',
   verified: null,

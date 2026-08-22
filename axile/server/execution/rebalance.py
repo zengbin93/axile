@@ -13,12 +13,12 @@ from typing import cast
 import loguru
 
 from axile.domain.execution import ExecutionKind
-from axile.domain.strategy import Strategy
+from axile.domain.strategy import Strategy, WeightType
 from axile.executor.models.unified_input import UnifiedStandardInput
 from axile.executor.termination import ExecutionTerminated
 from axile.server.core.db import SessionLocal
 from axile.server.core.log_config import execution_log_context
-from axile.server.db.models import Account, ExecuteRecord, Portfolio
+from axile.server.db.models import Account, ExecuteRecord, Portfolio, StrategyConfig
 from axile.server.execution import backend as execution_backend
 from axile.server.execution import lifecycle as execution_lifecycle
 from axile.server.execution.execution_algorithms import (
@@ -190,11 +190,11 @@ async def _execute_custom_calc_if_configured(
         raise ValueError(msg)
 
 
-async def _load_strategy_rows(
+async def _load_strategy_config(
     account: Account,
     portfolio_id: int,
     execution_id: str | None,
-) -> list[Strategy]:
+) -> StrategyConfig:
     """
     加载组合最新一版策略配置记录.
 
@@ -209,7 +209,7 @@ async def _load_strategy_rows(
 
     Returns
     -------
-    list[Strategy]
+    StrategyConfig
         组合最新的策略配置快照。
 
     Raises
@@ -229,7 +229,16 @@ async def _load_strategy_rows(
         )
         raise ValueError(msg)
 
-    return strategies.strategies
+    if strategies.weight_type is None:
+        msg = f"无法调仓，组合策略配置缺少仓位类型, 组合id: {portfolio_id}"
+        await append_error_execute_record(
+            account_id=account.id,
+            msg=msg,
+            execution_id=execution_id,
+        )
+        raise ValueError(msg)
+
+    return strategies
 
 
 def _build_strategy_maps(strategy_rows: list[Strategy]) -> tuple[dict[str, float], dict[str, str]]:
@@ -261,6 +270,7 @@ def _build_strategy_maps(strategy_rows: list[Strategy]) -> tuple[dict[str, float
 async def _compute_trade_target(
     account: Account,
     strategy_rows: list[Strategy],
+    weight_type: WeightType,
     execution_id: str | None,
 ) -> tuple[dict[str, float], str | None]:
     """
@@ -300,6 +310,7 @@ async def _compute_trade_target(
     try:
         total_df, target_update_time = await get_latest_weights(
             strategy_config.keys(),
+            weight_type=weight_type,
             strategy_freqs=strategy_freqs if strategy_freqs else None,
         )
     except Exception as e:
@@ -355,8 +366,14 @@ async def _resolve_rebalance_request(
     if curr_target is not None:
         return _ResolvedRebalanceRequest(curr_target=curr_target, strategy_config=[])
 
-    strategy_rows = await _load_strategy_rows(account, curr_portfolio_id, execution_id)
-    curr_target, target_update_time = await _compute_trade_target(account, strategy_rows, execution_id)
+    strategy_snapshot = await _load_strategy_config(account, curr_portfolio_id, execution_id)
+    strategy_rows = strategy_snapshot.strategies
+    curr_target, target_update_time = await _compute_trade_target(
+        account,
+        strategy_rows,
+        strategy_snapshot.weight_type,
+        execution_id,
+    )
     return _ResolvedRebalanceRequest(
         curr_target=curr_target,
         strategy_config=strategy_rows,

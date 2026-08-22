@@ -6,6 +6,8 @@ export interface InitValues {
   sqlalchemy_database_uri: string
   quant_data_token: string
   quant_data_api: string
+  trading_calendar_token: string
+  trading_calendar_api: string
   /** 执行错误告警飞书机器人 key（系统级，区别于账户各自的 `feishu_key`）；空串表示不推送。 */
   exe_err_feishu_key: string
   environment: string
@@ -74,6 +76,11 @@ export function peekDataSourceAvailable(): boolean | null {
 /** 测试量化数据源连通性。 */
 export function testQuantData(token: string, dataApi: string): Promise<TestResult> {
   return apiSend<TestResult>('POST', '/init/test-quant-data', { token, data_api: dataApi })
+}
+
+/** 测试交易日历兼容接口。 */
+export function testTradingCalendar(token: string, api: string): Promise<TestResult> {
+  return apiSend<TestResult>('POST', '/init/test-trading-calendar', { token, api })
 }
 
 /** 测试数据库连通性。 */

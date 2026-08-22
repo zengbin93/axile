@@ -20,9 +20,11 @@ from axile.executor.algorithms.core.loader import load_algorithm_modules
 from axile.server.api.main import api_router
 from axile.server.core.scheduler import scheduler
 from axile.server.core.single_worker import ensure_single_worker
+from axile.server.execution.ctp_channels import prepare_ctp_accounts, register_ctp_channel_jobs
 from axile.server.execution.live import live_hub
 from axile.server.execution.worker_backend.manager import shutdown_worker_backend_manager
 from axile.server.initial_data import init_scheduler
+from axile.server.trading_calendar import ensure_trading_calendar_coverage, register_trading_calendar_job
 
 __all__ = [
     "ALGORITHM_DIRECTORIES_ENV",
@@ -216,8 +218,12 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         return
     _load_configured_algorithm_directories()
     _load_configured_algorithm_modules()
+    await ensure_trading_calendar_coverage()
+    register_trading_calendar_job(scheduler)
+    register_ctp_channel_jobs(scheduler)
     scheduler.start()
     await init_scheduler()
+    await prepare_ctp_accounts("startup")
     logger.warning("axile已经成功运行!")
     yield
     scheduler.shutdown()

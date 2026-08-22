@@ -11,7 +11,7 @@ from sqlmodel import func, select
 
 from axile.common.config import settings
 from axile.common.trade_channel import TradeChannel
-from axile.domain.strategy import Strategy
+from axile.domain.strategy import Strategy, WeightType
 from axile.server.api.deps import SessionDep
 from axile.server.context import Context, build_sample_context
 from axile.server.core.db import SessionLocal
@@ -77,6 +77,15 @@ def _ensure_custom_only_when_no_data_source(*, has_strategies: bool, has_custom_
         )
 
 
+def _require_data_source_weight_type(*, custom_code: str | None, weight_type: WeightType | None) -> None:
+    """确保数据源型组合明确选择时序或截面仓位。"""
+    if not custom_code and weight_type is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="策略组合必须选择仓位类型：ts（时序）或 cs（截面）。",
+        )
+
+
 @router.post(
     "/",
     status_code=status.HTTP_201_CREATED,
@@ -95,6 +104,10 @@ async def create_portfolio(
         has_strategies=bool(portfolio.strategies),
         has_custom_code=bool(portfolio.custom_calc_py_code),
     )
+    _require_data_source_weight_type(
+        custom_code=portfolio.custom_calc_py_code,
+        weight_type=portfolio.weight_type,
+    )
     try:
         db_portfolio = Portfolio.model_validate(portfolio)
         session.add(db_portfolio)
@@ -102,7 +115,12 @@ async def create_portfolio(
         await session.flush()
 
         # 添加组合更新记录
-        new_strategies = add_strategies_by_portfolio_id(session, db_portfolio.id, portfolio.strategies)
+        new_strategies = add_strategies_by_portfolio_id(
+            session,
+            db_portfolio.id,
+            portfolio.strategies,
+            None if portfolio.custom_calc_py_code else portfolio.weight_type,
+        )
 
         await session.commit()
         await session.refresh(db_portfolio)
@@ -125,6 +143,7 @@ async def create_portfolio(
     return PortfolioPublic(
         **db_portfolio.model_dump(),
         strategy_config=new_strategies.strategies,
+        weight_type=new_strategies.weight_type,
         # 新的组合不绑定账户
         account_id=None,
     )
@@ -151,11 +170,12 @@ async def portfolio_info(session: SessionDep, portfolio_id: int) -> PortfolioPub
         raise HTTPException(status_code=404, detail="组合不存在")
 
     portfolio_id = cast("int", db_portfolio.id)
-    strategy_config, account_id = await get_portfolio_strategies_and_account(session, portfolio_id)
+    strategy_config, weight_type, account_id = await get_portfolio_strategies_and_account(session, portfolio_id)
 
     return PortfolioPublic(
         **db_portfolio.model_dump(),
         strategy_config=strategy_config,
+        weight_type=None if db_portfolio.custom_calc_py_code else weight_type,
         account_id=account_id,
     )
 
@@ -201,16 +221,39 @@ async def update_portfolio(session: SessionDep, portfolio_id: int, portfolio: Po
         has_custom_code=bool(resulting_custom_code),
     )
 
+    current_config = await get_latest_strategies_by_portfolio_id(session, portfolio_id)
+    resulting_strategies = (
+        portfolio.strategies
+        if portfolio.strategies is not None
+        else ([] if current_config is None else current_config.strategies)
+    )
+    resulting_weight_type = (
+        portfolio.weight_type
+        if "weight_type" in portfolio.model_fields_set
+        else (None if current_config is None else current_config.weight_type)
+    )
+    _require_data_source_weight_type(
+        custom_code=resulting_custom_code,
+        weight_type=resulting_weight_type,
+    )
+
     try:
-        if portfolio.strategies is not None:
+        if portfolio.strategies is not None or "weight_type" in portfolio.model_fields_set:
             # 更新策略
             # 创建新策略
-            add_strategies_by_portfolio_id(session, portfolio_id, portfolio.strategies)
+            add_strategies_by_portfolio_id(
+                session,
+                portfolio_id,
+                resulting_strategies,
+                None if resulting_custom_code else resulting_weight_type,
+            )
 
             # 组合字段没有和策略配置有关，因此需要显式触发
             db_portfolio.updated_at = now_str()
 
         data = portfolio.model_dump(exclude_unset=True)
+        data.pop("strategies", None)
+        data.pop("weight_type", None)
         db_portfolio.sqlmodel_update(data)
 
         session.add(db_portfolio)
@@ -223,11 +266,12 @@ async def update_portfolio(session: SessionDep, portfolio_id: int, portfolio: Po
         )
         await session.rollback()
 
-    strategy_config, account_id = await get_portfolio_strategies_and_account(session, portfolio_id)
+    strategy_config, weight_type, account_id = await get_portfolio_strategies_and_account(session, portfolio_id)
 
     return PortfolioPublic(
         **db_portfolio.model_dump(),
         strategy_config=strategy_config,
+        weight_type=None if db_portfolio.custom_calc_py_code else weight_type,
         account_id=account_id,
     )
 
@@ -256,7 +300,11 @@ async def list_strategies_records(
     )
 
 
-async def _synthesize_target(strategies: list[Strategy], trade_channel: TradeChannel) -> dict[str, float]:
+async def _synthesize_target(
+    strategies: list[Strategy],
+    trade_channel: TradeChannel,
+    weight_type: WeightType,
+) -> dict[str, float]:
     """
     由一份策略配置合成目标持仓权重.
 
@@ -294,6 +342,7 @@ async def _synthesize_target(strategies: list[Strategy], trade_channel: TradeCha
     try:
         total_df, _ = await get_latest_weights(
             strategy_config.keys(),
+            weight_type=weight_type,
             strategy_freqs=strategy_freqs if strategy_freqs else None,
         )
     except DataSourceUnavailableError as e:
@@ -392,7 +441,9 @@ async def resolve_portfolio_target(
     if not strategies:
         raise HTTPException(status_code=404, detail="策略配置不存在")
 
-    return await _synthesize_target(strategies.strategies, trade_channel)
+    if strategies.weight_type is None:
+        raise HTTPException(status_code=422, detail="策略组合缺少仓位类型")
+    return await _synthesize_target(strategies.strategies, trade_channel, strategies.weight_type)
 
 
 @router.get(
@@ -438,7 +489,7 @@ async def preview_portfolio_weights(payload: PortfolioPreviewRequest) -> dict[st
     dict[str, float]
         合成后的 ``symbol -> 目标权重`` 映射。
     """
-    return await _synthesize_target(payload.strategies, payload.trade_channel)
+    return await _synthesize_target(payload.strategies, payload.trade_channel, payload.weight_type)
 
 
 def _ensure_weight_mapping(target: object) -> None:

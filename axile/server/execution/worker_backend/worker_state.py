@@ -35,6 +35,20 @@ class _WorkerBackendState:
     config_signature: str | None = None
 
 
+def _close_executor(executor: object | None) -> None:
+    """清理请求级状态并释放缓存执行器。"""
+    if executor is None:
+        return
+    _finalize_executor(executor)
+    stop = getattr(executor, "stop", None)
+    if callable(stop):
+        stop()
+        return
+    close = getattr(executor, "close", None)
+    if callable(close):
+        close()
+
+
 def _config_signature(account: Account) -> str:
     """生成账户配置的稳定签名，用于判定执行器是否可复用.
 
@@ -51,7 +65,11 @@ def _config_signature(account: Account) -> str:
     return json.dumps(account.account_config, sort_keys=True, ensure_ascii=False)
 
 
-def _resolve_executor(state: _WorkerBackendState, account: Account) -> object:
+def _resolve_executor(
+    state: _WorkerBackendState,
+    account: Account,
+    expected_trading_day: str | None = None,
+) -> object:
     """
     解析当前请求应复用的执行器实例。
 
@@ -70,11 +88,28 @@ def _resolve_executor(state: _WorkerBackendState, account: Account) -> object:
     signature = _config_signature(account)
     # worker 只在“账户相同且配置签名相同”时复用执行器，避免把旧连接状态带到新配置里。
     if state.executor is not None and state.account_id == account.id and state.config_signature == signature:
-        return state.executor
+        verify = getattr(state.executor, "_verify_connection", None)
+        connected = not callable(verify) or bool(verify())
+        trading_day = str(getattr(state.executor, "_trading_day", "") or "")
+        if connected and (not expected_trading_day or trading_day == expected_trading_day):
+            return state.executor
 
+    if state.executor is not None:
+        _close_executor(state.executor)
+    state.executor = None
+    state.account_id = None
+    state.config_signature = None
     state.executor = create_executor_instance(account)
     state.account_id = account.id
     state.config_signature = signature
+    if expected_trading_day:
+        trading_day = str(getattr(state.executor, "_trading_day", "") or "")
+        if trading_day != expected_trading_day:
+            _close_executor(state.executor)
+            state.executor = None
+            state.account_id = None
+            state.config_signature = None
+            raise RuntimeError(f"柜台交易日不匹配: expected={expected_trading_day}, actual={trading_day or 'unknown'}")
     return state.executor
 
 

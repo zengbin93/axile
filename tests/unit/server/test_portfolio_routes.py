@@ -124,10 +124,14 @@ def test_create_portfolio_returns_full_public_model(monkeypatch) -> None:
     session = _RouteSession()
 
     def fake_add_strategies_by_portfolio_id(
-        _session: object, portfolio_id: int | None, strategies: list[dict[str, object]]
+        _session: object, portfolio_id: int | None, strategies: list[dict[str, object]], weight_type: str | None
     ) -> StrategyConfig:
         return StrategyConfig(
-            id=11, portfolio_id=portfolio_id or 0, strategies=strategies, created_at="2026-03-22T18:00:00"
+            id=11,
+            portfolio_id=portfolio_id or 0,
+            strategies=strategies,
+            weight_type=weight_type,
+            created_at="2026-03-22T18:00:00",
         )
 
     monkeypatch.setattr(portfolio_routes, "add_strategies_by_portfolio_id", fake_add_strategies_by_portfolio_id)
@@ -142,6 +146,7 @@ def test_create_portfolio_returns_full_public_model(monkeypatch) -> None:
             "status": "active",
             "tag": "core",
             "strategies": [_strategy("s1", 0.6), _strategy("s2", 0.4)],
+            "weight_type": "ts",
         },
     )
 
@@ -150,6 +155,7 @@ def test_create_portfolio_returns_full_public_model(monkeypatch) -> None:
     assert body["id"] == 1
     assert body["name"] == "alpha"
     assert body["strategy_config"] == [_strategy("s1", 0.6), _strategy("s2", 0.4)]
+    assert body["weight_type"] == "ts"
     assert body["account_id"] is None
 
 
@@ -168,8 +174,8 @@ def test_portfolio_info_returns_latest_strategy_config_and_bound_account(monkeyp
 
     async def fake_get_portfolio_strategies_and_account(
         _session: object, _portfolio_id: int
-    ) -> tuple[list[dict[str, object]], int]:
-        return ([_strategy("alpha", 1.0)], 7)
+    ) -> tuple[list[dict[str, object]], str, int]:
+        return ([_strategy("alpha", 1.0)], "cs", 7)
 
     monkeypatch.setattr(
         portfolio_routes, "get_portfolio_strategies_and_account", fake_get_portfolio_strategies_and_account
@@ -179,6 +185,7 @@ def test_portfolio_info_returns_latest_strategy_config_and_bound_account(monkeyp
 
     assert response.status_code == 200
     assert response.json()["strategy_config"] == [_strategy("alpha", 1.0)]
+    assert response.json()["weight_type"] == "cs"
     assert response.json()["account_id"] == 7
 
 
@@ -217,23 +224,34 @@ def test_delete_portfolio_deletes_unbound_portfolio(monkeypatch) -> None:
 def test_update_portfolio_returns_updated_public_model(monkeypatch) -> None:
     portfolio = _build_portfolio(portfolio_id=1, name="before")
     session = _RouteSession(portfolios=[portfolio])
-    added_strategy_calls: list[tuple[int, list[dict[str, object]]]] = []
+    added_strategy_calls: list[tuple[int, list[dict[str, object]], str | None]] = []
 
     def fake_add_strategies_by_portfolio_id(
-        _session: object, portfolio_id: int | None, strategies: list[dict[str, object]]
+        _session: object, portfolio_id: int | None, strategies: list[dict[str, object]], weight_type: str | None
     ) -> StrategyConfig:
-        added_strategy_calls.append((portfolio_id or 0, strategies))
+        added_strategy_calls.append((portfolio_id or 0, strategies, weight_type))
         return StrategyConfig(
-            id=12, portfolio_id=portfolio_id or 0, strategies=strategies, created_at="2026-03-22T18:00:00"
+            id=12,
+            portfolio_id=portfolio_id or 0,
+            strategies=strategies,
+            weight_type=weight_type,
+            created_at="2026-03-22T18:00:00",
         )
 
     monkeypatch.setattr(portfolio_routes, "add_strategies_by_portfolio_id", fake_add_strategies_by_portfolio_id)
 
+    async def fake_get_latest_strategies_by_portfolio_id(_session: object, _portfolio_id: int) -> StrategyConfig:
+        return StrategyConfig(portfolio_id=1, strategies=[_strategy("old", 1.0)], weight_type="ts")
+
+    monkeypatch.setattr(
+        portfolio_routes, "get_latest_strategies_by_portfolio_id", fake_get_latest_strategies_by_portfolio_id
+    )
+
     async def fake_get_portfolio_strategies_and_account(
         _session: object,
         _portfolio_id: int,
-    ) -> tuple[list[dict[str, object]], None]:
-        return ([_strategy("fresh", 1.0)], None)
+    ) -> tuple[list[dict[str, object]], str, None]:
+        return ([_strategy("fresh", 1.0)], "cs", None)
 
     monkeypatch.setattr(
         portfolio_routes, "get_portfolio_strategies_and_account", fake_get_portfolio_strategies_and_account
@@ -241,13 +259,53 @@ def test_update_portfolio_returns_updated_public_model(monkeypatch) -> None:
 
     response = TestClient(_build_app(session)).patch(
         "/portfolio/1",
-        json={"name": "after", "custom_calc_py_code": None, "strategies": [_strategy("fresh", 1.0)]},
+        json={
+            "name": "after",
+            "custom_calc_py_code": None,
+            "strategies": [_strategy("fresh", 1.0)],
+            "weight_type": "cs",
+        },
     )
 
     assert response.status_code == 200
     assert response.json()["name"] == "after"
     assert response.json()["strategy_config"] == [_strategy("fresh", 1.0)]
-    assert added_strategy_calls == [(1, [_strategy("fresh", 1.0)])]
+    assert response.json()["weight_type"] == "cs"
+    assert added_strategy_calls == [(1, [_strategy("fresh", 1.0)], "cs")]
+
+
+def test_update_only_weight_type_reuses_current_strategies(monkeypatch) -> None:
+    """只切换仓位类型时应复用当前策略清单并发布完整新版本。"""
+    monkeypatch.setattr(portfolio_routes.settings, "quant_data_api", "https://example.test/latest")
+    portfolio = _build_portfolio(portfolio_id=1)
+    session = _RouteSession(portfolios=[portfolio])
+    current_rows = [_strategy("alpha", 0.6), _strategy("beta", 0.4)]
+    added: list[tuple[list[dict[str, object]], str | None]] = []
+
+    async def fake_latest(_session: object, _portfolio_id: int) -> StrategyConfig:
+        return StrategyConfig(portfolio_id=1, strategies=current_rows, weight_type="ts")
+
+    def fake_add(
+        _session: object,
+        _portfolio_id: int | None,
+        strategies: list[dict[str, object]],
+        weight_type: str | None,
+    ) -> StrategyConfig:
+        added.append((strategies, weight_type))
+        return StrategyConfig(portfolio_id=1, strategies=strategies, weight_type=weight_type)
+
+    async def fake_public(_session: object, _portfolio_id: int) -> tuple[list[dict[str, object]], str, None]:
+        return current_rows, "cs", None
+
+    monkeypatch.setattr(portfolio_routes, "get_latest_strategies_by_portfolio_id", fake_latest)
+    monkeypatch.setattr(portfolio_routes, "add_strategies_by_portfolio_id", fake_add)
+    monkeypatch.setattr(portfolio_routes, "get_portfolio_strategies_and_account", fake_public)
+
+    response = TestClient(_build_app(session)).patch("/portfolio/1", json={"weight_type": "cs"})
+
+    assert response.status_code == 200
+    assert added == [(current_rows, "cs")]
+    assert response.json()["weight_type"] == "cs"
 
 
 def test_create_portfolio_rejects_strategy_without_data_source(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -264,6 +322,7 @@ def test_create_portfolio_rejects_strategy_without_data_source(monkeypatch: pyte
             "status": "active",
             "tag": "core",
             "strategies": [_strategy("s1", 1.0)],
+            "weight_type": "ts",
         },
     )
 
@@ -271,15 +330,38 @@ def test_create_portfolio_rejects_strategy_without_data_source(monkeypatch: pyte
     assert "仅支持自定义组合" in response.json()["detail"]
 
 
+def test_create_data_source_portfolio_requires_weight_type(monkeypatch: pytest.MonkeyPatch) -> None:
+    """配置数据源时，策略组合仍必须明确选择 ts 或 cs。"""
+    monkeypatch.setattr(portfolio_routes.settings, "quant_data_api", "https://example.test/latest")
+    response = TestClient(_build_app(_RouteSession())).post(
+        "/portfolio/",
+        json={
+            "name": "alpha",
+            "market": "加密货币",
+            "description": None,
+            "custom_calc_py_code": None,
+            "status": None,
+            "tag": None,
+            "strategies": [_strategy("s1", 1.0)],
+        },
+    )
+    assert response.status_code == 422
+    assert "仓位类型" in response.json()["detail"]
+
+
 def test_create_portfolio_allows_custom_without_data_source(monkeypatch: pytest.MonkeyPatch) -> None:
     """无数据源时创建自定义组合应放行（不含策略、带脚本）。"""
     monkeypatch.setattr(portfolio_routes.settings, "quant_data_api", "")
 
     def fake_add_strategies_by_portfolio_id(
-        _session: object, portfolio_id: int | None, strategies: list[dict[str, object]]
+        _session: object, portfolio_id: int | None, strategies: list[dict[str, object]], weight_type: str | None
     ) -> StrategyConfig:
         return StrategyConfig(
-            id=1, portfolio_id=portfolio_id or 0, strategies=strategies, created_at="2026-03-22T18:00:00"
+            id=1,
+            portfolio_id=portfolio_id or 0,
+            strategies=strategies,
+            weight_type=weight_type,
+            created_at="2026-03-22T18:00:00",
         )
 
     monkeypatch.setattr(portfolio_routes, "add_strategies_by_portfolio_id", fake_add_strategies_by_portfolio_id)
@@ -307,7 +389,7 @@ def test_update_portfolio_rejects_adding_strategies_without_data_source(monkeypa
 
     response = TestClient(_build_app(session)).patch(
         "/portfolio/1",
-        json={"strategies": [_strategy("s1", 1.0)], "custom_calc_py_code": None},
+        json={"strategies": [_strategy("s1", 1.0)], "weight_type": "ts", "custom_calc_py_code": None},
     )
 
     assert response.status_code == 422
@@ -321,7 +403,11 @@ def test_latest_weights_reports_missing_data_source(monkeypatch: pytest.MonkeyPa
 
     async def fake_get_latest_strategies_by_portfolio_id(_session: object, _portfolio_id: int) -> StrategyConfig:
         return StrategyConfig(
-            id=1, portfolio_id=1, strategies=[_strategy("alpha", 1.0)], created_at="2026-03-22T18:00:00"
+            id=1,
+            portfolio_id=1,
+            strategies=[_strategy("alpha", 1.0)],
+            weight_type="ts",
+            created_at="2026-03-22T18:00:00",
         )
 
     monkeypatch.setattr(
@@ -337,8 +423,20 @@ def test_latest_weights_reports_missing_data_source(monkeypatch: pytest.MonkeyPa
 def test_list_strategies_records_returns_count_and_rows() -> None:
     portfolio = _build_portfolio(portfolio_id=1)
     records = [
-        StrategyConfig(id=1, portfolio_id=1, strategies=[_strategy("alpha", 0.6)], created_at="2026-03-22T17:00:00"),
-        StrategyConfig(id=2, portfolio_id=1, strategies=[_strategy("beta", 0.4)], created_at="2026-03-22T18:00:00"),
+        StrategyConfig(
+            id=1,
+            portfolio_id=1,
+            strategies=[_strategy("alpha", 0.6)],
+            weight_type="ts",
+            created_at="2026-03-22T17:00:00",
+        ),
+        StrategyConfig(
+            id=2,
+            portfolio_id=1,
+            strategies=[_strategy("beta", 0.4)],
+            weight_type="cs",
+            created_at="2026-03-22T18:00:00",
+        ),
     ]
     session = _RouteSession(
         portfolios=[portfolio],
@@ -365,6 +463,7 @@ def test_portfolio_latest_weights_returns_target_balance(monkeypatch) -> None:
             id=1,
             portfolio_id=1,
             strategies=[_strategy("alpha", 0.6, "15m"), _strategy("beta", 0.4)],
+            weight_type="cs",
             created_at="2026-03-22T18:00:00",
         )
 
@@ -373,9 +472,10 @@ def test_portfolio_latest_weights_returns_target_balance(monkeypatch) -> None:
     )
 
     async def fake_get_latest_weights(
-        strategy_names: Any, strategy_freqs: dict[str, str] | None = None
+        strategy_names: Any, weight_type: str, strategy_freqs: dict[str, str] | None = None
     ) -> tuple[pd.DataFrame, str | None]:
         assert list(strategy_names) == ["alpha", "beta"]
+        assert weight_type == "cs"
         assert strategy_freqs == {"alpha": "15m"}
         return (
             pd.DataFrame(
@@ -439,9 +539,10 @@ def test_portfolio_preview_weights_synthesizes_without_persistence(monkeypatch) 
     session = _RouteSession()
 
     async def fake_get_latest_weights(
-        strategy_names: Any, strategy_freqs: dict[str, str] | None = None
+        strategy_names: Any, weight_type: str, strategy_freqs: dict[str, str] | None = None
     ) -> tuple[pd.DataFrame, str | None]:
         assert list(strategy_names) == ["alpha", "beta"]
+        assert weight_type == "cs"
         assert strategy_freqs == {"alpha": "15m"}
         return (
             pd.DataFrame(
@@ -467,6 +568,7 @@ def test_portfolio_preview_weights_synthesizes_without_persistence(monkeypatch) 
         "/portfolio/preview_weights",
         json={
             "trade_channel": "ctp",
+            "weight_type": "cs",
             "strategies": [_strategy("alpha", 0.6, "15m"), _strategy("beta", 0.4)],
         },
     )
@@ -479,7 +581,7 @@ def test_portfolio_preview_weights_rejects_empty_config() -> None:
     """空策略配置应返回 404。"""
     response = TestClient(_build_app(_RouteSession())).post(
         "/portfolio/preview_weights",
-        json={"trade_channel": "ctp", "strategies": []},
+        json={"trade_channel": "ctp", "weight_type": "ts", "strategies": []},
     )
 
     assert response.status_code == 404

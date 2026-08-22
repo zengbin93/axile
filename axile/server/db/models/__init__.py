@@ -68,6 +68,7 @@ from axile.server.db.models.portfolio import (
     ValidateCustomCalcRequest,
     ValidateCustomCalcResponse,
 )
+from axile.server.db.models.trading_calendar import TradingCalendarRecord
 
 StrategyConfig.model_rebuild()
 Portfolio.model_rebuild()
@@ -136,4 +137,5 @@ __all__ = [
     "Message",
     "ListResponse",
     "ListResponsePage",
+    "TradingCalendarRecord",
 ]

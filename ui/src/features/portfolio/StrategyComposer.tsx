@@ -13,7 +13,7 @@ import { FOLD, equalize, normalize, summary } from '@/features/portfolio/strateg
 import { previewWeights, validateCustomCalc } from '@/lib/api/portfolios'
 import { barColor } from '@/lib/derive'
 import { useDomainStore } from '@/stores/domain'
-import type { LatestWeights, TradeChannel, ValidateCustomCalcResult } from '@/types/api'
+import type { LatestWeights, TradeChannel, ValidateCustomCalcResult, WeightType } from '@/types/api'
 
 /** CodeMirror 外观：透明底（交给外层 bg-code-bg）、去边框描边、等宽字体。 */
 const cmEditorTheme = EditorView.theme({
@@ -32,6 +32,8 @@ export interface VerifiedState {
 interface StrategyComposerProps {
   mode: 'compose' | 'custom'
   onModeChange: (m: 'compose' | 'custom') => void
+  weightType: WeightType
+  onWeightTypeChange: (value: WeightType) => void
   strategies: DraftStrategy[]
   onStrategiesChange: (s: DraftStrategy[]) => void
   customCode: string
@@ -48,6 +50,8 @@ interface StrategyComposerProps {
 export function StrategyComposer({
   mode,
   onModeChange,
+  weightType,
+  onWeightTypeChange,
   strategies,
   onStrategiesChange,
   customCode,
@@ -91,7 +95,7 @@ export function StrategyComposer({
   useEffect(() => {
     setPreviewResult(null)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [strategies])
+  }, [strategies, weightType])
 
   // 统一把「当前 tab 的试跑结论」上报父层，供「下一步」软拦截；配置未跑/改动即为 null。
   useEffect(() => {
@@ -146,7 +150,7 @@ export function StrategyComposer({
     if (!rows.length || validating || !tradeChannel) return
     setValidating(true)
     try {
-      const target = await previewWeights(rows, tradeChannel)
+      const target = await previewWeights(rows, tradeChannel, weightType)
       setPreviewResult({ ok: true, target })
     } catch (e) {
       setPreviewResult({ ok: false, error: e instanceof Error ? e.message : String(e) })
@@ -248,6 +252,18 @@ export function StrategyComposer({
       <div key={mode} className="panel-fade-in">
       {mode === 'compose' ? (
         <div className="max-w-[660px]">
+          <div className="mb-4 flex items-center justify-between border-b border-line pb-4">
+            <span className="text-[13px] text-ink-2">仓位类型</span>
+            <Segmented
+              value={weightType}
+              options={[
+                { value: 'ts', label: '时序' },
+                { value: 'cs', label: '截面' },
+              ]}
+              onChange={onWeightTypeChange}
+              size="sm"
+            />
+          </div>
           {strategies.length === 0 ? (
             <div className="rounded-[14px] border border-dashed border-line px-6 py-9 text-center">
               <div className="text-[15px] font-[550]">从你的清单开始</div>

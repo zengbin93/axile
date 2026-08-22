@@ -32,6 +32,7 @@ from axile.server.db.models import (
     PortfolioAccountPublic,
     now_str,
 )
+from axile.server.execution.ctp_channels import drop_account_worker, reconcile_ctp_account
 from axile.server.execution.live import live_hub
 from axile.server.execution.registry import get_execution_task_state, get_running_execution_id
 from axile.server.execution.scheduler import create_job, delete_job
@@ -175,6 +176,7 @@ async def create_account(
         await session.commit()
         await session.refresh(db_account)
         await create_job(sched, db_account, cron_expr)  # type: ignore[misc]
+        await reconcile_ctp_account(db_account)
     except ValueError as exc:
         await session.rollback()
         logger.exception(f"创建账户失败: {exc}")
@@ -472,6 +474,7 @@ async def delete_account(session: SessionDep, sched: SchedDep, account_id: int) 
     await session.commit()
 
     delete_job(sched, account_id)
+    await drop_account_worker(account_id)
     return Message(message="成功删除账户")
 
 
@@ -550,6 +553,7 @@ async def update_account(
         account_routes._validate_account_control_binding(next_trade_channel, next_preset)
 
         data = _build_account_update_data(account)
+        runtime_changed = bool({"account_config", "trade_channel", "is_started"} & data.keys())
         await _sync_portfolio_binding_update(session, db_account, account_id, data)
         db_account.sqlmodel_update(data)
 
@@ -557,6 +561,8 @@ async def update_account(
         await session.commit()
         await session.refresh(db_account)
         await account_routes._reconcile_account_job(session, sched, db_account)
+        if runtime_changed:
+            await reconcile_ctp_account(db_account, reset=True)
     except ValueError as exc:
         await session.rollback()
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc

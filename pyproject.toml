@@ -9,9 +9,7 @@ dependencies = [
     "aiosqlite>=0.21.0",
     "alembic>=1.15.2",
     "apscheduler>=3.11.0",
-    "bs4>=0.0.2",
     "croniter>=5.0.0",
-    "czsc>=0.9.64",
     "fastapi[standard]>=0.115.12",
     "greenlet>=3.3.0",
     "loguru>=0.7.3",
@@ -25,7 +23,6 @@ dependencies = [
     "streamlit>=1.41.0",
     "tenacity>=9.0.0",
     "typer>=0.20.1",
-    "rs-czsc>=0.1.25",
     "tomlkit>=0.15.0",
 ]
 
@@ -64,10 +61,6 @@ default = true
 name = "pypi"
 url = "https://pypi.org/simple/"
 explicit = true
-
-[tool.uv.sources]
-rs-czsc = { index = "pypi" }
-
 
 [build-system]
 requires = ["hatchling"]

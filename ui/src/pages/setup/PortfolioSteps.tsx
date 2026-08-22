@@ -64,6 +64,7 @@ export function PfDefine() {
         name: pf.name,
         market: pf.market,
         custom_calc_py_code: effMode === 'custom' ? pf.customCode : null,
+        weight_type: effMode === 'custom' ? null : pf.weightType,
         strategies:
           effMode === 'custom'
             ? []
@@ -104,6 +105,8 @@ export function PfDefine() {
           <StrategyComposer
             mode={effMode}
             onModeChange={(m) => setPf({ mode: m })}
+            weightType={pf.weightType}
+            onWeightTypeChange={(weightType) => setPf({ weightType })}
             strategies={pf.strategies}
             onStrategiesChange={(s) => setPf({ strategies: s })}
             customCode={pf.customCode}

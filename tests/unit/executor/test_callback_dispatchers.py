@@ -25,6 +25,8 @@ GMCallbackDispatcher = _load_dispatcher_class(
     "axile/executor/gm/core/callback_dispatcher.py",
     "GMCallbackDispatcher",
 )
+
+
 def _build_order(symbol: str) -> UnifiedOrder:
     return UnifiedOrder(
         order_id=f"order-{symbol}",

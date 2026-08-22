@@ -80,11 +80,12 @@ def test_add_strategies_by_portfolio_id_creates_and_adds_strategy_config() -> No
     session = MagicMock()
     strategies = [_strategy("alpha", 0.6), _strategy("beta", 0.4)]
 
-    result = add_strategies_by_portfolio_id(session, 7, strategies)
+    result = add_strategies_by_portfolio_id(session, 7, strategies, "cs")
 
     assert isinstance(result, StrategyConfig)
     assert result.portfolio_id == 7
     assert result.strategies == strategies
+    assert result.weight_type == "cs"
     session.add.assert_called_once_with(result)
 
 
@@ -92,7 +93,7 @@ def test_add_strategies_by_portfolio_id_supports_empty_strategy_list() -> None:
     """创建记录时应保留空策略列表。"""
     session = MagicMock()
 
-    result = add_strategies_by_portfolio_id(session, 9, [])
+    result = add_strategies_by_portfolio_id(session, 9, [], None)
 
     assert result.portfolio_id == 9
     assert result.strategies == []
@@ -160,6 +161,7 @@ def test_get_portfolio_strategies_and_account_returns_latest_records() -> None:
                     StrategyConfig(
                         portfolio_id=portfolio.id,
                         strategies=[_strategy("alpha", 0.6), _strategy("beta", 0.4)],
+                        weight_type="cs",
                     ),
                     PortfolioAccount(account_id=account_old.id, portfolio_id=portfolio.id),
                     PortfolioAccount(account_id=account_new.id, portfolio_id=portfolio.id),
@@ -167,9 +169,10 @@ def test_get_portfolio_strategies_and_account_returns_latest_records() -> None:
             )
             await session.commit()
 
-            strategies, account_id = await get_portfolio_strategies_and_account(session, portfolio.id)
+            strategies, weight_type, account_id = await get_portfolio_strategies_and_account(session, portfolio.id)
 
             assert strategies == [_strategy("alpha", 0.6), _strategy("beta", 0.4)]
+            assert weight_type == "cs"
             assert account_id == account_new.id
 
     asyncio.run(scenario())
@@ -191,9 +194,10 @@ def test_get_portfolio_strategies_and_account_returns_empty_list_without_strateg
             session.add(PortfolioAccount(account_id=account.id, portfolio_id=portfolio.id))
             await session.commit()
 
-            strategies, account_id = await get_portfolio_strategies_and_account(session, portfolio.id)
+            strategies, weight_type, account_id = await get_portfolio_strategies_and_account(session, portfolio.id)
 
             assert strategies == []
+            assert weight_type is None
             assert account_id == account.id
 
     asyncio.run(scenario())

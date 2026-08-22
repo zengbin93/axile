@@ -90,7 +90,7 @@ def _import_builtin_account_control_declarers() -> None:
     这些模块在导入时会通过装饰器或显式调用向默认注册表登记 operation 与 group。
     """
     importlib.import_module("axile.executor.abstract_executor.base")
-    importlib.import_module("axile.executor.ctp.core.trader")
+    importlib.import_module("axile.executor.account_control.ctp_operations")
 
 
 _import_builtin_account_control_declarers()

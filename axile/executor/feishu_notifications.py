@@ -8,6 +8,7 @@ from typing import Protocol, TypedDict
 
 import loguru
 
+from axile.common.feishu import push_feishu_card
 from axile.executor.algorithms.utils import clock_now
 from axile.executor.models.unified_account_assets import Position
 from axile.executor.models.unified_order import TradeRecord, UnifiedOrder
@@ -95,8 +96,6 @@ def send_execute_results_to_feishu(
         source.logger.info("未提供飞书key，跳过通知发送")
         return
 
-    from czsc.fsa import push_card  # type: ignore[import-not-found]
-
     account_mark = source._get_account_mark()
     dt = clock_now().strftime("%Y-%m-%d %H:%M:%S")
     algorithm_name = str(output.inputs.algorithm.get("method", "Unknown")) if output.inputs else "Unknown"
@@ -144,7 +143,7 @@ def send_execute_results_to_feishu(
     }
 
     try:
-        push_card(card, feishu_key)
+        push_feishu_card(card, feishu_key)
         source.logger.info(f"飞书通知发送成功 - 账户: {account_mark}")
     except Exception as exc:
         source.logger.error(f"发送飞书通知失败: {exc}")
@@ -152,16 +151,14 @@ def send_execute_results_to_feishu(
 
 # ---- 有界后台通知派发器 ----
 #
-# 飞书通知是执行尾部的尽力而为副作用。底层 czsc.fsa.push_card 是无 timeout 的
-# 第三方阻塞调用，飞书侧挂起时会永久阻塞。若沿用「每次执行裸起 daemon 线程」，
-# 卡死线程会随执行次数无界增长。这里收口成「固定 worker + 有界队列 + 满则丢弃」：
-# 无论 push_card 是否挂死，存活线程恒 ≤ worker 数、内存 ≤ 队列容量，主执行链路零阻塞。
+# 飞书通知是执行尾部的尽力而为副作用。HTTP 请求虽有超时，仍使用固定 worker 与
+# 有界队列隔离网络延迟；队列满时丢弃新通知，保证主执行链路不阻塞且资源有界。
 
 _FEISHU_NOTIFY_WORKER_COUNT = 2
-"""后台飞书通知 worker 线程数（同时也是 push_card 挂死时的卡死线程上界）。."""
+"""后台飞书通知 worker 线程数。"""
 
 _FEISHU_NOTIFY_QUEUE_MAXSIZE = 64
-"""待发通知队列容量；超出后丢弃最新通知，避免无界堆积。."""
+"""待发通知队列容量；超出后丢弃最新通知，避免无界堆积。"""
 
 _FeishuNotifyTask = tuple["FeishuNotificationSource", UnifiedStandardOutput, str]
 
@@ -223,8 +220,7 @@ def enqueue_execute_results_to_feishu(
 
     Notes
     -----
-    尽力而为语义：由固定数量的后台 worker 串行发送。底层 ``push_card`` 是无
-    超时的第三方阻塞调用，故在此收口并发与积压——队列满时**丢弃本次通知并记
+    尽力而为语义：由固定数量的后台 worker 串行发送。队列满时**丢弃本次通知并记
     warning**，用「丢通知」换取「主执行链路不阻塞、线程与内存有界」。绝不为单次
     执行新建线程。
     """

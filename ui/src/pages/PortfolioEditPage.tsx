@@ -12,7 +12,7 @@ import { useDomainStore } from '@/stores/domain'
 import { usePolling } from '@/lib/hooks/usePolling'
 import { useToastStore } from '@/stores/ui'
 import { getChannelForMarket } from '@/stores/channels'
-import type { LatestWeights } from '@/types/api'
+import type { LatestWeights, WeightType } from '@/types/api'
 
 /** 组合发版页 /portfolios/:id/edit —— 编辑=发布新版本。 */
 export function PortfolioEditPage() {
@@ -33,12 +33,14 @@ export function PortfolioEditPage() {
   const [ready, setReady] = useState(false)
   const [name, setName] = useState('')
   const [mode, setMode] = useState<'compose' | 'custom'>('compose')
+  const [weightType, setWeightType] = useState<WeightType>('ts')
   const [strategies, setStrategies] = useState<DraftStrategy[]>([])
   const [customCode, setCustomCode] = useState('')
-  const [original, setOriginal] = useState<{ name: string; strategies: DraftStrategy[]; code: string }>({
+  const [original, setOriginal] = useState<{ name: string; strategies: DraftStrategy[]; code: string; weightType: WeightType }>({
     name: '',
     strategies: [],
     code: '',
+    weightType: 'ts',
   })
 
   useEffect(() => {
@@ -48,9 +50,11 @@ export function PortfolioEditPage() {
     setName(pf.name)
     setStrategies(strat)
     setCustomCode(code)
+    const initialWeightType = pf.weight_type ?? 'ts'
+    setWeightType(initialWeightType)
     // 无数据源时强制自定义逻辑；否则按现有配置推断初始档。
     setMode(!dsAvailable || code ? 'custom' : 'compose')
-    setOriginal({ name: pf.name, strategies: strat, code })
+    setOriginal({ name: pf.name, strategies: strat, code, weightType: initialWeightType })
     setReady(true)
   }, [pf, ready, dsAvailable])
 
@@ -63,7 +67,7 @@ export function PortfolioEditPage() {
   const diff = specDiff(original.strategies, strategies)
   const nameChanged = name.trim() !== original.name
   const codeChanged = mode === 'custom' && customCode !== original.code
-  const dirty = diff.dirty || nameChanged || codeChanged || (mode === 'custom') !== Boolean(original.code)
+  const dirty = diff.dirty || nameChanged || codeChanged || weightType !== original.weightType || (mode === 'custom') !== Boolean(original.code)
 
   const concBefore = concentration(original.strategies.map((s) => s.weight))
   const concAfter = concentration(strategies.map((s) => s.weight))
@@ -83,8 +87,8 @@ export function PortfolioEditPage() {
       const toFrac = (rows: DraftStrategy[]) =>
         rows.filter((r) => r.name.trim()).map((r) => ({ name: r.name.trim(), weight: r.weight / 100 }))
       const [b, a] = await Promise.all([
-        previewWeights(toFrac(original.strategies), channel),
-        previewWeights(toFrac(strategies), channel),
+        previewWeights(toFrac(original.strategies), channel, original.weightType),
+        previewWeights(toFrac(strategies), channel, weightType),
       ])
       setBefore(b)
       setAfter(a)
@@ -100,6 +104,7 @@ export function PortfolioEditPage() {
       await updatePortfolio(portfolioId, {
         name: name.trim(),
         custom_calc_py_code: mode === 'custom' ? customCode : null,
+        weight_type: mode === 'custom' ? null : weightType,
         strategies:
           mode === 'custom'
             ? []
@@ -165,6 +170,8 @@ export function PortfolioEditPage() {
         <StrategyComposer
           mode={mode}
           onModeChange={setMode}
+          weightType={weightType}
+          onWeightTypeChange={setWeightType}
           strategies={strategies}
           onStrategiesChange={setStrategies}
           customCode={customCode}

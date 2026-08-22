@@ -95,7 +95,7 @@ class AbstractExecutorExecutionLifecycleMixin(AbstractExecutorExecutionRuntimeFa
                 output = executor._execution_engine().run(standard_input)
 
             # 通知是尾部副作用，不影响主执行结果的返回；投递到有界后台队列，
-            # 避免每次执行裸起线程（push_card 无超时，挂死时线程会随执行次数增长）。
+            # 统一经有界后台队列发送，隔离飞书网络延迟且避免线程随执行次数增长。
             if standard_input.feishu_key:
                 executor.logger.info(f"[{executor.channel_type.value}] 异步发送飞书通知")
                 enqueue_execute_results_to_feishu(

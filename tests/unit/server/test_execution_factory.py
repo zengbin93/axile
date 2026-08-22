@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 import pandas as pd
 import pytest
@@ -33,6 +34,9 @@ def _transform(_config: dict[str, float], frame: pd.DataFrame) -> pd.DataFrame:
 
 
 def _plugin() -> ChannelPlugin:
+    def create_executor(config: BaseAccountConfig) -> SimpleNamespace:
+        return SimpleNamespace(config=config, set_trading_calendar=MagicMock())
+
     return ChannelPlugin(
         descriptor=ChannelDescriptor(
             channel="factory-demo",
@@ -51,7 +55,7 @@ def _plugin() -> ChannelPlugin:
             account_form=ChannelAccountForm(),
         ),
         account_config_model=_Config,
-        create_executor=lambda config: SimpleNamespace(config=config),
+        create_executor=create_executor,
         target_transform=_transform,
     )
 
@@ -71,6 +75,7 @@ def test_create_executor_instance_uses_registered_plugin(monkeypatch: pytest.Mon
         )
         assert isinstance(executor.config, _Config)
         assert executor.config.channel_type == "factory-demo"
+        executor.set_trading_calendar.assert_called_once()
     finally:
         registry._reset_registry_for_tests()
 

@@ -43,7 +43,7 @@ def _gm_target(config: dict[str, float], frame: pd.DataFrame) -> pd.DataFrame:
 
 
 def _create_ctp_executor(config: BaseAccountConfig):
-    """根据已验证的 CTP 配置创建执行器."""
+    """根据已验证的 CTP 配置创建执行器。"""
     from axile.executor.ctp.ctp_execute import CTPExecutor
 
     if not isinstance(config, CTPAccountConfig):
@@ -98,6 +98,7 @@ def _ctp_plugin() -> ChannelPlugin:
         account_config_model=CTPAccountConfig,
         create_executor=_create_ctp_executor,
         target_transform=_contribution_target,
+        execution_backend="process",
         required_modules=("openctp_ctp",),
         install_extra="ctp",
     )
