@@ -8,7 +8,6 @@ function rec(id: number, kind: 'fill' | 'noop' | 'fail'): ExecuteRecord {
     id,
     execution_id: `e${id}`,
     created_at: `2026-07-02T10:${String(id % 60).padStart(2, '0')}:00`,
-    strategy_config: [],
     raw_result: { account_assets: { total_asset: 1000 } },
   }
   if (kind === 'fail') return { ...base, is_success: 0, raw_input: {} }

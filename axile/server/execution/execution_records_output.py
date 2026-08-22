@@ -1,7 +1,6 @@
 """执行输出落库与审计输入辅助函数."""
 
 from axile.domain.execution import ExecutionEventStatus, ExecutionKind
-from axile.domain.strategy import Strategy
 from axile.executor.models.execution_result import ExecutionStatus
 from axile.executor.models.unified_input import UnifiedStandardInput
 from axile.executor.models.unified_output import UnifiedStandardOutput
@@ -55,7 +54,6 @@ def resolve_completion_event_status(output_status: ExecutionStatus) -> Execution
 async def append_execute_record_from_output(
     *,
     account: Account,
-    strategy_config: list[Strategy] | None,
     raw_input: dict[str, object],
     result: dict[str, object],
     output: UnifiedStandardOutput,
@@ -69,8 +67,6 @@ async def append_execute_record_from_output(
     ----------
     account : Account
         当前执行所属账户。
-    strategy_config : list[Strategy] | None
-        本次执行关联的策略快照；清仓链路可为空。
     raw_input : dict[str, object]
         原始输入的字典快照。
     result : dict[str, object]
@@ -90,7 +86,6 @@ async def append_execute_record_from_output(
     if output.success:
         return await append_success_execute_record(
             account,
-            strategy_config,
             raw_input,
             result,
             execution_id,
@@ -99,7 +94,6 @@ async def append_execute_record_from_output(
 
     return await append_error_execute_record(
         account_id=account.id,
-        strategy_config=strategy_config,
         raw_input=raw_input,
         raw_result=result,
         msg=output.get_error_message() or "执行未成功完成",

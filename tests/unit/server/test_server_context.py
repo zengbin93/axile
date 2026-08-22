@@ -21,7 +21,6 @@ def _record(
     return ExecuteRecord(
         id=1,
         account_id=1,
-        strategy_config=[],
         raw_input={},
         raw_result={
             "account_assets": {

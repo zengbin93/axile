@@ -6,24 +6,13 @@ import { Card, SectionLabel, Chip } from '@/components/ui/Card'
 import { Skeleton, SkeletonLines } from '@/components/ui/Skeleton'
 import { ExposureBar } from '@/components/viz/ExposureBar'
 import { ConfirmModal, type ConfirmSpec } from '@/components/ui/ConfirmModal'
-import { getPortfolio, getStrategyRecords, getLatestWeights, updatePortfolio } from '@/lib/api/portfolios'
+import { getPortfolio, getLatestWeights } from '@/lib/api/portfolios'
 import { useDomainStore } from '@/stores/domain'
 import { triggerExecute } from '@/lib/api/executions'
 import { usePolling } from '@/lib/hooks/usePolling'
 import { useToastStore } from '@/stores/ui'
 import { channelLabel } from '@/features/dashboard/display'
-import { getChannelForMarket } from '@/stores/channels'
 import type { LatestWeights } from '@/types/api'
-
-/** 集中度指标：最大权重、前 10 占比、有效策略数（1/ΣwΒ）。 */
-function concentration(weights: number[]) {
-  const ws = weights.map(Math.abs).sort((a, b) => b - a)
-  const total = ws.reduce((s, w) => s + w, 0) || 1
-  const norm = ws.map((w) => w / total)
-  const top10 = norm.slice(0, 10).reduce((s, w) => s + w, 0) * 100
-  const eff = 1 / norm.reduce((s, w) => s + w * w, 0)
-  return { max: (norm[0] ?? 0) * 100, top10, eff }
-}
 
 export function PortfolioDetailPage() {
   const { id } = useParams()
@@ -33,7 +22,6 @@ export function PortfolioDetailPage() {
   const [confirm, setConfirm] = useState<ConfirmSpec | null>(null)
 
   const portfolio = usePolling(useCallback((s: AbortSignal) => getPortfolio(portfolioId, s), [portfolioId]), 0)
-  const records = usePolling(useCallback((s: AbortSignal) => getStrategyRecords(portfolioId, s), [portfolioId]), 0)
   const accounts = useDomainStore((s) => s.accounts)
   const portfolios = useDomainStore((s) => s.portfolios)
 
@@ -42,7 +30,6 @@ export function PortfolioDetailPage() {
   const lite = portfolios?.find((p) => p.id === portfolioId) ?? null
   const head = pf ?? lite
   const boundAccount = accounts?.find((a) => a.portfolio_id === portfolioId) ?? null
-  const channel = boundAccount?.trade_channel ?? getChannelForMarket(head?.market)
 
   // 共享元素 FLIP：组合名与列表卡配对（A）；绑定账户名与账户详情头配对（B，复用 account-name）。
   const pfNameVt = useViewTransitionState(`/portfolios/${portfolioId}`)
@@ -50,11 +37,11 @@ export function PortfolioDetailPage() {
 
   const weights = usePolling<LatestWeights>(
     useCallback(
-      (s: AbortSignal) => (pf && channel ? getLatestWeights(portfolioId, channel, s) : Promise.resolve({})),
-      [portfolioId, channel, pf],
+      (s: AbortSignal) => (pf ? getLatestWeights(portfolioId, s) : Promise.resolve({})),
+      [portfolioId, pf],
     ),
     0,
-    pf && channel ? `${portfolioId}:${channel}` : null,
+    pf ? `${portfolioId}` : null,
   )
 
   if (portfolio.error && !pf)
@@ -69,10 +56,6 @@ export function PortfolioDetailPage() {
         <p className="mt-3 text-[14px] text-bad">组合加载失败：{portfolio.error.message}</p>
       </section>
     )
-
-  const strategies = pf?.strategy_config ?? []
-  const stratWeights = strategies.map((s) => s.weight)
-  const conc = concentration(stratWeights)
 
   const target = weights.data ?? {}
   const targetRows = Object.entries(target)
@@ -118,13 +101,7 @@ export function PortfolioDetailPage() {
                 {head.name}
               </span>
               <Chip>{head.market}</Chip>
-              <Chip>
-                {head.custom_calc_py_code
-                  ? '自定义逻辑'
-                  : pf
-                    ? `加权组合 · ${strategies.length} 策略`
-                    : '加权组合'}
-              </Chip>
+              <Chip>自定义函数</Chip>
             </div>
             {head.description && <div className="mt-2 text-[13px] text-ink-2">{head.description}</div>}
             <div className="mt-6 flex gap-8 border-t border-line pt-4">
@@ -154,41 +131,6 @@ export function PortfolioDetailPage() {
             <Skeleton className="h-6 w-52" />
             <Skeleton className="mt-3 h-4 w-full" />
             <Skeleton className="mt-6 h-10 w-64" />
-          </>
-        )}
-      </Card>
-
-      {/* 策略构成 */}
-      <SectionLabel>策略构成 · 各策略在组合中的权重</SectionLabel>
-      <Card className="px-6 py-4">
-        {!pf ? (
-          <SkeletonLines rows={4} />
-        ) : strategies.length === 0 ? (
-          <p className="text-[13px] text-ink-3">
-            {pf.custom_calc_py_code ? '自定义逻辑组合，无策略权重表。' : '暂无策略。'}
-          </p>
-        ) : (
-          <>
-            <ExposureBar weights={stratWeights} />
-            <div className="my-2 text-[13px] text-ink-2">
-              {strategies.length} 个策略 · 最大 {conc.max.toFixed(1)}% · 前 10 占 {conc.top10.toFixed(0)}% · 有效 ≈ {conc.eff.toFixed(1)} 个
-            </div>
-            {[...strategies]
-              .sort((a, b) => b.weight - a.weight)
-              .map((s) => (
-                <div key={s.name} className="flex items-center gap-3 border-t border-line py-3 first:border-t-0">
-                  <div className="flex-1 min-w-0">
-                    <div className="truncate text-[14px] font-semibold">{s.name}</div>
-                    {s.base_freq && <div className="text-xs text-ink-3">频率 {s.base_freq}</div>}
-                  </div>
-                  <div className="num w-14 flex-none text-right text-[14.5px] font-[640]">
-                    {(s.weight * 100).toFixed(1)}%
-                  </div>
-                </div>
-              ))}
-            <div className="mt-3 text-xs text-ink-3">
-              注：后端仅下发合成后的目标权重，暂无「逐策略 → 品种」的分项贡献，故此处不展开双向归因。
-            </div>
           </>
         )}
       </Card>
@@ -243,59 +185,6 @@ export function PortfolioDetailPage() {
           </Link>
         ) : (
           <p className="py-3 text-[13px] text-ink-3">暂无账户跟随此组合。</p>
-        )}
-      </Card>
-
-      {/* 策略更换记录 */}
-      <SectionLabel>策略更换记录</SectionLabel>
-      <Card className="px-6 py-4">
-        {records.loading && <p className="text-[13px] text-ink-2">加载中…</p>}
-        {!records.loading && (records.data?.data.length ?? 0) === 0 && (
-          <p className="text-[13px] text-ink-3">暂无更换记录。</p>
-        )}
-        {(records.data?.data.length ?? 0) > 0 && (
-          <div className="relative pl-[22px]">
-            <div className="absolute left-1.5 top-2 bottom-2 w-0.5 bg-line" />
-            {records.data!.data
-              .slice()
-              .sort((a, b) => b.created_at.localeCompare(a.created_at))
-              .map((r, i) => (
-                <div key={r.id ?? i} className="relative flex items-center gap-3 py-2.5">
-                  <span className={`absolute -left-[19px] top-3.5 h-[9px] w-[9px] rounded-full border-2 border-surface ${i === 0 ? 'bg-accent' : 'bg-border-strong'}`} />
-                  <div className="flex-1">
-                    <div className="text-[13px] text-ink-3">
-                      {r.created_at.replace('T', ' ').slice(0, 16)}
-                      {i === 0 && <span className="ml-2 text-accent">当前版本</span>}
-                    </div>
-                    <div className="text-[14px]">{r.strategies.length} 个策略配置</div>
-                  </div>
-                  {i !== 0 && (
-                    <button
-                      className="cursor-pointer rounded-lg border border-line px-2.5 py-1 text-[12.5px] text-ink-2 hover:border-ink-3/40 hover:text-ink-1"
-                      onClick={() =>
-                        setConfirm({
-                          title: '回滚到此版配置',
-                          body: '把这一版的策略配置重新发布为新版本。回滚的是配置（spec），持仓仍按当下市场重算。',
-                          okText: '回滚',
-                          onConfirm: async () => {
-                            try {
-                              await updatePortfolio(portfolioId, { strategies: r.strategies })
-                              toast('已回滚为新版本')
-                              records.refresh()
-                              portfolio.refresh()
-                            } catch (e) {
-                              toast(`回滚失败：${e instanceof Error ? e.message : String(e)}`)
-                            }
-                          },
-                        })
-                      }
-                    >
-                      回滚
-                    </button>
-                  )}
-                </div>
-              ))}
-          </div>
         )}
       </Card>
 

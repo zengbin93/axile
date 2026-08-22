@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-import pandas as pd
 import pytest
 from pydantic import Field, ValidationError
 from sqlalchemy import Text
@@ -32,19 +31,12 @@ from axile.server.db.models import Account, AccountControlEvent, AccountCreate, 
 from axile.server.execution.dispatch import ExecutionBackendKind, resolve_execution_backend_kind
 from axile.server.execution.execution_algorithms import resolve_account_leverages
 from axile.server.execution.factory import create_executor_instance
-from axile.server.weights import get_target_balance
 
 
 class DemoAccountConfig(BaseAccountConfig):
     """测试插件账户配置。"""
 
     token: str = Field(min_length=1)
-
-
-def _target_transform(config: dict[str, float], frame: pd.DataFrame) -> pd.DataFrame:
-    transformed = frame.copy()
-    transformed["contribution"] = transformed["weight"] * transformed["strategy"].map(config)
-    return transformed
 
 
 def _plugin(
@@ -85,7 +77,6 @@ def _plugin(
         ),
         account_config_model=DemoAccountConfig,
         create_executor=lambda config: SimpleNamespace(config=config),
-        target_transform=_target_transform,
         execution_backend="process",
         required_modules=required_modules,
         max_parallel_symbols=max_parallel_symbols,
@@ -180,7 +171,6 @@ def test_capabilities_expose_descriptor_and_runtime_availability() -> None:
 def test_runtime_policies_resolve_from_plugin() -> None:
     list_channels()
     register_channel(_plugin())
-    frame = pd.DataFrame([{"strategy": "s", "symbol": "X", "weight": 0.5}])
     account = SimpleNamespace(
         trade_channel="vendor-demo",
         market="demo",
@@ -188,7 +178,6 @@ def test_runtime_policies_resolve_from_plugin() -> None:
         short_leverage=None,
     )
 
-    assert get_target_balance(frame, {"s": 0.4}, "vendor-demo") == {"X": pytest.approx(0.2)}
     assert resolve_execution_backend_kind("vendor-demo") == ExecutionBackendKind.PROCESS
     assert resolve_account_leverages(account) == (2.0, 1.0)
 

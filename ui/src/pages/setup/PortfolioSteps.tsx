@@ -1,15 +1,13 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { Link, useNavigate } from '@/components/ui/nav'
 import { WizardPage, WizardNav } from '@/features/setup/WizardNav'
 import { ChoiceGroup } from '@/components/ui/ChoiceGroup'
 import { ConfirmModal, type ConfirmSpec } from '@/components/ui/ConfirmModal'
-import { StrategyComposer } from '@/features/portfolio/StrategyComposer'
-import { peekDataSourceAvailable } from '@/lib/api/init'
+import { CustomFunctionEditor } from '@/features/portfolio/CustomFunctionEditor'
 import { createPortfolio } from '@/lib/api/portfolios'
 import { useWizardStore } from '@/stores/wizard'
 import { useToastStore } from '@/stores/ui'
 import { useDomainStore } from '@/stores/domain'
-import { getChannelForMarket } from '@/stores/channels'
 
 const MARKETS = ['加密货币', 'A股', '期货']
 
@@ -50,25 +48,12 @@ export function PfDefine() {
   const refreshPortfolios = useDomainStore((s) => s.refreshPortfolios)
   const [confirm, setConfirm] = useState<ConfirmSpec | null>(null)
 
-  // 数据源能力位：null（启动探测失败）按允许处理，兜底交后端护栏。
-  const dsAvailable = peekDataSourceAvailable() !== false
-  // 无数据源时强制自定义逻辑；effMode 兜住 store 纠正的时序，并回写 store 供后续步骤一致。
-  const effMode: 'compose' | 'custom' = dsAvailable ? pf.mode : 'custom'
-  useEffect(() => {
-    if (!dsAvailable && pf.mode !== 'custom') setPf({ mode: 'custom' })
-  }, [dsAvailable, pf.mode, setPf])
-
   const doCreate = async () => {
     try {
       const created = await createPortfolio({
         name: pf.name,
         market: pf.market,
-        custom_calc_py_code: effMode === 'custom' ? pf.customCode : null,
-        weight_type: effMode === 'custom' ? null : pf.weightType,
-        strategies:
-          effMode === 'custom'
-            ? []
-            : pf.strategies.filter((r) => r.name.trim()).map((r) => ({ name: r.name.trim(), weight: r.weight / 100 })),
+        custom_calc_py_code: pf.customCode,
       })
       setPf({ savedId: created.id })
       toast('组合已创建')
@@ -95,25 +80,17 @@ export function PfDefine() {
     await doCreate()
   }
 
-  const canNext = effMode === 'custom' ? pf.customCode.trim().length > 0 : pf.strategies.some((r) => r.name.trim())
+  const canNext = pf.customCode.trim().length > 0
 
   return (
     <div className="flex h-full flex-col">
       {/* 预留滚动条槽位：验证结果出现使内容超出一屏、滚动条切入时，居中列不会左右抖动。 */}
       <div className="flex-1 overflow-y-auto [scrollbar-gutter:stable]">
         <WizardPage kicker="组合设置 · 2 / 3" title="这个组合交易什么？">
-          <StrategyComposer
-            mode={effMode}
-            onModeChange={(m) => setPf({ mode: m })}
-            weightType={pf.weightType}
-            onWeightTypeChange={(weightType) => setPf({ weightType })}
-            strategies={pf.strategies}
-            onStrategiesChange={(s) => setPf({ strategies: s })}
-            customCode={pf.customCode}
-            onCustomCodeChange={(c) => setPf({ customCode: c })}
-            tradeChannel={getChannelForMarket(pf.market)}
+          <CustomFunctionEditor
+            code={pf.customCode}
+            onChange={(customCode) => setPf({ customCode })}
             onVerifiedChange={(v) => setPf({ verified: v })}
-            allowCompose={dsAvailable}
           />
         </WizardPage>
       </div>

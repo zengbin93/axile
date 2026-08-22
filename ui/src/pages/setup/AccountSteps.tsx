@@ -604,7 +604,7 @@ export function AcctConfirm() {
       return
     }
     try {
-      const w = await getLatestWeights(acct.portfolioId, acct.channel)
+      const w = await getLatestWeights(acct.portfolioId)
       setRows(Object.entries(w).filter(([, v]) => Math.abs(v) > 1e-9).sort((a, b) => Math.abs(b[1]) - Math.abs(a[1])))
     } catch (e) {
       toast(`试跑失败：${e instanceof Error ? e.message : String(e)}`)

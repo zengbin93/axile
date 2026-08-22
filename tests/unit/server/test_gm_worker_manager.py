@@ -193,7 +193,6 @@ def test_execute_trade_worker_timeout_follows_standard_input(monkeypatch: pytest
             standard_input=standard_input,  # type: ignore[arg-type]
             standard_input_dict={"execution_timeout": 180},
             audit_input={},
-            strategy_config=[],
             execution_id="exec-1",
             trigger_source="manual",
             cleanup=True,

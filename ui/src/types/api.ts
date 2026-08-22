@@ -8,8 +8,6 @@
 /** 运行时注册的交易渠道标识。 */
 export type TradeChannel = string
 
-/** 数据源仓位类型：时序或截面。 */
-export type WeightType = 'ts' | 'cs'
 
 /** 算法引用。 */
 export interface AlgorithmRef {
@@ -92,15 +90,6 @@ export interface AlgorithmInfo {
   slots: AlgorithmSlot[] | null
   /** 是否为内置默认算法。 */
   builtin: boolean
-}
-
-/** 单个策略，对应 `axile.domain.strategy.Strategy`（TypedDict）。 */
-export interface Strategy {
-  name: string
-  weight: number
-  base_freq?: string
-  description?: string
-  outsample_sdt?: string
 }
 
 /* ============================ 账户 ============================ */
@@ -186,15 +175,11 @@ export interface Portfolio {
   name: string
   market: string
   description: string | null
-  custom_calc_py_code: string | null
+  custom_calc_py_code: string
   status: string | null
   tag: string | null
   updated_at: string
   created_at: string
-  /** 当前策略配置。 */
-  strategy_config: Strategy[]
-  /** 当前策略配置版本的仓位类型；自定义逻辑组合为空。 */
-  weight_type: WeightType | null
   /** 当前绑定该组合的账户 ID（可空）。 */
   account_id: number | null
 }
@@ -205,7 +190,7 @@ export interface PortfolioLite {
   name: string
   market: string
   description: string | null
-  custom_calc_py_code: string | null
+  custom_calc_py_code: string
   status: string | null
   tag: string | null
   updated_at: string
@@ -215,20 +200,6 @@ export interface PortfolioLite {
 /** `GET /portfolio/` 响应。 */
 export interface PortfolioList {
   data: PortfolioLite[]
-}
-
-/** 策略更换记录，对应 `StrategyConfigPublic`。 */
-export interface StrategyConfigRecord {
-  id: number | null
-  created_at: string
-  strategies: Strategy[]
-  weight_type: WeightType | null
-}
-
-/** `GET /portfolio/strategies_records/{id}` 响应。 */
-export interface StrategyConfigList {
-  data: StrategyConfigRecord[]
-  count: number
 }
 
 /** `GET /portfolio/latest_weights/{id}` 响应：symbol → 目标权重（可负=空头）。 */
@@ -294,7 +265,6 @@ export interface ExecuteRecord {
     execution_kind?: string
   }
   is_success: number
-  strategy_config: Strategy[] | null
   created_at: string
 }
 

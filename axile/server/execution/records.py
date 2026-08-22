@@ -12,7 +12,6 @@ from typing import Protocol, cast
 import loguru
 
 from axile.domain.execution import ExecutionKind, ExecutionTaskStatus, ExecutionTerminateMode
-from axile.domain.strategy import Strategy
 from axile.executor.termination import TERMINATION_TRIGGER_OPERATOR
 from axile.server.core.db import SessionLocal
 from axile.server.db.models import Account, ExecuteRecord
@@ -51,7 +50,6 @@ async def _persist_execute_record(
     *,
     account_id: int,
     execution_id: str | None,
-    strategy_config: list[Strategy] | None,
     raw_input: dict[str, object] | None,
     raw_result: dict[str, object],
     is_success: int,
@@ -62,7 +60,6 @@ async def _persist_execute_record(
         record = ExecuteRecord(
             account_id=account_id,
             execution_id=execution_id,
-            strategy_config=strategy_config,
             raw_input=_sanitize_execute_record_input(raw_input),
             raw_result=raw_result,
             is_success=is_success,
@@ -75,7 +72,6 @@ async def _persist_execute_record(
 
 async def append_error_execute_record(
     account_id: int | None,
-    strategy_config: list[Strategy] | None = None,
     raw_input: dict[str, object] | None = None,
     raw_result: dict[str, object] | None = None,
     msg: str = "",
@@ -90,8 +86,6 @@ async def append_error_execute_record(
     ----------
     account_id : int | None
         本次执行对应的账户 ID。
-    strategy_config : list[Strategy] | None, optional
-        本次执行关联的策略配置快照。
     raw_input : dict[str, object] | None, optional
         需要持久化的输入快照。
     raw_result : dict[str, object] | None, optional
@@ -115,7 +109,6 @@ async def append_error_execute_record(
     return await _persist_execute_record(
         account_id=cast("int", account_id),
         execution_id=execution_id,
-        strategy_config=strategy_config,
         raw_input=raw_input,
         raw_result=persisted_raw_result,
         is_success=0,
@@ -125,7 +118,6 @@ async def append_error_execute_record(
 
 async def append_success_execute_record(
     account: Account,
-    strategy_config: list[Strategy] | None,
     raw_input: dict[str, object],
     result: dict[str, object],
     execution_id: str | None = None,
@@ -139,8 +131,6 @@ async def append_success_execute_record(
     ----------
     account : Account
         本次执行对应的账户对象。
-    strategy_config : list[Strategy] | None
-        本次执行关联的策略配置快照。
     raw_input : dict[str, object]
         需要持久化的输入快照。
     result : dict[str, object]
@@ -165,7 +155,6 @@ async def append_success_execute_record(
     return await _persist_execute_record(
         account_id=cast("int", account.id),
         execution_id=execution_id,
-        strategy_config=strategy_config,
         raw_input=raw_input,
         raw_result=persisted_raw_result,
         is_success=1,
@@ -188,7 +177,6 @@ async def append_terminated_execute_record(
     trigger: str = TERMINATION_TRIGGER_OPERATOR,
     raw_input: dict[str, object] | None = None,
     raw_result: dict[str, object] | None = None,
-    strategy_config: list[Strategy] | None = None,
     session_factory: SessionFactory = SessionLocal,
 ) -> ExecuteRecord:
     """
@@ -223,8 +211,6 @@ async def append_terminated_execute_record(
         需要持久化的输入快照。
     raw_result : dict[str, object] | None, optional
         需要持久化的结果快照。
-    strategy_config : list[Strategy] | None, optional
-        本次执行关联的策略配置快照。
     session_factory : SessionFactory, optional
         创建数据库写会话的工厂函数。
 
@@ -250,7 +236,6 @@ async def append_terminated_execute_record(
     return await _persist_execute_record(
         account_id=account_id,
         execution_id=execution_id,
-        strategy_config=strategy_config,
         raw_input=raw_input,
         raw_result=persisted_raw_result,
         is_success=0,

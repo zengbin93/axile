@@ -124,7 +124,6 @@ def _append_trade_pre_execute_audit(
         content={
             "curr_target": standard_input.curr_target,
             "last_target": standard_input.last_target,
-            "target_update_time": standard_input.extra.get("target_update_time"),
         },
     )
     append_execution_artifact_sync(

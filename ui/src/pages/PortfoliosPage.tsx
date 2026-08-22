@@ -116,7 +116,7 @@ function PortfolioCard({
             {p.name}
           </span>
           <Chip>{p.market}</Chip>
-          <Chip>{p.custom_calc_py_code ? '自定义逻辑' : '策略组合'}</Chip>
+          <Chip>自定义函数</Chip>
         </div>
         <div className="mt-1 text-[12.5px] text-ink-3">
           {followers.length > 0 ? (

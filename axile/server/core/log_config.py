@@ -54,7 +54,6 @@ MODULE_LOG_LEVELS = {
     "asyncio": logging.WARNING,
     "threading": logging.WARNING,
     "urllib3": logging.WARNING,
-    "tenacity._utils": logging.WARNING,
     "uvicorn.access": logging.WARNING,
     "starlette.middleware.errors": logging.WARNING,
     "sqlalchemy": logging.WARNING,
@@ -64,7 +63,6 @@ MODULE_LOG_LEVELS = {
 }
 
 SUPPRESSED_INFO_LOGGERS = {
-    "tenacity._utils",
     "uvicorn.access",
     "starlette.middleware.errors",
 }

@@ -259,7 +259,6 @@ dependencies = [
     { name = "sqlalchemy" },
     { name = "sqlmodel" },
     { name = "streamlit" },
-    { name = "tenacity" },
     { name = "tomlkit" },
     { name = "typer" },
 ]
@@ -314,7 +313,6 @@ requires-dist = [
     { name = "sqlalchemy", specifier = ">=2.0.46" },
     { name = "sqlmodel", specifier = ">=0.0.24" },
     { name = "streamlit", specifier = ">=1.41.0" },
-    { name = "tenacity", specifier = ">=9.0.0" },
     { name = "tomlkit", specifier = ">=0.15.0" },
     { name = "typer", specifier = ">=0.20.1" },
 ]

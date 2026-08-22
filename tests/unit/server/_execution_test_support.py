@@ -4,7 +4,6 @@ from datetime import datetime
 from types import SimpleNamespace, TracebackType
 
 from axile.common.trade_channel import TradeChannel
-from axile.domain.strategy import Strategy
 from axile.executor.models.execution_result import AlgorithmResult
 from axile.executor.models.unified_account_assets import UnifiedAccountAssets
 from axile.executor.models.unified_input import UnifiedStandardInput
@@ -185,7 +184,6 @@ class FakeWorkerBackendManager:
         standard_input: UnifiedStandardInput,
         standard_input_dict: dict[str, object],
         audit_input: dict[str, object],
-        strategy_config: list[Strategy],
         execution_id: str | None,
         trigger_source: str,
         cleanup: bool,
@@ -196,7 +194,6 @@ class FakeWorkerBackendManager:
                 "standard_input": standard_input,
                 "standard_input_dict": standard_input_dict,
                 "audit_input": audit_input,
-                "strategy_config": strategy_config,
                 "execution_id": execution_id,
                 "trigger_source": trigger_source,
                 "cleanup": cleanup,

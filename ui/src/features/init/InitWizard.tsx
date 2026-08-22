@@ -8,7 +8,6 @@ import { ApiError } from '@/lib/api/client'
 import {
   initStatus,
   saveInit,
-  testQuantData,
   testDb,
   testFeishu,
   testTradingCalendar,
@@ -24,8 +23,6 @@ const inputCls =
 const labelCls = 'mb-1.5 mt-4 block text-[13px] text-ink-2 first:mt-0'
 
 const DEFAULT_DB_URI = 'sqlite+aiosqlite:///./axile.db'
-const DEFAULT_CALENDAR_API = 'https://api.shengkezhi.com/open/v1/market/trading-calendar'
-const DEFAULT_QUANT_DATA_API = 'https://api.shengkezhi.com/open/v1/research/strategies/positions/latest'
 
 /** 随模式切换的文案；`init`=首启初始化，`edit`=已配置后的系统配置。 */
 interface Copy {
@@ -43,8 +40,6 @@ interface Copy {
   savingLabel: string
   /** 保存成功后的 toast。 */
   savedToast: string
-  /** 数据源那步「跳过（清空并进确认页）」的文案。 */
-  skipLabel: string
 }
 
 const COPY: Record<WizardMode, Copy> = {
@@ -56,7 +51,6 @@ const COPY: Record<WizardMode, Copy> = {
     saveLabel: '保存并启动',
     savingLabel: '启动中…',
     savedToast: '配置已保存，axile 正在启动…',
-    skipLabel: '跳过 · 仅自定义组合',
   },
   edit: {
     brand: '系统配置',
@@ -66,19 +60,16 @@ const COPY: Record<WizardMode, Copy> = {
     saveLabel: '保存并重启',
     savingLabel: '重启中…',
     savedToast: '配置已保存，axile 正在重启…',
-    skipLabel: '清空数据源 · 仅自定义组合',
   },
 }
 
-// 三个可选集成各自成步（都带「测试」按钮，需要按钮+结果的横向空间）：量化数据源、交易日历、执行告警飞书。
+// 两个可选集成各自成步（都带「测试」按钮，需要按钮+结果的横向空间）：交易日历、执行告警飞书。
 // 数据库/环境/日志等有可用默认值、无需连通性自检，收进确认页的「高级选项」。
-const STEP_LABELS = ['量化数据源', '交易日历', '执行告警'] as const
+const STEP_LABELS = ['交易日历', '执行告警'] as const
 
 /** 表单草稿；`algorithm_modules` / `algorithm_directories` 以每行一项的文本承载，保存时切分为数组。 */
 interface Draft {
   sqlalchemy_database_uri: string
-  quant_data_token: string
-  quant_data_api: string
   trading_calendar_token: string
   trading_calendar_api: string
   exe_err_feishu_key: string
@@ -195,7 +186,7 @@ function Rail({
  * - `edit`=已配置后从齿轮进入的系统配置（由 `SystemConfigPage` 承载，带关闭回调）：**设置页**，
  *   Rail 各节任意跳转、页脚常驻「保存并重启」，可从任意节直接保存——系统早已配好，无须逐级点按。
  *
- * 采集数据库地址与量化数据源等配置，保存后后端写入 config.toml 并自重启；
+ * 采集数据库地址与可选外部集成配置，保存后后端写入 config.toml 并自重启；
  * 期间轮询 `/init/status`，就绪后刷新页面进入正常应用。编辑态保存前先弹确认（重启会中断执行）。
  */
 export function InitWizard({
@@ -217,17 +208,14 @@ export function InitWizard({
   const [step, setStep] = useState(0)
   const [saving, setSaving] = useState(false)
   const [dbTest, setDbTest] = useState<TestState>(null)
-  const [quantDataTest, setQuantDataTest] = useState<TestState>(null)
   const [calendarTest, setCalendarTest] = useState<TestState>(null)
   const [feishuTest, setFeishuTest] = useState<TestState>(null)
   const [confirm, setConfirm] = useState<ConfirmSpec | null>(null)
 
   const [draft, setDraft] = useState<Draft>({
     sqlalchemy_database_uri: initial.sqlalchemy_database_uri || DEFAULT_DB_URI,
-    quant_data_token: initial.quant_data_token,
-    quant_data_api: initial.quant_data_api || DEFAULT_QUANT_DATA_API,
     trading_calendar_token: initial.trading_calendar_token ?? '',
-    trading_calendar_api: initial.trading_calendar_api || DEFAULT_CALENDAR_API,
+    trading_calendar_api: initial.trading_calendar_api ?? '',
     exe_err_feishu_key: initial.exe_err_feishu_key ?? '',
     environment: initial.environment || 'local',
     app_log_dir: initial.app_log_dir || './logs',
@@ -243,15 +231,6 @@ export function InitWizard({
       setDbTest(await testDb(draft.sqlalchemy_database_uri))
     } catch (e) {
       setDbTest({ ok: false, message: errText(e) })
-    }
-  }
-
-  const runQuantDataTest = async () => {
-    setQuantDataTest('busy')
-    try {
-      setQuantDataTest(await testQuantData(draft.quant_data_token, draft.quant_data_api))
-    } catch (e) {
-      setQuantDataTest({ ok: false, message: errText(e) })
     }
   }
 
@@ -324,18 +303,11 @@ export function InitWizard({
     }
   }
 
-  // 「下一步」= 带数据源继续，需两项都填；空 / 半填改走左下角「跳过」（清空并进下一步）。
-  // 执行告警（step 1）为选填，空即不推送，从不拦「下一步」；数据库地址护栏落在确认页（末步）。
-  const dataSourceReady = Boolean(draft.quant_data_token.trim() && draft.quant_data_api.trim())
   const confirmStep = steps.length - 1
-  const nextDisabled =
-    (step === 0 && !dataSourceReady) || (step === confirmStep && !draft.sqlalchemy_database_uri.trim())
+  const nextDisabled = step === confirmStep && !draft.sqlalchemy_database_uri.trim()
 
-  // 数据源半填（只填其一）后端必 422；edit 态可从任意节直接保存，故在此统一拦截。
-  const dataSourceHalf =
-    Boolean(draft.quant_data_token.trim()) !== Boolean(draft.quant_data_api.trim())
   const calendarHalf = Boolean(draft.trading_calendar_token.trim()) && !draft.trading_calendar_api.trim()
-  const saveDisabled = saving || !draft.sqlalchemy_database_uri.trim() || dataSourceHalf || calendarHalf
+  const saveDisabled = saving || !draft.sqlalchemy_database_uri.trim() || calendarHalf
 
   // edit 态是设置页而非向导：kicker 去掉「n / N」序号，只留分节标签。
   const kickerOf = (n: number) => (isEdit ? copy.kicker : `${copy.kicker} · ${n} / ${steps.length}`)
@@ -343,19 +315,6 @@ export function InitWizard({
   const onNext = () => {
     if (step < steps.length - 1) setStep(step + 1)
     else onSave()
-  }
-
-  /** 跳过数据源：清空两项与其测试结果，以「仅自定义组合」模式进入下一步（仅 init 向导）。 */
-  const onSkip = () => {
-    set({ quant_data_token: '', quant_data_api: '' })
-    setQuantDataTest(null)
-    setStep(step + 1)
-  }
-
-  /** 清空数据源：edit 态原地清空两项（转「仅自定义组合」），不跳步——设置页由 Rail 导航。 */
-  const onClearDataSource = () => {
-    set({ quant_data_token: '', quant_data_api: '' })
-    setQuantDataTest(null)
   }
 
   return (
@@ -382,34 +341,8 @@ export function InitWizard({
             {step === 0 && (
               <WizardPage
                 kicker={kickerOf(1)}
-                title="量化数据源（选填）"
-                lead="策略权重组合需要量化数据服务；只用自定义组合可直接「跳过」。要用策略组合请两项都填，并点「测试连接」确认。"
-              >
-                <div className="max-w-[560px]">
-                  <label className={labelCls}>数据接口地址</label>
-                  <input
-                    className={inputCls}
-                    value={draft.quant_data_api}
-                    onChange={(e) => set({ quant_data_api: e.target.value })}
-                    placeholder={DEFAULT_QUANT_DATA_API}
-                  />
-                  <label className={labelCls}>访问令牌</label>
-                  <input
-                    className={inputCls}
-                    value={draft.quant_data_token}
-                    onChange={(e) => set({ quant_data_token: e.target.value })}
-                    placeholder="粘贴访问令牌"
-                  />
-                  <TestRow state={quantDataTest} onTest={runQuantDataTest} />
-                </div>
-              </WizardPage>
-            )}
-
-            {step === 1 && (
-              <WizardPage
-                kicker={kickerOf(2)}
                 title="交易日历（选填）"
-                lead="配置与胜可知交易日历契约兼容的接口后，axile 会把 SSE 与 CFFEX 日历保存到本地数据库，并在覆盖不足时自动补齐。留空令牌则关闭自动同步。"
+                lead="配置兼容接口后，axile 会把 SSE 与 CFFEX 日历保存到本地数据库，并在覆盖不足时自动补齐。接口地址留空则使用工作日回退。"
               >
                 <div className="max-w-[560px]">
                   <label className={labelCls}>交易日历接口</label>
@@ -417,28 +350,28 @@ export function InitWizard({
                     className={inputCls}
                     value={draft.trading_calendar_api}
                     onChange={(e) => set({ trading_calendar_api: e.target.value })}
-                    placeholder={DEFAULT_CALENDAR_API}
+                    placeholder="https://example.com/trading-calendar"
                   />
-                  <label className={labelCls}>开放平台令牌</label>
+                  <label className={labelCls}>Bearer 令牌（选填）</label>
                   <input
                     className={inputCls}
                     type="password"
                     value={draft.trading_calendar_token}
                     onChange={(e) => set({ trading_calendar_token: e.target.value })}
-                    placeholder="sk_xxx；留空则不自动同步"
+                    placeholder="接口无需鉴权时留空"
                   />
                   <TestRow
                     state={calendarTest}
                     onTest={runCalendarTest}
-                    disabled={!draft.trading_calendar_token.trim() || !draft.trading_calendar_api.trim()}
+                    disabled={!draft.trading_calendar_api.trim()}
                   />
                 </div>
               </WizardPage>
             )}
 
-            {step === 2 && (
+            {step === 1 && (
               <WizardPage
-                kicker={kickerOf(3)}
+                kicker={kickerOf(2)}
                 title="执行错误告警（选填）"
                 lead="任一账户执行异常时，axile 会把错误卡片推送到此飞书机器人；系统级，区别于各账户自己的「飞书通知」。留空则不推送，可先「测试推送」发一张示例卡片确认联通。"
               >
@@ -460,7 +393,7 @@ export function InitWizard({
               </WizardPage>
             )}
 
-            {step === 3 && (
+            {step === 2 && (
               <WizardPage
                 kicker={kickerOf(steps.length)}
                 title={copy.confirmTitle}
@@ -469,9 +402,8 @@ export function InitWizard({
                 <div className="max-w-[560px]">
                   <dl className="rounded-[14px] border border-line bg-surface px-4 py-2 text-[14px]">
                     {[
-                      ['数据接口', draft.quant_data_api || '（未配置 · 仅自定义组合）'],
-                      ['数据令牌', draft.quant_data_token ? '已填写' : '（空）'],
-                      ['交易日历', draft.trading_calendar_token ? '已配置自动同步' : '（未配置 · 工作日回退）'],
+                      ['交易日历', draft.trading_calendar_api ? '已配置自动同步' : '（未配置 · 工作日回退）'],
+                      ['日历鉴权', draft.trading_calendar_token ? '已填写 Bearer 令牌' : '（无需鉴权）'],
                       ['执行告警', draft.exe_err_feishu_key ? '已配置飞书推送' : '（未配置 · 不推送）'],
                     ].map(([k, v]) => (
                       <div key={k} className="flex justify-between gap-4 border-b border-line py-2.5 last:border-0">
@@ -546,16 +478,8 @@ export function InitWizard({
 
           <div className="flex gap-3 border-t border-line bg-surface px-12 py-3.5">
             {isEdit ? (
-              // edit=设置页：不逐级推进。左侧仅在数据源节给「清空」便捷键；右侧常驻「保存并重启」，可从任意节直接保存（经确认弹窗）。
+              // edit=设置页：右侧常驻「保存并重启」，可从任意节直接保存（经确认弹窗）。
               <>
-                {step === 0 && (
-                  <button
-                    className="cursor-pointer rounded-[11px] border border-line bg-surface px-[22px] py-2.5 text-[14px] text-ink-2"
-                    onClick={onClearDataSource}
-                  >
-                    {copy.skipLabel}
-                  </button>
-                )}
                 <span className="flex-1" />
                 <button
                   className="cursor-pointer rounded-[11px] border border-ink-1 bg-ink-1 px-[22px] py-2.5 text-[14px] font-[550] text-surface disabled:opacity-45"
@@ -566,22 +490,14 @@ export function InitWizard({
                 </button>
               </>
             ) : (
-              // init=向导：上一步 / 跳过 + 下一步 / 保存，逐级推进。
+              // init=向导：上一步 + 下一步 / 保存，逐级推进。
               <>
-                {step > 0 ? (
+                {step > 0 && (
                   <button
                     className="cursor-pointer rounded-[11px] border border-line bg-surface px-[22px] py-2.5 text-[14px] text-ink-2"
                     onClick={() => setStep(step - 1)}
                   >
                     上一步
-                  </button>
-                ) : (
-                  // 数据源为选填：常驻中性「跳过」，一眼可见这步可跳（不做入场表演、不用状态色）。
-                  <button
-                    className="cursor-pointer rounded-[11px] border border-line bg-surface px-[22px] py-2.5 text-[14px] text-ink-2"
-                    onClick={onSkip}
-                  >
-                    {copy.skipLabel}
                   </button>
                 )}
                 <span className="flex-1" />

@@ -64,7 +64,7 @@ class _FakeSession:
 
 
 def _patch_aiohttp_response(monkeypatch: pytest.MonkeyPatch, payload: Any) -> None:
-    """让走 aiohttp 的连通性测试（量化数据源 / 飞书）使用伪造响应，避免真实网络请求."""
+    """让走 aiohttp 的连通性测试使用伪造响应，避免真实网络请求."""
     monkeypatch.setattr(
         init_module.aiohttp,
         "ClientSession",
@@ -80,8 +80,6 @@ def test_init_status_returns_prefill_keys(client: TestClient) -> None:
     body = resp.json()
     assert set(body["values"]) == {
         "sqlalchemy_database_uri",
-        "quant_data_token",
-        "quant_data_api",
         "trading_calendar_token",
         "trading_calendar_api",
         "exe_err_feishu_key",
@@ -93,36 +91,8 @@ def test_init_status_returns_prefill_keys(client: TestClient) -> None:
     }
 
 
-def test_init_status_reports_data_source_available(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
-    """状态接口应按 quant_data_api 是否非空返回 data_source_available."""
-    monkeypatch.setattr(cfg.settings, "quant_data_api", "")
-    assert client.get("/api/v1/init/status").json()["data_source_available"] is False
-
-    monkeypatch.setattr(cfg.settings, "quant_data_api", "http://x")
-    assert client.get("/api/v1/init/status").json()["data_source_available"] is True
-
-
-def test_test_quant_data_success(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
-    """量化数据源响应含 data.items 时判定成功."""
-    _patch_aiohttp_response(monkeypatch, {"code": 0, "msg": "ok", "data": {"items": [1, 2, 3]}})
-
-    resp = client.post("/api/v1/init/test-quant-data", json={"token": "t", "data_api": "http://x"})
-
-    assert resp.json()["ok"] is True
-    assert "3" in resp.json()["message"]
-
-
-def test_test_quant_data_missing_items(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
-    """量化数据源响应缺少 data.items 时判定失败."""
-    _patch_aiohttp_response(monkeypatch, {"code": 0, "msg": "ok", "data": {}})
-
-    resp = client.post("/api/v1/init/test-quant-data", json={"token": "t", "data_api": "http://x"})
-
-    assert resp.json()["ok"] is False
-
-
 def test_test_trading_calendar_success(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
-    """交易日历测试应校验胜可知兼容字段。"""
+    """交易日历测试应校验通用上游契约。"""
     _patch_aiohttp_response(
         monkeypatch,
         [{"exchange": "SSE", "calDate": "2026-08-22", "isOpen": False, "pretradeDate": "2026-08-21"}],
@@ -198,32 +168,27 @@ def test_init_save_rejects_bad_dsn(client: TestClient) -> None:
         "/api/v1/init/save",
         json={
             "sqlalchemy_database_uri": "not-a-valid-dsn",
-            "quant_data_token": "t",
-            "quant_data_api": "http://x",
         },
     )
 
     assert resp.status_code == 422
 
 
-def test_init_save_rejects_partial_quant_data(client: TestClient) -> None:
-    """量化数据源只填其一（半配）应返回 422."""
+def test_init_save_rejects_calendar_token_without_api(client: TestClient) -> None:
+    """交易日历令牌存在但接口为空时应返回 422。"""
     resp = client.post(
         "/api/v1/init/save",
         json={
             "sqlalchemy_database_uri": "sqlite+aiosqlite:///./axile.db",
-            "quant_data_token": "",
-            "quant_data_api": "http://x",
+            "trading_calendar_token": "token",
         },
     )
 
     assert resp.status_code == 422
 
 
-def test_init_save_accepts_empty_quant_data_custom_only(
-    client: TestClient, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    """数据源两项皆空应放行（仅自定义组合模式），并写入 config.toml."""
+def test_init_save_accepts_empty_calendar(client: TestClient, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """交易日历留空应放行并写入 config.toml。"""
     toml_path = tmp_path / "config.toml"
     monkeypatch.setattr(cfg, "CONFIG_TOML_PATH", toml_path)
     monkeypatch.setattr(init_module, "_restart_process", lambda: None)
@@ -232,8 +197,6 @@ def test_init_save_accepts_empty_quant_data_custom_only(
         "/api/v1/init/save",
         json={
             "sqlalchemy_database_uri": "sqlite+aiosqlite:///./axile.db",
-            "quant_data_token": "",
-            "quant_data_api": "",
         },
     )
 
@@ -241,7 +204,7 @@ def test_init_save_accepts_empty_quant_data_custom_only(
     assert resp.json()["ok"] is True
     assert toml_path.exists()
     written = toml_path.read_text(encoding="utf-8")
-    assert 'quant_data_api = ""' in written
+    assert 'trading_calendar_api = ""' in written
     assert 'trading_calendar_token = ""' in written
     # 未提供告警 key 时应落盘为空串（默认不推送）。
     assert 'exe_err_feishu_key = ""' in written
@@ -261,8 +224,8 @@ def test_init_save_writes_config_and_schedules_restart(
         "/api/v1/init/save",
         json={
             "sqlalchemy_database_uri": "sqlite+aiosqlite:///./axile.db",
-            "quant_data_token": "tok",
-            "quant_data_api": "http://x",
+            "trading_calendar_api": "http://calendar.test",
+            "trading_calendar_token": "tok",
             "exe_err_feishu_key": "bot-key-123",
             "algorithm_modules": ["pkg.a"],
             "algorithm_directories": ["./my_algos"],
@@ -273,7 +236,7 @@ def test_init_save_writes_config_and_schedules_restart(
     assert resp.json()["ok"] is True
     assert toml_path.exists()
     written = toml_path.read_text(encoding="utf-8")
-    assert 'quant_data_token = "tok"' in written
+    assert 'trading_calendar_token = "tok"' in written
     assert 'exe_err_feishu_key = "bot-key-123"' in written
     assert "./my_algos" in written
     assert restarted.get("done") is True

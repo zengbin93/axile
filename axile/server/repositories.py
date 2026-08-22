@@ -7,51 +7,7 @@ from sqlalchemy import ColumnElement
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import and_, col, desc, func, select
 
-from axile.domain.strategy import Strategy, WeightType
-from axile.server.db.models import ExecuteRecord, Portfolio, PortfolioAccount, StrategyConfig
-
-
-async def get_latest_strategies_by_account_id(session: AsyncSession, account_id: int) -> Optional[StrategyConfig]:
-    """获取账户当前策略配置."""
-    curr_portfolio_id = await get_latest_portfolio_id_by_account_id(session, account_id)
-
-    if curr_portfolio_id is None:
-        return None
-
-    return await get_latest_strategies_by_portfolio_id(session, curr_portfolio_id)
-
-
-async def get_latest_strategies_by_portfolio_id(session: AsyncSession, portfolio_id: int) -> Optional[StrategyConfig]:
-    """获取组合的当前策略配置."""
-    return (
-        await session.execute(
-            select(StrategyConfig)
-            .where(StrategyConfig.portfolio_id == portfolio_id)
-            .order_by(desc(StrategyConfig.id))
-            .limit(1)
-        )
-    ).scalar_one_or_none()
-
-
-def add_strategies_by_portfolio_id(
-    session: AsyncSession,
-    portfolio_id: Optional[int],
-    strategies: List[Strategy],
-    weight_type: WeightType | None,
-) -> StrategyConfig:
-    """
-    新增组合/策略记录.
-
-    (创建或更新组合的当前策略配置).
-    """
-    portfolio_id = cast("int", portfolio_id)
-    new_strategies = StrategyConfig(
-        portfolio_id=portfolio_id,
-        strategies=strategies,
-        weight_type=weight_type,
-    )
-    session.add(new_strategies)
-    return new_strategies
+from axile.server.db.models import ExecuteRecord, Portfolio, PortfolioAccount
 
 
 async def add_record_portfolio_account(
@@ -386,16 +342,3 @@ async def get_earliest_execute_records_since_for_accounts(
         newest_first=False,
         limit=limit,
     )
-
-
-async def get_portfolio_strategies_and_account(
-    session: AsyncSession, portfolio_id: int
-) -> tuple[list[Strategy], WeightType | None, Optional[int]]:
-    """获取组合当前策略配置和当前绑定账户ID."""
-    strategy_config = await get_latest_strategies_by_portfolio_id(session, portfolio_id)
-
-    account_id = await get_latest_account_id_by_portfolio_id(session, portfolio_id)
-
-    if strategy_config is None:
-        return [], None, account_id
-    return strategy_config.strategies, strategy_config.weight_type, account_id

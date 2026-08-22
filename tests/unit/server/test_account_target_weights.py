@@ -68,7 +68,7 @@ def _build_portfolio() -> Portfolio:
         name="combo",
         market="加密货币",
         description="desc",
-        custom_calc_py_code=None,
+        custom_calc_py_code="def calculate_portfolio(context):\n    return {}\n",
         status="active",
         tag="core",
     )
@@ -96,9 +96,7 @@ def _patch_resolution(
     async def fake_get_latest_portfolio_id_by_account_id(_session: object, _account_id: int) -> int | None:
         return portfolio_id
 
-    async def fake_resolve_portfolio_target(
-        _session: object, _portfolio: Portfolio, _trade_channel: TradeChannel
-    ) -> dict[str, float]:
+    async def fake_resolve_portfolio_target(_portfolio: Portfolio, _context: object) -> dict[str, float]:
         return dict(raw_target)
 
     monkeypatch.setattr(

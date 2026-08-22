@@ -19,7 +19,6 @@ from axile.domain.execution import (
     ExecutionTaskStatus,
     ExecutionTerminateMode,
 )
-from axile.domain.strategy import Strategy
 from axile.server.db.models.base import (
     new_execution_id,
     now_str,
@@ -44,10 +43,6 @@ class ExecuteRecordBase(SQLModel):
         description="如果成功: 标准输出; 如果失败: 错误信息/终止理由",
     )
     is_success: int = Field(sa_column=Column(Integer, nullable=False))
-    strategy_config: Optional[List[Strategy]] = Field(
-        sa_column=Column(SA_JSON, nullable=False),
-        description="本次执行时候所用的策略组合",
-    )
 
 
 class ExecuteRecord(ExecuteRecordBase, table=True):

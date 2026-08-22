@@ -13,7 +13,6 @@ from axile.domain.execution import (
     ExecutionKind,
     ExecutionReasonFamily,
 )
-from axile.domain.strategy import Strategy
 from axile.executor.abstract_executor.base import AbstractExecutor
 from axile.executor.models.unified_input import UnifiedStandardInput
 from axile.executor.models.unified_output import UnifiedStandardOutput
@@ -38,7 +37,6 @@ class RebalanceBackendRequest:
     standard_input: UnifiedStandardInput
     standard_input_dict: dict[str, object]
     audit_input: dict[str, object]
-    strategy_config: list[Strategy]
     execution_id: str | None
     trigger_source: str
     cleanup: bool
@@ -88,7 +86,6 @@ def _dump_output_result(output: UnifiedStandardOutput | None) -> dict[str, objec
 async def _append_output_record(
     *,
     account: Account,
-    strategy_config: list[Strategy] | None,
     raw_input: dict[str, object],
     output: UnifiedStandardOutput | None,
     execution_id: str | None,
@@ -99,7 +96,6 @@ async def _append_output_record(
     result = _dump_output_result(output)
     record = await append_execute_record_from_output(
         account=account,
-        strategy_config=strategy_config,
         raw_input=raw_input,
         result=result,
         output=output,
@@ -117,14 +113,12 @@ async def _run_rebalance_via_worker_process(request: RebalanceBackendRequest) ->
             standard_input=request.standard_input,
             standard_input_dict=request.standard_input_dict,
             audit_input=request.audit_input,
-            strategy_config=request.strategy_config,
             execution_id=request.execution_id,
             trigger_source=request.trigger_source,
             cleanup=request.cleanup,
         )
         record, _ = await _append_output_record(
             account=request.account,
-            strategy_config=request.strategy_config,
             raw_input=request.standard_input_dict,
             output=output,
             execution_id=request.execution_id,
@@ -263,7 +257,6 @@ async def _append_rebalance_start_audit(
         content={
             "curr_target": request.curr_target,
             "last_target": request.last_target,
-            "target_update_time": request.standard_input.extra.get("target_update_time"),
         },
     )
     await append_execution_artifact(
@@ -282,7 +275,7 @@ async def _append_rebalance_start_audit(
         reason_family=ExecutionReasonFamily.INPUT,
         reason_code="COMMON.INPUT_SNAPSHOTTED",
         seq=executor.next_audit_seq(),
-        details={"debug": {"strategy_count": len(request.strategy_config), "symbol_count": len(request.curr_target)}},
+        details={"debug": {"symbol_count": len(request.curr_target)}},
     )
     await append_execution_event(
         execution_id=execution_id,
@@ -307,7 +300,6 @@ async def _persist_rebalance_completion(
     """持久化调仓结果，并补写完成事件与逐只对账。"""
     record, result = await _append_output_record(
         account=request.account,
-        strategy_config=request.strategy_config,
         raw_input=request.standard_input_dict,
         output=output,
         execution_id=request.execution_id,
@@ -367,7 +359,6 @@ async def _append_rebalance_error_record(request: RebalanceBackendRequest, msg: 
     """为调仓失败路径持久化错误执行记录。"""
     await append_error_execute_record(
         account_id=request.account.id,
-        strategy_config=request.strategy_config,
         raw_input=request.standard_input_dict,
         msg=msg,
         execution_id=request.execution_id,
@@ -408,7 +399,6 @@ async def _run_clear_positions_via_worker_process(request: ClearPositionsBackend
         )
         record, _ = await _append_output_record(
             account=request.account,
-            strategy_config=None,
             raw_input={},
             output=output,
             execution_id=request.execution_id,
@@ -503,7 +493,6 @@ async def _persist_clear_positions_completion(
     """持久化清仓结果，并补写完成事件与产物。"""
     record, result = await _append_output_record(
         account=request.account,
-        strategy_config=None,
         raw_input={},
         output=output,
         execution_id=request.execution_id,

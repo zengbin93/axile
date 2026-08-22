@@ -58,19 +58,13 @@ from axile.server.db.models.portfolio import (
     PortfolioCreate,
     PortfolioListPublic,
     PortfolioLitePublic,
-    PortfolioPreviewRequest,
     PortfolioPublic,
     PortfolioUpdate,
-    StrategyConfig,
-    StrategyConfigBase,
-    StrategyConfigListPublic,
-    StrategyConfigPublic,
     ValidateCustomCalcRequest,
     ValidateCustomCalcResponse,
 )
 from axile.server.db.models.trading_calendar import TradingCalendarRecord
 
-StrategyConfig.model_rebuild()
 Portfolio.model_rebuild()
 Account.model_rebuild()
 PortfolioAccount.model_rebuild()
@@ -82,15 +76,10 @@ __all__ = [
     "now_str",
     "now_ms",
     "new_execution_id",
-    "StrategyConfigBase",
-    "StrategyConfig",
-    "StrategyConfigPublic",
-    "StrategyConfigListPublic",
     "PortfolioBase",
     "Portfolio",
     "PortfolioUpdate",
     "PortfolioCreate",
-    "PortfolioPreviewRequest",
     "PortfolioPublic",
     "PortfolioLitePublic",
     "PortfolioListPublic",

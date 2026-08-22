@@ -16,6 +16,7 @@ from axile.domain.execution import ExecutionTaskStatus
 from axile.server.api.deps import SchedDep, SessionDep
 from axile.server.api.routes.account_support import _get_account_or_404
 from axile.server.api.routes.portfolio import resolve_portfolio_target
+from axile.server.context import Context
 from axile.server.db.models import (
     ExecutionArtifact,
     ExecutionArtifactListPublic,
@@ -102,8 +103,7 @@ async def account_target_weights(session: SessionDep, account_id: int) -> dict[s
 
     Notes
     -----
-    自定义逻辑组合的目标以 dry-run 上下文（``context=None``）试跑脚本, 与真实调仓的
-    账户上下文存在既有差异（与 ``/portfolio/latest_weights`` 同源, 本端点不额外消除）。
+    组合函数使用当前账户的真实上下文执行，随后再叠加账户杠杆和精度，口径与调仓一致。
     """
     account = await _get_account_or_404(session, account_id)
 
@@ -114,7 +114,7 @@ async def account_target_weights(session: SessionDep, account_id: int) -> dict[s
     if portfolio is None:
         return {}
 
-    raw_target = await resolve_portfolio_target(session, portfolio, account.trade_channel)
+    raw_target = await resolve_portfolio_target(portfolio, Context(session=session, account_id=account_id))
     return _normalize_rebalance_target(account, raw_target)
 
 

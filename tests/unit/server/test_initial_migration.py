@@ -30,17 +30,13 @@ def test_migration_history_is_linear() -> None:
     assert [path.name for path in migration_paths] == [
         "0001_initial.py",
         "0002_trading_calendar.py",
-        "0003_strategy_weight_type.py",
     ]
     initial = _load_migration(migration_paths[0])
     calendar = _load_migration(migration_paths[1])
-    weight_type = _load_migration(migration_paths[2])
     assert initial.revision == "0001"
     assert initial.down_revision is None
     assert calendar.revision == "0002"
     assert calendar.down_revision == "0001"
-    assert weight_type.revision == "0003"
-    assert weight_type.down_revision == "0002"
 
 
 def test_initial_baseline_creates_the_current_schema() -> None:
@@ -61,7 +57,6 @@ def test_initial_baseline_creates_the_current_schema() -> None:
             "execution_event",
             "portfolio",
             "portfolioaccount",
-            "strategyconfig",
         }
 
         for table_name, column_name in (
@@ -101,6 +96,9 @@ def test_initial_baseline_creates_the_current_schema() -> None:
         }
         assert "uq_execution_event_event_uid" in event_unique_constraints
 
+        portfolio_columns = {column["name"]: column for column in inspector.get_columns("portfolio")}
+        assert portfolio_columns["custom_calc_py_code"]["nullable"] is False
+
 
 def test_trading_calendar_migration_adds_calendar_table() -> None:
     initial = _load_migration(_MIGRATIONS_DIR / "0001_initial.py")
@@ -118,42 +116,3 @@ def test_trading_calendar_migration_adds_calendar_table() -> None:
         assert "trading_calendar" in inspector.get_table_names()
         primary_key = inspector.get_pk_constraint("trading_calendar")
         assert primary_key["constrained_columns"] == ["exchange", "cal_date"]
-
-
-def test_weight_type_migration_marks_only_data_source_portfolios_as_ts() -> None:
-    """存量数据源配置迁移为 ts，自定义函数配置保持空值。"""
-    initial = _load_migration(_MIGRATIONS_DIR / "0001_initial.py")
-    migration = _load_migration(_MIGRATIONS_DIR / "0003_strategy_weight_type.py")
-    engine = sa.create_engine("sqlite://")
-
-    with engine.begin() as connection:
-        operations = Operations(MigrationContext.configure(connection))
-        initial.op = operations
-        initial.upgrade()
-        connection.execute(
-            sa.text(
-                """
-                INSERT INTO portfolio
-                    (id, name, market, custom_calc_py_code, updated_at, created_at)
-                VALUES
-                    (1, 'data', 'crypto', NULL, 'now', 'now'),
-                    (2, 'custom', 'crypto', 'def calculate_portfolio(context): pass', 'now', 'now')
-                """
-            )
-        )
-        connection.execute(
-            sa.text(
-                """
-                INSERT INTO strategyconfig (id, portfolio_id, strategies, created_at)
-                VALUES (1, 1, '[]', 'now'), (2, 2, '[]', 'now')
-                """
-            )
-        )
-
-        migration.op = operations
-        migration.upgrade()
-
-        rows = connection.execute(
-            sa.text("SELECT portfolio_id, weight_type FROM strategyconfig ORDER BY portfolio_id")
-        ).all()
-        assert rows == [(1, "ts"), (2, None)]

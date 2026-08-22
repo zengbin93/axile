@@ -5,11 +5,7 @@ import type {
   Message,
   Portfolio,
   PortfolioList,
-  StrategyConfigList,
-  Strategy,
-  TradeChannel,
   ValidateCustomCalcResult,
-  WeightType,
 } from '@/types/api'
 
 /** 组合列表（不含策略）。 */
@@ -22,42 +18,12 @@ export function getPortfolio(id: number, signal?: AbortSignal): Promise<Portfoli
   return apiGet<Portfolio>(`/portfolio/${id}`, signal)
 }
 
-/** 组合策略更换记录。 */
-export function getStrategyRecords(
-  id: number,
-  signal?: AbortSignal,
-): Promise<StrategyConfigList> {
-  return apiGet<StrategyConfigList>(`/portfolio/strategies_records/${id}`, signal)
-}
-
 /** 组合当前目标权重（symbol → weight，可负=空头）。 */
 export function getLatestWeights(
   id: number,
-  channel: TradeChannel,
   signal?: AbortSignal,
 ): Promise<LatestWeights> {
-  return apiGet<LatestWeights>(
-    `/portfolio/latest_weights/${id}?trade_channel=${channel}`,
-    signal,
-  )
-}
-
-/**
- * 试算一份策略配置合成后的目标权重（不落库）。
- *
- * 供编辑组合时「生效目标·前后对比」使用：对旧配置与草稿配置背靠背调用，
- * 落在同一根 bar 上，差异即可干净归因到配置改动本身。
- */
-export function previewWeights(
-  strategies: Strategy[],
-  channel: TradeChannel,
-  weightType: WeightType,
-): Promise<LatestWeights> {
-  return apiSend<LatestWeights>('POST', '/portfolio/preview_weights', {
-    strategies,
-    trade_channel: channel,
-    weight_type: weightType,
-  })
+  return apiGet<LatestWeights>(`/portfolio/latest_weights/${id}`, signal)
 }
 
 /**
@@ -79,16 +45,13 @@ export function createPortfolio(body: {
   name: string
   market: string
   description?: string | null
-  custom_calc_py_code?: string | null
+  custom_calc_py_code: string
   status?: string | null
   tag?: string | null
-  strategies: Strategy[]
-  weight_type?: WeightType | null
 }): Promise<Portfolio> {
   // 后端 PortfolioCreate 要求这些字段「存在」（即便为 null），补齐默认值。
   return apiSend<Portfolio>('POST', '/portfolio/', {
     description: null,
-    custom_calc_py_code: null,
     status: null,
     tag: null,
     ...body,
@@ -102,11 +65,9 @@ export function updatePortfolio(
     name: string
     market: string
     description: string | null
-    custom_calc_py_code: string | null
+    custom_calc_py_code: string
     status: string | null
     tag: string | null
-    strategies: Strategy[]
-    weight_type: WeightType | null
   }>,
 ): Promise<Portfolio> {
   return apiSend<Portfolio>('PATCH', `/portfolio/${id}`, patch)

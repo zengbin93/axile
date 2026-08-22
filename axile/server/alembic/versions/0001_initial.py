@@ -51,7 +51,7 @@ def upgrade() -> None:
         sa.Column("name", sa.Text(), nullable=False),
         sa.Column("market", sa.Text(), nullable=False),
         sa.Column("description", sa.Text(), nullable=True),
-        sa.Column("custom_calc_py_code", sa.Text(), nullable=True),
+        sa.Column("custom_calc_py_code", sa.Text(), nullable=False),
         sa.Column("status", sa.Text(), nullable=True),
         sa.Column("tag", sa.Text(), nullable=True),
         sa.Column("id", sa.Integer(), nullable=False),
@@ -87,15 +87,6 @@ def upgrade() -> None:
         sa.Column("updated_at", sa.Text(), nullable=False),
         sa.Column("created_at", sa.Text(), nullable=False),
         sa.ForeignKeyConstraint(["portfolio_id"], ["portfolio.id"], ondelete="SET NULL"),
-        sa.PrimaryKeyConstraint("id"),
-    )
-    op.create_table(
-        "strategyconfig",
-        sa.Column("strategies", sa.JSON(), nullable=False),
-        sa.Column("id", sa.Integer(), nullable=False),
-        sa.Column("portfolio_id", sa.Integer(), nullable=False),
-        sa.Column("created_at", sa.Text(), nullable=False),
-        sa.ForeignKeyConstraint(["portfolio_id"], ["portfolio.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),
     )
     op.create_table(
@@ -178,7 +169,6 @@ def upgrade() -> None:
         sa.Column("raw_input", sa.JSON(), nullable=False),
         sa.Column("raw_result", sa.JSON(), nullable=False),
         sa.Column("is_success", sa.Integer(), nullable=False),
-        sa.Column("strategy_config", sa.JSON(), nullable=False),
         sa.Column("id", sa.Integer(), nullable=False),
         sa.Column("account_id", sa.Integer(), nullable=False),
         sa.Column("created_at", sa.Text(), nullable=False),
@@ -306,7 +296,6 @@ def downgrade() -> None:
     op.drop_index("ix_account_control_counter_delta_execution", table_name="account_control_counter_delta")
     op.drop_index("ix_account_control_counter_delta_account_date", table_name="account_control_counter_delta")
     op.drop_table("account_control_counter_delta")
-    op.drop_table("strategyconfig")
     op.drop_table("account")
     op.drop_table("portfolio")
     op.drop_index("ix_execution_artifact_execution", table_name="execution_artifact")

@@ -13,7 +13,6 @@ from typing import cast
 from uuid import uuid4
 
 from axile.common.trade_channel import TradeChannel
-from axile.domain.strategy import Strategy
 from axile.executor.models.execution_result import ExecutionStatus
 from axile.executor.models.unified_account_assets import UnifiedAccountAssets
 from axile.executor.models.unified_input import UnifiedStandardInput
@@ -414,7 +413,6 @@ class WorkerBackendManager:
         standard_input: UnifiedStandardInput,
         standard_input_dict: dict[str, object],
         audit_input: dict[str, object],
-        strategy_config: list[Strategy],
         execution_id: str | None,
         trigger_source: str,
         cleanup: bool,
@@ -432,8 +430,6 @@ class WorkerBackendManager:
             发送给 worker 的标准输入字典快照。
         audit_input : dict[str, object]
             预先脱敏后的审计输入。
-        strategy_config : list[Strategy]
-            本次执行关联的策略配置快照。
         execution_id : str | None
             当前 execution 标识。
         trigger_source : str
@@ -455,7 +451,6 @@ class WorkerBackendManager:
             payload={
                 "standard_input": standard_input_dict,
                 "audit_input": audit_input,
-                "strategy_count": len(strategy_config),
                 "trigger_source": trigger_source,
                 "cleanup": cleanup,
             },

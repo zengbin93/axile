@@ -11,7 +11,6 @@ function rec(id: number, ok: boolean, at: string, error?: string): ExecuteRecord
     raw_input: {},
     raw_result: error ? { error } : {},
     is_success: ok ? 1 : 0,
-    strategy_config: null,
     created_at: at,
   } as ExecuteRecord
 }

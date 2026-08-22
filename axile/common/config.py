@@ -53,13 +53,6 @@ class Settings(BaseSettings):
         当前运行环境标识。
     sqlalchemy_database_uri : SqliteDsn
         SQLAlchemy 使用的数据库连接地址。
-    quant_data_token : str
-        上游量化数据服务的访问令牌（主服务端拉取策略目标权重、CTP 渠道映射主力合约
-        代码均用它）；缺省为空串。为空即以「仅自定义组合」模式运行——策略权重组合不可用，
-        自定义组合（``custom_calc_py_code``）不受影响。
-    quant_data_api : str
-        上游最新仓位资源的完整接口地址；缺省为空串。是否具备该数据源
-        是运行时能力位（见 :func:`is_configured` 的 Notes），为空即仅允许自定义组合。
     trading_calendar_api : str
         与胜可知交易日历契约兼容的上游接口地址。
     trading_calendar_token : str
@@ -82,7 +75,7 @@ class Settings(BaseSettings):
     :meth:`settings_customise_sources`；**不读取任何进程环境变量作为配置值**。所有字段
     均带默认值，因此在缺失 ``config.toml`` 时也能成功实例化，从而支持「未配置即进入初始化
     向导」的启动流程；是否完成初始化由 :func:`is_configured` 判定（以 ``config.toml`` 是否
-    存在为准，量化数据源可缺省）。
+        存在为准）。
     """
 
     model_config = SettingsConfigDict(
@@ -94,10 +87,7 @@ class Settings(BaseSettings):
     environment: Literal["local", "staging", "production"] = "local"
 
     sqlalchemy_database_uri: SqliteDsn = MultiHostUrl("sqlite+aiosqlite:///./axile.db")
-    # 上游量化数据服务；为空表示尚未完成初始化（缺省不再抛错，改由向导补齐）。
-    quant_data_token: str = ""
-    quant_data_api: str = ""
-    trading_calendar_api: str = "https://api.shengkezhi.com/open/v1/market/trading-calendar"
+    trading_calendar_api: str = ""
     trading_calendar_token: str = ""
     exe_err_feishu_key: str = ""
     app_log_dir: Path = Path("./logs")
@@ -145,9 +135,7 @@ def is_configured() -> bool:
     Notes
     -----
     判据是「向导的产物是否已生成」——向导保存的终点动作即写出 :data:`CONFIG_TOML_PATH`
-    （见 :func:`write_config_toml`），因此文件存在等价于「至少完成过一次初始化」。刻意
-    **不**以量化数据源是否非空为判据：数据源是可选能力（缺省即进入「仅自定义组合」模式），
-    是否具备由 ``settings.quant_data_api`` 在运行时另行判断，而非作为门禁。
+    （见 :func:`write_config_toml`），因此文件存在等价于「至少完成过一次初始化」。
     """
     return CONFIG_TOML_PATH.exists()
 

@@ -1,10 +1,7 @@
 """服务端通用工具函数测试。"""
 
 import asyncio
-from types import SimpleNamespace
-from typing import cast
 
-import pandas as pd
 import pytest
 from pydantic import ValidationError
 
@@ -12,53 +9,9 @@ from axile.common.trade_channel import TradeChannel
 from axile.domain.execution import ExecutionKind, ExecutionTaskStatus
 from axile.server import channel_capabilities
 from axile.server import utils as server_utils
-from axile.server.context import Context
 from axile.server.db.models import Account
 from axile.server.db.models.account import AccountUpdate
 from axile.server.execution import records as execution_records
-from axile.server.utils import invoke_portfolio_calc_code
-
-
-def test_invoke_portfolio_calc_code_accepts_context_signature() -> None:
-    """自定义组合脚本必须支持 calculate_portfolio(context) 入口。"""
-    script = """
-def calculate_portfolio(context):
-    return {"BTCUSDT": 0.6 if context is not None else 0.0}
-"""
-
-    result = invoke_portfolio_calc_code(script, context=cast(Context, object()))
-
-    assert result == {"BTCUSDT": 0.6}
-
-
-def test_invoke_portfolio_calc_code_requires_callable_function() -> None:
-    """缺失 calculate_portfolio 时应直接报错。"""
-    with pytest.raises(ValueError, match="calculate_portfolio 函数未找到或不可调用"):
-        invoke_portfolio_calc_code("portfolio = {}", context=None)
-
-
-def test_invoke_portfolio_calc_code_rejects_legacy_zero_arg_signature() -> None:
-    """零参旧脚本不再兼容，必须显式接收 context。"""
-    script = """
-def calculate_portfolio():
-    return {"ETHUSDT": 0.4}
-"""
-
-    with pytest.raises(ValueError, match="calculate_portfolio 必须定义为 calculate_portfolio\\(context\\)"):
-        invoke_portfolio_calc_code(script, context=None)
-
-
-def test_invoke_portfolio_calc_code_accepts_context_instance() -> None:
-    """上下文对象应作为唯一参数传入脚本。"""
-    script = """
-def calculate_portfolio(context):
-    return {"ETHUSDT": float(context.account_id)}
-"""
-
-    context = cast(Context, SimpleNamespace(account_id=1))
-    result = invoke_portfolio_calc_code(script, context=context)
-
-    assert result == {"ETHUSDT": 1.0}
 
 
 class _FakeWriteSession:
@@ -108,37 +61,6 @@ def _build_account() -> Account:
         portfolio_id=None,
         write_empty_record=0,
     )
-
-
-@pytest.mark.parametrize(
-    ("freq", "seconds"),
-    [("15m", 900), ("1h", 3600), ("2d", 172800), ("3w", 1814400), ("30s", 30)],
-)
-def test_parse_freq_supports_supported_units(freq: str, seconds: int) -> None:
-    assert server_utils.parse_freq(freq) == seconds
-
-
-def test_parse_freq_rejects_empty_string() -> None:
-    with pytest.raises(ValueError, match="频率字符串不能为空"):
-        server_utils.parse_freq(" ")
-
-
-def test_get_target_balance_aggregates_contributions_by_symbol() -> None:
-    dfw = pd.DataFrame(
-        [
-            {"symbol": "BTCUSDT", "weight": 0.5, "strategy": "alpha"},
-            {"symbol": "BTCUSDT", "weight": 0.25, "strategy": "beta"},
-            {"symbol": "ETHUSDT", "weight": 0.5, "strategy": "alpha"},
-        ]
-    )
-
-    result = server_utils.get_target_balance(
-        dfw=dfw,
-        strategy_config={"alpha": 0.6, "beta": 0.4},
-        trade_channel=TradeChannel.CTP,
-    )
-
-    assert result == {"BTCUSDT": 0.4, "ETHUSDT": 0.3}
 
 
 def test_parse_cron_expr_supports_multiple_triggers() -> None:

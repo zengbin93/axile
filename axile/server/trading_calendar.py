@@ -25,7 +25,7 @@ _CALENDAR_TIMEOUT_SECONDS = 10
 
 
 class TradingCalendarEntry(BaseModel):
-    """与胜可知交易日历响应对齐的单日记录。"""
+    """Axile 通用交易日历上游的单日记录。"""
 
     model_config = ConfigDict(populate_by_name=True)
 
@@ -46,7 +46,7 @@ async def list_calendar_entries(
     end: date | None = None,
     only_open: bool = False,
 ) -> list[TradingCalendarEntry]:
-    """从本地数据库按胜可知查询口径读取交易日历。"""
+    """从本地数据库按 Axile 查询口径读取交易日历。"""
     statement = select(TradingCalendarRecord).where(col(TradingCalendarRecord.exchange) == exchange.upper())
     if start is not None:
         statement = statement.where(col(TradingCalendarRecord.cal_date) >= start)
@@ -74,7 +74,8 @@ async def _max_calendar_date(session: AsyncSession, exchange: str) -> date | Non
 
 
 async def _fetch_calendar(exchange: str) -> list[TradingCalendarEntry]:
-    headers = {"Authorization": f"Bearer {settings.trading_calendar_token}"}
+    token = settings.trading_calendar_token.strip()
+    headers = {"Authorization": f"Bearer {token}"} if token else {}
     timeout = aiohttp.ClientTimeout(total=_CALENDAR_TIMEOUT_SECONDS)
     async with aiohttp.ClientSession(timeout=timeout) as client:
         async with client.get(
@@ -131,7 +132,7 @@ async def _ensure_exchange(exchange: str, cutoff: date) -> None:
 
 async def ensure_trading_calendar_coverage() -> None:
     """在配置上游后，补齐未来不足 90 天的交易日历。"""
-    if not settings.trading_calendar_token.strip() or not settings.trading_calendar_api.strip():
+    if not settings.trading_calendar_api.strip():
         logger.info("未配置交易日历上游，跳过自动同步")
         return
     cutoff = date.today() + timedelta(days=CALENDAR_MIN_FUTURE_DAYS)

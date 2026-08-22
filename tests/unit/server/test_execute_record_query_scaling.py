@@ -49,7 +49,6 @@ def _make_record(account_id: int, total_asset: float, created_at: str, is_succes
         raw_input={},
         raw_result={"account_assets": {"total_asset": total_asset}},
         is_success=is_success,
-        strategy_config=[],
         created_at=created_at,
     )
 

@@ -2,7 +2,7 @@
 
 Notes
 -----
-本模块提供「未完成配置」时初始化向导所需的接口：查询就绪状态、测试量化数据源
+本模块提供「未完成配置」时初始化向导所需的接口：查询就绪状态、测试交易日历
 与数据库连通性、写入 ``config.toml`` 并触发重启。所有接口**均不触达业务数据库**，
 因此在服务端处于初始化向导模式（数据库尚未迁移）时也能正常工作。
 """
@@ -31,7 +31,7 @@ from axile.server.error_notifications import build_test_card
 router = APIRouter(prefix="/init", tags=["init"])
 
 _DSN_ADAPTER: TypeAdapter[SqliteDsn] = TypeAdapter(SqliteDsn)
-_QUANT_DATA_TIMEOUT_SECONDS = 15
+_HTTP_TIMEOUT_SECONDS = 15
 _RESTART_DELAY_SECONDS = 0.5
 # 飞书自定义机器人 webhook 前缀；测试推送走与真实告警一致的地址契约。
 _FEISHU_HOOK_BASE = "https://open.feishu.cn/open-apis/bot/v2/hook/"
@@ -44,9 +44,6 @@ class InitStatus(BaseModel):
     ----------
     configured : bool
         是否已完成初始化配置（``config.toml`` 存在）。
-    data_source_available : bool
-        量化数据源是否就绪（``quant_data_api`` 非空）。为 ``False`` 时前端应仅允许
-        自定义组合，隐藏策略权重相关配置。
     environment : str
         当前运行环境标识。
     values : dict[str, Any]
@@ -54,16 +51,8 @@ class InitStatus(BaseModel):
     """
 
     configured: bool
-    data_source_available: bool
     environment: str
     values: dict[str, Any]
-
-
-class QuantDataTestRequest(BaseModel):
-    """量化数据源连通性测试载荷."""
-
-    token: str
-    data_api: str
 
 
 class TradingCalendarTestRequest(BaseModel):
@@ -104,10 +93,8 @@ class InitSaveRequest(BaseModel):
     """初始化向导保存载荷（对应 :class:`~axile.common.config.Settings` 的向导字段）."""
 
     sqlalchemy_database_uri: str
-    quant_data_token: str
-    quant_data_api: str
     trading_calendar_token: str = ""
-    trading_calendar_api: str = "https://api.shengkezhi.com/open/v1/market/trading-calendar"
+    trading_calendar_api: str = ""
     exe_err_feishu_key: str = ""
     environment: Literal["local", "staging", "production"] = "local"
     app_log_dir: str = "./logs"
@@ -127,13 +114,11 @@ def _prefill_values() -> dict[str, Any]:
 
     Notes
     -----
-    这里返回真实值（含量化数据 token）而不做掩码：其运行前提是本机、单用户，
-    用户也需看到当前值以便确认或修改后保存。
+    这里返回真实配置值而不做掩码：其运行前提是本机、单用户，用户也需看到
+    当前值以便确认或修改后保存。
     """
     return {
         "sqlalchemy_database_uri": str(settings.sqlalchemy_database_uri),
-        "quant_data_token": settings.quant_data_token,
-        "quant_data_api": settings.quant_data_api,
         "trading_calendar_token": settings.trading_calendar_token,
         "trading_calendar_api": settings.trading_calendar_api,
         "exe_err_feishu_key": settings.exe_err_feishu_key,
@@ -150,51 +135,19 @@ def init_status() -> InitStatus:
     """返回初始化就绪状态与向导预填值."""
     return InitStatus(
         configured=is_configured(),
-        data_source_available=bool(settings.quant_data_api),
         environment=settings.environment,
         values=_prefill_values(),
     )
 
 
-@router.post("/test-quant-data")
-async def test_quant_data(payload: QuantDataTestRequest) -> TestResult:
-    """
-    测试量化数据源连通性.
-
-    Notes
-    -----
-    请求形态与 :func:`axile.server.weights._fetch_latest_weights_frame` 一致，
-    使用 Bearer 认证并以 ``ts`` 测试最新仓位资源。测试本身的失败以 ``ok=False``
-    返回（HTTP 200），便于前端统一展示结果。
-    """
-    headers = {"Authorization": f"Bearer {payload.token.strip()}"}
-    params = {"weight_type": "ts"}
-    try:
-        timeout = aiohttp.ClientTimeout(total=_QUANT_DATA_TIMEOUT_SECONDS)
-        async with aiohttp.ClientSession(timeout=timeout) as session:
-            async with session.get(payload.data_api.strip(), params=params, headers=headers) as res:
-                res.raise_for_status()
-                result = await res.json()
-    except Exception as exc:  # noqa: BLE001 - 网络/解析异常统一转为失败结果
-        return TestResult(ok=False, message=f"连接失败：{exc}")
-
-    if not isinstance(result, dict) or result.get("code") != 0:
-        return TestResult(ok=False, message=f"接口返回失败：{str(result)[:200]}")
-    data = result.get("data")
-    items = data.get("items") if isinstance(data, dict) else None
-    if items is None:
-        return TestResult(ok=False, message=f"响应缺少 data.items：{str(result)[:200]}")
-    return TestResult(ok=True, message=f"连接成功，返回 {len(items)} 条权重记录")
-
-
 @router.post("/test-trading-calendar")
 async def test_trading_calendar(payload: TradingCalendarTestRequest) -> TestResult:
-    """使用 SSE 当日记录测试交易日历兼容接口。"""
+    """使用 SSE 当日记录测试 Axile 交易日历上游契约。"""
     today = date.today().isoformat()
-    headers = {"Authorization": f"Bearer {payload.token.strip()}"}
+    headers = {"Authorization": f"Bearer {payload.token.strip()}"} if payload.token.strip() else {}
     params = {"exchange": "SSE", "start": today, "end": today}
     try:
-        timeout = aiohttp.ClientTimeout(total=_QUANT_DATA_TIMEOUT_SECONDS)
+        timeout = aiohttp.ClientTimeout(total=_HTTP_TIMEOUT_SECONDS)
         async with aiohttp.ClientSession(timeout=timeout) as session:
             async with session.get(payload.api.strip(), params=params, headers=headers) as response:
                 response.raise_for_status()
@@ -253,7 +206,7 @@ async def test_feishu(payload: FeishuTestRequest) -> TestResult:
 
     data = {"msg_type": "interactive", "card": build_test_card()}
     try:
-        timeout = aiohttp.ClientTimeout(total=_QUANT_DATA_TIMEOUT_SECONDS)
+        timeout = aiohttp.ClientTimeout(total=_HTTP_TIMEOUT_SECONDS)
         async with aiohttp.ClientSession(timeout=timeout) as session:
             async with session.post(f"{_FEISHU_HOOK_BASE}{key}", json=data) as res:
                 result = await res.json()
@@ -300,8 +253,7 @@ def init_save(payload: InitSaveRequest, background_tasks: BackgroundTasks) -> Te
     Raises
     ------
     HTTPException
-        数据库地址不合法、或量化数据源 token 与接口地址只填其一时返回 422；写入文件
-        失败时返回 500。
+        数据库地址不合法、或交易日历 token 缺少接口地址时返回 422；写入文件失败时返回 500。
     """
     try:
         _DSN_ADAPTER.validate_python(payload.sqlalchemy_database_uri)
@@ -311,13 +263,6 @@ def init_save(payload: InitSaveRequest, background_tasks: BackgroundTasks) -> Te
             detail=f"数据库地址不合法：{exc}",
         ) from exc
 
-    # 数据源为可选能力：两者同填=启用策略权重组合；两者同空=仅自定义组合模式。
-    # 只填其一属半配（会得到一个取不到数的数据源），拒绝以避免静默失效。
-    if bool(payload.quant_data_token.strip()) != bool(payload.quant_data_api.strip()):
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="量化数据源 token 与接口地址须同时填写或同时留空；留空即以「仅自定义组合」模式运行。",
-        )
     if payload.trading_calendar_token.strip() and not payload.trading_calendar_api.strip():
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -326,8 +271,6 @@ def init_save(payload: InitSaveRequest, background_tasks: BackgroundTasks) -> Te
 
     values: dict[str, Any] = {
         "sqlalchemy_database_uri": payload.sqlalchemy_database_uri,
-        "quant_data_token": payload.quant_data_token,
-        "quant_data_api": payload.quant_data_api,
         "trading_calendar_token": payload.trading_calendar_token,
         "trading_calendar_api": payload.trading_calendar_api,
         "exe_err_feishu_key": payload.exe_err_feishu_key,

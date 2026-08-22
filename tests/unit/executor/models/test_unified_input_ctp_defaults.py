@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-import pandas as pd
 import pytest
 from pydantic import Field, ValidationError
 
@@ -134,10 +133,6 @@ def test_external_plugin_controls_unknown_channel_config_validation(monkeypatch:
     class ExternalConfig(BaseAccountConfig):
         account_ref: str = Field(min_length=1)
 
-    def transform(config: dict[str, float], frame: pd.DataFrame) -> pd.DataFrame:
-        frame["contribution"] = frame["weight"] * frame["strategy"].map(config)
-        return frame
-
     class _NoEntryPoints(list[object]):
         def select(self, **_kwargs: object) -> _NoEntryPoints:
             return self
@@ -165,7 +160,6 @@ def test_external_plugin_controls_unknown_channel_config_validation(monkeypatch:
             ),
             account_config_model=ExternalConfig,
             create_executor=lambda config: SimpleNamespace(config=config),
-            target_transform=transform,
         )
     )
     try:

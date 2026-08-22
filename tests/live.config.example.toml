@@ -4,8 +4,7 @@
 # 解析优先级：同名环境变量（SECTION_KEY 全大写，如 CTP_PASSWORD）> 本文件 > 代码默认值。
 # 是否运行由各自的 RUN_LIVE_* 开关（环境变量）控制，本文件只提供凭据。
 #
-# 注意：这里**只放测试专属凭据**。量化数据源（quant_data_token / quant_data_api）属于
-# 应用配置，住在 config.toml（见 example.config.toml），数据 API 联机测试直接读它，不在此重复。
+# 注意：这里只放测试专属凭据。应用配置位于 config.toml（见 example.config.toml）。
 
 # CTP 真实/联机环境（tests/live/test_ctp_live.py）
 # 开关：RUN_LIVE_CTP_TESTS=1；以下全部必填

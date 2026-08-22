@@ -1,65 +1,24 @@
-"""组合与策略配置数据库模型."""
+"""投资组合数据库模型."""
 
-from typing import TYPE_CHECKING, List, Optional
+from typing import TYPE_CHECKING, Optional
 
-from sqlalchemy import JSON as SA_JSON
-from sqlalchemy import Column, Connection, ForeignKey, Integer, Text, event
+from pydantic import ConfigDict, field_validator
+from sqlalchemy import Column, Connection, Text, event
 from sqlalchemy.ext.asyncio import AsyncAttrs
 from sqlalchemy.orm import Mapper, relationship
 from sqlmodel import Field, Relationship, SQLModel
 
-from axile.common.trade_channel import TradeChannel
-from axile.domain.strategy import Strategy, WeightType
 from axile.server.db.models.base import now_str
 
 if TYPE_CHECKING:
     from axile.server.db.models.account import PortfolioAccount
 
 
-class StrategyConfigBase(SQLModel):
-    """持久化策略配置的基础字段."""
-
-    strategies: List[Strategy] = Field(
-        sa_column=Column(SA_JSON, nullable=False),
-        description="策略组合",
-    )
-    weight_type: Optional[WeightType] = Field(
-        default=None,
-        sa_column=Column(Text, nullable=True),
-        description="仓位类型：ts 为时序策略，cs 为截面策略；自定义组合为空",
-    )
-
-
-class StrategyConfig(StrategyConfigBase, AsyncAttrs, table=True):
-    """策略组合的关系记录, 只加不修改."""
-
-    id: Optional[int] = Field(default=None, primary_key=True)
-    portfolio_id: int = Field(
-        default=0,
-        sa_column=Column(Integer, ForeignKey("portfolio.id", ondelete="CASCADE"), nullable=False),
-    )
-    created_at: str = Field(default_factory=now_str, sa_column=Column(Text, nullable=False))
-
-    portfolio: "Portfolio" = Relationship(
-        sa_relationship=relationship(
-            "Portfolio",
-            back_populates="strategy_configs",
-        )
-    )
-
-
-class StrategyConfigPublic(StrategyConfigBase):
-    """策略配置记录的公开表示."""
-
-    id: Optional[int]
-    created_at: str
-
-
-class StrategyConfigListPublic(SQLModel):
-    """策略配置记录的列表响应封装."""
-
-    data: List[StrategyConfigPublic]
-    count: int
+def _validate_custom_calc_py_code(value: str) -> str:
+    """拒绝空白的组合计算函数，同时保留源码原始格式."""
+    if not value.strip():
+        raise ValueError("自定义组合计算函数不能为空")
+    return value
 
 
 class PortfolioBase(SQLModel):
@@ -71,37 +30,35 @@ class PortfolioBase(SQLModel):
         description="交易市场标识, 例如: A股、加密货币、期货等, 必填",
     )
     description: Optional[str] = Field(
+        default=None,
         sa_column=Column(Text, nullable=True),
         description="投资组合的描述信息, 用于介绍组合逻辑或目的, 非必填",
     )
-    custom_calc_py_code: Optional[str] = Field(
-        sa_column=Column(Text, nullable=True),
-        description="自定义组合计算python脚本, 非必填",
+    custom_calc_py_code: str = Field(
+        sa_column=Column(Text, nullable=False),
+        description="定义 calculate_portfolio(context) 的组合计算 Python 源码",
     )
     status: Optional[str] = Field(
+        default=None,
         sa_column=Column(Text, nullable=True),
         description="组合当前状态, 例如：启用、暂停、关闭, 非必填",
     )
     tag: Optional[str] = Field(
+        default=None,
         sa_column=Column(Text, nullable=True),
         description="组合标签, 用于分类标记, 便于筛选和检索, 非必填",
     )
 
+    _validate_code = field_validator("custom_calc_py_code")(_validate_custom_calc_py_code)
+
 
 class Portfolio(PortfolioBase, AsyncAttrs, table=True):
-    """组合."""
+    """由自定义函数计算目标权重的投资组合."""
 
     id: Optional[int] = Field(default=None, primary_key=True)
     updated_at: str = Field(default_factory=now_str, sa_column=Column(Text, nullable=False))
     created_at: str = Field(default_factory=now_str, sa_column=Column(Text, nullable=False))
 
-    strategy_configs: list[StrategyConfig] = Relationship(
-        sa_relationship=relationship(
-            "StrategyConfig",
-            back_populates="portfolio",
-            cascade="all, delete-orphan",
-        )
-    )
     account_records: list["PortfolioAccount"] = Relationship(
         sa_relationship=relationship(
             "PortfolioAccount",
@@ -114,83 +71,39 @@ class Portfolio(PortfolioBase, AsyncAttrs, table=True):
 class PortfolioUpdate(SQLModel):
     """组合的局部更新载荷."""
 
+    model_config = ConfigDict(extra="forbid")
+
     name: Optional[str] = None
     market: Optional[str] = None
     description: Optional[str] = None
     custom_calc_py_code: Optional[str] = None
     status: Optional[str] = None
     tag: Optional[str] = None
-    strategies: Optional[List[Strategy]] = None
-    weight_type: Optional[WeightType] = None
+
+    @field_validator("custom_calc_py_code")
+    @classmethod
+    def validate_custom_calc_py_code(cls, value: str | None) -> str | None:
+        """更新函数时拒绝空值和空白源码."""
+        if value is None:
+            raise ValueError("自定义组合计算函数不可清空")
+        return _validate_custom_calc_py_code(value)
 
 
 class PortfolioCreate(PortfolioBase):
-    """创建组合及其初始策略配置时使用的载荷."""
+    """创建组合时使用的载荷."""
 
-    strategies: List[Strategy]
-    weight_type: Optional[WeightType] = None
-
-
-class PortfolioPreviewRequest(SQLModel):
-    """试算组合目标权重的请求载荷.
-
-    仅用于「不落库」地预览一份策略配置合成后的目标权重, 供编辑组合时的
-    「前后对比」使用; 与 ``PortfolioCreate`` 不同, 它不涉及任何持久化。
-
-    Attributes
-    ----------
-    strategies : List[Strategy]
-        待试算的策略组合。
-    trade_channel : TradeChannel
-        计算目标所用的交易渠道。
-    """
-
-    strategies: List[Strategy]
-    weight_type: WeightType
-    trade_channel: TradeChannel
+    model_config = ConfigDict(extra="forbid")
 
 
 class ValidateCustomCalcRequest(SQLModel):
-    """校验自定义组合脚本的请求载荷.
-
-    仅用于「不落库、不下单」地执行一次用户脚本, 返回其计算出的目标权重或错误信息,
-    供组合设置向导里的「Dry-run 验证 / 真实账户验证」使用。
-
-    Attributes
-    ----------
-    custom_calc_py_code : str
-        待校验的自定义组合脚本源码。
-    account_id : Optional[int]
-        指定时借该账户构造真实 ``Context`` 执行 (真实账户验证); 为空时使用样例
-        上下文执行 (Dry-run)。
-    """
+    """校验自定义组合脚本的请求载荷."""
 
     custom_calc_py_code: str
     account_id: Optional[int] = None
 
 
 class ValidateCustomCalcResponse(SQLModel):
-    """校验自定义组合脚本的响应载荷.
-
-    Attributes
-    ----------
-    valid : bool
-        脚本是否成功执行并返回结果。
-    target : Optional[dict[str, float]]
-        校验成功时脚本返回的 ``symbol -> 目标权重`` 映射。
-    error : Optional[str]
-        校验失败时的错误摘要 (``str(exc)``)。
-    traceback : Optional[str]
-        校验失败时的完整 traceback, 供前端「展开」查看。
-    error_line : Optional[int]
-        出错所在的用户代码行号 (1 基); 无法定位到用户代码时为 ``None``。
-    error_offset : Optional[int]
-        语法错误时的列偏移 (1 基); 其它情况为 ``None``。
-    error_type : Optional[str]
-        异常类型名, 例如 ``SyntaxError`` / ``RuntimeError``。
-    error_message : Optional[str]
-        简洁的错误消息, 供前端在出错行内联展示。
-    """
+    """校验自定义组合脚本的响应载荷."""
 
     valid: bool
     target: Optional[dict[str, float]] = None
@@ -203,18 +116,16 @@ class ValidateCustomCalcResponse(SQLModel):
 
 
 class PortfolioPublic(PortfolioBase):
-    """完整版组合信息,包含当前绑定的账户和当前策略."""
+    """完整版组合信息, 包含当前绑定账户."""
 
     id: Optional[int]
     updated_at: str
     created_at: str
-    strategy_config: List[Strategy]
-    weight_type: Optional[WeightType]
     account_id: Optional[int]
 
 
 class PortfolioLitePublic(PortfolioBase):
-    """简化版组合信息,不会加载关系."""
+    """简化版组合信息, 不加载关系."""
 
     id: Optional[int]
     updated_at: str
@@ -224,7 +135,7 @@ class PortfolioLitePublic(PortfolioBase):
 class PortfolioListPublic(SQLModel):
     """轻量组合载荷的列表响应封装."""
 
-    data: List[PortfolioLitePublic]
+    data: list[PortfolioLitePublic]
 
 
 @event.listens_for(Portfolio, "before_update")

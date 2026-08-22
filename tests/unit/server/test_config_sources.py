@@ -17,8 +17,8 @@ def test_missing_toml_falls_back_to_defaults(tmp_path: Path, monkeypatch: pytest
     """缺失 config.toml 时应回退到代码默认值，且不抛错."""
     settings = _settings_with_toml(monkeypatch, tmp_path / "nope.toml")
 
-    assert settings.quant_data_token == ""
-    assert settings.quant_data_api == ""
+    assert settings.trading_calendar_token == ""
+    assert settings.trading_calendar_api == ""
     assert settings.algorithm_modules == []
     assert str(settings.sqlalchemy_database_uri).startswith("sqlite+aiosqlite")
 
@@ -27,28 +27,28 @@ def test_toml_overrides_defaults(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     """config.toml 中的值应覆盖默认值（含 list 类型的算法模块）."""
     toml_path = tmp_path / "config.toml"
     toml_path.write_text(
-        'quant_data_token = "tok"\nquant_data_api = "http://x"\nalgorithm_modules = ["a.b", "c.d"]\n',
+        'trading_calendar_token = "tok"\ntrading_calendar_api = "http://x"\nalgorithm_modules = ["a.b", "c.d"]\n',
         encoding="utf-8",
     )
     settings = _settings_with_toml(monkeypatch, toml_path)
 
-    assert settings.quant_data_token == "tok"
-    assert settings.quant_data_api == "http://x"
+    assert settings.trading_calendar_token == "tok"
+    assert settings.trading_calendar_api == "http://x"
     assert settings.algorithm_modules == ["a.b", "c.d"]
 
 
 def test_env_is_ignored(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """进程环境变量不作为配置来源：即便设置同名 env 也完全不影响 Settings."""
     toml_path = tmp_path / "config.toml"
-    toml_path.write_text('quant_data_token = "from_toml"\n', encoding="utf-8")
-    monkeypatch.setenv("QUANT_DATA_TOKEN", "from_env")
-    monkeypatch.setenv("QUANT_DATA_API", "from_env_api")
+    toml_path.write_text('trading_calendar_token = "from_toml"\n', encoding="utf-8")
+    monkeypatch.setenv("TRADING_CALENDAR_TOKEN", "from_env")
+    monkeypatch.setenv("TRADING_CALENDAR_API", "from_env_api")
 
     settings = _settings_with_toml(monkeypatch, toml_path)
 
     # toml 提供的键取 toml 值（非 env）；toml 未提供的键回退默认值（不被 env 兜底）。
-    assert settings.quant_data_token == "from_toml"
-    assert settings.quant_data_api == ""
+    assert settings.trading_calendar_token == "from_toml"
+    assert settings.trading_calendar_api == ""
 
 
 def test_is_configured_reflects_toml_existence(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -56,13 +56,11 @@ def test_is_configured_reflects_toml_existence(tmp_path: Path, monkeypatch: pyte
     toml_path = tmp_path / "config.toml"
     monkeypatch.setattr(cfg, "CONFIG_TOML_PATH", toml_path)
 
-    # 文件不存在 → 未配置（无论数据源），此时应进入初始化向导。
+    # 文件不存在时进入初始化向导。
     assert cfg.is_configured() is False
 
-    # 文件存在但数据源为空 → 已配置（仅自定义组合模式），门禁与数据源解耦。
+    # 文件存在且日历上游为空也视为已配置。
     toml_path.write_text("", encoding="utf-8")
-    monkeypatch.setattr(cfg.settings, "quant_data_token", "")
-    monkeypatch.setattr(cfg.settings, "quant_data_api", "")
     assert cfg.is_configured() is True
 
 
@@ -74,8 +72,8 @@ def test_write_config_toml_roundtrip(tmp_path: Path, monkeypatch: pytest.MonkeyP
     cfg.write_config_toml(
         {
             "sqlalchemy_database_uri": "sqlite+aiosqlite:///./axile.db",
-            "quant_data_token": "tok",
-            "quant_data_api": "http://x",
+            "trading_calendar_token": "tok",
+            "trading_calendar_api": "http://x",
             "environment": "local",
             "app_log_dir": "./logs",
             "axile_log_rotation": "1 day",
@@ -87,5 +85,5 @@ def test_write_config_toml_roundtrip(tmp_path: Path, monkeypatch: pytest.MonkeyP
     assert "请勿手工编辑" in toml_path.read_text(encoding="utf-8")
 
     settings = _settings_with_toml(monkeypatch, toml_path)
-    assert settings.quant_data_token == "tok"
+    assert settings.trading_calendar_token == "tok"
     assert settings.algorithm_modules == ["a.b", "c.d"]

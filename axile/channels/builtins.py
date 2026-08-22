@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import pandas as pd
-
 from axile.channels.contracts import (
     AlgorithmReference,
     ChannelAccountField,
@@ -25,21 +23,6 @@ from axile.executor.models.unified_input_accounts import (
 
 _LEVERAGE = ChannelLeverage(min=0, max=125, step=0.1)
 _SINGLE_MAKER = AlgorithmReference(method="SINGLE-MAKER", params={})
-
-
-def _contribution_target(config: dict[str, float], frame: pd.DataFrame) -> pd.DataFrame:
-    """将策略权重与组合配置相乘并写入贡献度列."""
-    frame["contribution"] = frame["weight"] * frame["strategy"].map(config)
-    return frame
-
-
-def _gm_target(config: dict[str, float], frame: pd.DataFrame) -> pd.DataFrame:
-    """计算掘金渠道目标贡献度并转换证券代码格式."""
-    from axile.common.gm_helpers import to_gm_symbol
-
-    weighted = _contribution_target(config, frame)
-    weighted["symbol"] = weighted["symbol"].astype(object).apply(lambda value: to_gm_symbol(str(value)))
-    return weighted
 
 
 def _create_ctp_executor(config: BaseAccountConfig):
@@ -97,7 +80,6 @@ def _ctp_plugin() -> ChannelPlugin:
         ),
         account_config_model=CTPAccountConfig,
         create_executor=_create_ctp_executor,
-        target_transform=_contribution_target,
         execution_backend="process",
         required_modules=("openctp_ctp",),
         install_extra="ctp",
@@ -145,7 +127,6 @@ def _gm_plugin() -> ChannelPlugin:
         ),
         account_config_model=GMAccountConfig,
         create_executor=_create_gm_executor,
-        target_transform=_gm_target,
         execution_backend="process",
         required_modules=("gm",),
         install_extra="gm",

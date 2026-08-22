@@ -112,7 +112,6 @@ def test_trade_serializes_success_result_to_json_safe_dict(
     async def fake_append_output_record(
         *,
         account: object,
-        strategy_config: object,
         raw_input: object,
         output: object,
         execution_id: str | None = None,
@@ -120,7 +119,6 @@ def test_trade_serializes_success_result_to_json_safe_dict(
     ) -> tuple[SimpleNamespace, dict[str, object]]:
         result = cast("dict[str, object]", cast(UnifiedStandardOutput, output).model_dump(mode="json"))
         captured["account"] = account
-        captured["strategy_config"] = strategy_config
         captured["raw_input"] = raw_input
         captured["result"] = result
         captured["execution_id"] = execution_id
@@ -135,7 +133,7 @@ def test_trade_serializes_success_result_to_json_safe_dict(
     monkeypatch.setattr(execution_lifecycle, "create_executor_instance", lambda _account: FakeExecutor())
     monkeypatch.setattr(execution_backend, "_append_output_record", fake_append_output_record)
 
-    _ = asyncio.run(rebalance_execution.trade(account, {"ETHUSDT": 0.1}, []))
+    _ = asyncio.run(rebalance_execution.trade(account, {"ETHUSDT": 0.1}))
 
     result = captured["result"]
     assert isinstance(result, dict)
@@ -170,13 +168,12 @@ def test_trade_builds_model_before_execute_and_persists_dict(
     async def fake_append_output_record(
         *,
         account: object,
-        strategy_config: object,
         raw_input: object,
         output: object,
         execution_id: str | None = None,
         execution_kind: object = None,
     ) -> tuple[SimpleNamespace, dict[str, object]]:
-        _ = account, strategy_config, output
+        _ = account, output
         captured["raw_input"] = raw_input
         captured["execution_id"] = execution_id
         return (
@@ -193,7 +190,7 @@ def test_trade_builds_model_before_execute_and_persists_dict(
     monkeypatch.setattr(execution_lifecycle, "create_executor_instance", lambda _account: fake_executor)
     monkeypatch.setattr(execution_backend, "_append_output_record", fake_append_output_record)
 
-    _ = asyncio.run(rebalance_execution.trade(account, {"ETHUSDT": 0.1}, []))
+    _ = asyncio.run(rebalance_execution.trade(account, {"ETHUSDT": 0.1}))
 
     assert isinstance(fake_executor.execute_input, UnifiedStandardInput)
     assert fake_executor.execute_input.curr_target == {"ETHUSDT": 0.1}
@@ -232,13 +229,12 @@ def test_trade_defaults_gm_ashare_short_leverage_to_zero_when_unset(
     async def fake_append_output_record(
         *,
         account: object,
-        strategy_config: object,
         raw_input: object,
         output: object,
         execution_id: str | None = None,
         execution_kind: object = None,
     ) -> tuple[SimpleNamespace, dict[str, object]]:
-        _ = account, strategy_config, raw_input, output, execution_id
+        _ = account, raw_input, output, execution_id
         return (
             SimpleNamespace(id=108, is_success=1),
             cast("dict[str, object]", cast(UnifiedStandardOutput, output).model_dump(mode="json")),
@@ -257,7 +253,6 @@ def test_trade_defaults_gm_ashare_short_leverage_to_zero_when_unset(
         rebalance_execution.trade(
             account,
             {"SHSE.600000": 0.13, "SHSE.588000": -0.09},
-            [],
         )
     )
 
@@ -293,13 +288,12 @@ def test_trade_routes_gm_account_to_worker_manager(
     async def fake_append_output_record(
         *,
         account: object,
-        strategy_config: object,
         raw_input: object,
         output: object,
         execution_id: str | None = None,
         execution_kind: object = None,
     ) -> tuple[SimpleNamespace, dict[str, object]]:
-        _ = account, strategy_config, output
+        _ = account, output
         captured["raw_input"] = raw_input
         captured["execution_id"] = execution_id
         return (
@@ -332,7 +326,6 @@ def test_trade_routes_gm_account_to_worker_manager(
         rebalance_execution.trade(
             account,
             {"SHSE.600000": 0.12},
-            [],
             execution_id="exec-gm-worker-trade-1",
             trigger_source="manual",
         )
@@ -361,13 +354,12 @@ def test_trade_routes_ctp_account_to_worker_manager_when_policy_is_process(
     async def fake_append_output_record(
         *,
         account: object,
-        strategy_config: object,
         raw_input: object,
         output: object,
         execution_id: str | None = None,
         execution_kind: object = None,
     ) -> tuple[SimpleNamespace, dict[str, object]]:
-        _ = account, strategy_config, raw_input, output, execution_id
+        _ = account, raw_input, output, execution_id
         return (
             SimpleNamespace(id=305, is_success=1),
             cast("dict[str, object]", cast(UnifiedStandardOutput, output).model_dump(mode="json")),
@@ -395,7 +387,6 @@ def test_trade_routes_ctp_account_to_worker_manager_when_policy_is_process(
         rebalance_execution.trade(
             account,
             {"BTCUSDT": 0.12},
-            [],
             execution_id="exec-ctp-worker-policy-1",
             trigger_source="manual",
         )
@@ -454,18 +445,16 @@ def test_trade_persists_failed_gm_worker_output(
     async def fake_append_output_record(
         *,
         account: object,
-        strategy_config: object,
         raw_input: object,
         output: UnifiedStandardOutput,
         execution_id: str | None = None,
         execution_kind: object = None,
     ) -> tuple[SimpleNamespace, dict[str, object]]:
-        _ = account, strategy_config
+        _ = account
         raw_result = cast("dict[str, object]", output.model_dump(mode="json"))
         captured_error_record.update(
             {
                 "account_id": 1,
-                "strategy_config": [],
                 "raw_input": raw_input,
                 "raw_result": raw_result,
                 "msg": output.get_error_message(),
@@ -487,7 +476,6 @@ def test_trade_persists_failed_gm_worker_output(
         rebalance_execution.trade(
             account,
             {"SHSE.600000": 0.12},
-            [],
             execution_id="exec-gm-worker-error-1",
             trigger_source="manual",
         )
@@ -558,13 +546,12 @@ def test_trade_passes_execution_id_to_persisted_record(
     async def fake_append_output_record(
         *,
         account: object,
-        strategy_config: object,
         raw_input: object,
         output: object,
         execution_id: str | None = None,
         execution_kind: object = None,
     ) -> tuple[SimpleNamespace, dict[str, object]]:
-        _ = account, strategy_config, raw_input, output
+        _ = account, raw_input, output
         captured["execution_id"] = execution_id
         return (
             SimpleNamespace(id=105, is_success=1),
@@ -587,7 +574,6 @@ def test_trade_passes_execution_id_to_persisted_record(
         rebalance_execution.trade(
             account,
             {"ETHUSDT": 0.1},
-            [],
             execution_id="exec-test-1",
         )
     )
@@ -627,13 +613,12 @@ def test_trade_emits_execution_events_and_artifacts(
     async def fake_append_output_record(
         *,
         account: object,
-        strategy_config: object,
         raw_input: object,
         output: object,
         execution_id: str | None = None,
         execution_kind: object = None,
     ) -> tuple[SimpleNamespace, dict[str, object]]:
-        _ = account, strategy_config, raw_input, output, execution_id
+        _ = account, raw_input, output, execution_id
         return (
             SimpleNamespace(id=106, is_success=1),
             cast("dict[str, object]", cast(UnifiedStandardOutput, output).model_dump(mode="json")),
@@ -655,10 +640,8 @@ def test_trade_emits_execution_events_and_artifacts(
         rebalance_execution.trade(
             account,
             {"ETHUSDT": 0.1},
-            [],
             execution_id="exec-audit-1",
             trigger_source="manual",
-            target_update_time="2026-07-02T09:00:00",
         )
     )
 
@@ -690,9 +673,7 @@ def test_trade_emits_execution_events_and_artifacts(
     assert eth_row["target"] == 0.1
     assert eth_row["after"] == 0.0
     assert eth_row["reached"] is False
-    # target_update_time 应随 extra 一路透传进 TARGET_SNAPSHOT。
     assert target_snapshot_content is not None
-    assert target_snapshot_content["target_update_time"] == "2026-07-02T09:00:00"
 
 
 def test_trade_prepares_execution_runtime_before_pre_execute_audit_events(
@@ -741,13 +722,12 @@ def test_trade_prepares_execution_runtime_before_pre_execute_audit_events(
     async def fake_append_output_record(
         *,
         account: object,
-        strategy_config: object,
         raw_input: object,
         output: object,
         execution_id: str | None = None,
         execution_kind: object = None,
     ) -> tuple[SimpleNamespace, dict[str, object]]:
-        _ = account, strategy_config, raw_input, output, execution_id
+        _ = account, raw_input, output, execution_id
         return (
             SimpleNamespace(id=107, is_success=1),
             cast("dict[str, object]", cast(UnifiedStandardOutput, output).model_dump(mode="json")),
@@ -775,7 +755,6 @@ def test_trade_prepares_execution_runtime_before_pre_execute_audit_events(
         rebalance_execution.trade(
             account,
             {"ETHUSDT": 0.1},
-            [],
             execution_id="exec-runtime-seq-1",
             trigger_source="manual",
         )
@@ -845,13 +824,12 @@ def test_trade_persists_unsuccessful_output_without_marking_success(
     async def fake_append_output_record(
         *,
         account: object,
-        strategy_config: object,
         raw_input: object,
         output: UnifiedStandardOutput,
         execution_id: str | None = None,
         execution_kind: object = None,
     ) -> tuple[SimpleNamespace, dict[str, object]]:
-        _ = account, strategy_config
+        _ = account
         raw_result = cast("dict[str, object]", output.model_dump(mode="json"))
         captured_error_record.update(
             {
@@ -880,7 +858,6 @@ def test_trade_persists_unsuccessful_output_without_marking_success(
         rebalance_execution.trade(
             account,
             {"ETHUSDT": 0.1},
-            [],
             execution_id="exec-unsuccessful-1",
             trigger_source="manual",
         )
@@ -921,13 +898,12 @@ def test_trade_binds_account_control_guard(
     async def fake_append_output_record(
         *,
         account: object,
-        strategy_config: object,
         raw_input: object,
         output: object,
         execution_id: str | None = None,
         execution_kind: object = None,
     ) -> tuple[SimpleNamespace, dict[str, object]]:
-        _ = account, strategy_config, raw_input, output, execution_id
+        _ = account, raw_input, output, execution_id
         return (
             SimpleNamespace(id=201, is_success=1),
             cast("dict[str, object]", cast(UnifiedStandardOutput, output).model_dump(mode="json")),
@@ -956,7 +932,6 @@ def test_trade_binds_account_control_guard(
         rebalance_execution.trade(
             account,
             {"ETHUSDT": 0.1},
-            [],
             execution_id="exec-bind-1",
         )
     )
@@ -967,28 +942,6 @@ def test_trade_binds_account_control_guard(
         "execution_id": "exec-bind-1",
     }
     assert fake_executor.account_control_guard is fake_guard
-
-
-def test_target_update_time_survives_standard_input_serialization() -> None:
-    """target_update_time 应经 to_dict/from_dict 往返仍保留在 extra 中。
-
-    worker 后端在独立进程重建 UnifiedStandardInput，只能读到序列化过的 extra，
-    该测试直接验证跨进程通道不会丢失 target_update_time。
-    """
-    account = build_account()
-
-    standard_input = rebalance_execution._build_rebalance_standard_input(
-        account=account,
-        curr_target={"ETHUSDT": 0.1},
-        last_target={},
-        execution_id="exec-roundtrip-1",
-        trigger_source="scheduler",
-        target_update_time="2026-07-02T09:00:00",
-    )
-    assert standard_input.extra["target_update_time"] == "2026-07-02T09:00:00"
-
-    restored = UnifiedStandardInput.from_dict(standard_input.to_dict())
-    assert restored.extra.get("target_update_time") == "2026-07-02T09:00:00"
 
 
 def test_standard_input_accepts_database_trade_channel_string() -> None:
@@ -1008,23 +961,6 @@ def test_standard_input_accepts_database_trade_channel_string() -> None:
 
     assert standard_input.channel_type == TradeChannel.GM
     assert cast("dict[str, object]", standard_input.extra["audit"])["channel"] == "gm"
-
-
-def test_target_update_time_defaults_to_none_when_absent() -> None:
-    """未提供 target_update_time 时，extra 中该键为 None 且往返保持 None。"""
-    account = build_account()
-
-    standard_input = rebalance_execution._build_rebalance_standard_input(
-        account=account,
-        curr_target={"ETHUSDT": 0.1},
-        last_target={},
-        execution_id="exec-roundtrip-2",
-        trigger_source="scheduler",
-    )
-    assert standard_input.extra["target_update_time"] is None
-
-    restored = UnifiedStandardInput.from_dict(standard_input.to_dict())
-    assert restored.extra.get("target_update_time") is None
 
 
 def test_account_execution_timeout_flows_into_standard_input() -> None:
