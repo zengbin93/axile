@@ -29,6 +29,11 @@ jobs:
         curl -LsSf https://astral.sh/uv/install.sh | sh
         echo "$HOME/.local/bin" >> $GITHUB_PATH
 
+    - name: Set up Bun
+      uses: oven-sh/setup-bun@v2
+      with:
+        bun-version: '1.4.0'
+
     - name: Verify tag matches project version
       run: |
         TAG_VERSION="${GITHUB_REF_NAME#v}"
@@ -38,6 +43,12 @@ jobs:
           echo "::error::tag 版本 (${GITHUB_REF_NAME}) 与 pyproject.toml 版本 (${PROJECT_VERSION}) 不一致"
           exit 1
         fi
+
+    - name: Build Web UI
+      working-directory: ui
+      run: |
+        bun install --frozen-lockfile
+        bun run build
 
     - name: Build distributions
       run: |
