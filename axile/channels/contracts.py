@@ -6,7 +6,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+import pandas as pd
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from axile.executor.models.unified_input_accounts import BaseAccountConfig
 
@@ -16,6 +17,7 @@ if TYPE_CHECKING:
 type ChannelId = str
 type ExecutionBackend = Literal["thread", "process"]
 type ExecutorFactory = Callable[[BaseAccountConfig], "AbstractExecutor"]
+type TargetTransform = Callable[[dict[str, float], pd.DataFrame], pd.DataFrame]
 
 
 class _FrozenDescriptorModel(BaseModel):
@@ -144,6 +146,59 @@ class ChannelAccountOption(_FrozenDescriptorModel):
     label: str
 
 
+class ChannelAccountFieldCondition(_FrozenDescriptorModel):
+    """描述账户字段的声明式显示条件."""
+
+    field: str = Field(min_length=1)
+    equals: object
+
+
+class ChannelAccountFieldClipboard(_FrozenDescriptorModel):
+    """描述地址字段在智能剪贴板中的语义角色与批量匹配分组."""
+
+    role: Literal["trading", "market-data", "rpc", "proxy"]
+    group: str | None = Field(default=None, min_length=1)
+
+
+class ChannelEndpointConstraints(_FrozenDescriptorModel):
+    """描述地址字段可由客户端确定的结构约束."""
+
+    scheme: Literal["required", "optional", "forbidden"] = "optional"
+    allowed_schemes: tuple[Literal["tcp", "http", "https", "ftp", "ws", "wss"], ...] = ()
+    port: Literal["required", "optional"] = "required"
+    allow_path: bool = False
+
+    @model_validator(mode="after")
+    def validate_scheme_configuration(self) -> "ChannelEndpointConstraints":
+        """拒绝互相矛盾的协议配置."""
+        if self.scheme == "required" and not self.allowed_schemes:
+            raise ValueError("scheme=required 时必须声明 allowed_schemes")
+        if self.scheme == "forbidden" and self.allowed_schemes:
+            raise ValueError("scheme=forbidden 时不得声明 allowed_schemes")
+        return self
+
+
+class ChannelNumberConstraints(_FrozenDescriptorModel):
+    """描述金额字段的确定性数值下界."""
+
+    gt: float | None = None
+    gte: float | None = None
+
+    @model_validator(mode="after")
+    def validate_bounds(self) -> "ChannelNumberConstraints":
+        """同一字段只允许一种下界语义."""
+        if self.gt is not None and self.gte is not None:
+            raise ValueError("gt 与 gte 不能同时声明")
+        return self
+
+
+class ChannelAccountFieldConstraints(_FrozenDescriptorModel):
+    """描述账户字段的可选结构化校验规则."""
+
+    endpoint: ChannelEndpointConstraints | None = None
+    number: ChannelNumberConstraints | None = None
+
+
 class ChannelAccountField(_FrozenDescriptorModel):
     """
     描述渠道账户表单中的一个字段.
@@ -154,8 +209,10 @@ class ChannelAccountField(_FrozenDescriptorModel):
         提交到账户配置中的字段名。
     label : str
         面向用户的字段标签。
-    input : Literal["text", "password", "number", "boolean", "select"]
-        前端输入控件类型。
+    kind : Literal["text", "identifier", "secret", "endpoint", "directory", "money", "boolean", "select"]
+        字段的业务语义与前端控件类型。
+    width : Literal["half", "full"]
+        桌面表单中的建议宽度；移动端统一单列。
     required : bool
         是否要求用户填写。
     help : str | None
@@ -164,12 +221,29 @@ class ChannelAccountField(_FrozenDescriptorModel):
 
     name: str = Field(min_length=1)
     label: str = Field(min_length=1)
-    input: Literal["text", "password", "number", "boolean", "select"] = "text"
+    kind: Literal["text", "identifier", "secret", "endpoint", "directory", "money", "boolean", "select"]
+    width: Literal["half", "full"]
     required: bool = True
     placeholder: str | None = None
     help: str | None = None
     default: object | None = None
     options: tuple[ChannelAccountOption, ...] = ()
+    visible_when: ChannelAccountFieldCondition | None = None
+    constraints: ChannelAccountFieldConstraints | None = None
+    clipboard: ChannelAccountFieldClipboard | None = None
+
+    @model_validator(mode="after")
+    def validate_constraints_match_kind(self) -> "ChannelAccountField":
+        """确保约束类型与字段语义一致."""
+        if self.clipboard is not None and self.kind != "endpoint":
+            raise ValueError("clipboard 元数据只能用于 endpoint 字段")
+        if self.constraints is None:
+            return self
+        if self.constraints.endpoint is not None and self.kind != "endpoint":
+            raise ValueError("endpoint 约束只能用于 endpoint 字段")
+        if self.constraints.number is not None and self.kind != "money":
+            raise ValueError("number 约束只能用于 money 字段")
+        return self
 
 
 class ChannelAccountNotice(_FrozenDescriptorModel):
@@ -184,6 +258,20 @@ class ChannelAccountForm(_FrozenDescriptorModel):
 
     fields: tuple[ChannelAccountField, ...] = ()
     notices: tuple[ChannelAccountNotice, ...] = ()
+
+
+class ChannelCalendar(_FrozenDescriptorModel):
+    """描述渠道使用的共享交易日历。"""
+
+    calendar_id: str = Field(pattern=r"^[a-z][a-z0-9_-]*$")
+    label: str = Field(min_length=1)
+
+
+class ChannelPortfolioPreset(_FrozenDescriptorModel):
+    """描述组合向导中某市场的名称与示例标的."""
+
+    market_label: str = Field(min_length=1)
+    example_symbols: tuple[str, ...] = Field(min_length=1)
 
 
 class ChannelDescriptor(_FrozenDescriptorModel):
@@ -214,6 +302,10 @@ class ChannelDescriptor(_FrozenDescriptorModel):
         可配置杠杆范围。
     account_form : ChannelAccountForm
         账户连接表单定义。
+    calendar : ChannelCalendar | None
+        渠道使用的交易日历；为空表示渠道不需要日期限制。
+    portfolio : ChannelPortfolioPreset
+        组合向导使用的市场名称与示例标的。
     """
 
     channel: str = Field(pattern=r"^[a-z][a-z0-9_-]*$")
@@ -227,6 +319,8 @@ class ChannelDescriptor(_FrozenDescriptorModel):
     defaults: ChannelDefaults
     leverage: ChannelLeverage
     account_form: ChannelAccountForm
+    calendar: ChannelCalendar | None = None
+    portfolio: ChannelPortfolioPreset
 
 
 @dataclass(frozen=True, slots=True)
@@ -242,6 +336,8 @@ class ChannelPlugin:
         用于验证渠道账户配置的 Pydantic 模型。
     create_executor : ExecutorFactory
         根据已验证配置创建执行器的工厂。
+    target_transform : TargetTransform
+        将策略权重表转换为渠道目标贡献度的函数。
     execution_backend : ExecutionBackend
         执行阻塞渠道逻辑所用的隔离后端。
     required_modules : tuple[str, ...]
@@ -255,6 +351,7 @@ class ChannelPlugin:
     descriptor: ChannelDescriptor
     account_config_model: type[BaseAccountConfig]
     create_executor: ExecutorFactory
+    target_transform: TargetTransform
     execution_backend: ExecutionBackend = "thread"
     required_modules: tuple[str, ...] = ()
     install_extra: str | None = None

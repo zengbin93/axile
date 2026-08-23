@@ -105,7 +105,17 @@ def test_empty_positions_returns_noop_result_when_no_positions() -> None:
             positions=[],
         )
     )
-    executor.account_config = CTPAccountConfig.model_validate({"broker_id": "b", "investor_id": "i", "password": "p"})
+    executor.account_config = CTPAccountConfig.model_validate(
+        {
+            "broker_id": "b",
+            "investor_id": "i",
+            "password": "p",
+            "td_front": "tcp://td:1",
+            "md_front": "tcp://md:2",
+            "app_id": "app",
+            "auth_code": "auth",
+        }
+    )
 
     result = executor.empty_positions()
 
@@ -123,7 +133,7 @@ def test_empty_positions_executes_and_sends_feishu_notification(monkeypatch) -> 
             market_value=100.0,
             positions=[
                 Position(
-                    symbol="BTCUSDT",
+                    symbol="rb2610",
                     volume=1.0,
                     available_volume=1.0,
                     market_value=100.0,
@@ -133,7 +143,17 @@ def test_empty_positions_executes_and_sends_feishu_notification(monkeypatch) -> 
             ],
         )
     )
-    executor.account_config = CTPAccountConfig.model_validate({"broker_id": "b", "investor_id": "i", "password": "p"})
+    executor.account_config = CTPAccountConfig.model_validate(
+        {
+            "broker_id": "b",
+            "investor_id": "i",
+            "password": "p",
+            "td_front": "tcp://td:1",
+            "md_front": "tcp://md:2",
+            "app_id": "app",
+            "auth_code": "auth",
+        }
+    )
 
     def fake_execute(
         standard_input: UnifiedStandardInput,
@@ -165,7 +185,7 @@ def test_empty_positions_executes_and_sends_feishu_notification(monkeypatch) -> 
         cleanup=False,
         retain_runtime=True,
         feishu_key="hook-empty",
-        forbidden_symbols=["ETHUSDT"],
+        forbidden_symbols=["ag2612"],
         extra={"source": "test"},
     )
 
@@ -174,11 +194,11 @@ def test_empty_positions_executes_and_sends_feishu_notification(monkeypatch) -> 
     assert captured["retain_runtime"] is True
     standard_input = captured["input"]
     assert isinstance(standard_input, UnifiedStandardInput)
-    assert standard_input.curr_target == {"BTCUSDT": 0.0}
-    assert standard_input.last_target == {"BTCUSDT": 0.1}
-    assert standard_input.trade_rules == {"BTCUSDT": {"price": "PASSIVE"}}
+    assert standard_input.curr_target == {"rb2610": 0.0}
+    assert standard_input.last_target == {"rb2610": 0.1}
+    assert standard_input.trade_rules == {"rb2610": {"price": "PASSIVE"}}
     assert standard_input.feishu_key == "hook-empty"
-    assert standard_input.forbidden_symbols == ["ETHUSDT"]
+    assert standard_input.forbidden_symbols == ["ag2612"]
     assert standard_input.extra["source"] == "test"
     assert sent == [(executor, result, "hook-empty")]
 
@@ -203,7 +223,7 @@ def test_empty_positions_uses_wider_default_timeout(monkeypatch) -> None:
             market_value=100.0,
             positions=[
                 Position(
-                    symbol="BTCUSDT",
+                    symbol="rb2610",
                     volume=1.0,
                     available_volume=1.0,
                     market_value=100.0,
@@ -213,7 +233,17 @@ def test_empty_positions_uses_wider_default_timeout(monkeypatch) -> None:
             ],
         )
     )
-    executor.account_config = CTPAccountConfig.model_validate({"broker_id": "b", "investor_id": "i", "password": "p"})
+    executor.account_config = CTPAccountConfig.model_validate(
+        {
+            "broker_id": "b",
+            "investor_id": "i",
+            "password": "p",
+            "td_front": "tcp://td:1",
+            "md_front": "tcp://md:2",
+            "app_id": "app",
+            "auth_code": "auth",
+        }
+    )
 
     def fake_execute(standard_input: UnifiedStandardInput, **kwargs: object) -> UnifiedStandardOutput:
         _ = kwargs

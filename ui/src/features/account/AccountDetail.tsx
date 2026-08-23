@@ -9,14 +9,14 @@ import { NumberTicker } from '@/components/ui/NumberTicker'
 import { AccountActions } from '@/features/account/AccountActions'
 import { useExecutionRunner } from '@/features/account/useExecutionRunner'
 import { useTerminateAction } from '@/features/account/useTerminateAction'
-import { buildRecentRows } from '@/features/account/recent'
+import { buildRecentActivity } from '@/features/account/recent'
 import { INTEGRITY_ICON, INTEGRITY_TEXT_CLASS, STATUS_ICON, STATUS_TEXT_CLASS, channelLabel } from '@/features/dashboard/display'
 import { phaseLabel, runVerb } from '@/features/dashboard/execProgress'
 import { useRunning } from '@/stores/liveExec'
 import {
   getAccount,
+  getAccountActivity,
   getAccountTargetWeights,
-  getExecuteRecords,
   getNextRun,
   prefetchExecuteRecords,
   updateAccount,
@@ -61,8 +61,8 @@ export function AccountDetail({ accountId, item, onDashboardRefresh }: AccountDe
 
   const account = usePolling(useCallback((s: AbortSignal) => getAccount(accountId, s), [accountId]), 15000)
   const RECENT_LIMIT = 50
-  const records = usePolling(
-    useCallback((s: AbortSignal) => getExecuteRecords(accountId, { limit: RECENT_LIMIT }, s), [accountId]),
+  const activity = usePolling(
+    useCallback((s: AbortSignal) => getAccountActivity(accountId, { limit: RECENT_LIMIT }, s), [accountId]),
     10000,
   )
   const nextRun = usePolling(useCallback((s: AbortSignal) => getNextRun(accountId, s), [accountId]), 30000)
@@ -76,7 +76,7 @@ export function AccountDetail({ accountId, item, onDashboardRefresh }: AccountDe
   )
 
   const runner = useExecutionRunner(accountId, () => {
-    records.refresh()
+    activity.refresh()
     onDashboardRefresh?.()
   })
   // 服务端真源的在途执行（SSE/轮询汇入 liveExec store）：任何来源发起的执行都可见。
@@ -84,7 +84,7 @@ export function AccountDetail({ accountId, item, onDashboardRefresh }: AccountDe
   // 当前在途执行 id：优先服务端真源，退回本地 runner（首帧前）。用于「一行可点跳详情」。
   const runningExecId = live?.executionId ?? runner.executionId
 
-  const recordList = records.data?.data ?? []
+  const recordList = activity.data?.data.flatMap((item) => item.kind === 'execution' ? [item.record] : []) ?? []
   const positions = positionsOf(recordList)
   const target = weights.data ?? {}
   // 背离摘要：与明细抽屉同口径（均出自 rebalancePlan）。文案讲「几只要动 · 卖几买几」，
@@ -104,7 +104,7 @@ export function AccountDetail({ accountId, item, onDashboardRefresh }: AccountDe
   // 执行态：服务端 live 优先，runner 仅首帧前乐观；驱动主句「正在执行/清仓」与生命体征。
   const isRunning = !!(live || runner.running)
   // 终止动作 + 防连点：点后乐观进「终止中…」并禁用按钮，执行离开运行态即复位。
-  const { terminating, terminate } = useTerminateAction(accountId, isRunning, records.refresh)
+  const { terminating, terminate } = useTerminateAction(accountId, isRunning, activity.refresh)
   const runKind = live?.kind ?? (runner.kind === 'clear' ? 'clear' : 'rebalance')
   // 主句只跟离散态变（进出执行、执行↔清仓、启停空闲句）；phase 不并入，避免连刷糊墨。
   const statusHeadline = isRunning
@@ -263,7 +263,7 @@ export function AccountDetail({ accountId, item, onDashboardRefresh }: AccountDe
         </div>
         <div className="mt-1.5 text-[13px] text-ink-3">
           {item.last_exec_at ? `上次 ${item.last_exec_at.replace('T', ' ')}` : '尚无执行'}
-          {nextRun.data?.next_run_time ? ` · 下次 ${nextRun.data.next_run_time.replace('T', ' ').slice(0, 16)}` : ''}
+          {nextRun.data?.next_run_time ? ` · 下次排程 ${nextRun.data.next_run_time.replace('T', ' ').slice(0, 16)}` : ''}
         </div>
 
         <div className="mt-6 border-t border-line pt-4">
@@ -371,7 +371,7 @@ export function AccountDetail({ accountId, item, onDashboardRefresh }: AccountDe
             </span>
           </button>
           <Kv k="上次" v={item.last_exec_at ? item.last_exec_at.replace('T', ' ').slice(5, 16) : '—'} />
-          <Kv k="下次" v={nextRun.data?.next_run_time ? nextRun.data.next_run_time.replace('T', ' ').slice(5, 16) : '未排程'} />
+          <Kv k="下次排程" v={nextRun.data?.next_run_time ? nextRun.data.next_run_time.replace('T', ' ').slice(5, 16) : '未排程'} />
           {cronFires.length > 0 && (
             <div className="num pt-1.5 text-right text-[12px] text-ink-3">接下来 {cronFires.map(fmtFire).join(' · ')}</div>
           )}
@@ -392,21 +392,21 @@ export function AccountDetail({ accountId, item, onDashboardRefresh }: AccountDe
         }}
       />
 
-      {/* 近期执行 */}
+      {/* 近期活动 */}
       <div className="mx-0.5 mt-6 mb-3 flex items-center justify-between">
-        <span className="text-xs font-semibold tracking-wide text-ink-3">近期执行</span>
+        <span className="text-xs font-semibold tracking-wide text-ink-3">近期活动</span>
         <Link to={`/accounts/${accountId}/history`} className="text-[12.5px] font-semibold text-accent hover:underline">
           完整回看 / 绩效 →
         </Link>
       </div>
       <Card className="overflow-hidden">
-        {records.loading && <div className="px-6 py-4 text-[14px] text-ink-2">加载中…</div>}
-        {records.error && <div className="px-6 py-4 text-[14px] text-warn">加载失败：{records.error.message}</div>}
-        {!records.loading && !records.error && (records.data?.data.length ?? 0) === 0 && (
-          <div className="px-6 py-4 text-[14px] text-ink-3">暂无执行记录。</div>
+        {activity.loading && <div className="px-6 py-4 text-[14px] text-ink-2">加载中…</div>}
+        {activity.error && <div className="px-6 py-4 text-[14px] text-warn">加载失败：{activity.error.message}</div>}
+        {!activity.loading && !activity.error && (activity.data?.data.length ?? 0) === 0 && (
+          <div className="px-6 py-4 text-[14px] text-ink-3">暂无执行或跳过记录。</div>
         )}
         {(() => {
-          const { rows, truncated } = buildRecentRows(records.data?.data ?? [], {
+          const { rows, truncated } = buildRecentActivity(activity.data?.data ?? [], {
             cap: 6,
             fetchLimit: RECENT_LIMIT,
           })
@@ -414,9 +414,9 @@ export function AccountDetail({ accountId, item, onDashboardRefresh }: AccountDe
           return (
             <>
               {rows.map((row) => {
-                const clickable = row.type !== 'noop' && Boolean(row.executionId)
+                const clickable = 'executionId' in row && Boolean(row.executionId)
                 const onClick = () => {
-                  if (row.type !== 'noop' && row.executionId)
+                  if ('executionId' in row && row.executionId)
                     navigate(`/accounts/${accountId}/executions/${row.executionId}`)
                 }
                 return (
@@ -456,6 +456,14 @@ export function AccountDetail({ accountId, item, onDashboardRefresh }: AccountDe
                         <span className="w-4 flex-none text-center text-ink-3">■</span>
                         <span className="flex-1 min-w-0 truncate text-ink-2">
                           {row.count > 1 ? `已终止 · ${row.count} 次` : '已终止'}
+                        </span>
+                      </>
+                    )}
+                    {row.type === 'skip' && (
+                      <>
+                        <span className="w-4 flex-none text-center text-ink-3">–</span>
+                        <span className="flex-1 min-w-0 truncate text-ink-2">
+                          {row.count > 1 ? `连续 ${row.count} 次排程因休市跳过` : '排程已跳过 · 当日休市'}
                         </span>
                       </>
                     )}

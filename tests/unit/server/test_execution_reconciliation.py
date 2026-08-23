@@ -47,9 +47,9 @@ def _order(direction: str, filled: float, avg_price: float = 0.0) -> dict[str, o
 def test_reconciliation_reached_target_exactly() -> None:
     """买入到位：after≈target 且 drift≈0，reached 为真、attained≈1。"""
     result = {
-        "account_assets": {"total_asset": 1000.0, "positions": [_long("ETHUSDT", 4.366)], "source": "real"},
+        "account_assets": {"total_asset": 1000.0, "positions": [_long("ag2612", 4.366)], "source": "real"},
         "symbol_results": {
-            "ETHUSDT": {"target_volume": 4.366, "orders": [_order("BUY", 4.366)], "status": "SUCCEEDED"},
+            "ag2612": {"target_volume": 4.366, "orders": [_order("BUY", 4.366)], "status": "SUCCEEDED"},
         },
     }
     before = {"total_asset": 1000.0, "positions": [], "source": "real"}
@@ -57,7 +57,7 @@ def test_reconciliation_reached_target_exactly() -> None:
     recon = build_symbol_reconciliation(result, before)
 
     row = recon["symbols"][0]
-    assert row["symbol"] == "ETHUSDT"
+    assert row["symbol"] == "ag2612"
     assert row["target"] == 4.366
     assert row["filled"] == 4.366
     assert row["before"] == 0.0
@@ -71,12 +71,12 @@ def test_reconciliation_reached_target_exactly() -> None:
 def test_reconciliation_undershoot_counts_preexisting_position() -> None:
     """欠量到位：已有底仓 + 部分成交，after 由前仓叠加，attained<1、reached 为假。"""
     result = {
-        "account_assets": {"total_asset": 5149.0, "positions": [_long("BTCUSDT", 0.1011)], "source": "real"},
+        "account_assets": {"total_asset": 5149.0, "positions": [_long("rb2610", 0.1011)], "source": "real"},
         "symbol_results": {
-            "BTCUSDT": {"target_volume": 0.1243, "orders": [_order("BUY", 0.0675)], "status": "SUCCEEDED"},
+            "rb2610": {"target_volume": 0.1243, "orders": [_order("BUY", 0.0675)], "status": "SUCCEEDED"},
         },
     }
-    before = {"total_asset": 5149.0, "positions": [_long("BTCUSDT", 0.0336)], "source": "real"}
+    before = {"total_asset": 5149.0, "positions": [_long("rb2610", 0.0336)], "source": "real"}
 
     row = build_symbol_reconciliation(result, before)["symbols"][0]
 
@@ -92,9 +92,9 @@ def test_reconciliation_undershoot_counts_preexisting_position() -> None:
 def test_reconciliation_fill_value_and_avg_price() -> None:
     """成交金额与均价：多单加权、卖出成交额记负号。"""
     result = {
-        "account_assets": {"total_asset": 1000.0, "positions": [_long("ETHUSDT", 4.366)], "source": "real"},
+        "account_assets": {"total_asset": 1000.0, "positions": [_long("ag2612", 4.366)], "source": "real"},
         "symbol_results": {
-            "ETHUSDT": {
+            "ag2612": {
                 "target_volume": 4.366,
                 "orders": [_order("BUY", 2.0, 1800.0), _order("BUY", 2.366, 1750.0)],
                 "status": "SUCCEEDED",
@@ -109,7 +109,7 @@ def test_reconciliation_fill_value_and_avg_price() -> None:
     sell_result = {
         "account_assets": {"total_asset": 1000.0, "positions": [], "source": "real"},
         "symbol_results": {
-            "BNBUSDT": {"target_volume": 0, "orders": [_order("SELL", 2.34, 566.27)], "status": "SUCCEEDED"},
+            "m2609": {"target_volume": 0, "orders": [_order("SELL", 2.34, 566.27)], "status": "SUCCEEDED"},
         },
     }
     sell_row = build_symbol_reconciliation(sell_result, None)["symbols"][0]
@@ -122,7 +122,7 @@ def test_symbol_tca_slippage_liquidity_fee_and_tree() -> None:
     result = {
         "account_assets": {"total_asset": 1000.0, "positions": [], "source": "real"},
         "symbol_results": {
-            "ETHUSDT": {
+            "ag2612": {
                 "status": "SUCCEEDED",
                 "target_volume": 0,
                 "first_tick": {"bid_price": 100.0, "ask_price": 100.1, "last_price": 100.05},
@@ -146,13 +146,13 @@ def test_symbol_tca_slippage_liquidity_fee_and_tree() -> None:
                         "trade_volume": 2.0,
                         "trade_value": 200.2,
                         "trade_time": "2026-07-14T10:00:00",
-                        "extra": {"commission": 0.5, "commission_asset": "USDT"},
+                        "extra": {"commission": 0.5, "commission_asset": "CNY"},
                     }
                 ],
             }
         },
     }
-    before = {"total_asset": 1000.0, "positions": [_long("ETHUSDT", 2.0)], "source": "real"}
+    before = {"total_asset": 1000.0, "positions": [_long("ag2612", 2.0)], "source": "real"}
     row = build_symbol_reconciliation(result, before)["symbols"][0]
 
     tca = row["tca"]
@@ -161,7 +161,7 @@ def test_symbol_tca_slippage_liquidity_fee_and_tree() -> None:
     assert tca["liquidity"] == "passive"
     assert 4.9 < tca["slippage_bps"] < 5.0  # 卖在卖一、高于中间价 → 有利、正号
     assert tca["fee"] == 0.5
-    assert tca["fee_asset"] == "USDT"
+    assert tca["fee_asset"] == "CNY"
     assert abs(tca["fill_ratio"] - 1.0) < 1e-9
     assert abs((tca["arrival_mid"] or 0) - 100.05) < 1e-9
 
@@ -178,10 +178,10 @@ def test_reconciliation_close_to_zero_target() -> None:
     result = {
         "account_assets": {"total_asset": 1000.0, "positions": [], "source": "real"},
         "symbol_results": {
-            "BNBUSDT": {"target_volume": 0, "orders": [_order("SELL", 2.34)], "status": "SUCCEEDED"},
+            "m2609": {"target_volume": 0, "orders": [_order("SELL", 2.34)], "status": "SUCCEEDED"},
         },
     }
-    before = {"total_asset": 1200.0, "positions": [_long("BNBUSDT", 2.34)], "source": "real"}
+    before = {"total_asset": 1200.0, "positions": [_long("m2609", 2.34)], "source": "real"}
 
     row = build_symbol_reconciliation(result, before)["symbols"][0]
 
@@ -194,9 +194,9 @@ def test_reconciliation_close_to_zero_target() -> None:
 def test_reconciliation_short_position_is_negative() -> None:
     """做空：空头持仓与卖出成交都记负号。"""
     result = {
-        "account_assets": {"total_asset": 1000.0, "positions": [_short("ETHUSDT", 5.0)], "source": "real"},
+        "account_assets": {"total_asset": 1000.0, "positions": [_short("ag2612", 5.0)], "source": "real"},
         "symbol_results": {
-            "ETHUSDT": {"target_volume": -5.0, "orders": [_order("SELL", 5.0)], "status": "SUCCEEDED"},
+            "ag2612": {"target_volume": -5.0, "orders": [_order("SELL", 5.0)], "status": "SUCCEEDED"},
         },
     }
     before = {"total_asset": 1000.0, "positions": [], "source": "real"}
@@ -212,9 +212,9 @@ def test_reconciliation_short_position_is_negative() -> None:
 def test_reconciliation_missing_before_marks_unavailable() -> None:
     """前仓不可用：before=None → 账户级 source_before 记 unavailable、逐只 before 记 0。"""
     result = {
-        "account_assets": {"total_asset": 1000.0, "positions": [_long("ETHUSDT", 1.0)], "source": "real"},
+        "account_assets": {"total_asset": 1000.0, "positions": [_long("ag2612", 1.0)], "source": "real"},
         "symbol_results": {
-            "ETHUSDT": {"target_volume": 1.0, "orders": [_order("BUY", 1.0)], "status": "SUCCEEDED"},
+            "ag2612": {"target_volume": 1.0, "orders": [_order("BUY", 1.0)], "status": "SUCCEEDED"},
         },
     }
 
@@ -240,9 +240,9 @@ def test_reconciliation_empty_symbol_results() -> None:
 def test_reconciliation_none_target_leaves_ratio_unset() -> None:
     """NOOP 品种 target_volume 缺失：attained_ratio 与 reached 均为 None。"""
     result = {
-        "account_assets": {"total_asset": 1000.0, "positions": [_long("ETHUSDT", 1.0)], "source": "real"},
+        "account_assets": {"total_asset": 1000.0, "positions": [_long("ag2612", 1.0)], "source": "real"},
         "symbol_results": {
-            "ETHUSDT": {"target_volume": None, "orders": [], "status": "NOOP"},
+            "ag2612": {"target_volume": None, "orders": [], "status": "NOOP"},
         },
     }
 

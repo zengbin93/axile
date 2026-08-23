@@ -17,7 +17,7 @@ export function WizardPage({
   wide?: boolean
 }) {
   return (
-    <div className={`mx-auto ${wide ? 'max-w-[1040px]' : 'max-w-[820px]'} px-12 pt-8 pb-6`}>
+    <div className={`mx-auto ${wide ? 'max-w-[1040px]' : 'max-w-[820px]'} px-5 pt-8 pb-6 sm:px-12`}>
       <div className="mb-1.5 text-xs font-semibold tracking-wide text-accent">{kicker}</div>
       <div className="text-[22px] font-[680] tracking-tight">{title}</div>
       {lead && <div className="mt-1.5 max-w-[560px] text-[14px] text-ink-2">{lead}</div>}
@@ -60,7 +60,7 @@ export function WizardNav({
   const nextCls = 'bg-ink-1 border-ink-1 text-surface font-[550]'
 
   return (
-    <div className="flex gap-3 border-t border-line bg-surface px-12 py-3.5">
+    <div className="flex gap-3 border-t border-line bg-surface px-5 py-3.5 sm:px-12">
       {prevTo ? (
         <button
           className="cursor-pointer rounded-[11px] border border-line bg-surface px-[22px] py-2.5 text-[14px] text-ink-2"

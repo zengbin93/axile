@@ -16,6 +16,7 @@ from axile.executor.models.unified_input_accounts import (
     BaseAccountConfig,
     CTPAccountConfig,
     GMAccountConfig,
+    TQAccountConfig,
     _channel_value,
 )
 from axile.executor.models.unified_input_support import (
@@ -47,6 +48,7 @@ __all__ = [
     "BaseAccountConfig",
     "CTPAccountConfig",
     "GMAccountConfig",
+    "TQAccountConfig",
     "SymbolAlgorithms",
     "TradeAlgorithm",
     "TradeRule",

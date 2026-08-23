@@ -74,6 +74,10 @@ class _TestExecutor(AbstractExecutor):
                     "broker_id": "b",
                     "investor_id": "i",
                     "password": "p",
+                    "td_front": "tcp://td:1",
+                    "md_front": "tcp://md:2",
+                    "app_id": "app",
+                    "auth_code": "auth",
                 }
             ),
         )
@@ -294,26 +298,34 @@ def test_execute_dispatches_symbols_with_overrides_and_default_fallback(
         UnifiedStandardInput.from_dict(
             {
                 "channel_type": TradeChannel.CTP.value,
-                "account_config": {"broker_id": "b", "investor_id": "i", "password": "p"},
-                "curr_target": {"BTCUSDT": 0.1, "ETHUSDT": 0.2},
+                "account_config": {
+                    "broker_id": "b",
+                    "investor_id": "i",
+                    "password": "p",
+                    "td_front": "tcp://td:1",
+                    "md_front": "tcp://md:2",
+                    "app_id": "app",
+                    "auth_code": "auth",
+                },
+                "curr_target": {"rb2610": 0.1, "ag2612": 0.2},
                 "algorithm": {"method": "DEFAULT-ALGO", "params": {"timeout": 3}},
-                "symbol_algorithms": {"ETHUSDT": {"method": "OVERRIDE-ALGO", "params": {"timeout": 7}}},
+                "symbol_algorithms": {"ag2612": {"method": "OVERRIDE-ALGO", "params": {"timeout": 7}}},
             }
         )
     )
 
     sorted_calls = sorted((symbol, name, timeout) for symbol, name, timeout, _executor_id in calls)
     assert sorted_calls == [
-        ("BTCUSDT", "DEFAULT-ALGO", 3),
-        ("ETHUSDT", "OVERRIDE-ALGO", 7),
+        ("ag2612", "OVERRIDE-ALGO", 7),
+        ("rb2610", "DEFAULT-ALGO", 3),
     ]
     assert len({session_id for *_head, session_id in calls}) == 2
     assert all(session_id != id(executor) for *_head, session_id in calls)
     assert output.success is True
-    assert sorted(order.symbol for order in output.orders) == ["BTCUSDT", "ETHUSDT"]
-    assert set(output.target_volume) == {"BTCUSDT", "ETHUSDT"}
-    assert output.symbol_results["BTCUSDT"].algorithm == "DEFAULT-ALGO"
-    assert output.symbol_results["ETHUSDT"].algorithm == "OVERRIDE-ALGO"
+    assert sorted(order.symbol for order in output.orders) == ["ag2612", "rb2610"]
+    assert set(output.target_volume) == {"rb2610", "ag2612"}
+    assert output.symbol_results["rb2610"].algorithm == "DEFAULT-ALGO"
+    assert output.symbol_results["ag2612"].algorithm == "OVERRIDE-ALGO"
 
 
 def test_execute_rejects_dict_input() -> None:
@@ -326,8 +338,16 @@ def test_execute_rejects_dict_input() -> None:
                 "UnifiedStandardInput",
                 {
                     "channel_type": TradeChannel.CTP.value,
-                    "account_config": {"broker_id": "b", "investor_id": "i", "password": "p"},
-                    "curr_target": {"BTCUSDT": 0.1},
+                    "account_config": {
+                        "broker_id": "b",
+                        "investor_id": "i",
+                        "password": "p",
+                        "td_front": "tcp://td:1",
+                        "md_front": "tcp://md:2",
+                        "app_id": "app",
+                        "auth_code": "auth",
+                    },
+                    "curr_target": {"rb2610": 0.1},
                     "algorithm": {"method": "DEFAULT-ALGO", "params": {"timeout": 3}},
                 },
             )
@@ -342,8 +362,16 @@ def test_execute_delegates_orchestration_to_execution_engine(monkeypatch: pytest
     standard_input = UnifiedStandardInput.from_dict(
         {
             "channel_type": TradeChannel.CTP.value,
-            "account_config": {"broker_id": "b", "investor_id": "i", "password": "p"},
-            "curr_target": {"BTCUSDT": 0.1},
+            "account_config": {
+                "broker_id": "b",
+                "investor_id": "i",
+                "password": "p",
+                "td_front": "tcp://td:1",
+                "md_front": "tcp://md:2",
+                "app_id": "app",
+                "auth_code": "auth",
+            },
+            "curr_target": {"rb2610": 0.1},
             "algorithm": {"method": "DEFAULT-ALGO", "params": {"timeout": 3}},
         }
     )
@@ -380,13 +408,13 @@ def test_execution_session_returns_current_symbol_market_data() -> None:
     """执行会话读取行情时应直接返回当前品种的 tick。"""
     executor = _TestExecutor()
 
-    session = executor._execution_engine()._create_symbol_session("BTCUSDT", None)
+    session = executor._execution_engine()._create_symbol_session("rb2610", None)
 
     market_data = session.get_market_data()
 
     assert isinstance(market_data, UnifiedPriceData)
-    assert market_data.symbol == "BTCUSDT"
-    assert executor.market_data_requests == [["BTCUSDT"]]
+    assert market_data.symbol == "rb2610"
+    assert executor.market_data_requests == [["rb2610"]]
 
 
 def test_execute_uses_phase_boundary_termination_checkpoints(
@@ -427,8 +455,16 @@ def test_execute_uses_phase_boundary_termination_checkpoints(
         UnifiedStandardInput.from_dict(
             {
                 "channel_type": TradeChannel.CTP.value,
-                "account_config": {"broker_id": "b", "investor_id": "i", "password": "p"},
-                "curr_target": {"BTCUSDT": 0.1},
+                "account_config": {
+                    "broker_id": "b",
+                    "investor_id": "i",
+                    "password": "p",
+                    "td_front": "tcp://td:1",
+                    "md_front": "tcp://md:2",
+                    "app_id": "app",
+                    "auth_code": "auth",
+                },
+                "curr_target": {"rb2610": 0.1},
                 "algorithm": {"method": "DEFAULT-ALGO", "params": {"timeout": 3}},
             }
         )
@@ -475,8 +511,16 @@ def test_run_symbol_algorithms_returns_symbol_level_results(monkeypatch: pytest.
         UnifiedStandardInput.from_dict(
             {
                 "channel_type": TradeChannel.CTP.value,
-                "account_config": {"broker_id": "b", "investor_id": "i", "password": "p"},
-                "curr_target": {"BTCUSDT": 0.1, "ETHUSDT": 0.2},
+                "account_config": {
+                    "broker_id": "b",
+                    "investor_id": "i",
+                    "password": "p",
+                    "td_front": "tcp://td:1",
+                    "md_front": "tcp://md:2",
+                    "app_id": "app",
+                    "auth_code": "auth",
+                },
+                "curr_target": {"rb2610": 0.1, "ag2612": 0.2},
                 "algorithm": {"method": "DEFAULT-ALGO", "params": {"timeout": 3}},
             }
         )
@@ -541,22 +585,30 @@ def test_execute_dispatches_top_level_symbol_algorithm_per_symbol(
         UnifiedStandardInput.from_dict(
             {
                 "channel_type": TradeChannel.CTP.value,
-                "account_config": {"broker_id": "b", "investor_id": "i", "password": "p"},
-                "curr_target": {"BTCUSDT": 0.1, "ETHUSDT": 0.2},
+                "account_config": {
+                    "broker_id": "b",
+                    "investor_id": "i",
+                    "password": "p",
+                    "td_front": "tcp://td:1",
+                    "md_front": "tcp://md:2",
+                    "app_id": "app",
+                    "auth_code": "auth",
+                },
+                "curr_target": {"rb2610": 0.1, "ag2612": 0.2},
                 "algorithm": {"method": "DEFAULT-ALGO", "params": {"timeout": 3}},
             }
         )
     )
 
     assert sorted(calls, key=lambda item: item[0]) == [
-        ("BTCUSDT", "DEFAULT-ALGO", 3, 1.0, {}),
-        ("ETHUSDT", "DEFAULT-ALGO", 3, 2.0, {}),
+        ("ag2612", "DEFAULT-ALGO", 3, 2.0, {}),
+        ("rb2610", "DEFAULT-ALGO", 3, 1.0, {}),
     ]
     assert output.success is True
-    assert sorted(order.symbol for order in output.orders) == ["BTCUSDT", "ETHUSDT"]
+    assert sorted(order.symbol for order in output.orders) == ["ag2612", "rb2610"]
     assert len(output.symbol_results) == 2
     assert sum(1 for result in output.symbol_results.values() if result.success) == 2
-    assert executor.market_data_requests == [["BTCUSDT", "ETHUSDT"]]
+    assert executor.market_data_requests == [["rb2610", "ag2612"]]
 
 
 def test_execute_dispatches_single_symbol_through_aggregator(
@@ -612,8 +664,16 @@ def test_execute_dispatches_single_symbol_through_aggregator(
         UnifiedStandardInput.from_dict(
             {
                 "channel_type": TradeChannel.CTP.value,
-                "account_config": {"broker_id": "b", "investor_id": "i", "password": "p"},
-                "curr_target": {"BTCUSDT": 0.1},
+                "account_config": {
+                    "broker_id": "b",
+                    "investor_id": "i",
+                    "password": "p",
+                    "td_front": "tcp://td:1",
+                    "md_front": "tcp://md:2",
+                    "app_id": "app",
+                    "auth_code": "auth",
+                },
+                "curr_target": {"rb2610": 0.1},
                 "algorithm": {"method": "DEFAULT-ALGO", "params": {"timeout": 3}},
                 "extra": {
                     "audit": {
@@ -626,16 +686,16 @@ def test_execute_dispatches_single_symbol_through_aggregator(
     )
 
     assert len(captured_inputs) == 1
-    assert captured_inputs[0].symbol == "BTCUSDT"
+    assert captured_inputs[0].symbol == "rb2610"
     assert captured_inputs[0].target_volume == 1.0
     assert captured_audit_contexts[0] == {
         "execution_id": "exec-1",
         "algorithm": "DEFAULT-ALGO",
-        "symbol": "BTCUSDT",
+        "symbol": "rb2610",
     }
     assert len(output.symbol_results) == 1
-    assert output.symbol_results["BTCUSDT"].algorithm == "DEFAULT-ALGO"
-    assert output.symbol_results["BTCUSDT"].success is True
+    assert output.symbol_results["rb2610"].algorithm == "DEFAULT-ALGO"
+    assert output.symbol_results["rb2610"].success is True
     assert output.memory == {}
 
 
@@ -690,10 +750,18 @@ def test_execute_continues_other_symbols_and_marks_overall_failure(
         UnifiedStandardInput.from_dict(
             {
                 "channel_type": TradeChannel.CTP.value,
-                "account_config": {"broker_id": "b", "investor_id": "i", "password": "p"},
-                "curr_target": {"BTCUSDT": 0.1, "ETHUSDT": 0.2},
+                "account_config": {
+                    "broker_id": "b",
+                    "investor_id": "i",
+                    "password": "p",
+                    "td_front": "tcp://td:1",
+                    "md_front": "tcp://md:2",
+                    "app_id": "app",
+                    "auth_code": "auth",
+                },
+                "curr_target": {"rb2610": 0.1, "ag2612": 0.2},
                 "algorithm": {"method": "SUCCESS-ALGO", "params": {"timeout": 3}},
-                "symbol_algorithms": {"ETHUSDT": {"method": "FAIL-ALGO", "params": {"timeout": 7}}},
+                "symbol_algorithms": {"ag2612": {"method": "FAIL-ALGO", "params": {"timeout": 7}}},
             }
         )
     )
@@ -701,13 +769,13 @@ def test_execute_continues_other_symbols_and_marks_overall_failure(
     assert output.success is False
     assert output.status == ExecutionStatus.PARTIAL
     assert len(output.symbol_results) == 2
-    assert [order.symbol for order in output.orders] == ["BTCUSDT"]
-    assert output.error == "ETHUSDT failed"
-    assert output.symbol_results["ETHUSDT"].algorithm == "FAIL-ALGO"
-    assert output.symbol_results["ETHUSDT"].status == ExecutionStatus.FAILED
-    assert output.symbol_results["ETHUSDT"].success is False
-    assert output.symbol_results["ETHUSDT"].error is not None
-    assert "ETHUSDT failed" in output.symbol_results["ETHUSDT"].error
+    assert [order.symbol for order in output.orders] == ["rb2610"]
+    assert output.error == "ag2612 failed"
+    assert output.symbol_results["ag2612"].algorithm == "FAIL-ALGO"
+    assert output.symbol_results["ag2612"].status == ExecutionStatus.FAILED
+    assert output.symbol_results["ag2612"].success is False
+    assert output.symbol_results["ag2612"].error is not None
+    assert "ag2612 failed" in output.symbol_results["ag2612"].error
 
 
 def test_execute_single_symbol_failure_is_aggregated(
@@ -743,8 +811,16 @@ def test_execute_single_symbol_failure_is_aggregated(
         UnifiedStandardInput.from_dict(
             {
                 "channel_type": TradeChannel.CTP.value,
-                "account_config": {"broker_id": "b", "investor_id": "i", "password": "p"},
-                "curr_target": {"BTCUSDT": 0.1},
+                "account_config": {
+                    "broker_id": "b",
+                    "investor_id": "i",
+                    "password": "p",
+                    "td_front": "tcp://td:1",
+                    "md_front": "tcp://md:2",
+                    "app_id": "app",
+                    "auth_code": "auth",
+                },
+                "curr_target": {"rb2610": 0.1},
                 "algorithm": {"method": "FAIL-ALGO", "params": {"timeout": 3}},
             }
         )
@@ -754,11 +830,11 @@ def test_execute_single_symbol_failure_is_aggregated(
     assert output.status == ExecutionStatus.FAILED
     assert len(output.symbol_results) == 1
     assert sum(1 for result in output.symbol_results.values() if not result.success) == 1
-    assert output.symbol_results["BTCUSDT"].algorithm == "FAIL-ALGO"
-    assert output.symbol_results["BTCUSDT"].status == ExecutionStatus.FAILED
-    assert output.error == "BTCUSDT failed with FAIL-ALGO"
-    assert output.symbol_results["BTCUSDT"].error is not None
-    assert "BTCUSDT failed with FAIL-ALGO" in output.symbol_results["BTCUSDT"].error
+    assert output.symbol_results["rb2610"].algorithm == "FAIL-ALGO"
+    assert output.symbol_results["rb2610"].status == ExecutionStatus.FAILED
+    assert output.error == "rb2610 failed with FAIL-ALGO"
+    assert output.symbol_results["rb2610"].error is not None
+    assert "rb2610 failed with FAIL-ALGO" in output.symbol_results["rb2610"].error
 
 
 def test_execute_serial_dispatch_treats_explicit_failed_status_as_failure(
@@ -803,8 +879,16 @@ def test_execute_serial_dispatch_treats_explicit_failed_status_as_failure(
         UnifiedStandardInput.from_dict(
             {
                 "channel_type": TradeChannel.CTP.value,
-                "account_config": {"broker_id": "b", "investor_id": "i", "password": "p"},
-                "curr_target": {"BTCUSDT": 0.1},
+                "account_config": {
+                    "broker_id": "b",
+                    "investor_id": "i",
+                    "password": "p",
+                    "td_front": "tcp://td:1",
+                    "md_front": "tcp://md:2",
+                    "app_id": "app",
+                    "auth_code": "auth",
+                },
+                "curr_target": {"rb2610": 0.1},
                 "algorithm": {"method": "ERROR-ALGO", "params": {"timeout": 3}},
             }
         )
@@ -814,10 +898,10 @@ def test_execute_serial_dispatch_treats_explicit_failed_status_as_failure(
     assert output.status == ExecutionStatus.FAILED
     assert len(output.symbol_results) == 1
     assert sum(1 for result in output.symbol_results.values() if not result.success) == 1
-    assert output.symbol_results["BTCUSDT"].algorithm == "ERROR-ALGO"
-    assert output.symbol_results["BTCUSDT"].status == ExecutionStatus.FAILED
+    assert output.symbol_results["rb2610"].algorithm == "ERROR-ALGO"
+    assert output.symbol_results["rb2610"].status == ExecutionStatus.FAILED
     assert output.error == "ERROR-ALGO failed"
-    assert output.symbol_results["BTCUSDT"].error == "ERROR-ALGO failed"
+    assert output.symbol_results["rb2610"].error == "ERROR-ALGO failed"
 
 
 def test_execute_does_not_treat_memory_error_key_as_failure_when_status_succeeds(
@@ -861,8 +945,16 @@ def test_execute_does_not_treat_memory_error_key_as_failure_when_status_succeeds
         UnifiedStandardInput.from_dict(
             {
                 "channel_type": TradeChannel.CTP.value,
-                "account_config": {"broker_id": "b", "investor_id": "i", "password": "p"},
-                "curr_target": {"BTCUSDT": 0.1},
+                "account_config": {
+                    "broker_id": "b",
+                    "investor_id": "i",
+                    "password": "p",
+                    "td_front": "tcp://td:1",
+                    "md_front": "tcp://md:2",
+                    "app_id": "app",
+                    "auth_code": "auth",
+                },
+                "curr_target": {"rb2610": 0.1},
                 "algorithm": {"method": "SUCCESS-ALGO", "params": {"timeout": 3}},
             }
         )
@@ -871,10 +963,10 @@ def test_execute_does_not_treat_memory_error_key_as_failure_when_status_succeeds
     assert output.success is True
     assert output.status == ExecutionStatus.SUCCEEDED
     assert output.memory == {}
-    assert output.symbol_results["BTCUSDT"].status == ExecutionStatus.SUCCEEDED
-    assert output.symbol_results["BTCUSDT"].success is True
-    assert output.symbol_results["BTCUSDT"].error is None
-    assert output.symbol_results["BTCUSDT"].memory["error"] == "SUCCESS-ALGO debug only"
+    assert output.symbol_results["rb2610"].status == ExecutionStatus.SUCCEEDED
+    assert output.symbol_results["rb2610"].success is True
+    assert output.symbol_results["rb2610"].error is None
+    assert output.symbol_results["rb2610"].memory["error"] == "SUCCESS-ALGO debug only"
 
 
 def test_execute_runs_reduce_phase_before_open_phase(
@@ -886,7 +978,7 @@ def test_execute_runs_reduce_phase_before_open_phase(
 
     executor = _TestExecutor(
         account_assets_snapshots=[
-            _assets(positions=[("BTCUSDT", 5.0, PositionDirection.LONG)]),
+            _assets(positions=[("rb2610", 5.0, PositionDirection.LONG)]),
             _assets(positions=[]),
         ]
     )
@@ -922,15 +1014,23 @@ def test_execute_runs_reduce_phase_before_open_phase(
         UnifiedStandardInput.from_dict(
             {
                 "channel_type": TradeChannel.CTP.value,
-                "account_config": {"broker_id": "b", "investor_id": "i", "password": "p"},
-                "curr_target": {"BTCUSDT": 0.2, "ETHUSDT": 0.3},
+                "account_config": {
+                    "broker_id": "b",
+                    "investor_id": "i",
+                    "password": "p",
+                    "td_front": "tcp://td:1",
+                    "md_front": "tcp://md:2",
+                    "app_id": "app",
+                    "auth_code": "auth",
+                },
+                "curr_target": {"rb2610": 0.2, "ag2612": 0.3},
                 "algorithm": {"method": "DEFAULT-ALGO", "params": {"timeout": 3}},
             }
         )
     )
 
-    assert calls == [("BTCUSDT", 2.0), ("ETHUSDT", 3.0)]
-    assert executor.market_data_requests == [["BTCUSDT", "ETHUSDT"], ["ETHUSDT"]]
+    assert calls == [("rb2610", 2.0), ("ag2612", 3.0)]
+    assert executor.market_data_requests == [["rb2610", "ag2612"], ["ag2612"]]
     assert output.success is True
 
 
@@ -979,14 +1079,22 @@ def test_execute_cancels_all_orders_once_before_symbol_dispatch(
         UnifiedStandardInput.from_dict(
             {
                 "channel_type": TradeChannel.CTP.value,
-                "account_config": {"broker_id": "b", "investor_id": "i", "password": "p"},
-                "curr_target": {"BTCUSDT": 0.1, "ETHUSDT": 0.2},
+                "account_config": {
+                    "broker_id": "b",
+                    "investor_id": "i",
+                    "password": "p",
+                    "td_front": "tcp://td:1",
+                    "md_front": "tcp://md:2",
+                    "app_id": "app",
+                    "auth_code": "auth",
+                },
+                "curr_target": {"rb2610": 0.1, "ag2612": 0.2},
                 "algorithm": {"method": "DEFAULT-ALGO", "params": {"timeout": 3}},
             }
         )
     )
 
-    assert call_log == ["cancel_all_orders", "DEFAULT-ALGO:BTCUSDT", "DEFAULT-ALGO:ETHUSDT"]
+    assert call_log == ["cancel_all_orders", "DEFAULT-ALGO:rb2610", "DEFAULT-ALGO:ag2612"]
     assert output.success is True
 
 
@@ -999,7 +1107,7 @@ def test_execute_splits_reverse_symbol_into_two_phases_and_replans_open_phase(
 
     executor = _TestExecutor(
         account_assets_snapshots=[
-            _assets(positions=[("BTCUSDT", 5.0, PositionDirection.LONG)]),
+            _assets(positions=[("rb2610", 5.0, PositionDirection.LONG)]),
             _assets(total_asset=2000.0, positions=[]),
         ]
     )
@@ -1035,17 +1143,25 @@ def test_execute_splits_reverse_symbol_into_two_phases_and_replans_open_phase(
         UnifiedStandardInput.from_dict(
             {
                 "channel_type": TradeChannel.CTP.value,
-                "account_config": {"broker_id": "b", "investor_id": "i", "password": "p"},
-                "curr_target": {"BTCUSDT": -0.3},
+                "account_config": {
+                    "broker_id": "b",
+                    "investor_id": "i",
+                    "password": "p",
+                    "td_front": "tcp://td:1",
+                    "md_front": "tcp://md:2",
+                    "app_id": "app",
+                    "auth_code": "auth",
+                },
+                "curr_target": {"rb2610": -0.3},
                 "algorithm": {"method": "DEFAULT-ALGO", "params": {"timeout": 3}},
             }
         )
     )
 
     assert calls == [0, -6.0]
-    assert executor.market_data_requests == [["BTCUSDT"], ["BTCUSDT"]]
-    assert output.symbol_results["BTCUSDT"].success is True
-    assert output.target_volume["BTCUSDT"] == -6.0
+    assert executor.market_data_requests == [["rb2610"], ["rb2610"]]
+    assert output.symbol_results["rb2610"].success is True
+    assert output.target_volume["rb2610"] == -6.0
 
 
 def test_execute_only_cancels_all_orders_once_across_two_phases(
@@ -1057,7 +1173,7 @@ def test_execute_only_cancels_all_orders_once_across_two_phases(
 
     executor = _TestExecutor(
         account_assets_snapshots=[
-            _assets(positions=[("BTCUSDT", 5.0, PositionDirection.LONG)]),
+            _assets(positions=[("rb2610", 5.0, PositionDirection.LONG)]),
             _assets(total_asset=2000.0, positions=[]),
         ]
     )
@@ -1097,15 +1213,23 @@ def test_execute_only_cancels_all_orders_once_across_two_phases(
         UnifiedStandardInput.from_dict(
             {
                 "channel_type": TradeChannel.CTP.value,
-                "account_config": {"broker_id": "b", "investor_id": "i", "password": "p"},
-                "curr_target": {"BTCUSDT": -0.3},
+                "account_config": {
+                    "broker_id": "b",
+                    "investor_id": "i",
+                    "password": "p",
+                    "td_front": "tcp://td:1",
+                    "md_front": "tcp://md:2",
+                    "app_id": "app",
+                    "auth_code": "auth",
+                },
+                "curr_target": {"rb2610": -0.3},
                 "algorithm": {"method": "DEFAULT-ALGO", "params": {"timeout": 3}},
             }
         )
     )
 
     assert call_log == ["cancel_all_orders", "DEFAULT-ALGO:0", "DEFAULT-ALGO:-6.0"]
-    assert output.symbol_results["BTCUSDT"].success is True
+    assert output.symbol_results["rb2610"].success is True
 
 
 def test_execute_skips_cancel_all_orders_when_all_symbols_are_noop(
@@ -1125,8 +1249,16 @@ def test_execute_skips_cancel_all_orders_when_all_symbols_are_noop(
         UnifiedStandardInput.from_dict(
             {
                 "channel_type": TradeChannel.CTP.value,
-                "account_config": {"broker_id": "b", "investor_id": "i", "password": "p"},
-                "curr_target": {"BTCUSDT": 0.0},
+                "account_config": {
+                    "broker_id": "b",
+                    "investor_id": "i",
+                    "password": "p",
+                    "td_front": "tcp://td:1",
+                    "md_front": "tcp://md:2",
+                    "app_id": "app",
+                    "auth_code": "auth",
+                },
+                "curr_target": {"rb2610": 0.0},
                 "algorithm": {"method": "DEFAULT-ALGO"},
             }
         )
@@ -1182,8 +1314,16 @@ def test_execute_aborts_before_dispatch_when_cancel_all_orders_fails(
             UnifiedStandardInput.from_dict(
                 {
                     "channel_type": TradeChannel.CTP.value,
-                    "account_config": {"broker_id": "b", "investor_id": "i", "password": "p"},
-                    "curr_target": {"BTCUSDT": 0.1},
+                    "account_config": {
+                        "broker_id": "b",
+                        "investor_id": "i",
+                        "password": "p",
+                        "td_front": "tcp://td:1",
+                        "md_front": "tcp://md:2",
+                        "app_id": "app",
+                        "auth_code": "auth",
+                    },
+                    "curr_target": {"rb2610": 0.1},
                     "algorithm": {"method": "DEFAULT-ALGO", "params": {"timeout": 3}},
                 }
             )
@@ -1201,7 +1341,7 @@ def test_execute_blocks_open_phase_when_reduce_phase_has_failure(
 
     executor = _TestExecutor(
         account_assets_snapshots=[
-            _assets(positions=[("BTCUSDT", 5.0, PositionDirection.LONG)]),
+            _assets(positions=[("rb2610", 5.0, PositionDirection.LONG)]),
         ]
     )
     calls: list[str] = []
@@ -1219,8 +1359,8 @@ def test_execute_blocks_open_phase_when_reduce_phase_has_failure(
     def fake_resolve_algorithm(name: str, _executor: AbstractExecutor) -> Any:
         def _algorithm(_exec: AbstractExecutor, algorithm_input: AlgorithmInput) -> AlgorithmResult:
             calls.append(algorithm_input.symbol)
-            if algorithm_input.symbol == "BTCUSDT":
-                raise RuntimeError("BTCUSDT reduce failed")
+            if algorithm_input.symbol == "rb2610":
+                raise RuntimeError("rb2610 reduce failed")
             return AlgorithmResult(
                 orders=[],
                 account_assets=_assets(positions=[]),
@@ -1238,20 +1378,28 @@ def test_execute_blocks_open_phase_when_reduce_phase_has_failure(
         UnifiedStandardInput.from_dict(
             {
                 "channel_type": TradeChannel.CTP.value,
-                "account_config": {"broker_id": "b", "investor_id": "i", "password": "p"},
-                "curr_target": {"BTCUSDT": 0.2, "ETHUSDT": 0.3},
+                "account_config": {
+                    "broker_id": "b",
+                    "investor_id": "i",
+                    "password": "p",
+                    "td_front": "tcp://td:1",
+                    "md_front": "tcp://md:2",
+                    "app_id": "app",
+                    "auth_code": "auth",
+                },
+                "curr_target": {"rb2610": 0.2, "ag2612": 0.3},
                 "algorithm": {"method": "DEFAULT-ALGO", "params": {"timeout": 3}},
             }
         )
     )
 
-    assert calls == ["BTCUSDT"]
+    assert calls == ["rb2610"]
     assert output.success is False
     # 减仓失败 + 开仓阻塞、无任何品种成功 → 整体判 FAILED（不再被 BLOCKED 稀释成 PARTIAL）。
     assert output.status == ExecutionStatus.FAILED
-    assert output.symbol_results["BTCUSDT"].status == ExecutionStatus.FAILED
-    assert output.symbol_results["ETHUSDT"].status == ExecutionStatus.BLOCKED
-    assert output.symbol_results["ETHUSDT"].error == "第一阶段存在未成功的 symbol，已跳过后续开仓阶段"
+    assert output.symbol_results["rb2610"].status == ExecutionStatus.FAILED
+    assert output.symbol_results["ag2612"].status == ExecutionStatus.BLOCKED
+    assert output.symbol_results["ag2612"].error == "第一阶段存在未成功的 symbol，已跳过后续开仓阶段"
 
 
 def test_execution_session_pending_orders_only_return_current_symbol_orders() -> None:
@@ -1261,8 +1409,8 @@ def test_execution_session_pending_orders_only_return_current_symbol_orders() ->
     executor = _ScopedOrderViewsExecutor(
         pending_orders=[
             UnifiedOrder(
-                order_id="pending-btc",
-                symbol="BTCUSDT",
+                order_id="pending-rb",
+                symbol="rb2610",
                 direction=OrderDirection.BUY,
                 order_type=OrderType.LIMIT,
                 volume=1.0,
@@ -1270,8 +1418,8 @@ def test_execution_session_pending_orders_only_return_current_symbol_orders() ->
                 status="NEW",
             ),
             UnifiedOrder(
-                order_id="pending-eth",
-                symbol="ETHUSDT",
+                order_id="pending-ag",
+                symbol="ag2612",
                 direction=OrderDirection.SELL,
                 order_type=OrderType.LIMIT,
                 volume=1.0,
@@ -1280,9 +1428,9 @@ def test_execution_session_pending_orders_only_return_current_symbol_orders() ->
             ),
         ]
     )
-    session = ExecutionSession(owner=executor, symbol="BTCUSDT")
+    session = ExecutionSession(owner=executor, symbol="rb2610")
 
-    assert [order.order_id for order in session.get_pending_orders()] == ["pending-btc"]
+    assert [order.order_id for order in session.get_pending_orders()] == ["pending-rb"]
 
 
 def test_execute_maps_account_control_block_to_blocked_result(
@@ -1296,12 +1444,12 @@ def test_execute_maps_account_control_block_to_blocked_result(
     def fake_resolve_algorithm(_name: str, _executor: AbstractExecutor) -> Any:
         def _algorithm(_session: object, _algorithm_input: AlgorithmInput) -> AlgorithmResult:
             raise AccountControlBlockedError(
-                "account control blocked BTCUSDT",
+                "account control blocked rb2610",
                 account_id=1,
                 execution_id="exec-guard",
                 channel=TradeChannel.CTP,
                 operation="place_order",
-                symbol="BTCUSDT",
+                symbol="rb2610",
             )
 
         return _algorithm
@@ -1312,8 +1460,16 @@ def test_execute_maps_account_control_block_to_blocked_result(
         UnifiedStandardInput.from_dict(
             {
                 "channel_type": TradeChannel.CTP.value,
-                "account_config": {"broker_id": "b", "investor_id": "i", "password": "p"},
-                "curr_target": {"BTCUSDT": 0.1},
+                "account_config": {
+                    "broker_id": "b",
+                    "investor_id": "i",
+                    "password": "p",
+                    "td_front": "tcp://td:1",
+                    "md_front": "tcp://md:2",
+                    "app_id": "app",
+                    "auth_code": "auth",
+                },
+                "curr_target": {"rb2610": 0.1},
                 "algorithm": {"method": "DEFAULT-ALGO"},
             }
         ),
@@ -1321,8 +1477,8 @@ def test_execute_maps_account_control_block_to_blocked_result(
     )
 
     assert output.status == ExecutionStatus.BLOCKED
-    assert output.symbol_results["BTCUSDT"].status == ExecutionStatus.BLOCKED
-    assert "account control blocked" in cast(str, output.symbol_results["BTCUSDT"].error)
+    assert output.symbol_results["rb2610"].status == ExecutionStatus.BLOCKED
+    assert "account control blocked" in cast(str, output.symbol_results["rb2610"].error)
 
 
 def _trivial_algorithm_result(symbol: str) -> AlgorithmResult:
@@ -1412,7 +1568,7 @@ def test_parallel_operator_terminate_merges_all_cancel_failures(
 ) -> None:
     """并行人工终止应汇总每个品种的撤单失败订单。"""
     engine = _TestExecutor()._execution_engine()
-    tasks = [_prepared_task(symbol) for symbol in ("BTCUSDT", "ETHUSDT", "SOLUSDT")]
+    tasks = [_prepared_task(symbol) for symbol in ("rb2610", "ag2612", "au2612")]
 
     def terminate(task: Any) -> AlgorithmResult:
         raise ExecutionTerminated(
@@ -1568,7 +1724,15 @@ def _multi_symbol_input(symbols: list[str], *, execution_timeout: int) -> Unifie
     return UnifiedStandardInput.from_dict(
         {
             "channel_type": TradeChannel.CTP.value,
-            "account_config": {"broker_id": "b", "investor_id": "i", "password": "p"},
+            "account_config": {
+                "broker_id": "b",
+                "investor_id": "i",
+                "password": "p",
+                "td_front": "tcp://td:1",
+                "md_front": "tcp://md:2",
+                "app_id": "app",
+                "auth_code": "auth",
+            },
             "curr_target": {symbol: 0.1 for symbol in symbols},
             "algorithm": {"method": "DEFAULT-ALGO", "params": {"timeout": 3}},
             "execution_timeout": execution_timeout,
@@ -1583,7 +1747,7 @@ def test_parallel_symbols_terminate_on_deadline_without_cancelling(monkeypatch: 
     线程成立。超时是兜底中断而非有序收尾——若每个品种都要先等自己的撤单往返，
     渠道挂死时 deadline 会跟着挂死，兜底就失去意义。
     """
-    symbols = ["BTCUSDT", "ETHUSDT", "SOLUSDT"]
+    symbols = ["rb2610", "ag2612", "au2612"]
     executor = _DeadlineParallelExecutor({symbol: [_resting_order(symbol, f"order-{symbol}")] for symbol in symbols})
     # 算法各自愿意等 600s；能否被打断完全取决于总超时。
     _install_waiting_algorithm(monkeypatch, barrier=Barrier(len(symbols)), wait_seconds=600.0)
@@ -1603,7 +1767,7 @@ def test_parallel_deadline_does_not_wait_full_algorithm_budget(monkeypatch: pyte
     用虚拟时钟断言「累计等了多久」而不是真实墙钟：回归时各线程会睡满算法预算，
     虚拟时间会被推到几千秒，用例立刻失败且无需真的等待。
     """
-    symbols = ["BTCUSDT", "ETHUSDT"]
+    symbols = ["rb2610", "ag2612"]
     algorithm_budget = 3600.0
     executor = _DeadlineParallelExecutor({symbol: [] for symbol in symbols})
     _install_waiting_algorithm(monkeypatch, barrier=Barrier(len(symbols)), wait_seconds=algorithm_budget)
@@ -1633,7 +1797,7 @@ def test_parallel_operator_terminate_reports_every_symbol_cancel_failure(
     走人工终止而非总超时：超时已改为不撤单的硬中断，只有 ``cancel_pending`` 这条路
     才会在并行品种上真正逐笔撤单，也才有「失败清单被吞掉」的风险。
     """
-    symbols = ["BTCUSDT", "ETHUSDT", "SOLUSDT"]
+    symbols = ["rb2610", "ag2612", "au2612"]
     # 全部品种都撤单失败：避免依赖 as_completed 的先后顺序，让断言稳定可复现。
     executor = _DeadlineParallelExecutor(
         {symbol: [_resting_order(symbol, f"order-fail-{symbol}")] for symbol in symbols}

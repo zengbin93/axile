@@ -46,8 +46,16 @@ def test_get_resolved_symbol_algorithm_raises_on_invalid_params() -> None:
     standard_input = UnifiedStandardInput.from_dict(
         {
             "channel_type": "ctp",
-            "account_config": {"broker_id": "9999", "investor_id": "test", "password": "test"},
-            "curr_target": {"BTCUSDT": 0.1},
+            "account_config": {
+                "broker_id": "9999",
+                "investor_id": "test",
+                "password": "test",
+                "td_front": "tcp://td:1",
+                "md_front": "tcp://md:2",
+                "app_id": "app",
+                "auth_code": "auth",
+            },
+            "curr_target": {"rb2610": 0.1},
             "algorithm": {
                 "method": "SINGLE-MAKER",
                 "params": {"max_wait_seconds": 0, "chase_enabled": True, "max_chase_count": 99},
@@ -55,4 +63,4 @@ def test_get_resolved_symbol_algorithm_raises_on_invalid_params() -> None:
         }
     )
     with pytest.raises(AlgorithmParamsError):
-        standard_input.get_resolved_symbol_algorithm("BTCUSDT")
+        standard_input.get_resolved_symbol_algorithm("rb2610")

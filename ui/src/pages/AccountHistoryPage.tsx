@@ -7,7 +7,7 @@ import { Skeleton } from '@/components/ui/Skeleton'
 import { EquityChart, type ChartMarker } from '@/components/viz/EquityChart'
 import { DailyBars } from '@/components/viz/DailyBars'
 import { Segmented } from '@/components/ui/Segmented'
-import { getAccount, getCachedExecuteRecords, getExecuteRecords, getPortfolioRecords } from '@/lib/api/accounts'
+import { getAccount, getAccountActivity, getCachedExecuteRecords, getPortfolioRecords } from '@/lib/api/accounts'
 import { usePolling } from '@/lib/hooks/usePolling'
 import { withViewTransition } from '@/lib/viewTransition'
 import { channelLabel } from '@/features/dashboard/display'
@@ -19,6 +19,7 @@ import {
   buildEvents,
   buildSegments,
   filterRecords,
+  filterScheduleSkips,
   type RangeKey,
 } from '@/features/history/derive'
 
@@ -38,12 +39,14 @@ const EVENT_TAG_CLASS: Record<string, string> = {
   rebind: 'text-accent bg-accent-soft',
   // 失败=琥珀（红绿只留给行情涨跌，不表达成败）。
   fail: 'text-warn bg-warn-soft',
+  skip: 'text-ink-3 bg-fill',
 }
 
 const EVENT_DOT_CLASS: Record<string, string> = {
   create: 'bg-border-strong',
   rebind: 'bg-accent',
   fail: 'bg-warn',
+  skip: 'bg-border-strong',
 }
 
 /** 回看 / 绩效页 /accounts/:id/history。 */
@@ -64,24 +67,27 @@ export function AccountHistoryPage() {
   const amountVt = useViewTransitionState(`/accounts/${accountId}/history`)
 
   const account = usePolling(useCallback((s: AbortSignal) => getAccount(accountId, s), [accountId]), 0)
-  const records = usePolling(
-    useCallback((s: AbortSignal) => getExecuteRecords(accountId, { limit: 500 }, s), [accountId]),
+  const activity = usePolling(
+    useCallback((s: AbortSignal) => getAccountActivity(accountId, { limit: 500 }, s), [accountId]),
     0,
   )
   const bindings = usePolling(
     useCallback((s: AbortSignal) => getPortfolioRecords(accountId, s), [accountId]),
     0,
   )
-
   // 首帧优先用 hover 预取缓存：有缓存即直接出图，落地不闪骨架，金额 FLIP 有真实落点。
   const cached = getCachedExecuteRecords(accountId)
-  const recordsData = records.data ?? cached ?? null
-  const allRecords = recordsData?.data ?? []
+  const allRecords = activity.data
+    ? activity.data.data.flatMap((item) => item.kind === 'execution' ? [item.record] : [])
+    : cached?.data ?? []
+  const recordsData = activity.data ?? cached ?? null
+  const allSkips = activity.data?.data.flatMap((item) => item.kind === 'schedule_skip' ? [item] : []) ?? []
   const ranged = filterRecords(allRecords, range)
+  const rangedSkips = filterScheduleSkips(allSkips, allRecords, range)
   const points = buildEquityPoints(ranged)
   const stats = aggregateStats(ranged)
   const segments = buildSegments(bindings.data?.data ?? [], points)
-  const events = buildEvents(bindings.data?.data ?? [], ranged)
+  const events = buildEvents(bindings.data?.data ?? [], ranged, rangedSkips)
 
   const sgn = (v: number) => (v >= 0 ? '+' : '−') + formatMoney(Math.abs(v))
   const ret = stats.pnl != null && stats.eqFirst ? (stats.pnl / stats.eqFirst) * 100 : null
@@ -138,7 +144,7 @@ export function AccountHistoryPage() {
         <Segmented size="sm" value={range} options={RANGES} onChange={switchRange} />
       </div>
 
-      {!recordsData && records.loading && (
+      {!recordsData && activity.loading && (
         <>
           {/* 骨架与成品同尺寸：hero + 曲线 + 概览四卡，避免整屏塌成一行（L1 消闪）。 */}
           <Card className="p-6">
@@ -159,7 +165,7 @@ export function AccountHistoryPage() {
           </div>
         </>
       )}
-      {!recordsData && records.error && <p className="text-[14px] text-bad">加载失败：{records.error.message}</p>}
+      {!recordsData && activity.error && <p className="text-[14px] text-bad">加载失败：{activity.error.message}</p>}
 
       {recordsData && (
         <>
@@ -255,7 +261,7 @@ export function AccountHistoryPage() {
               k="执行"
               v={`${stats.fills}`}
               vUnit="成交"
-              sub={`空跑 ${stats.noops} · 失败 ${stats.fails}${stats.terminated > 0 ? ` · 终止 ${stats.terminated}` : ''}`}
+              sub={`空跑 ${stats.noops} · 跳过 ${rangedSkips.length} · 失败 ${stats.fails}${stats.terminated > 0 ? ` · 终止 ${stats.terminated}` : ''}`}
             />
             <StatCard
               k="失败"

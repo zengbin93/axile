@@ -6,6 +6,7 @@ from typing import Any, cast
 
 from fastapi import APIRouter, HTTPException, status
 from loguru import logger
+from pydantic import ValidationError
 from sqlmodel import and_, delete, desc, func, select
 
 from axile.channels import get_channel
@@ -32,7 +33,7 @@ from axile.server.db.models import (
     PortfolioAccountPublic,
     now_str,
 )
-from axile.server.execution.ctp_channels import drop_account_worker, reconcile_ctp_account
+from axile.server.execution.ctp_channels import drop_account_worker, reconcile_china_channel_account
 from axile.server.execution.live import live_hub
 from axile.server.execution.registry import get_execution_task_state, get_running_execution_id
 from axile.server.execution.scheduler import create_job, delete_job
@@ -49,13 +50,39 @@ from axile.server.repositories import (
 router = APIRouter()
 
 
+def _validate_channel_account_config(channel: TradeChannel | str, config: dict[str, object]) -> dict[str, object]:
+    """按渠道模型校验账户配置并返回可直接持久化的规范化结果。"""
+    plugin = get_channel(str(channel))
+    try:
+        validated = plugin.account_config_model.model_validate(config)
+    except ValidationError as exc:
+        errors = exc.errors(include_url=False, include_context=False)
+        first = errors[0] if errors else {"loc": (), "msg": "账户配置不合法"}
+        location = ".".join(str(part) for part in first.get("loc", ()))
+        prefix = f"account_config.{location}" if location else "account_config"
+        raise ValueError(f"{prefix}: {first.get('msg', '账户配置不合法')}") from exc
+    normalized = cast(
+        "dict[str, object]",
+        validated.model_dump(mode="json", exclude_none=True, exclude={"channel_type"}),
+    )
+    for field in plugin.descriptor.account_form.fields:
+        condition = field.visible_when
+        if condition is not None and normalized.get(condition.field) != condition.equals:
+            normalized.pop(field.name, None)
+    return normalized
+
+
 def _account_route_module() -> Any:
     from axile.server.api.routes import account as account_routes
 
     return account_routes
 
 
-async def _create_account_record(session: SessionDep, account: AccountCreate) -> Account:
+async def _create_account_record(
+    session: SessionDep,
+    account: AccountCreate,
+    account_config: dict[str, object],
+) -> Account:
     """
     创建账户并写入初始组合绑定记录.
 
@@ -71,7 +98,7 @@ async def _create_account_record(session: SessionDep, account: AccountCreate) ->
     Account
         已加入当前会话、并完成初始组合绑定的账户对象。
     """
-    db_account = Account.model_validate(account)
+    db_account = Account.model_validate(account.model_copy(update={"account_config": account_config}))
     session.add(db_account)
     await session.flush()
 
@@ -171,12 +198,13 @@ async def create_account(
     account_routes = _account_route_module()
     try:
         account_routes._validate_account_control_binding(account.trade_channel, account.account_control_preset)
+        account_config = _validate_channel_account_config(account.trade_channel, account.account_config)
         cron_expr = parse_cron_expr(account.cron_expr)
-        db_account = await _create_account_record(session, account)
+        db_account = await _create_account_record(session, account, account_config)
         await session.commit()
         await session.refresh(db_account)
         await create_job(sched, db_account, cron_expr)  # type: ignore[misc]
-        await reconcile_ctp_account(db_account)
+        await reconcile_china_channel_account(db_account)
     except ValueError as exc:
         await session.rollback()
         logger.exception(f"创建账户失败: {exc}")
@@ -551,8 +579,12 @@ async def update_account(
         # 账户控制 binding 要按“更新后的目标状态”校验，不能只看当前库里的旧值。
         next_trade_channel, next_preset = _resolve_next_account_control_binding(db_account, account)
         account_routes._validate_account_control_binding(next_trade_channel, next_preset)
+        next_account_config = db_account.account_config if account.account_config is None else account.account_config
+        normalized_account_config = _validate_channel_account_config(next_trade_channel, next_account_config)
 
         data = _build_account_update_data(account)
+        if account.account_config is not None or account.trade_channel is not None:
+            data["account_config"] = normalized_account_config
         runtime_changed = bool({"account_config", "trade_channel", "is_started"} & data.keys())
         await _sync_portfolio_binding_update(session, db_account, account_id, data)
         db_account.sqlmodel_update(data)
@@ -562,7 +594,7 @@ async def update_account(
         await session.refresh(db_account)
         await account_routes._reconcile_account_job(session, sched, db_account)
         if runtime_changed:
-            await reconcile_ctp_account(db_account, reset=True)
+            await reconcile_china_channel_account(db_account, reset=True)
     except ValueError as exc:
         await session.rollback()
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc

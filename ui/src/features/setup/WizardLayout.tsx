@@ -6,8 +6,8 @@ import { flowOf, PF_STEPS, ACCT_STEPS, type Step } from '@/features/setup/steps'
 
 function Rail({ steps, index, title }: { steps: Step[]; index: number; title: string }) {
   return (
-    <aside className="w-[248px] flex-none overflow-y-auto border-r border-line bg-surface px-[18px] py-7">
-      <div className="px-2.5 pb-3.5 text-xs font-semibold tracking-wide text-ink-3">{title}</div>
+    <aside className="flex w-full flex-none overflow-x-auto border-b border-line bg-surface px-3 py-2 sm:block sm:w-[248px] sm:overflow-y-auto sm:border-r sm:border-b-0 sm:px-[18px] sm:py-7">
+      <div className="hidden px-2.5 pb-3.5 text-xs font-semibold tracking-wide text-ink-3 sm:block">{title}</div>
       {steps.map((s, i) => {
         const done = i < index
         const cur = i === index
@@ -15,7 +15,7 @@ function Rail({ steps, index, title }: { steps: Step[]; index: number; title: st
           <Link
             key={s.path}
             to={s.path}
-            className={`flex items-center gap-3 rounded-[10px] p-2.5 text-[14px] ${
+            className={`flex min-w-fit flex-none items-center gap-2 rounded-[8px] px-3 py-2 text-[13px] sm:mb-1 sm:w-full sm:gap-3 sm:p-2.5 sm:text-[14px] ${
               cur ? 'bg-accent-soft font-semibold text-ink-1' : 'text-ink-2'
             }`}
           >
@@ -45,7 +45,7 @@ export function WizardLayout() {
 
   return (
     <div className="flex h-screen flex-col">
-      <header className="flex h-14 flex-none items-center gap-3.5 border-b border-line bg-surface px-6">
+      <header className="flex h-14 flex-none items-center gap-3.5 border-b border-line bg-surface px-4 sm:px-6">
         <Link to="/setup" className="font-[650] tracking-wide">
           axile
         </Link>
@@ -59,10 +59,10 @@ export function WizardLayout() {
         </Link>
       </header>
 
-      <div className="flex flex-1 overflow-hidden">
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden sm:flex-row">
         {flow === 'pf' && <Rail steps={PF_STEPS} index={index} title="组合设置" />}
         {flow === 'acct' && <Rail steps={ACCT_STEPS} index={index} title="账户设置" />}
-        <div className="flex-1 overflow-y-auto">
+        <div className="min-h-0 min-w-0 flex-1 overflow-y-auto">
           <Outlet />
         </div>
       </div>

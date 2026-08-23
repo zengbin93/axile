@@ -20,7 +20,7 @@ from axile.executor.models.unified_price import UnifiedPriceData
 
 class _FallbackExecutor:
     def __init__(self) -> None:
-        self.symbol = "BTCUSDT"
+        self.symbol = "rb2610"
         self.logger = MagicMock()
         self.audit_context = {
             "execution_id": "exec-1",
@@ -96,7 +96,7 @@ class _FallbackExecutor:
 
 class _SingleMakerExecutor:
     def __init__(self) -> None:
-        self.symbol = "BTCUSDT"
+        self.symbol = "rb2610"
         self.logger = MagicMock()
         self._account_assets = UnifiedAccountAssets(
             available_cash=10_000.0,
@@ -106,7 +106,7 @@ class _SingleMakerExecutor:
         )
         self.pending_orders: list[UnifiedOrder] = [
             UnifiedOrder(
-                order_id="pending-btc-1",
+                order_id="pending-rb-1",
                 symbol=self.symbol,
                 direction=OrderDirection.BUY,
                 order_type=OrderType.LIMIT,
@@ -215,7 +215,7 @@ class _ChaseParamsStub(BaseModel):
 
 class _RefreshingExecutor:
     def __init__(self, pending_orders: list[UnifiedOrder]) -> None:
-        self.symbol = "BTCUSDT"
+        self.symbol = "rb2610"
         self.logger = MagicMock()
         self.pending_orders = pending_orders
         self.query_calls = 0
@@ -248,7 +248,7 @@ def _build_tracker() -> tuple[_FallbackExecutor, OrderTracker, UnifiedOrder]:
     )
     order = UnifiedOrder(
         order_id="limit-1",
-        symbol="BTCUSDT",
+        symbol="rb2610",
         direction=OrderDirection.BUY,
         order_type=OrderType.LIMIT,
         volume=1.0,
@@ -260,8 +260,8 @@ def _build_tracker() -> tuple[_FallbackExecutor, OrderTracker, UnifiedOrder]:
     tracker.add_order(order, direction=OrderDirection.BUY, target_volume=1.0, current_volume=0.0)
     chase_info = getattr(tracker, "_chase_info")
     chase_info[order.order_id]["chase_count"] = 1
-    tracker.latest_prices["BTCUSDT"] = UnifiedPriceData(
-        symbol="BTCUSDT",
+    tracker.latest_prices["rb2610"] = UnifiedPriceData(
+        symbol="rb2610",
         last_price=100.0,
         bid_price=99.9,
         ask_price=100.1,
@@ -415,7 +415,7 @@ def test_market_fallback_uses_trade_records_to_compute_remaining_volume_without_
     tracker.on_trade_record(
         TradeRecord.create(
             trade_id="trade-1",
-            symbol="BTCUSDT",
+            symbol="rb2610",
             order_id="limit-1",
             trade_time="2026-03-24T09:00:00",
             trade_volume=0.4,
@@ -436,7 +436,7 @@ def test_order_tracker_does_not_regress_cumulative_fill_when_order_update_is_new
     tracker = OrderTracker(executor=cast("ExecutorProtocol", executor))
     order = UnifiedOrder(
         order_id="external-order-1",
-        symbol="BTCUSDT",
+        symbol="rb2610",
         direction=OrderDirection.BUY,
         order_type=OrderType.LIMIT,
         volume=1.0,
@@ -449,7 +449,7 @@ def test_order_tracker_does_not_regress_cumulative_fill_when_order_update_is_new
     tracker.on_trade_record(
         TradeRecord.create(
             trade_id="t1",
-            symbol="BTCUSDT",
+            symbol="rb2610",
             order_id="external-order-1",
             trade_time="2026-03-24T09:00:00",
             trade_volume=0.4,
@@ -460,7 +460,7 @@ def test_order_tracker_does_not_regress_cumulative_fill_when_order_update_is_new
     tracker.on_order_update(
         UnifiedOrder(
             order_id="external-order-1",
-            symbol="BTCUSDT",
+            symbol="rb2610",
             direction=OrderDirection.BUY,
             order_type=OrderType.LIMIT,
             volume=1.0,
@@ -537,7 +537,7 @@ def test_chase_config_requires_pydantic_params_model() -> None:
 def test_order_tracker_periodically_queries_order_status_during_wait() -> None:
     executor_order = UnifiedOrder(
         order_id="limit-1",
-        symbol="BTCUSDT",
+        symbol="rb2610",
         direction=OrderDirection.BUY,
         order_type=OrderType.LIMIT,
         volume=1.0,
@@ -570,7 +570,7 @@ def test_order_tracker_replays_early_order_update_after_add_order() -> None:
     tracker.on_order_update(
         UnifiedOrder(
             order_id="limit-1",
-            symbol="BTCUSDT",
+            symbol="rb2610",
             direction=OrderDirection.BUY,
             order_type=OrderType.LIMIT,
             volume=1.0,
@@ -584,7 +584,7 @@ def test_order_tracker_replays_early_order_update_after_add_order() -> None:
     tracker.add_order(
         UnifiedOrder(
             order_id="limit-1",
-            symbol="BTCUSDT",
+            symbol="rb2610",
             direction=OrderDirection.BUY,
             order_type=OrderType.LIMIT,
             volume=1.0,
@@ -603,7 +603,7 @@ def test_order_tracker_replays_early_order_update_after_add_order() -> None:
 def test_order_tracker_queries_once_before_short_timeout() -> None:
     executor_order = UnifiedOrder(
         order_id="limit-1",
-        symbol="BTCUSDT",
+        symbol="rb2610",
         direction=OrderDirection.BUY,
         order_type=OrderType.LIMIT,
         volume=1.0,
@@ -631,7 +631,7 @@ def test_order_tracker_queries_once_before_short_timeout() -> None:
 def test_order_tracker_timeout_cancels_only_tracked_symbols() -> None:
     executor_order = UnifiedOrder(
         order_id="limit-1",
-        symbol="BTCUSDT",
+        symbol="rb2610",
         direction=OrderDirection.BUY,
         order_type=OrderType.LIMIT,
         volume=1.0,
@@ -658,7 +658,7 @@ def test_order_tracker_timeout_cancels_only_tracked_symbols() -> None:
 def test_order_tracker_timeout_loop_avoids_redundant_termination_checkpoints() -> None:
     executor_order = UnifiedOrder(
         order_id="limit-1",
-        symbol="BTCUSDT",
+        symbol="rb2610",
         direction=OrderDirection.BUY,
         order_type=OrderType.LIMIT,
         volume=1.0,
@@ -718,7 +718,7 @@ def test_single_maker_records_regular_order_submission_errors(
     _patch_single_maker_dependencies(monkeypatch, RuntimeError("submit failed"))
     executor = _SingleMakerExecutor()
     algorithm_input = AlgorithmInput(
-        symbol="BTCUSDT",
+        symbol="rb2610",
         target_volume=1.0,
         trade_rule={},
         params=single_maker_impl.SingleMakerParams(),
@@ -731,7 +731,7 @@ def test_single_maker_records_regular_order_submission_errors(
 
     result_memory = cast("dict[str, Any]", result.memory)
     execution_details = cast("dict[str, Any]", result_memory["execution_details"])
-    assert execution_details["BTCUSDT_error"] == "RuntimeError: submit failed"
+    assert execution_details["rb2610_error"] == "RuntimeError: submit failed"
 
 
 def test_single_maker_defaults_to_active_price_strategy(
@@ -763,8 +763,8 @@ def test_single_maker_defaults_to_active_price_strategy(
         single_maker_impl,
         "submit_and_track_order",
         lambda *_args, **_kwargs: UnifiedOrder(
-            order_id="btc-active-1",
-            symbol="BTCUSDT",
+            order_id="rb-active-1",
+            symbol="rb2610",
             direction=OrderDirection.BUY,
             order_type=OrderType.LIMIT,
             volume=1.0,
@@ -775,7 +775,7 @@ def test_single_maker_defaults_to_active_price_strategy(
 
     executor = _SingleMakerExecutor()
     algorithm_input = AlgorithmInput(
-        symbol="BTCUSDT",
+        symbol="rb2610",
         target_volume=1.0,
         trade_rule={},
         params=single_maker_impl.SingleMakerParams(),
@@ -801,7 +801,7 @@ def test_single_maker_first_tick_uses_snapshot_copy(
 
     executor = _SharedTickSingleMakerExecutor()
     algorithm_input = AlgorithmInput(
-        symbol="BTCUSDT",
+        symbol="rb2610",
         target_volume=0.0,
         trade_rule={},
         params=single_maker_impl.SingleMakerParams(),
@@ -826,7 +826,7 @@ def test_single_maker_does_not_cancel_pending_orders_before_submit(
     _patch_single_maker_dependencies(monkeypatch, RuntimeError("submit failed"))
     executor = _SingleMakerExecutor()
     algorithm_input = AlgorithmInput(
-        symbol="BTCUSDT",
+        symbol="rb2610",
         target_volume=1.0,
         trade_rule={},
         params=single_maker_impl.SingleMakerParams(),
@@ -847,7 +847,7 @@ def test_single_maker_reraises_memory_error(
     _patch_single_maker_dependencies(monkeypatch, MemoryError("out of memory"))
     executor = _SingleMakerExecutor()
     algorithm_input = AlgorithmInput(
-        symbol="BTCUSDT",
+        symbol="rb2610",
         target_volume=1.0,
         trade_rule={},
         params=single_maker_impl.SingleMakerParams(),
@@ -860,7 +860,7 @@ def test_single_maker_reraises_memory_error(
         )
 
 
-def _invalid_book_tick(symbol: str = "BTCUSDT") -> UnifiedPriceData:
+def _invalid_book_tick(symbol: str = "rb2610") -> UnifiedPriceData:
     """构造 book_valid=False 的假盘口（买卖一被 last_price 兜底、盘口无效）。"""
     return UnifiedPriceData(
         symbol=symbol,
@@ -897,7 +897,7 @@ def test_single_maker_skips_on_invalid_book_by_default(
     executor = _SingleMakerExecutor()
     monkeypatch.setattr(executor, "get_market_data", _invalid_book_tick)
     algorithm_input = AlgorithmInput(
-        symbol="BTCUSDT",
+        symbol="rb2610",
         target_volume=1.0,
         trade_rule={},
         params=single_maker_impl.SingleMakerParams(),
@@ -912,7 +912,7 @@ def test_single_maker_skips_on_invalid_book_by_default(
     assert result.status == ExecutionStatus.NOOP
     result_memory = cast("dict[str, Any]", result.memory)
     execution_details = cast("dict[str, Any]", result_memory["execution_details"])
-    assert execution_details["BTCUSDT_skipped"] == "missing_book"
+    assert execution_details["rb2610_skipped"] == "missing_book"
 
 
 def test_single_maker_market_order_on_invalid_book(
@@ -934,7 +934,7 @@ def test_single_maker_market_order_on_invalid_book(
         captured["price"] = args[5]
         return UnifiedOrder(
             order_id="mkt-1",
-            symbol="BTCUSDT",
+            symbol="rb2610",
             direction=OrderDirection.BUY,
             order_type=OrderType.MARKET,
             volume=1.0,
@@ -947,7 +947,7 @@ def test_single_maker_market_order_on_invalid_book(
     executor = _SingleMakerExecutor()
     monkeypatch.setattr(executor, "get_market_data", _invalid_book_tick)
     algorithm_input = AlgorithmInput(
-        symbol="BTCUSDT",
+        symbol="rb2610",
         target_volume=1.0,
         trade_rule={},
         params=single_maker_impl.SingleMakerParams(on_missing_book="market"),
@@ -991,7 +991,7 @@ def test_single_maker_active_price_on_invalid_book(
         "submit_and_track_order",
         lambda *_a, **_k: UnifiedOrder(
             order_id="act-1",
-            symbol="BTCUSDT",
+            symbol="rb2610",
             direction=OrderDirection.BUY,
             order_type=OrderType.LIMIT,
             volume=1.0,
@@ -1003,7 +1003,7 @@ def test_single_maker_active_price_on_invalid_book(
     executor = _SingleMakerExecutor()
     monkeypatch.setattr(executor, "get_market_data", _invalid_book_tick)
     algorithm_input = AlgorithmInput(
-        symbol="BTCUSDT",
+        symbol="rb2610",
         target_volume=1.0,
         trade_rule={},
         params=single_maker_impl.SingleMakerParams(price_strategy="PASSIVE", on_missing_book="active"),

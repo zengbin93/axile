@@ -21,7 +21,7 @@ class TestUnifiedUpdateCurrTarget:
         """测试基本功能."""
         positions = [
             Position(
-                symbol="BTC/USDT",
+                symbol="rb2610",
                 volume=0.5,
                 available_volume=0.5,
                 market_value=15000.0,
@@ -29,7 +29,7 @@ class TestUnifiedUpdateCurrTarget:
                 avg_price=30000.0,
             ),
             Position(
-                symbol="ETH/USDT",
+                symbol="ag2612",
                 volume=1.0,
                 available_volume=1.0,
                 market_value=2000.0,
@@ -37,7 +37,7 @@ class TestUnifiedUpdateCurrTarget:
                 avg_price=2000.0,
             ),
             Position(
-                symbol="DOGE/USDT",
+                symbol="cu2610",
                 volume=1000.0,
                 available_volume=1000.0,
                 market_value=500.0,
@@ -53,19 +53,19 @@ class TestUnifiedUpdateCurrTarget:
             positions=positions,
         )
 
-        curr_target: dict[str, float] = {"BTC/USDT": 0.1, "ETH/USDT": 0.2}
+        curr_target: dict[str, float] = {"rb2610": 0.1, "ag2612": 0.2}
 
         result = account_assets.update_curr_target(curr_target)
 
         # 应该包含持仓中不在目标中的品种，权重为0
-        expected = {"BTC/USDT": 0.1, "ETH/USDT": 0.2, "DOGE/USDT": 0.0}
+        expected = {"rb2610": 0.1, "ag2612": 0.2, "cu2610": 0.0}
         assert result == expected
 
     def test_forbidden_symbols(self) -> None:
         """测试禁止交易品种过滤."""
         positions = [
             Position(
-                symbol="BTC/USDT",
+                symbol="rb2610",
                 volume=0.5,
                 available_volume=0.5,
                 market_value=15000.0,
@@ -73,7 +73,7 @@ class TestUnifiedUpdateCurrTarget:
                 avg_price=30000.0,
             ),
             Position(
-                symbol="ETH/USDT",
+                symbol="ag2612",
                 volume=1.0,
                 available_volume=1.0,
                 market_value=2000.0,
@@ -81,7 +81,7 @@ class TestUnifiedUpdateCurrTarget:
                 avg_price=2000.0,
             ),
             Position(
-                symbol="DOGE/USDT",
+                symbol="cu2610",
                 volume=1000.0,
                 available_volume=1000.0,
                 market_value=500.0,
@@ -97,20 +97,20 @@ class TestUnifiedUpdateCurrTarget:
             positions=positions,
         )
 
-        curr_target = {"BTC/USDT": 0.1, "ETH/USDT": 0.2, "DOGE/USDT": 0.05}
-        forbidden_symbols = ["DOGE/USDT", "LUNA/USDT"]
+        curr_target = {"rb2610": 0.1, "ag2612": 0.2, "cu2610": 0.05}
+        forbidden_symbols = ["cu2610", "IF2609"]
 
         result = account_assets.update_curr_target(curr_target, forbidden_symbols=forbidden_symbols)
 
         # 禁止品种应被过滤掉
-        expected = {"BTC/USDT": 0.1, "ETH/USDT": 0.2}
+        expected = {"rb2610": 0.1, "ag2612": 0.2}
         assert result == expected
 
     def test_risk_symbols(self) -> None:
         """测试风险品种自动清零."""
         positions = [
             Position(
-                symbol="BTC/USDT",
+                symbol="rb2610",
                 volume=0.5,
                 available_volume=0.5,
                 market_value=15000.0,
@@ -118,7 +118,7 @@ class TestUnifiedUpdateCurrTarget:
                 avg_price=30000.0,
             ),
             Position(
-                symbol="ETH/USDT",
+                symbol="ag2612",
                 volume=1.0,
                 available_volume=1.0,
                 market_value=2000.0,
@@ -126,7 +126,7 @@ class TestUnifiedUpdateCurrTarget:
                 avg_price=2000.0,
             ),
             Position(
-                symbol="DOGE/USDT",
+                symbol="cu2610",
                 volume=1000.0,
                 available_volume=1000.0,
                 market_value=500.0,
@@ -142,13 +142,13 @@ class TestUnifiedUpdateCurrTarget:
             positions=positions,
         )
 
-        curr_target = {"BTC/USDT": 0.1, "ETH/USDT": 0.2, "DOGE/USDT": 0.05}
-        risk_symbols = ["DOGE/USDT"]
+        curr_target = {"rb2610": 0.1, "ag2612": 0.2, "cu2610": 0.05}
+        risk_symbols = ["cu2610"]
 
         result = account_assets.update_curr_target(curr_target, risk_symbols=risk_symbols)
 
         # 风险品种应被设置为0
-        expected = {"BTC/USDT": 0.1, "ETH/USDT": 0.2, "DOGE/USDT": 0.0}
+        expected = {"rb2610": 0.1, "ag2612": 0.2, "cu2610": 0.0}
         assert result == expected
 
     def test_empty_positions(self) -> None:
@@ -159,18 +159,18 @@ class TestUnifiedUpdateCurrTarget:
             market_value=0.0,
             positions=[],
         )
-        curr_target: dict[str, float] = {"BTC/USDT": 0.1, "ETH/USDT": 0.2}
+        curr_target: dict[str, float] = {"rb2610": 0.1, "ag2612": 0.2}
 
         result = empty_assets.update_curr_target(curr_target)
 
-        expected = {"BTC/USDT": 0.1, "ETH/USDT": 0.2}
+        expected = {"rb2610": 0.1, "ag2612": 0.2}
         assert result == expected
 
     def test_none_target(self) -> None:
         """测试None目标输入."""
         positions = [
             Position(
-                symbol="BTC/USDT",
+                symbol="rb2610",
                 volume=0.5,
                 available_volume=0.5,
                 market_value=15000.0,
@@ -178,7 +178,7 @@ class TestUnifiedUpdateCurrTarget:
                 avg_price=30000.0,
             ),
             Position(
-                symbol="ETH/USDT",
+                symbol="ag2612",
                 volume=1.0,
                 available_volume=1.0,
                 market_value=2000.0,
@@ -196,7 +196,7 @@ class TestUnifiedUpdateCurrTarget:
 
         # 现在方法支持None输入，会自动补充持仓中的品种但权重为0
         result = account_assets.update_curr_target(None)
-        expected = {"BTC/USDT": 0.0, "ETH/USDT": 0.0}
+        expected = {"rb2610": 0.0, "ag2612": 0.0}
         assert result == expected
 
     def test_empty_inputs(self) -> None:
@@ -214,7 +214,7 @@ class TestUnifiedUpdateCurrTarget:
         """测试目标中的品种不在持仓中."""
         positions = [
             Position(
-                symbol="BTC/USDT",
+                symbol="rb2610",
                 volume=0.5,
                 available_volume=0.5,
                 market_value=15000.0,
@@ -230,12 +230,12 @@ class TestUnifiedUpdateCurrTarget:
             positions=positions,
         )
 
-        curr_target = {"BTC/USDT": 0.1, "ETH/USDT": 0.2}
+        curr_target = {"rb2610": 0.1, "ag2612": 0.2}
 
         result = account_assets.update_curr_target(curr_target)
 
-        # ETH不在持仓中，应被添加为0权重，但保留原有的权重值
-        expected = {"BTC/USDT": 0.1, "ETH/USDT": 0.2}
+        # ag2612 不在持仓中，应被添加为 0 权重，但保留原有的权重值
+        expected = {"rb2610": 0.1, "ag2612": 0.2}
         assert result == expected
 
     @pytest.mark.parametrize(
@@ -243,14 +243,14 @@ class TestUnifiedUpdateCurrTarget:
         [
             # 基本测试
             (
-                {"BTC/USDT": 0.1},
+                {"rb2610": 0.1},
                 UnifiedAccountAssets(
                     available_cash=10000.0,
                     total_asset=15000.0,
                     market_value=5000.0,
                     positions=[
                         Position(
-                            symbol="BTC/USDT",
+                            symbol="rb2610",
                             volume=0.5,
                             available_volume=0.5,
                             market_value=5000.0,
@@ -259,18 +259,18 @@ class TestUnifiedUpdateCurrTarget:
                         )
                     ],
                 ),
-                {"BTC/USDT": 0.1},
+                {"rb2610": 0.1},
             ),
             # 空持仓
             (
-                {"BTC/USDT": 0.1},
+                {"rb2610": 0.1},
                 UnifiedAccountAssets(
                     available_cash=10000.0,
                     total_asset=10000.0,
                     market_value=0.0,
                     positions=[],
                 ),
-                {"BTC/USDT": 0.1},
+                {"rb2610": 0.1},
             ),
             # 空目标
             (
@@ -281,7 +281,7 @@ class TestUnifiedUpdateCurrTarget:
                     market_value=5000.0,
                     positions=[
                         Position(
-                            symbol="BTC/USDT",
+                            symbol="rb2610",
                             volume=0.5,
                             available_volume=0.5,
                             market_value=5000.0,
@@ -290,7 +290,7 @@ class TestUnifiedUpdateCurrTarget:
                         )
                     ],
                 ),
-                {"BTC/USDT": 0.0},
+                {"rb2610": 0.0},
             ),
         ],
     )
@@ -312,7 +312,7 @@ class TestPydanticIntegration:
         """测试AccountAssets模型验证."""
         positions = [
             Position(
-                symbol="BTC/USDT",
+                symbol="rb2610",
                 volume=0.5,
                 available_volume=0.5,
                 market_value=15000.0,
@@ -338,7 +338,7 @@ class TestPydanticIntegration:
     def test_position_validation(self) -> None:
         """测试Position模型验证."""
         position = Position(
-            symbol="BTC/USDT",
+            symbol="rb2610",
             volume=0.5,
             available_volume=0.5,
             market_value=15000.0,
@@ -347,7 +347,7 @@ class TestPydanticIntegration:
         )
 
         # 测试模型属性访问
-        assert position.symbol == "BTC/USDT"
+        assert position.symbol == "rb2610"
         assert position.volume == 0.5
         assert position.direction == PositionDirection.LONG
         assert position.avg_price == 30000.0
@@ -356,7 +356,7 @@ class TestPydanticIntegration:
         """测试PositionDirection枚举."""
         # 测试不同的方向枚举值
         long_pos = Position(
-            symbol="BTC/USDT",
+            symbol="rb2610",
             volume=0.5,
             available_volume=0.5,
             market_value=15000.0,
@@ -365,7 +365,7 @@ class TestPydanticIntegration:
         )
 
         short_pos = Position(
-            symbol="ETH/USDT",
+            symbol="ag2612",
             volume=1.0,
             available_volume=1.0,
             market_value=2000.0,
@@ -385,7 +385,7 @@ class TestPydanticIntegration:
             total_asset=27500.0,
             positions_data=[
                 {
-                    "symbol": "BTC/USDT",
+                    "symbol": "rb2610",
                     "volume": 0.5,
                     "available_volume": 0.5,
                     "market_value": 15000.0,
@@ -393,7 +393,7 @@ class TestPydanticIntegration:
                     "avg_price": 30000.0,
                 },
                 {
-                    "symbol": "ETH/USDT",
+                    "symbol": "ag2612",
                     "volume": 1.0,
                     "available_volume": 1.0,
                     "market_value": 2000.0,
@@ -405,14 +405,14 @@ class TestPydanticIntegration:
         )
 
         assert len(assets.positions) == 2
-        assert assets.positions[0].symbol == "BTC/USDT"
+        assert assets.positions[0].symbol == "rb2610"
         assert assets.positions[1].direction == PositionDirection.LONG
         assert assets.extra.get("channel_type") == TradeChannel("external")
 
     def test_model_serialization(self) -> None:
         """测试模型序列化."""
         position = Position(
-            symbol="BTC/USDT",
+            symbol="rb2610",
             volume=0.5,
             available_volume=0.5,
             market_value=15000.0,
@@ -436,7 +436,7 @@ class TestPydanticIntegration:
         # 测试JSON序列化
         assets_json = assets.model_dump_json()
         assert isinstance(assets_json, str)
-        assert "BTC/USDT" in assets_json
+        assert "rb2610" in assets_json
 
 
 class TestIntegration:
@@ -445,7 +445,7 @@ class TestIntegration:
     def test_complete_workflow(self) -> None:
         """测试完整工作流程."""
         # 1. 定义目标权重
-        curr_target = {"BTC/USDT": 0.1, "ETH/USDT": 0.2}
+        curr_target = {"rb2610": 0.1, "ag2612": 0.2}
 
         # 2. 创建账户资产（使用工厂方法）
         assets = UnifiedAccountAssets.create(
@@ -453,7 +453,7 @@ class TestIntegration:
             total_asset=27500.0,
             positions_data=[
                 {
-                    "symbol": "BTC/USDT",
+                    "symbol": "rb2610",
                     "volume": 0.5,
                     "available_volume": 0.5,
                     "market_value": 15000.0,
@@ -461,7 +461,7 @@ class TestIntegration:
                     "avg_price": 30000.0,
                 },
                 {
-                    "symbol": "ETH/USDT",
+                    "symbol": "ag2612",
                     "volume": 1.0,
                     "available_volume": 1.0,
                     "market_value": 2000.0,
@@ -469,7 +469,7 @@ class TestIntegration:
                     "avg_price": 2000.0,
                 },
                 {
-                    "symbol": "DOGE/USDT",
+                    "symbol": "cu2610",
                     "volume": 1000,
                     "available_volume": 1000,
                     "market_value": 500,
@@ -481,21 +481,19 @@ class TestIntegration:
         )
 
         # 3. 更新目标权重
-        updated_target = assets.update_curr_target(
-            curr_target, forbidden_symbols=["LUNA/USDT"], risk_symbols=["DOGE/USDT"]
-        )
+        updated_target = assets.update_curr_target(curr_target, forbidden_symbols=["IF2609"], risk_symbols=["cu2610"])
 
         # 验证结果
-        assert "BTC/USDT" in updated_target
-        assert "ETH/USDT" in updated_target
+        assert "rb2610" in updated_target
+        assert "ag2612" in updated_target
         assert isinstance(updated_target, dict)
 
         # 验证自动补充的品种权重为0
-        assert updated_target["DOGE/USDT"] == 0.0
+        assert updated_target["cu2610"] == 0.0
 
         # 验证原有目标权重保持不变
-        assert updated_target["BTC/USDT"] == 0.1
-        assert updated_target["ETH/USDT"] == 0.2
+        assert updated_target["rb2610"] == 0.1
+        assert updated_target["ag2612"] == 0.2
 
         # 验证模型属性
         assert assets.currency == "CNY"
@@ -505,7 +503,7 @@ class TestIntegration:
         """测试验证方法."""
         positions = [
             Position(
-                symbol="BTC/USDT",
+                symbol="rb2610",
                 volume=0.5,
                 available_volume=0.5,
                 market_value=15000.0,
@@ -525,9 +523,9 @@ class TestIntegration:
         assert assets.validate_balance()  # 10000 + 15000 = 25000
 
         # 测试获取持仓
-        btc_position = assets.get_position("BTC/USDT")
-        assert btc_position is not None
-        assert btc_position.symbol == "BTC/USDT"
+        rb_position = assets.get_position("rb2610")
+        assert rb_position is not None
+        assert rb_position.symbol == "rb2610"
 
         # 测试获取总持仓市值
         total_value = assets.get_total_position_value()
@@ -538,7 +536,7 @@ class TestIntegration:
         # 测试所有方向枚举值
         all_directions = [
             Position(
-                symbol="BTC/USDT",
+                symbol="rb2610",
                 volume=0.1,
                 available_volume=0.1,
                 market_value=1000,
@@ -546,7 +544,7 @@ class TestIntegration:
                 avg_price=10000,
             ),
             Position(
-                symbol="ETH/USDT",
+                symbol="ag2612",
                 volume=0.1,
                 available_volume=0.1,
                 market_value=1000,
@@ -554,7 +552,7 @@ class TestIntegration:
                 avg_price=10000,
             ),
             Position(
-                symbol="SOL/USDT",
+                symbol="au2612",
                 volume=0.1,
                 available_volume=0.1,
                 market_value=1000,
@@ -570,15 +568,15 @@ class TestIntegration:
             positions=all_directions,
         )
 
-        curr_target = {"BTC/USDT": 0.1}
+        curr_target = {"rb2610": 0.1}
         result = assets.update_curr_target(curr_target)
 
         # 验证所有方向的品种都被正确处理
-        assert "BTC/USDT" in result
-        assert "ETH/USDT" in result
-        assert "SOL/USDT" in result
-        assert result["ETH/USDT"] == 0.0
-        assert result["SOL/USDT"] == 0.0
+        assert "rb2610" in result
+        assert "ag2612" in result
+        assert "au2612" in result
+        assert result["ag2612"] == 0.0
+        assert result["au2612"] == 0.0
 
 
 if __name__ == "__main__":

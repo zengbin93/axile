@@ -105,7 +105,7 @@ def test_account_control_event_write_and_guard_emit_monotonic_seq() -> None:
             "execution_id": "exec-seq",
             "channel": TradeChannel.CTP,
             "operation": "place_order",
-            "symbol": "BTCUSDT",
+            "symbol": "rb2610",
             "metadata": {"order_id": "oid-1"},
             "decision": "allowed",
             "counted": True,
@@ -131,11 +131,11 @@ def test_account_control_event_write_and_guard_emit_monotonic_seq() -> None:
         clock=_clock,
     )
 
-    attempt = guard.begin_operation("place_order", symbol="BTCUSDT")
+    attempt = guard.begin_operation("place_order", symbol="rb2610")
     attempt.record_outcome("submitted", metadata={"order_id": "oid-1"})
 
     with pytest.raises(AccountControlBlockedError):
-        guard.begin_operation("place_order", symbol="BTCUSDT")
+        guard.begin_operation("place_order", symbol="rb2610")
 
     _, events = guard.flush_records()
 

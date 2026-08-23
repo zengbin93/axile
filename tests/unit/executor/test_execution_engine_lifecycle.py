@@ -37,7 +37,17 @@ class _LifecycleRecorderExecutor(AbstractExecutor):
         self.websocket_init_calls: list[list[str]] = []
         super().__init__(
             TradeChannel.CTP,
-            CTPAccountConfig.model_validate({"broker_id": "b", "investor_id": "i", "password": "p"}),
+            CTPAccountConfig.model_validate(
+                {
+                    "broker_id": "b",
+                    "investor_id": "i",
+                    "password": "p",
+                    "td_front": "tcp://td:1",
+                    "md_front": "tcp://md:2",
+                    "app_id": "app",
+                    "auth_code": "auth",
+                }
+            ),
         )
 
     def _initialize_connection(self, account_config: CTPAccountConfig) -> None:
@@ -151,8 +161,16 @@ def _standard_input() -> UnifiedStandardInput:
     return UnifiedStandardInput.from_dict(
         {
             "channel_type": TradeChannel.CTP.value,
-            "account_config": {"broker_id": "b", "investor_id": "i", "password": "p"},
-            "curr_target": {"BTCUSDT": 0.1},
+            "account_config": {
+                "broker_id": "b",
+                "investor_id": "i",
+                "password": "p",
+                "td_front": "tcp://td:1",
+                "md_front": "tcp://md:2",
+                "app_id": "app",
+                "auth_code": "auth",
+            },
+            "curr_target": {"rb2610": 0.1},
             "algorithm": {"method": "DEFAULT-ALGO", "params": {"timeout": 3}},
         }
     )
@@ -181,7 +199,7 @@ def test_base_executor_execute_owns_execution_lifecycle(monkeypatch) -> None:
 
     class _FakeEngine:
         def run(self, standard_input: UnifiedStandardInput) -> UnifiedStandardOutput:
-            assert standard_input.curr_target == {"BTCUSDT": 0.1}
+            assert standard_input.curr_target == {"rb2610": 0.1}
             executor.calls.append("engine_run")
             return _output()
 
@@ -207,12 +225,12 @@ def test_execution_engine_run_only_orchestrates_symbol_work(monkeypatch) -> None
     engine = ExecutionEngine(executor)
 
     def fake_run_symbol_algorithms(standard_input: UnifiedStandardInput) -> list[object]:
-        assert standard_input.curr_target == {"BTCUSDT": 0.1}
+        assert standard_input.curr_target == {"rb2610": 0.1}
         executor.calls.append("engine_run_symbol_algorithms")
         return []
 
     def fake_create_output(standard_input: UnifiedStandardInput, results: list[object]) -> UnifiedStandardOutput:
-        assert standard_input.curr_target == {"BTCUSDT": 0.1}
+        assert standard_input.curr_target == {"rb2610": 0.1}
         assert results == []
         executor.calls.append("engine_build_output")
         return _output()
@@ -232,14 +250,14 @@ def test_execution_engine_prewarms_runtime_before_serial_dispatch(monkeypatch) -
     engine = ExecutionEngine(executor)
     tasks = [
         _PreparedSymbolAlgorithm(
-            symbol="BTCUSDT",
+            symbol="rb2610",
             algorithm_name="TEST",
-            algorithm_input=AlgorithmInput(symbol="BTCUSDT", target_volume=1.0, trade_rule={}),
+            algorithm_input=AlgorithmInput(symbol="rb2610", target_volume=1.0, trade_rule={}),
         ),
         _PreparedSymbolAlgorithm(
-            symbol="ETHUSDT",
+            symbol="ag2612",
             algorithm_name="TEST",
-            algorithm_input=AlgorithmInput(symbol="ETHUSDT", target_volume=1.0, trade_rule={}),
+            algorithm_input=AlgorithmInput(symbol="ag2612", target_volume=1.0, trade_rule={}),
         ),
     ]
     serial_calls: list[list[str]] = []
@@ -253,11 +271,11 @@ def test_execution_engine_prewarms_runtime_before_serial_dispatch(monkeypatch) -
     monkeypatch.setattr(engine, "_run_symbol_algorithms_serially", fake_run_symbol_algorithms_serially)
 
     assert engine._run_prepared_symbol_algorithms(tasks) == []
-    assert executor.websocket_init_calls == [["BTCUSDT", "ETHUSDT"]]
-    assert serial_calls == [["BTCUSDT", "ETHUSDT"]]
+    assert executor.websocket_init_calls == [["rb2610", "ag2612"]]
+    assert serial_calls == [["rb2610", "ag2612"]]
 
 
-def _prepared_task(symbol: str = "BTCUSDT") -> _PreparedSymbolAlgorithm:
+def _prepared_task(symbol: str = "rb2610") -> _PreparedSymbolAlgorithm:
     return _PreparedSymbolAlgorithm(
         symbol=symbol,
         algorithm_name="TEST",
@@ -288,8 +306,8 @@ def test_symbol_error_capture_still_converts_generic_error_to_failed_result() ->
     def failing_runner() -> object:
         raise RuntimeError("boom")
 
-    result = engine._run_symbol_algorithm_with_error_capture(_prepared_task("ETHUSDT"), runner=failing_runner)
+    result = engine._run_symbol_algorithm_with_error_capture(_prepared_task("ag2612"), runner=failing_runner)
 
-    assert result.symbol == "ETHUSDT"
+    assert result.symbol == "ag2612"
     assert result.status == ExecutionStatus.FAILED
     assert "boom" in (result.error or "")

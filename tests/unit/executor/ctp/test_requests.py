@@ -26,10 +26,10 @@ def config() -> CTPAccountConfig:
         broker_id="9999",
         investor_id="100001",
         password="secret",
-        td_front="tcp://td",
-        md_front="tcp://md",
-        app_id="app",
-        auth_code="auth",
+        td_front="tcp://td:10001",
+        md_front="tcp://md:10002",
+        app_id="app-id",
+        auth_code="auth-code",
     )
 
 

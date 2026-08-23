@@ -34,7 +34,7 @@ def sample_account_assets():
         market_value=5000.0,
         positions=[
             Position(
-                symbol="BTCUSDT",
+                symbol="rb2610",
                 position_side="LONG",
                 volume=0.5,
                 available_volume=0.5,
@@ -50,7 +50,7 @@ def sample_order():
     """创建示例订单."""
     return UnifiedOrder.create(
         order_id="TEST_001",
-        symbol="BTCUSDT",
+        symbol="rb2610",
         direction="BUY",
         order_type="LIMIT",
         volume=0.1,

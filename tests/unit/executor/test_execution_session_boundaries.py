@@ -45,7 +45,17 @@ class _SessionBoundaryExecutor(AbstractExecutor):
         self.logger = _Logger()
         super().__init__(
             TradeChannel.CTP,
-            CTPAccountConfig.model_validate({"broker_id": "b", "investor_id": "i", "password": "p"}),
+            CTPAccountConfig.model_validate(
+                {
+                    "broker_id": "b",
+                    "investor_id": "i",
+                    "password": "p",
+                    "td_front": "tcp://td:1",
+                    "md_front": "tcp://md:2",
+                    "app_id": "app",
+                    "auth_code": "auth",
+                }
+            ),
         )
 
     def _initialize_connection(self, account_config: CTPAccountConfig) -> None:
@@ -152,7 +162,7 @@ def test_execution_session_keeps_symbol_local_memory() -> None:
     """symbol 级 memory 不应污染 owner executor 的 execution 级 memory。"""
     executor = _SessionBoundaryExecutor()
     executor.require_execution_runtime().memory["shared"] = "owner"
-    session = ExecutionSession(owner=executor, symbol="BTCUSDT", audit_context={"algorithm": "TEST-ALGO"})
+    session = ExecutionSession(owner=executor, symbol="rb2610", audit_context={"algorithm": "TEST-ALGO"})
 
     session.memory["local"] = "session"
 
@@ -166,7 +176,7 @@ def test_execution_session_uses_symbol_local_audit_context_and_seq() -> None:
     executor.set_audit_context({"execution_id": "owner-exec", "algorithm": "OWNER"})
     session = ExecutionSession(
         owner=executor,
-        symbol="ETHUSDT",
+        symbol="ag2612",
         audit_context={"execution_id": "symbol-exec", "algorithm": "SYMBOL"},
     )
 
@@ -180,7 +190,7 @@ def test_execution_session_uses_symbol_local_audit_context_and_seq() -> None:
 def test_execution_session_does_not_create_owner_runtime_implicitly() -> None:
     """会话只应复用现有 active runtime，不应在只读路径里隐式创建。"""
     executor = _SessionBoundaryExecutor()
-    session = ExecutionSession(owner=executor, symbol="BTCUSDT")
+    session = ExecutionSession(owner=executor, symbol="rb2610")
 
     assert executor.get_active_execution_runtime() is None
     assert session.is_termination_requested() is False
@@ -327,12 +337,12 @@ def test_execution_session_proxies_symbol_scoped_owner_query_methods() -> None:
             return cast("dict[str, dict[str, object]]", captured["audit_metadata"])[order_id]
 
     owner = cast(AbstractExecutor, _Owner())
-    session = ExecutionSession(owner=owner, symbol="BTCUSDT", audit_context={"execution_id": "exec-1", "account_id": 7})
+    session = ExecutionSession(owner=owner, symbol="rb2610", audit_context={"execution_id": "exec-1", "account_id": 7})
     account_assets = UnifiedAccountAssets(available_cash=10.0, total_asset=20.0, market_value=10.0, positions=[])
 
     assert session.get_current_volume(account_assets) == 2.5
     assert session.get_positions(account_assets) == [(1.0, "long")]
-    assert session.place_order(OrderDirection.BUY, OrderType.LIMIT, 3.0, 99.0, tif="GTC").order_id == "order-BTCUSDT"
+    assert session.place_order(OrderDirection.BUY, OrderType.LIMIT, 3.0, 99.0, tif="GTC").order_id == "order-rb2610"
     assert [order.order_id for order in session.get_pending_orders()] == ["pending"]
     assert [trade.trade_id for trade in session.query_trades("order-1")] == ["trade-order-1"]
     assert session.is_termination_requested() is True
@@ -355,19 +365,19 @@ def test_execution_session_proxies_symbol_scoped_owner_query_methods() -> None:
         "note": "tracked",
         "audit_context": {"execution_id": "exec-1", "account_id": 7},
     }
-    assert captured["place_order"] == ("BTCUSDT", OrderDirection.BUY, OrderType.LIMIT, 3.0, 99.0, {"tif": "GTC"})
-    assert captured["checkpoints"] == ["BTCUSDT", "BTCUSDT"]
-    assert captured["market_data"] == ["BTCUSDT"]
-    assert captured["pending_orders_for_execution"] == "BTCUSDT"
-    assert captured["query_trades_for_execution"] == ("BTCUSDT", "order-1")
-    assert captured["tick_size"] == "BTCUSDT"
-    assert captured["cancel_order"] == ("BTCUSDT", "order-1")
-    assert cast("tuple[object, str]", captured["order_callback"])[1] == "BTCUSDT"
-    assert cast("tuple[object, str]", captured["price_callback"])[1] == "BTCUSDT"
-    assert cast("tuple[object, str]", captured["trade_callback"])[1] == "BTCUSDT"
-    assert cast("tuple[object, str]", captured["unregister_order_callback"])[1] == "BTCUSDT"
-    assert cast("tuple[object, str]", captured["unregister_price_callback"])[1] == "BTCUSDT"
-    assert cast("tuple[object, str]", captured["unregister_trade_callback"])[1] == "BTCUSDT"
+    assert captured["place_order"] == ("rb2610", OrderDirection.BUY, OrderType.LIMIT, 3.0, 99.0, {"tif": "GTC"})
+    assert captured["checkpoints"] == ["rb2610", "rb2610"]
+    assert captured["market_data"] == ["rb2610"]
+    assert captured["pending_orders_for_execution"] == "rb2610"
+    assert captured["query_trades_for_execution"] == ("rb2610", "order-1")
+    assert captured["tick_size"] == "rb2610"
+    assert captured["cancel_order"] == ("rb2610", "order-1")
+    assert cast("tuple[object, str]", captured["order_callback"])[1] == "rb2610"
+    assert cast("tuple[object, str]", captured["price_callback"])[1] == "rb2610"
+    assert cast("tuple[object, str]", captured["trade_callback"])[1] == "rb2610"
+    assert cast("tuple[object, str]", captured["unregister_order_callback"])[1] == "rb2610"
+    assert cast("tuple[object, str]", captured["unregister_price_callback"])[1] == "rb2610"
+    assert cast("tuple[object, str]", captured["unregister_trade_callback"])[1] == "rb2610"
     assert set(captured) == {
         "audit_metadata",
         "current_volume",
@@ -392,7 +402,7 @@ def test_execution_session_emits_audit_event_and_artifact(monkeypatch: pytest.Mo
     executor = _SessionBoundaryExecutor()
     session = ExecutionSession(
         owner=executor,
-        symbol="ETHUSDT",
+        symbol="ag2612",
         audit_context={"execution_id": "exec-2", "account_id": "7", "algorithm": "SINGLE-MAKER"},
     )
     captured: dict[str, object] = {}
@@ -418,7 +428,7 @@ def test_execution_session_emits_audit_event_and_artifact(monkeypatch: pytest.Mo
         "status": "info",
         "reason_family": "system",
         "reason_code": "COMMON.STARTED",
-        "symbol": "ETHUSDT",
+        "symbol": "ag2612",
         "intent_id": None,
         "order_id": None,
         "client_order_id": None,
@@ -432,7 +442,7 @@ def test_execution_session_emits_audit_event_and_artifact(monkeypatch: pytest.Mo
         "content": {"x": 1},
     }
 
-    missing_context_session = ExecutionSession(owner=executor, symbol="BTCUSDT", audit_context={"execution_id": "only"})
+    missing_context_session = ExecutionSession(owner=executor, symbol="rb2610", audit_context={"execution_id": "only"})
     assert (
         missing_context_session.emit_audit_event(
             event_type="x",
@@ -443,7 +453,7 @@ def test_execution_session_emits_audit_event_and_artifact(monkeypatch: pytest.Mo
         is False
     )
     assert (
-        ExecutionSession(owner=executor, symbol="BTCUSDT").emit_audit_artifact(
+        ExecutionSession(owner=executor, symbol="rb2610").emit_audit_artifact(
             artifact_type="noop",
             content={},
         )
@@ -481,7 +491,7 @@ def test_execution_session_accepts_runtime_and_delegates_runtime_audit_and_termi
     session = ExecutionSession(
         owner=owner,
         runtime=runtime,
-        symbol="BTCUSDT",
+        symbol="rb2610",
         audit_context={"execution_id": "exec-runtime", "account_id": 1, "algorithm": "RUNTIME-ALGO"},
     )
 
@@ -500,13 +510,13 @@ def test_execution_session_accepts_runtime_and_delegates_runtime_audit_and_termi
     assert session.emit_audit_artifact(artifact_type="standard_input", content={"x": 1}) is True
 
     assert captured == {
-        "checkpoints": ["BTCUSDT"],
+        "checkpoints": ["rb2610"],
         "event": {
             "event_type": "execution_started",
             "status": "info",
             "reason_family": "system",
             "reason_code": "COMMON.STARTED",
-            "symbol": "BTCUSDT",
+            "symbol": "rb2610",
             "intent_id": None,
             "order_id": None,
             "client_order_id": None,

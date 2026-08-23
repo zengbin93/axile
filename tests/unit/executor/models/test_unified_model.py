@@ -36,7 +36,7 @@ class TestPosition:
     def test_create_position(self) -> None:
         """测试创建持仓."""
         position = Position(
-            symbol="BTC/USDT",
+            symbol="rb2610",
             volume=0.1,
             available_volume=0.1,
             market_value=3000.0,
@@ -44,7 +44,7 @@ class TestPosition:
             avg_price=30000.0,
         )
 
-        assert position.symbol == "BTC/USDT"
+        assert position.symbol == "rb2610"
         assert position.volume == 0.1
         assert position.available_volume == 0.1
         assert position.market_value == 3000.0
@@ -54,7 +54,7 @@ class TestPosition:
     def test_create_position_without_avg_price(self) -> None:
         """测试创建没有成本价的持仓."""
         position = Position(
-            symbol="ETH/USDT",
+            symbol="ag2612",
             volume=1.0,
             available_volume=1.0,
             market_value=2000.0,
@@ -62,14 +62,14 @@ class TestPosition:
             avg_price=None,
         )
 
-        assert position.symbol == "ETH/USDT"
+        assert position.symbol == "ag2612"
         assert position.direction == "空头"
         assert position.avg_price is None
 
     def test_position_str_method(self) -> None:
         """测试持仓的字符串表示."""
         position = Position(
-            symbol="DOGE/USDT",
+            symbol="cu2610",
             volume=1000.0,
             available_volume=1000.0,
             market_value=500.0,
@@ -79,7 +79,7 @@ class TestPosition:
 
         str_repr = str(position)
         assert "Position" in str_repr
-        assert "symbol=DOGE/USDT" in str_repr
+        assert "symbol=cu2610" in str_repr
         assert "volume=1000.0" in str_repr
         assert "direction=多头" in str_repr
 
@@ -87,7 +87,7 @@ class TestPosition:
         """测试持仓的额外字段."""
         extra_data = {"source": "exchange", "leverage": 2.0}
         position = Position(
-            symbol="SOL/USDT",
+            symbol="au2612",
             volume=10.0,
             available_volume=10.0,
             market_value=1000.0,
@@ -141,7 +141,7 @@ class TestUnifiedAccountAssets:
         """测试创建带持仓的账户资产."""
         positions = [
             Position(
-                symbol="BTC/USDT",
+                symbol="rb2610",
                 volume=0.1,
                 available_volume=0.1,
                 market_value=3000.0,
@@ -149,7 +149,7 @@ class TestUnifiedAccountAssets:
                 avg_price=None,
             ),
             Position(
-                symbol="ETH/USDT",
+                symbol="ag2612",
                 volume=1.0,
                 available_volume=1.0,
                 market_value=2000.0,
@@ -166,8 +166,8 @@ class TestUnifiedAccountAssets:
         )
 
         assert len(assets.positions) == 2
-        assert assets.positions[0].symbol == "BTC/USDT"
-        assert assets.positions[1].symbol == "ETH/USDT"
+        assert assets.positions[0].symbol == "rb2610"
+        assert assets.positions[1].symbol == "ag2612"
 
     def test_assets_str_method(self) -> None:
         """测试账户资产的字符串表示."""
@@ -209,7 +209,7 @@ class TestUnifiedAccountAssetsMethods:
         """测试获取持仓."""
         positions = [
             Position(
-                symbol="BTC/USDT",
+                symbol="rb2610",
                 volume=0.1,
                 available_volume=0.1,
                 market_value=3000.0,
@@ -217,7 +217,7 @@ class TestUnifiedAccountAssetsMethods:
                 avg_price=None,
             ),
             Position(
-                symbol="ETH/USDT",
+                symbol="ag2612",
                 volume=1.0,
                 available_volume=1.0,
                 market_value=2000.0,
@@ -234,24 +234,24 @@ class TestUnifiedAccountAssetsMethods:
         )
 
         # 获取存在的持仓
-        btc_pos = assets.get_position("BTC/USDT")
-        assert btc_pos is not None
-        assert btc_pos.symbol == "BTC/USDT"
-        assert btc_pos.volume == 0.1
+        rb_pos = assets.get_position("rb2610")
+        assert rb_pos is not None
+        assert rb_pos.symbol == "rb2610"
+        assert rb_pos.volume == 0.1
 
-        eth_pos = assets.get_position("ETH/USDT")
-        assert eth_pos is not None
-        assert eth_pos.symbol == "ETH/USDT"
+        ag_pos = assets.get_position("ag2612")
+        assert ag_pos is not None
+        assert ag_pos.symbol == "ag2612"
 
         # 获取不存在的持仓
-        sol_pos = assets.get_position("SOL/USDT")
-        assert sol_pos is None
+        au_pos = assets.get_position("au2612")
+        assert au_pos is None
 
     def test_get_total_position_value(self) -> None:
         """测试计算总持仓市值."""
         positions = [
             Position(
-                symbol="BTC/USDT",
+                symbol="rb2610",
                 volume=0.1,
                 available_volume=0.1,
                 market_value=3000.0,
@@ -259,7 +259,7 @@ class TestUnifiedAccountAssetsMethods:
                 avg_price=None,
             ),
             Position(
-                symbol="ETH/USDT",
+                symbol="ag2612",
                 volume=1.0,
                 available_volume=1.0,
                 market_value=2000.0,
@@ -267,7 +267,7 @@ class TestUnifiedAccountAssetsMethods:
                 avg_price=None,
             ),
             Position(
-                symbol="DOGE/USDT",
+                symbol="cu2610",
                 volume=1000.0,
                 available_volume=1000.0,
                 market_value=500.0,
@@ -319,7 +319,7 @@ class TestUnifiedAccountAssetsMethods:
         """测试带持仓的账户平衡验证."""
         positions = [
             Position(
-                symbol="BTC/USDT",
+                symbol="rb2610",
                 volume=0.1,
                 available_volume=0.1,
                 market_value=3000.0,
@@ -356,7 +356,7 @@ class TestUnifiedAccountAssetsCreate:
         """测试使用持仓数据创建账户资产."""
         positions_data = [
             {
-                "symbol": "BTC/USDT",
+                "symbol": "rb2610",
                 "volume": 0.1,
                 "available_volume": 0.1,
                 "market_value": 3000.0,
@@ -364,7 +364,7 @@ class TestUnifiedAccountAssetsCreate:
                 "avg_price": 30000.0,
             },
             {
-                "symbol": "ETH/USDT",
+                "symbol": "ag2612",
                 "volume": 2.0,
                 "available_volume": 2.0,
                 "market_value": 2000.0,
@@ -387,12 +387,12 @@ class TestUnifiedAccountAssetsCreate:
 
         # 验证持仓
         assert len(assets.positions) == 2
-        assert assets.positions[0].symbol == "BTC/USDT"
+        assert assets.positions[0].symbol == "rb2610"
         assert assets.positions[0].volume == 0.1
         assert assets.positions[0].avg_price == 30000.0
         assert assets.positions[0].extra["channel_type"] == TradeChannel("external")
 
-        assert assets.positions[1].symbol == "ETH/USDT"
+        assert assets.positions[1].symbol == "ag2612"
         assert assets.positions[1].volume == 2.0
         assert assets.positions[1].avg_price is None
 
@@ -471,7 +471,7 @@ class TestUnifiedAccountAssetsCreate:
         """测试创建时持仓数据中的额外字段."""
         positions_data = [
             {
-                "symbol": "BTC/USDT",
+                "symbol": "rb2610",
                 "volume": 0.1,
                 "available_volume": 0.1,
                 "market_value": 3000.0,

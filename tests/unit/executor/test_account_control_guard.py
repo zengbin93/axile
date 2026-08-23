@@ -91,11 +91,11 @@ def test_guard_uses_loaded_baseline_plus_in_memory_deltas() -> None:
         clock=_clock,
     )
 
-    attempt = guard.begin_operation("place_order", symbol="BTCUSDT")
+    attempt = guard.begin_operation("place_order", symbol="rb2610")
     attempt.record_outcome("submitted", metadata={"order_id": "oid-1"})
 
-    with pytest.raises(AccountControlBlockedError, match="BTCUSDT"):
-        guard.begin_operation("place_order", symbol="BTCUSDT")
+    with pytest.raises(AccountControlBlockedError, match="rb2610"):
+        guard.begin_operation("place_order", symbol="rb2610")
 
     counter_deltas, events = guard.flush_records()
 
@@ -132,7 +132,7 @@ def test_guard_records_account_execution_channel_symbol_and_operation() -> None:
     )
 
     with pytest.raises(AccountControlBlockedError):
-        guard.begin_operation("query_order", symbol="ETHUSDT")
+        guard.begin_operation("query_order", symbol="ag2612")
 
     counter_deltas, events = guard.flush_records()
 
@@ -143,7 +143,7 @@ def test_guard_records_account_execution_channel_symbol_and_operation() -> None:
     assert event.execution_id == "exec-ctx"
     assert event.channel == TradeChannel("external")
     assert event.operation == "query_order"
-    assert event.symbol == "ETHUSDT"
+    assert event.symbol == "ag2612"
     assert event.decision == AccountControlDecision.BLOCKED
 
 
@@ -158,7 +158,7 @@ def test_guard_is_noop_without_account_id() -> None:
         clock=_clock,
     )
 
-    attempt = guard.begin_operation("cancel_order", symbol="BTCUSDT")
+    attempt = guard.begin_operation("cancel_order", symbol="rb2610")
     attempt.record_outcome("submitted", metadata={"order_id": "oid-noop"})
 
     counter_deltas, events = guard.flush_records()
@@ -189,9 +189,9 @@ def test_guard_waits_until_min_interval_ms_elapsed() -> None:
         wait_poll_interval_ms=500,
     )
 
-    attempt = guard.begin_operation("place_order", symbol="BTCUSDT")
+    attempt = guard.begin_operation("place_order", symbol="rb2610")
     attempt.record_outcome("submitted", metadata={"order_id": "oid-1"})
-    second_attempt = guard.begin_operation("place_order", symbol="BTCUSDT")
+    second_attempt = guard.begin_operation("place_order", symbol="rb2610")
     second_attempt.record_outcome("submitted", metadata={"order_id": "oid-2"})
 
     counter_deltas, events = guard.flush_records()
@@ -230,9 +230,9 @@ def test_guard_uses_default_clock_for_waiting_when_no_sleep_or_clock_is_injected
             wait_poll_interval_ms=500,
         )
 
-        first_attempt = guard.begin_operation("place_order", symbol="BTCUSDT")
+        first_attempt = guard.begin_operation("place_order", symbol="rb2610")
         first_attempt.record_outcome("submitted", metadata={"order_id": "oid-1"})
-        second_attempt = guard.begin_operation("place_order", symbol="BTCUSDT")
+        second_attempt = guard.begin_operation("place_order", symbol="rb2610")
         second_attempt.record_outcome("submitted", metadata={"order_id": "oid-2"})
 
         _, events = guard.flush_records()
@@ -261,13 +261,13 @@ def test_guard_does_not_persist_symbol_counters_without_operation_symbol_policy(
         clock=_clock,
     )
 
-    attempt = guard.begin_operation("query_account", symbol="BTCUSDT")
+    attempt = guard.begin_operation("query_account", symbol="rb2610")
     attempt.record_outcome("fetched")
 
     counter_deltas, events = guard.flush_records()
 
     assert len(events) == 1
-    assert events[0].symbol == "BTCUSDT"
+    assert events[0].symbol == "rb2610"
     assert {delta.scope_type for delta in counter_deltas} == {AccountControlScopeType.ACCOUNT}
 
 
@@ -297,7 +297,7 @@ def test_guard_waits_until_next_minute_when_per_minute_quota_is_exhausted() -> N
         wait_poll_interval_ms=1000,
     )
 
-    attempt = guard.begin_operation("query_order", symbol="BTCUSDT")
+    attempt = guard.begin_operation("query_order", symbol="rb2610")
     attempt.record_outcome("queried")
 
     counter_deltas, events = guard.flush_records()
@@ -467,7 +467,7 @@ def test_guard_waits_across_control_date_boundary_for_min_interval() -> None:
         wait_poll_interval_ms=1000,
     )
 
-    attempt = guard.begin_operation("place_order", symbol="BTCUSDT")
+    attempt = guard.begin_operation("place_order", symbol="rb2610")
     attempt.record_outcome("submitted")
 
     counter_deltas, events = guard.flush_records()

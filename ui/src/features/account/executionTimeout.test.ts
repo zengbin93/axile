@@ -23,6 +23,7 @@ describe('defaultExecutionTimeoutForChannel', () => {
         },
         leverage: { min: 0, max: 10, step: 0.1 },
         account_form: { fields: [], notices: [] },
+        portfolio: { market_label: '测试市场', example_symbols: ['DEMO'] },
       }],
     })
     expect(defaultExecutionTimeoutForChannel('paper')).toBe('420')

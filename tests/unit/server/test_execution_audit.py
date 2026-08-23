@@ -58,24 +58,24 @@ def test_build_event_uid_is_stable_and_sensitive_to_seq() -> None:
     first = execution_audit.build_event_uid(
         "exec-1",
         ExecutionEventType.ORDER_SUBMITTED,
-        symbol="ETHUSDT",
-        intent_id="exec-1:ETHUSDT",
+        symbol="ag2612",
+        intent_id="exec-1:ag2612",
         order_id="123",
         seq=1,
     )
     second = execution_audit.build_event_uid(
         "exec-1",
         ExecutionEventType.ORDER_SUBMITTED,
-        symbol="ETHUSDT",
-        intent_id="exec-1:ETHUSDT",
+        symbol="ag2612",
+        intent_id="exec-1:ag2612",
         order_id="123",
         seq=1,
     )
     changed = execution_audit.build_event_uid(
         "exec-1",
         ExecutionEventType.ORDER_SUBMITTED,
-        symbol="ETHUSDT",
-        intent_id="exec-1:ETHUSDT",
+        symbol="ag2612",
+        intent_id="exec-1:ag2612",
         order_id="123",
         seq=2,
     )
@@ -137,7 +137,7 @@ def test_append_execution_event_ignores_duplicate_event_uid(
             status=ExecutionEventStatus.WARNING,
             reason_family=ExecutionReasonFamily.MARKET_RULE,
             reason_code="EXTERNAL.BELOW_MIN_NOTIONAL",
-            symbol="ETHUSDT",
+            symbol="ag2612",
             seq=2,
         )
     )

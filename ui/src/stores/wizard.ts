@@ -2,7 +2,6 @@ import { create } from 'zustand'
 import { defaultExecutionTimeoutForChannel } from '@/features/account/executionTimeout'
 import { defaultAlgorithm, type AlgorithmRef } from '@/features/setup/algorithms'
 import { getChannelDescriptor } from '@/stores/channels'
-import type { GMConnectionMode } from '@/features/setup/gmConnection'
 import type { TradeChannel } from '@/types/api'
 import {
   defaultScheduleRule,
@@ -15,6 +14,8 @@ export interface PortfolioDraft {
   name: string
   market: string
   customCode: string
+  /** 最近一次由系统写入模板时对应的 canonical market。 */
+  templateMarket: string | null
   /** 当前函数的试跑结论；改动源码即清空，供「下一步」软拦截读取。 */
   verified: { ok: boolean } | null
   /** 保存后回填的组合 ID。 */
@@ -27,8 +28,6 @@ export interface AccountDraft {
   channel: TradeChannel
   /** 连接表单（渠道特定字段）。 */
   config: Record<string, unknown>
-  /** GM 连接目标；仅供向导控制互斥字段，不提交给后端。 */
-  gmConnectionMode: GMConnectionMode
   portfolioId: number | null
   /** 主交易算法引用（`{method, params}`）；由「怎么交易」步的算法编辑器产出。 */
   algorithm: AlgorithmRef
@@ -71,8 +70,9 @@ export function defaultLeveragesForChannel(channel: TradeChannel) {
 
 const initialPf: PortfolioDraft = {
   name: '我的趋势组合',
-  market: '加密货币',
-  customCode: 'def calculate_portfolio(context):\n    # 返回 {品种: 目标权重}\n    return {"BTCUSDT": 0.5, "ETHUSDT": 0.5}',
+  market: 'crypto',
+  customCode: '',
+  templateMarket: null,
   verified: null,
   savedId: null,
 }
@@ -95,7 +95,6 @@ const initialAcct: AccountDraft = {
   name: '',
   channel: '',
   config: {},
-  gmConnectionMode: 'terminal',
   portfolioId: null,
   algorithm: defaultAlgorithm('crypto', 'trade'),
   ...defaultLeveragesForChannel(''),

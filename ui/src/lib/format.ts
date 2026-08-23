@@ -19,13 +19,13 @@ export function fmtMoney(v: number): string {
 }
 
 /**
- * 给金额数字缀 1 字符货币记号：USDT 用后缀「U」、CNY 用前缀「¥」。
+ * 给金额数字缀简短货币记号：人民币用前缀「¥」，私有渠道计价币用后缀「U」。
  *
- * 只用于行内钱数的「就地确认」；头部权益另用全称（USDT/CNY）当权威锚。其它币种原样
+ * 只用于行内钱数的「就地确认」；头部权益另用渠道声明的全称当权威锚。其它币种原样
  * 空格后缀，`currency` 为空则不缀。
  */
 export function withCurrency(numStr: string, currency: string): string {
-  if (currency === 'USDT') return `${numStr}U`
+  if (/^USD.$/.test(currency)) return `${numStr}U`
   if (currency === 'CNY') return `¥${numStr}`
   return currency ? `${numStr} ${currency}` : numStr
 }

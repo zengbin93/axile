@@ -101,6 +101,7 @@ def _build_gm_account() -> Account:
         account_config={
             "account_id": "gm-account",
             "token": "token",
+            "connection_mode": "service",
             "serv_addr": "127.0.0.1:7001",
         },
         is_started=True,
@@ -246,6 +247,15 @@ def test_resolve_executor_rejects_wrong_expected_trading_day(monkeypatch: pytest
     assert state.account_id is None
 
 
+def test_resolve_executor_does_not_require_ctp_trading_day_from_tq(monkeypatch: pytest.MonkeyPatch) -> None:
+    account = build_account(trade_channel="tq", brokerage="tq")
+    executor = _FakeWorkerExecutor()
+    state = worker_backend_entry._WorkerBackendState()
+    monkeypatch.setattr(worker_state, "create_executor_instance", lambda _account: executor)
+
+    assert worker_state._resolve_executor(state, account, "20260824") is executor
+
+
 def test_handle_prepare_returns_cached_trading_day(monkeypatch: pytest.MonkeyPatch) -> None:
     account = build_account()
     executor = _FakeWorkerExecutor()
@@ -342,13 +352,13 @@ def test_handle_execute_trade_uses_account_channel_for_standard_input(
             "standard_input": {
                 "channel_type": TradeChannel.GM.value,
                 "account_config": account.account_config,
-                "curr_target": {"BTCUSDT": 0.1},
+                "curr_target": {"rb2610": 0.1},
                 "last_target": {},
                 "algorithm": {"method": "SINGLE-MAKER", "params": {}},
                 "trade_rules": {},
                 "extra": {"audit": {"execution_id": "exec-worker-ctp-1"}},
             },
-            "audit_input": {"curr_target": {"BTCUSDT": 0.1}},
+            "audit_input": {"curr_target": {"rb2610": 0.1}},
             "strategy_count": 1,
             "trigger_source": "manual",
             "cleanup": True,

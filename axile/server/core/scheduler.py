@@ -3,4 +3,6 @@
 from apscheduler.jobstores.memory import MemoryJobStore  # type: ignore[import-untyped]
 from apscheduler.schedulers.asyncio import AsyncIOScheduler as Scheduler  # type: ignore[import-untyped]
 
-scheduler = Scheduler(jobstores={"default": MemoryJobStore()}, timezone="Asia/Shanghai")
+from axile.server.cron import SCHEDULER_TIMEZONE
+
+scheduler = Scheduler(jobstores={"default": MemoryJobStore()}, timezone=SCHEDULER_TIMEZONE)

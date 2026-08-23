@@ -87,7 +87,7 @@ class _DeadlineFixture:
         self.clock = clock
         self.audit_sink = audit_sink
 
-    def session(self, symbol: str = "ETHUSDT") -> ExecutionSession:
+    def session(self, symbol: str = "ag2612") -> ExecutionSession:
         """基于本次 runtime 构造单品种执行会话。"""
         return ExecutionSession(owner=self.executor, runtime=self.runtime, symbol=symbol)
 
@@ -152,7 +152,7 @@ def test_deadline_disabled_when_timeout_non_positive() -> None:
     assert fixture.runtime.is_termination_requested() is False
     assert fixture.runtime.get_termination_mode() is None
     assert fixture.runtime.get_termination_reason() is None
-    fixture.runtime.handle_termination_checkpoint("ETHUSDT")
+    fixture.runtime.handle_termination_checkpoint("ag2612")
 
 
 def test_deadline_triggers_without_controller() -> None:
@@ -172,7 +172,7 @@ def test_deadline_not_triggered_before_timeout() -> None:
 
     assert fixture.runtime.deadline_remaining_seconds() == pytest.approx(1.0)
     assert fixture.runtime.is_termination_requested() is False
-    fixture.runtime.handle_termination_checkpoint("ETHUSDT")
+    fixture.runtime.handle_termination_checkpoint("ag2612")
 
 
 def test_deadline_checkpoint_raises_with_timeout_trigger() -> None:
@@ -180,7 +180,7 @@ def test_deadline_checkpoint_raises_with_timeout_trigger() -> None:
     fixture = _build_deadline_fixture(timeout=180, elapsed=200.0)
 
     with pytest.raises(ExecutionTerminated) as exc_info:
-        fixture.runtime.handle_termination_checkpoint("ETHUSDT")
+        fixture.runtime.handle_termination_checkpoint("ag2612")
 
     assert exc_info.value.trigger == "timeout"
     assert exc_info.value.mode == "graceful"
@@ -198,7 +198,7 @@ def test_deadline_does_not_cancel_pending_orders() -> None:
     fixture = _build_deadline_fixture(
         timeout=180,
         elapsed=200.0,
-        execution_orders=[_active_order("ETHUSDT", "order-1")],
+        execution_orders=[_active_order("ag2612", "order-1")],
     )
     session = fixture.session()
 
@@ -215,7 +215,7 @@ def test_deadline_audit_event_emitted_once() -> None:
 
     for _attempt in range(5):
         with pytest.raises(ExecutionTerminated):
-            fixture.runtime.handle_termination_checkpoint("ETHUSDT")
+            fixture.runtime.handle_termination_checkpoint("ag2612")
 
     acked_events = fixture.audit_sink.events_of_type("execution_termination_acked")
     assert len(acked_events) == 1
@@ -230,7 +230,7 @@ def test_runtime_sleep_clamps_to_deadline_and_raises() -> None:
     fixture = _build_deadline_fixture(timeout=180, elapsed=170.0)
 
     with pytest.raises(ExecutionTerminated) as exc_info:
-        fixture.runtime.sleep_or_terminate(60.0, "ETHUSDT")
+        fixture.runtime.sleep_or_terminate(60.0, "ag2612")
 
     assert fixture.clock.sleep_calls == [10.0]
     assert exc_info.value.trigger == "timeout"
@@ -241,7 +241,7 @@ def test_session_sleep_clamps_to_deadline() -> None:
     fixture = _build_deadline_fixture(
         timeout=180,
         elapsed=170.0,
-        execution_orders=[_active_order("ETHUSDT", "order-1")],
+        execution_orders=[_active_order("ag2612", "order-1")],
     )
     session = fixture.session()
 
@@ -259,7 +259,7 @@ def test_sleep_with_controller_clamps_to_deadline() -> None:
     fixture = _build_deadline_fixture(timeout=180, elapsed=170.0, controller=controller)
 
     with pytest.raises(ExecutionTerminated) as exc_info:
-        fixture.runtime.sleep_or_terminate(60.0, "ETHUSDT")
+        fixture.runtime.sleep_or_terminate(60.0, "ag2612")
 
     assert fixture.clock.event_waits == [10.0]
     assert exc_info.value.trigger == "timeout"
@@ -270,7 +270,7 @@ def test_sleep_without_deadline_keeps_full_wait() -> None:
     controller = ExecutionTerminationController(cancel_event=Event())
     fixture = _build_deadline_fixture(timeout=0, elapsed=0.0, controller=controller)
 
-    fixture.runtime.sleep_or_terminate(5.0, "ETHUSDT")
+    fixture.runtime.sleep_or_terminate(5.0, "ag2612")
 
     assert fixture.clock.event_waits == [5.0]
 
@@ -284,7 +284,7 @@ def test_operator_termination_takes_precedence_over_deadline() -> None:
     assert fixture.runtime.get_termination_reason() == "manual stop"
 
     with pytest.raises(ExecutionTerminated) as exc_info:
-        fixture.runtime.handle_termination_checkpoint("ETHUSDT")
+        fixture.runtime.handle_termination_checkpoint("ag2612")
 
     assert exc_info.value.trigger == "operator"
     assert exc_info.value.mode == "graceful"
@@ -299,7 +299,17 @@ def _standard_input(*, execution_timeout: int) -> UnifiedStandardInput:
     """构造一个仅用于校验 deadline 装载的最小标准输入。"""
     return UnifiedStandardInput(
         channel_type=TradeChannel.CTP,
-        account_config=CTPAccountConfig.model_validate({"broker_id": "b", "investor_id": "i", "password": "p"}),
+        account_config=CTPAccountConfig.model_validate(
+            {
+                "broker_id": "b",
+                "investor_id": "i",
+                "password": "p",
+                "td_front": "tcp://td:1",
+                "md_front": "tcp://md:2",
+                "app_id": "app",
+                "auth_code": "auth",
+            }
+        ),
         curr_target={},
         last_target={},
         execution_timeout=execution_timeout,
@@ -327,7 +337,7 @@ def test_operator_cancel_pending_still_cancels_orders() -> None:
         timeout=0,
         elapsed=0.0,
         controller=controller,
-        execution_orders=[_active_order("ETHUSDT", "order-1")],
+        execution_orders=[_active_order("ag2612", "order-1")],
     )
     session = fixture.session()
 
@@ -336,4 +346,4 @@ def test_operator_cancel_pending_still_cancels_orders() -> None:
 
     assert exc_info.value.trigger == "operator"
     assert exc_info.value.mode == "cancel_pending"
-    assert fixture.executor.cancel_attempts == [("ETHUSDT", "order-1")]
+    assert fixture.executor.cancel_attempts == [("ag2612", "order-1")]

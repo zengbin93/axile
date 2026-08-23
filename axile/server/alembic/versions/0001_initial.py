@@ -260,6 +260,20 @@ def upgrade() -> None:
         "ix_execution_event_type_created", "execution_event", ["event_type", "ts_local_created"], unique=False
     )
     op.create_table(
+        "schedule_skip",
+        sa.Column("id", sa.Integer(), nullable=False),
+        sa.Column("account_id", sa.Integer(), nullable=False),
+        sa.Column("channel", sa.Text(), nullable=False),
+        sa.Column("triggered_at", sa.Text(), nullable=False),
+        sa.Column("calendar_id", sa.Text(), nullable=False),
+        sa.Column("calendar_day", sa.Date(), nullable=False),
+        sa.Column("calendar_label", sa.Text(), nullable=False),
+        sa.Column("reason_code", sa.Text(), nullable=False),
+        sa.ForeignKeyConstraint(["account_id"], ["account.id"], ondelete="CASCADE"),
+        sa.PrimaryKeyConstraint("id"),
+    )
+    op.create_index("ix_schedule_skip_account_triggered", "schedule_skip", ["account_id", "triggered_at"], unique=False)
+    op.create_table(
         "portfolioaccount",
         sa.Column("account_id", sa.Integer(), nullable=False),
         sa.Column("portfolio_id", sa.Integer(), nullable=True),
@@ -276,6 +290,8 @@ def downgrade() -> None:
     """删除初始基线创建的全部数据库结构."""
     # ### Alembic 自动生成的命令，请按需调整！ ###
     op.drop_table("portfolioaccount")
+    op.drop_index("ix_schedule_skip_account_triggered", table_name="schedule_skip")
+    op.drop_table("schedule_skip")
     op.drop_index("ix_execution_event_type_created", table_name="execution_event")
     op.drop_index("ix_execution_event_symbol_created", table_name="execution_event")
     op.drop_index("ix_execution_event_reason_created", table_name="execution_event")

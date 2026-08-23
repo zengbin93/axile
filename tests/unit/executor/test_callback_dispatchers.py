@@ -89,9 +89,9 @@ def test_dispatchers_register_broadcast_isolate_errors_and_clear_callbacks(
     def broken_order_callback(_order: UnifiedOrder) -> None:
         raise RuntimeError("broken-order")
 
-    dispatcher.dispatch_order_update(_build_order("BTCUSDT"))
-    dispatcher.dispatch_trade_record(_build_trade("BTCUSDT"))
-    dispatcher.dispatch_price_data(_build_price("BTCUSDT"))
+    dispatcher.dispatch_order_update(_build_order("rb2610"))
+    dispatcher.dispatch_trade_record(_build_trade("rb2610"))
+    dispatcher.dispatch_price_data(_build_price("rb2610"))
     assert dispatcher.get_callback_count() == {
         "order_callbacks": 0,
         "trade_callbacks": 0,
@@ -111,13 +111,13 @@ def test_dispatchers_register_broadcast_isolate_errors_and_clear_callbacks(
         "price_callbacks": 1,
     }
 
-    dispatcher.dispatch_order_update(_build_order("BTCUSDT"))
-    dispatcher.dispatch_trade_record(_build_trade("ETHUSDT"))
-    dispatcher.dispatch_price_data(_build_price("SOLUSDT"))
+    dispatcher.dispatch_order_update(_build_order("rb2610"))
+    dispatcher.dispatch_trade_record(_build_trade("ag2612"))
+    dispatcher.dispatch_price_data(_build_price("au2612"))
     assert events == [
-        ("order", "BTCUSDT"),
-        ("trade", "trade-ETHUSDT"),
-        ("price", "SOLUSDT"),
+        ("order", "rb2610"),
+        ("trade", "trade-ag2612"),
+        ("price", "au2612"),
     ]
 
     dispatcher.unregister_order_callback(broken_order_callback)

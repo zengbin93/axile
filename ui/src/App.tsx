@@ -21,6 +21,8 @@ import { PortfolioDetailPage } from '@/pages/PortfolioDetailPage'
 import { PortfolioEditPage } from '@/pages/PortfolioEditPage'
 import { Placeholder } from '@/pages/Placeholder'
 import { SystemConfigPage } from '@/pages/SystemConfigPage'
+import { TradingCalendarPage } from '@/pages/TradingCalendarPage'
+import { SettingsLayout } from '@/pages/SettingsLayout'
 import { WizardLayout } from '@/features/setup/WizardLayout'
 import { SetupHub } from '@/pages/setup/SetupHub'
 import { PfName, PfDefine, PfDone } from '@/pages/setup/PortfolioSteps'
@@ -108,7 +110,14 @@ const router = createBrowserRouter([
           { path: '*', element: <Placeholder title="页面不存在" milestone="—" /> },
         ],
       },
-      { path: 'settings', element: <SystemConfigPage /> },
+      {
+        path: 'settings',
+        element: <SettingsLayout />,
+        children: [
+          { index: true, element: <SystemConfigPage /> },
+          { path: 'trading-calendar', element: <TradingCalendarPage /> },
+        ],
+      },
       { path: 'docs/custom-calc', element: <CustomCalcDocPage /> },
       {
         path: 'setup',

@@ -32,7 +32,7 @@ from axile.server.sandbox import (
     snapshot_context,
 )
 
-_SIMPLE_SCRIPT = "def calculate_portfolio(context):\n    return {'BTCUSDT': 0.5}\n"
+_SIMPLE_SCRIPT = "def calculate_portfolio(context):\n    return {'rb2610': 0.5}\n"
 
 
 def test_simple_script_returns_target() -> None:
@@ -40,7 +40,7 @@ def test_simple_script_returns_target() -> None:
     result = run_portfolio_script(_SIMPLE_SCRIPT)
 
     assert result.ok
-    assert result.target == {"BTCUSDT": 0.5}
+    assert result.target == {"rb2610": 0.5}
 
 
 def test_script_runs_in_separate_process() -> None:
@@ -283,6 +283,23 @@ def test_pandas_works_under_production_defaults() -> None:
 
     assert result.ok, f"生产默认上限下 pandas 脚本失败: {result.error}"
     assert result.target == {"a": 0.3, "b": 0.7}
+
+
+def test_custom_function_can_use_registered_channel_target_transform() -> None:
+    """用户组合函数可显式调用渠道目标转换工具。"""
+    script = (
+        "import pandas as pd\n"
+        "from axile.channels import get_channel\n"
+        "def calculate_portfolio(context):\n"
+        "    frame = pd.DataFrame([{'strategy': 'alpha', 'symbol': '600000.SH', 'weight': 0.5}])\n"
+        "    target = get_channel('gm').target_transform({'alpha': 0.4}, frame)\n"
+        "    return dict(zip(target['symbol'], target['contribution'], strict=True))\n"
+    )
+
+    result = run_portfolio_script(script)
+
+    assert result.ok, f"渠道目标转换工具调用失败: {result.error}"
+    assert result.target == {"SHSE.600000": 0.2}
 
 
 def test_network_library_import_is_allowed() -> None:

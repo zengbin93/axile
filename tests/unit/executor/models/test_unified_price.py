@@ -15,7 +15,7 @@ class TestUnifiedPriceDataCreation:
     def test_basic_creation(self) -> None:
         """测试基础创建."""
         price = UnifiedPriceData(
-            symbol="BTC/USDT",
+            symbol="rb2610",
             last_price=30000.0,
             bid_price=29999.0,
             ask_price=30001.0,
@@ -26,7 +26,7 @@ class TestUnifiedPriceDataCreation:
             update_time="2023-12-21T10:30:00.000Z",
         )
 
-        assert price.symbol == "BTC/USDT"
+        assert price.symbol == "rb2610"
         assert price.last_price == 30000.0
         assert price.bid_price == 29999.0
         assert price.ask_price == 30001.0
@@ -39,7 +39,7 @@ class TestUnifiedPriceDataCreation:
     def test_default_values(self) -> None:
         """测试默认值."""
         price = UnifiedPriceData(
-            symbol="BTC/USDT",
+            symbol="rb2610",
             last_price=30000.0,
             bid_price=29999.0,
             ask_price=30001.0,
@@ -72,7 +72,7 @@ class TestUnifiedPriceDataCreation:
     def test_str_method(self) -> None:
         """测试__str__方法."""
         price = UnifiedPriceData(
-            symbol="BTC/USDT",
+            symbol="rb2610",
             last_price=30000.0,
             bid_price=29999.0,
             ask_price=30001.0,
@@ -85,7 +85,7 @@ class TestUnifiedPriceDataCreation:
 
         str_repr = str(price)
         assert "UnifiedPriceData" in str_repr
-        assert "symbol=BTC/USDT" in str_repr
+        assert "symbol=rb2610" in str_repr
         assert "last=30000.0" in str_repr
         assert "bid=29999.0" in str_repr
         assert "ask=30001.0" in str_repr
@@ -94,7 +94,7 @@ class TestUnifiedPriceDataCreation:
         """测试extra字段."""
         extra_data = {"source": "test", "raw_data": {"key": "value"}}
         price = UnifiedPriceData(
-            symbol="BTC/USDT",
+            symbol="rb2610",
             last_price=30000.0,
             bid_price=29999.0,
             ask_price=30001.0,
@@ -116,7 +116,7 @@ class TestUnifiedPriceDataMethods:
     def test_get_spread(self) -> None:
         """测试获取价差."""
         price = UnifiedPriceData(
-            symbol="BTC/USDT",
+            symbol="rb2610",
             last_price=30000.0,
             bid_price=29999.0,
             ask_price=30001.0,
@@ -132,7 +132,7 @@ class TestUnifiedPriceDataMethods:
     def test_get_mid_price(self) -> None:
         """测试获取中间价."""
         price = UnifiedPriceData(
-            symbol="BTC/USDT",
+            symbol="rb2610",
             last_price=30000.0,
             bid_price=29999.0,
             ask_price=30001.0,
@@ -148,7 +148,7 @@ class TestUnifiedPriceDataMethods:
     def test_is_valid(self) -> None:
         """测试数据有效性."""
         valid_price = UnifiedPriceData(
-            symbol="BTC/USDT",
+            symbol="rb2610",
             last_price=30000.0,
             bid_price=29999.0,
             ask_price=30001.0,
@@ -163,7 +163,7 @@ class TestUnifiedPriceDataMethods:
     def test_to_dict(self) -> None:
         """测试转换为字典."""
         price = UnifiedPriceData(
-            symbol="BTC/USDT",
+            symbol="rb2610",
             last_price=30000.0,
             bid_price=29999.0,
             ask_price=30001.0,
@@ -176,7 +176,7 @@ class TestUnifiedPriceDataMethods:
 
         price_dict = price.to_dict()
         assert isinstance(price_dict, dict)
-        assert price_dict["symbol"] == "BTC/USDT"
+        assert price_dict["symbol"] == "rb2610"
         assert price_dict["last_price"] == 30000.0
         assert price_dict["bid_price"] == 29999.0
         assert price_dict["ask_price"] == 30001.0
@@ -188,7 +188,7 @@ class TestUnifiedPriceDataPriceLevels:
     def test_get_all_bid_prices(self) -> None:
         """测试获取所有买价."""
         price = UnifiedPriceData(
-            symbol="BTC/USDT",
+            symbol="rb2610",
             last_price=30000.0,
             bid_price=29999.0,
             bid_price_2=29998.0,
@@ -209,7 +209,7 @@ class TestUnifiedPriceDataPriceLevels:
     def test_get_all_ask_prices(self) -> None:
         """测试获取所有卖价."""
         price = UnifiedPriceData(
-            symbol="BTC/USDT",
+            symbol="rb2610",
             last_price=30000.0,
             bid_price=29999.0,
             ask_price=30001.0,
@@ -230,7 +230,7 @@ class TestUnifiedPriceDataPriceLevels:
     def test_get_all_bid_volumes(self) -> None:
         """测试获取所有买量."""
         price = UnifiedPriceData(
-            symbol="BTC/USDT",
+            symbol="rb2610",
             last_price=30000.0,
             bid_price=29999.0,
             ask_price=30001.0,
@@ -251,7 +251,7 @@ class TestUnifiedPriceDataPriceLevels:
     def test_get_all_ask_volumes(self) -> None:
         """测试获取所有卖量."""
         price = UnifiedPriceData(
-            symbol="BTC/USDT",
+            symbol="rb2610",
             last_price=30000.0,
             bid_price=29999.0,
             ask_price=30001.0,
@@ -272,7 +272,7 @@ class TestUnifiedPriceDataPriceLevels:
     def test_get_price_levels(self) -> None:
         """测试获取指定深度的价格."""
         price = UnifiedPriceData(
-            symbol="BTC/USDT",
+            symbol="rb2610",
             last_price=30000.0,
             bid_price=29999.0,
             bid_price_2=29998.0,
@@ -310,7 +310,7 @@ class TestUnifiedPriceDataPriceLevels:
     def test_get_price_levels_edge_cases(self, depth: int) -> None:
         """测试获取指定深度的边界情况."""
         price = UnifiedPriceData(
-            symbol="BTC/USDT",
+            symbol="rb2610",
             last_price=30000.0,
             bid_price=29999.0,
             bid_price_2=29998.0,
@@ -379,7 +379,7 @@ class TestUnifiedPriceDataValidation:
     ) -> None:
         """测试数据有效性的边界情况."""
         price = UnifiedPriceData(
-            symbol="BTC/USDT",
+            symbol="rb2610",
             last_price=last_price,
             bid_price=bid_price,
             ask_price=ask_price,
@@ -396,7 +396,7 @@ class TestUnifiedPriceDataValidation:
 def test_book_valid_defaults_true_and_survives_clone() -> None:
     """book_valid 默认 True，且经 clone_price_data 深拷贝后保留."""
     price = UnifiedPriceData(
-        symbol="BTC/USDT",
+        symbol="rb2610",
         last_price=30000.0,
         bid_price=29999.0,
         ask_price=30001.0,

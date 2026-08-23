@@ -30,7 +30,8 @@ dependencies = [
 # CTP交易所版本依赖
 ctp = ["openctp-ctp==6.7.7.*"]
 gm = ["gm>=3.0.183"]
-all = ["axile[ctp]", "axile[gm]"]
+tqsdk = ["tqsdk>=3.10.2,<3.11"]
+all = ["axile[ctp]", "axile[gm]", "axile[tqsdk]"]
 
 [dependency-groups]
 dev = [

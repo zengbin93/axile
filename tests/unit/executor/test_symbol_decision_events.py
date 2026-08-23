@@ -14,8 +14,16 @@ def _standard_input() -> UnifiedStandardInput:
     return UnifiedStandardInput.from_dict(
         {
             "channel_type": "ctp",
-            "account_config": {"broker_id": "9999", "investor_id": "test", "password": "test"},
-            "curr_target": {"BTCUSDT": 0.1},
+            "account_config": {
+                "broker_id": "9999",
+                "investor_id": "test",
+                "password": "test",
+                "td_front": "tcp://td:1",
+                "md_front": "tcp://md:2",
+                "app_id": "app",
+                "auth_code": "auth",
+            },
+            "curr_target": {"rb2610": 0.1},
             "algorithm": {"method": "SINGLE-MAKER", "params": {"max_wait_seconds": 60}},
             "extra": {"audit": {"execution_id": "exec-x", "account_id": 1, "algorithm": "SINGLE-MAKER"}},
         }
@@ -38,9 +46,9 @@ def test_emit_symbol_decision_events_covers_each_symbol() -> None:
     runtime = _FakeRuntime()
     engine = ExecutionEngine(object(), runtime=runtime)  # type: ignore[arg-type]
     results = [
-        AlgorithmResult(symbol="ETHUSDT", algorithm="SINGLE-MAKER", status=ExecutionStatus.FAILED, error="boom"),
-        AlgorithmResult(symbol="BTCUSDT", algorithm="SINGLE-MAKER", status=ExecutionStatus.NOOP),
-        AlgorithmResult(symbol="SOLUSDT", algorithm="SINGLE-MAKER", status=ExecutionStatus.SUCCEEDED),
+        AlgorithmResult(symbol="ag2612", algorithm="SINGLE-MAKER", status=ExecutionStatus.FAILED, error="boom"),
+        AlgorithmResult(symbol="rb2610", algorithm="SINGLE-MAKER", status=ExecutionStatus.NOOP),
+        AlgorithmResult(symbol="au2612", algorithm="SINGLE-MAKER", status=ExecutionStatus.SUCCEEDED),
     ]
 
     engine._emit_symbol_decision_events(_standard_input(), results)
@@ -48,21 +56,21 @@ def test_emit_symbol_decision_events_covers_each_symbol() -> None:
     by_symbol = {event["symbol"]: event for event in runtime.events}
     assert len(by_symbol) == 3
 
-    eth = by_symbol["ETHUSDT"]
-    assert eth["event_type"] == ExecutionEventType.SYMBOL_DECISION_MADE
-    assert eth["status"] == ExecutionEventStatus.ERROR
-    assert eth["reason_code"] == "COMMON.SYMBOL_DECISION_MADE"
-    assert eth["details"]["debug"]["error"] == "boom"
+    ag = by_symbol["ag2612"]
+    assert ag["event_type"] == ExecutionEventType.SYMBOL_DECISION_MADE
+    assert ag["status"] == ExecutionEventStatus.ERROR
+    assert ag["reason_code"] == "COMMON.SYMBOL_DECISION_MADE"
+    assert ag["details"]["debug"]["error"] == "boom"
 
-    btc = by_symbol["BTCUSDT"]
-    assert btc["event_type"] == ExecutionEventType.SYMBOL_SKIPPED
-    assert btc["status"] == ExecutionEventStatus.SUCCESS
-    assert btc["reason_code"] == "COMMON.SYMBOL_SKIPPED"
-    assert "debug" not in btc["details"]
+    rb = by_symbol["rb2610"]
+    assert rb["event_type"] == ExecutionEventType.SYMBOL_SKIPPED
+    assert rb["status"] == ExecutionEventStatus.SUCCESS
+    assert rb["reason_code"] == "COMMON.SYMBOL_SKIPPED"
+    assert "debug" not in rb["details"]
 
-    sol = by_symbol["SOLUSDT"]
-    assert sol["event_type"] == ExecutionEventType.SYMBOL_DECISION_MADE
-    assert sol["status"] == ExecutionEventStatus.SUCCESS
+    au = by_symbol["au2612"]
+    assert au["event_type"] == ExecutionEventType.SYMBOL_DECISION_MADE
+    assert au["status"] == ExecutionEventStatus.SUCCESS
 
 
 def _results(*statuses: ExecutionStatus) -> dict[str, AlgorithmResult]:

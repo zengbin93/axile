@@ -100,6 +100,7 @@ export function AccountEditTimerPage() {
 
       <div className="mt-6">
         <TimerEditor
+          tradeChannel={acc.trade_channel}
           market={market}
           value={timer}
           onChange={(next) =>

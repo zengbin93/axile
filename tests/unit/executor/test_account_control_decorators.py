@@ -79,14 +79,14 @@ def test_controlled_operation_registers_defaults_and_records_single_event() -> N
         baseline=AccountControlCounterSnapshot(),
         clock=_clock,
     )
-    result = DemoExecutor(guard).place("BTCUSDT")
+    result = DemoExecutor(guard).place("rb2610")
 
-    assert result["order_id"] == "oid-BTCUSDT"
+    assert result["order_id"] == "oid-rb2610"
     _, events = guard.flush_records()
     assert len(events) == 1
     assert events[0].operation == "demo_place"
-    assert events[0].symbol == "BTCUSDT"
-    assert events[0].metadata == {"order_id": "oid-BTCUSDT"}
+    assert events[0].symbol == "rb2610"
+    assert events[0].metadata == {"order_id": "oid-rb2610"}
     assert events[0].outcome == "submitted"
 
 
@@ -156,13 +156,13 @@ def test_controlled_operation_routes_calls_through_shared_helper(monkeypatch: py
             return [f"{symbol}:{order_id}"]
 
     guard = _build_guard()
-    result = DemoExecutor(guard).query("BTCUSDT", "OID-1")
+    result = DemoExecutor(guard).query("rb2610", "OID-1")
 
-    assert result == ["BTCUSDT:OID-1"]
+    assert result == ["rb2610:OID-1"]
     assert captured == {
         "guard": guard,
         "operation": "demo_query",
-        "symbol": "BTCUSDT",
+        "symbol": "rb2610",
         "metadata": {"order_id": "OID-1"},
         "success_outcome": "fetched",
         "has_result_metadata_resolver": True,
@@ -208,11 +208,11 @@ def test_controlled_operation_prefers_explicit_guard_getter(monkeypatch: pytest.
 
     guard = _build_guard()
 
-    assert DemoExecutor(guard).query("BTCUSDT") == "BTCUSDT"
+    assert DemoExecutor(guard).query("rb2610") == "rb2610"
     assert captured == {
         "guard": guard,
         "operation": "demo_query",
-        "symbol": "BTCUSDT",
+        "symbol": "rb2610",
         "metadata": {},
     }
 

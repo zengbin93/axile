@@ -41,6 +41,8 @@ def test_channels_reports_all_available_when_deps_present(client: TestClient, mo
         assert "fields" in item["account_form"]
         assert "quantity_kind" in item["units"]
         assert "show_short_leverage" in item["ui"]
+        assert "market_label" in item["portfolio"]
+        assert "example_symbols" in item["portfolio"]
 
 
 def test_channels_reports_missing_dependency_with_install_extra(
@@ -68,3 +70,22 @@ def test_channels_reports_missing_dependency_with_install_extra(
     ctp = by_channel[TradeChannel.CTP.value]
     assert ctp["available"] is True
     assert ctp["missing_packages"] == []
+
+
+def test_calendar_requirements_group_shared_available_channels(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """CTP、GM 与 TqSdk 共用 china，聚合接口只返回一份稳定需求。"""
+    monkeypatch.setattr(channel_capabilities.importlib.util, "find_spec", lambda _name: object())
+
+    response = client.get("/api/v1/capabilities/calendar-requirements")
+
+    assert response.status_code == 200
+    assert response.json() == [
+        {
+            "calendar_id": "china",
+            "label": "中国交易日历",
+            "channels": ["ctp", "gm", "tq"],
+            "channel_labels": ["CTP", "掘金", "天勤"],
+        }
+    ]

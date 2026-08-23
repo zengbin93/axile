@@ -88,14 +88,14 @@ def test_dashboard_aggregates_account(monkeypatch: pytest.MonkeyPatch) -> None:
         _record(
             102.0,
             [
-                {"symbol": "BTC", "market_value": 60000},
-                {"symbol": "ETH", "market_value": 40000},
+                {"symbol": "rb2610", "market_value": 60000},
+                {"symbol": "ag2612", "market_value": 40000},
             ],
-            "USDT",
+            "CNY",
             1,
             "2026-07-02 09:03:00",
         ),
-        _record(100.0, [{"symbol": "BTC", "market_value": 50000}], "USDT", 1, "2026-07-02 09:00:00"),
+        _record(100.0, [{"symbol": "rb2610", "market_value": 50000}], "CNY", 1, "2026-07-02 09:00:00"),
     ]
 
     async def _bindings(_session: object) -> dict[int, int]:

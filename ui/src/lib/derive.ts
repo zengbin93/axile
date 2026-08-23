@@ -17,7 +17,7 @@ import type { AccountDashboardItem, ExecuteRecord, LatestWeights, Position } fro
  * Returns
  * -------
  * str
- *     计价货币代码（``USDT``/``CNY``），拿不到渠道时返回 ``''``。
+ *     渠道声明的计价货币代码，拿不到渠道时返回 ``''``。
  */
 export function currencyOf(currency: string | null | undefined): string {
   return currency?.trim() ?? ''

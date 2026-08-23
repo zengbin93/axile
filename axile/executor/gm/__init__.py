@@ -15,9 +15,10 @@ GM (掘金) 交易执行器模块.
 
     # 创建账户配置
     config = GMAccountConfig(
+        connection_mode="terminal",
         account_id="your_account_id",
         token="your_token",
-        terminal_path="C:/goldminer3",  # 或者 serv_addr="127.0.0.1:7001"
+        terminal_path="C:/goldminer3",
     )
 
     # 创建执行器

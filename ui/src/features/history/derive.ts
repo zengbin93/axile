@@ -14,6 +14,7 @@
  *   仅**标注不剔除**（无真源不伪造数）；据此把「区间盈亏」的免责条件化。
  */
 import type { EquityPoint } from '@/components/viz/EquityChart'
+import type { ScheduleSkipActivity } from '@/lib/api/accounts'
 import type { ExecuteRecord, PortfolioAccountRecord } from '@/types/api'
 
 export type RangeKey = '30' | '90' | 'all'
@@ -270,7 +271,7 @@ export function buildDailyBars(points: EquityPoint[], transfers: TransferMark[] 
 
 export interface HistoryEvent {
   date: string
-  kind: 'create' | 'rebind' | 'fail'
+  kind: 'create' | 'rebind' | 'fail' | 'skip'
   tag: string
   text: string
   /** 失败事件对应的执行 id，可点开执行详情抽屉；折叠汇总行为 null。 */
@@ -290,6 +291,7 @@ function recordError(record: ExecuteRecord): string {
 export function buildEvents(
   bindings: PortfolioAccountRecord[],
   records: ExecuteRecord[],
+  skips: ScheduleSkipActivity[] = [],
 ): HistoryEvent[] {
   const events: HistoryEvent[] = []
   const asc = [...bindings].sort((a, b) => a.created_at.localeCompare(b.created_at))
@@ -328,5 +330,44 @@ export function buildEvents(
     })
   }
 
+  const activity = [
+    ...records.map((record) => ({ type: 'record' as const, time: record.created_at })),
+    ...skips.map((skip) => ({ type: 'skip' as const, time: skip.occurred_at })),
+  ].sort((a, b) => b.time.localeCompare(a.time))
+  let index = 0
+  while (index < activity.length) {
+    const current = activity[index]
+    if (current.type !== 'skip') {
+      index++
+      continue
+    }
+    let end = index + 1
+    while (end < activity.length && activity[end].type === 'skip') end++
+    const count = end - index
+    events.push({
+      date: current.time.replace('T', ' ').slice(5, 16),
+      kind: 'skip',
+      tag: '跳过',
+      text: count > 1 ? `连续 ${count} 次排程因休市跳过` : '排程已跳过 · 当日休市',
+      executionId: null,
+    })
+    index = end
+  }
+
   return events.sort((a, b) => b.date.localeCompare(a.date))
+}
+
+/** 按回看区间过滤休市跳过记录，不影响执行记录的收益口径。 */
+export function filterScheduleSkips(
+  skips: ScheduleSkipActivity[],
+  records: ExecuteRecord[],
+  range: RangeKey,
+): ScheduleSkipActivity[] {
+  if (range === 'all' || skips.length === 0) return [...skips]
+  const latest = Math.max(
+    ...records.map((record) => new Date(record.created_at).getTime()),
+    ...skips.map((skip) => new Date(skip.occurred_at).getTime()),
+  )
+  const cutoff = latest - Number(range) * 864e5
+  return skips.filter((skip) => new Date(skip.occurred_at).getTime() >= cutoff)
 }

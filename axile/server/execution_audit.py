@@ -195,6 +195,7 @@ async def append_execution_event(
     schema_version: int = 1,
     logger: loguru.Logger = loguru.logger,
     raise_on_error: bool = False,
+    publish_live: bool = True,
 ) -> bool:
     """持久化一条 execution 事件记录，并按事件 UID 去重."""
     event = ExecutionEvent(
@@ -230,13 +231,14 @@ async def append_execution_event(
         try:
             session.add(event)
             await session.commit()
-            _notify_live_hub(
-                execution_id=execution_id,
-                account_id=account_id,
-                event_type=event_type,
-                symbol=symbol,
-                seq=seq,
-            )
+            if publish_live:
+                _notify_live_hub(
+                    execution_id=execution_id,
+                    account_id=account_id,
+                    event_type=event_type,
+                    symbol=symbol,
+                    seq=seq,
+                )
             return True
         except IntegrityError as exc:
             await session.rollback()
@@ -281,6 +283,7 @@ class _AppendExecutionEventKwargs(TypedDict):
     schema_version: int
     logger: loguru.Logger
     raise_on_error: bool
+    publish_live: bool
 
 
 def append_execution_event_sync(**kwargs: object) -> bool:

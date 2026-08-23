@@ -561,9 +561,9 @@ def _execute_position_adjustment(
 
 @register_algorithm(
     "TARGET-POS-TASK",
-    channels=[TradeChannel.CTP],
+    channels=[TradeChannel.CTP, TradeChannel.TQ],
     params_class=CTPTargetPosTaskParams,
-    label="CTP 目标持仓",
+    label="期货目标持仓",
     description="按目标净持仓增减期货仓位，并处理今仓与昨仓的开平顺序。",
 )
 def ctp_target_pos_task_algorithm(executor: ExecutorProtocol, algorithm_input: AlgorithmInput) -> AlgorithmResult:

@@ -10,10 +10,6 @@
 # 数据库连接（默认本地 SQLite；仅支持 sqlite+aiosqlite）
 sqlalchemy_database_uri = "sqlite+aiosqlite:///./axile.db"
 
-# 上游量化数据源（必填项，向导要求手填并测试连通；二者均非空才视为已初始化）
-trading_calendar_token = ""
-trading_calendar_api = ""
-
 # 高级项（一般保持默认）
 environment = "local"
 app_log_dir = "./logs"

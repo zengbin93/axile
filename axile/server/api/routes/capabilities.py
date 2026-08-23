@@ -5,8 +5,10 @@ from pydantic import BaseModel
 
 from axile.channels import (
     ChannelAccountForm,
+    ChannelCalendar,
     ChannelDefaults,
     ChannelLeverage,
+    ChannelPortfolioPreset,
     ChannelUi,
     ChannelUnits,
     list_channels,
@@ -43,9 +45,20 @@ class ChannelCapabilityPublic(BaseModel):
     defaults: ChannelDefaults
     leverage: ChannelLeverage
     account_form: ChannelAccountForm
+    calendar: ChannelCalendar | None
+    portfolio: ChannelPortfolioPreset
     available: bool
     missing_packages: list[str]
     install_extra: str | None
+
+
+class CalendarRequirementPublic(BaseModel):
+    """当前可用渠道共同要求的一份交易日历。"""
+
+    calendar_id: str
+    label: str
+    channels: list[str]
+    channel_labels: list[str]
 
 
 @router.get("/channels", response_model=list[ChannelCapabilityPublic])
@@ -72,3 +85,25 @@ def list_channel_capabilities() -> list[ChannelCapabilityPublic]:
         )
         for plugin in list_channels()
     ]
+
+
+@router.get("/calendar-requirements", response_model=list[CalendarRequirementPublic])
+def list_calendar_requirements() -> list[CalendarRequirementPublic]:
+    """按首次出现顺序聚合依赖完整渠道声明的交易日历。"""
+    grouped: dict[str, CalendarRequirementPublic] = {}
+    for plugin in list_channels():
+        calendar = plugin.descriptor.calendar
+        if calendar is None or missing_packages(plugin.descriptor.channel):
+            continue
+        item = grouped.get(calendar.calendar_id)
+        if item is None:
+            item = CalendarRequirementPublic(
+                calendar_id=calendar.calendar_id,
+                label=calendar.label,
+                channels=[],
+                channel_labels=[],
+            )
+            grouped[calendar.calendar_id] = item
+        item.channels.append(plugin.descriptor.channel)
+        item.channel_labels.append(plugin.descriptor.label)
+    return list(grouped.values())

@@ -13,7 +13,7 @@ from sqlalchemy.engine import make_url
 class TradingCalendar(Protocol):
     """定义执行器所需的最小交易日历能力。"""
 
-    def is_open(self, exchange: str, day: date) -> bool | None:
+    def is_open(self, calendar_id: str, day: date) -> bool | None:
         """返回开闭市状态；本地无记录时返回 ``None``。"""
 
 
@@ -31,17 +31,26 @@ class SqliteTradingCalendar:
             raise ValueError("交易日历只支持 SQLite 数据库")
         return cls(Path(url.database).expanduser().resolve())
 
-    def is_open(self, exchange: str, day: date) -> bool | None:
-        """查询指定交易所和日期的开闭市状态。"""
+    def is_open(self, calendar_id: str, day: date) -> bool | None:
+        """查询指定日历和日期；无记录时返回 None。"""
         with sqlite3.connect(self._database_path, timeout=1) as connection:
+            override = cast(
+                "tuple[int] | None",
+                connection.execute(
+                    "SELECT is_open FROM trading_calendar_override WHERE calendar_id = ? AND cal_date = ?",
+                    (calendar_id.lower(), day.isoformat()),
+                ).fetchone(),
+            )
+            if override is not None:
+                return bool(override[0])
             row = cast(
                 "tuple[int] | None",
                 connection.execute(
-                    "SELECT is_open FROM trading_calendar WHERE exchange = ? AND cal_date = ?",
-                    (exchange.upper(), day.isoformat()),
+                    "SELECT is_open FROM trading_calendar WHERE calendar_id = ? AND cal_date = ?",
+                    (calendar_id.lower(), day.isoformat()),
                 ).fetchone(),
             )
-        return None if row is None else bool(row[0])
+        return bool(row[0]) if row is not None else None
 
 
 __all__ = ["SqliteTradingCalendar", "TradingCalendar"]

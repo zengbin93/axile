@@ -22,10 +22,13 @@ class TradeChannel(str):
         CTP 渠道标识。
     GM : TradeChannel
         掘金量化渠道标识。
+    TQ : TradeChannel
+        天勤 TqSdk 渠道标识。
     """
 
     CTP: ClassVar[TradeChannel]
     GM: ClassVar[TradeChannel]
+    TQ: ClassVar[TradeChannel]
 
     def __new__(cls, value: object) -> TradeChannel:
         """
@@ -91,3 +94,4 @@ class TradeChannel(str):
 
 TradeChannel.CTP = TradeChannel("ctp")
 TradeChannel.GM = TradeChannel("gm")
+TradeChannel.TQ = TradeChannel("tq")

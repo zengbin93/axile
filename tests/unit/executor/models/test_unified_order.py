@@ -25,14 +25,14 @@ class TestTradeRecord:
         """测试创建成交记录."""
         trade = TradeRecord.create(
             trade_id="T001",
-            symbol="BTCUSDT",
+            symbol="rb2610",
             order_id="ORDER-1",
             trade_volume=0.1,
             trade_price=30000.0,
         )
 
         assert trade.trade_id == "T001"
-        assert trade.symbol == "BTCUSDT"
+        assert trade.symbol == "rb2610"
         assert trade.order_id == "ORDER-1"
         assert trade.trade_volume == 0.1
         assert trade.trade_price == 30000.0
@@ -71,7 +71,7 @@ class TestTradeRecord:
         extra_data: dict[str, object] = {"source": "exchange", "fee": 0.001}
         trade = TradeRecord(
             trade_id="T004",
-            symbol="BTCUSDT",
+            symbol="rb2610",
             order_id="ORDER-4",
             trade_time="2023-12-21T10:30:00.000Z",
             trade_volume=2.0,
@@ -92,7 +92,7 @@ class TestUnifiedOrderCreation:
         """测试创建基础订单."""
         order = UnifiedOrder.create(
             order_id="ORDER001",
-            symbol="BTC/USDT",
+            symbol="rb2610",
             direction="BUY",
             order_type="LIMIT",
             volume=0.1,
@@ -100,7 +100,7 @@ class TestUnifiedOrderCreation:
         )
 
         assert order.order_id == "ORDER001"
-        assert order.symbol == "BTC/USDT"
+        assert order.symbol == "rb2610"
         assert order.direction == OrderDirection.BUY
         assert order.order_type == OrderType.LIMIT
         assert order.volume == 0.1
@@ -113,7 +113,7 @@ class TestUnifiedOrderCreation:
         """测试创建带自定义状态的订单."""
         order = UnifiedOrder.create(
             order_id="ORDER002",
-            symbol="ETH/USDT",
+            symbol="ag2612",
             direction="SELL",
             order_type="MARKET",
             volume=1.0,
@@ -136,7 +136,7 @@ class TestUnifiedOrderCreation:
 
         order = UnifiedOrder.create(
             order_id="ORDER003",
-            symbol="SOL/USDT",
+            symbol="au2612",
             direction="BUY",
             order_type="LIMIT",
             volume=10.0,
@@ -153,7 +153,7 @@ class TestUnifiedOrderCreation:
         """测试订单的字符串表示."""
         order = UnifiedOrder.create(
             order_id="ORDER004",
-            symbol="DOGE/USDT",
+            symbol="cu2610",
             direction="BUY",
             order_type="LIMIT",
             volume=1000.0,
@@ -163,7 +163,7 @@ class TestUnifiedOrderCreation:
         str_repr = str(order)
         assert "UnifiedOrder" in str_repr
         assert "id=ORDER004" in str_repr
-        assert "symbol=DOGE/USDT" in str_repr
+        assert "symbol=cu2610" in str_repr
         assert "BUY 1000.0" in str_repr
         assert "@ 0.5" in str_repr
         assert f"status={OrderStatus.SUBMITTED}" in str_repr
@@ -176,10 +176,10 @@ class TestUnifiedOrderMethods:
         """测试订单完成判断."""
         # 已完成的订单
         completed_orders = [
-            UnifiedOrder.create("O1", "BTC/USDT", "BUY", "LIMIT", 0.1, 30000, status=OrderStatus.FILLED),
-            UnifiedOrder.create("O2", "BTC/USDT", "BUY", "LIMIT", 0.1, 30000, status=OrderStatus.CANCELED),
-            UnifiedOrder.create("O3", "BTC/USDT", "BUY", "LIMIT", 0.1, 30000, status=OrderStatus.REJECTED),
-            UnifiedOrder.create("O4", "BTC/USDT", "BUY", "LIMIT", 0.1, 30000, status=OrderStatus.EXPIRED),
+            UnifiedOrder.create("O1", "rb2610", "BUY", "LIMIT", 0.1, 30000, status=OrderStatus.FILLED),
+            UnifiedOrder.create("O2", "rb2610", "BUY", "LIMIT", 0.1, 30000, status=OrderStatus.CANCELED),
+            UnifiedOrder.create("O3", "rb2610", "BUY", "LIMIT", 0.1, 30000, status=OrderStatus.REJECTED),
+            UnifiedOrder.create("O4", "rb2610", "BUY", "LIMIT", 0.1, 30000, status=OrderStatus.EXPIRED),
         ]
 
         for order in completed_orders:
@@ -187,8 +187,8 @@ class TestUnifiedOrderMethods:
 
         # 未完成的订单
         active_orders = [
-            UnifiedOrder.create("O5", "BTC/USDT", "BUY", "LIMIT", 0.1, 30000, status=OrderStatus.SUBMITTED),
-            UnifiedOrder.create("O6", "BTC/USDT", "BUY", "LIMIT", 0.1, 30000, status=OrderStatus.PARTIALLY_FILLED),
+            UnifiedOrder.create("O5", "rb2610", "BUY", "LIMIT", 0.1, 30000, status=OrderStatus.SUBMITTED),
+            UnifiedOrder.create("O6", "rb2610", "BUY", "LIMIT", 0.1, 30000, status=OrderStatus.PARTIALLY_FILLED),
         ]
 
         for order in active_orders:
@@ -198,8 +198,8 @@ class TestUnifiedOrderMethods:
         """测试订单活跃状态判断."""
         # 活跃的订单
         active_orders = [
-            UnifiedOrder.create("O7", "BTC/USDT", "BUY", "LIMIT", 0.1, 30000, status=OrderStatus.SUBMITTED),
-            UnifiedOrder.create("O8", "BTC/USDT", "BUY", "LIMIT", 0.1, 30000, status=OrderStatus.PARTIALLY_FILLED),
+            UnifiedOrder.create("O7", "rb2610", "BUY", "LIMIT", 0.1, 30000, status=OrderStatus.SUBMITTED),
+            UnifiedOrder.create("O8", "rb2610", "BUY", "LIMIT", 0.1, 30000, status=OrderStatus.PARTIALLY_FILLED),
         ]
 
         for order in active_orders:
@@ -207,8 +207,8 @@ class TestUnifiedOrderMethods:
 
         # 非活跃的订单
         inactive_orders = [
-            UnifiedOrder.create("O9", "BTC/USDT", "BUY", "LIMIT", 0.1, 30000, status=OrderStatus.FILLED),
-            UnifiedOrder.create("O10", "BTC/USDT", "BUY", "LIMIT", 0.1, 30000, status=OrderStatus.CANCELED),
+            UnifiedOrder.create("O9", "rb2610", "BUY", "LIMIT", 0.1, 30000, status=OrderStatus.FILLED),
+            UnifiedOrder.create("O10", "rb2610", "BUY", "LIMIT", 0.1, 30000, status=OrderStatus.CANCELED),
         ]
 
         for order in inactive_orders:
@@ -216,46 +216,46 @@ class TestUnifiedOrderMethods:
 
     def test_remaining_volume(self) -> None:
         """测试获取剩余未成交数量."""
-        order = UnifiedOrder.create("O11", "BTC/USDT", "BUY", "LIMIT", 1.0, 30000, filled_volume=0.3)
+        order = UnifiedOrder.create("O11", "rb2610", "BUY", "LIMIT", 1.0, 30000, filled_volume=0.3)
 
         assert order.remaining_volume == 0.7
 
         # 完全成交
-        order_filled = UnifiedOrder.create("O12", "BTC/USDT", "BUY", "LIMIT", 0.5, 30000, filled_volume=0.5)
+        order_filled = UnifiedOrder.create("O12", "rb2610", "BUY", "LIMIT", 0.5, 30000, filled_volume=0.5)
         assert order_filled.remaining_volume == 0.0
 
         # 超成交（保护）
-        order_overfilled = UnifiedOrder.create("O13", "BTC/USDT", "BUY", "LIMIT", 0.5, 30000, filled_volume=0.6)
+        order_overfilled = UnifiedOrder.create("O13", "rb2610", "BUY", "LIMIT", 0.5, 30000, filled_volume=0.6)
         assert order_overfilled.remaining_volume == 0.0
 
     def test_filled_ratio(self) -> None:
         """测试获取成交比例."""
         # 部分成交
-        order = UnifiedOrder.create("O14", "BTC/USDT", "BUY", "LIMIT", 1.0, 30000, filled_volume=0.3)
+        order = UnifiedOrder.create("O14", "rb2610", "BUY", "LIMIT", 1.0, 30000, filled_volume=0.3)
         assert order.filled_ratio == 0.3
 
         # 完全成交
-        order_filled = UnifiedOrder.create("O15", "BTC/USDT", "BUY", "LIMIT", 0.5, 30000, filled_volume=0.5)
+        order_filled = UnifiedOrder.create("O15", "rb2610", "BUY", "LIMIT", 0.5, 30000, filled_volume=0.5)
         assert order_filled.filled_ratio == 1.0
 
         # 零成交
-        order_zero = UnifiedOrder.create("O16", "BTC/USDT", "BUY", "LIMIT", 1.0, 30000)
+        order_zero = UnifiedOrder.create("O16", "rb2610", "BUY", "LIMIT", 1.0, 30000)
         assert order_zero.filled_ratio == 0.0
 
         # 零委托量（保护）
-        order_zero_volume = UnifiedOrder.create("O17", "BTC/USDT", "BUY", "LIMIT", 0.0, 30000)
+        order_zero_volume = UnifiedOrder.create("O17", "rb2610", "BUY", "LIMIT", 0.0, 30000)
         assert order_zero_volume.filled_ratio == 0.0
 
     def test_to_dict(self) -> None:
         """测试转换为字典."""
-        order = UnifiedOrder.create("O18", "BTC/USDT", "BUY", "LIMIT", 0.1, 30000)
+        order = UnifiedOrder.create("O18", "rb2610", "BUY", "LIMIT", 0.1, 30000)
         order.extra["test_field"] = "test_value"
 
         order_dict = order.to_dict()
         extra = cast(dict[str, object], order_dict["extra"])
         assert isinstance(order_dict, dict)
         assert order_dict["order_id"] == "O18"
-        assert order_dict["symbol"] == "BTC/USDT"
+        assert order_dict["symbol"] == "rb2610"
         assert order_dict["direction"] == "BUY"
         # ChannelType 会由 pydantic 自动序列化
         assert "channel_type" in extra
@@ -269,14 +269,14 @@ class TestUnifiedOrderTrades:
         """成交模型应独立携带订单关联键。"""
         trade = TradeRecord.create(
             trade_id="T003",
-            symbol="ETHUSDT",
-            order_id="ORDER-ETH-1",
+            symbol="ag2612",
+            order_id="ORDER-ag2612-1",
             trade_volume=0.3,
             trade_price=2000.0,
         )
 
-        assert trade.symbol == "ETHUSDT"
-        assert trade.order_id == "ORDER-ETH-1"
+        assert trade.symbol == "ag2612"
+        assert trade.order_id == "ORDER-ag2612-1"
 
 
 class TestUnifiedOrderChannelSpecific:
@@ -286,7 +286,7 @@ class TestUnifiedOrderChannelSpecific:
         """测试外部渠道订单特定字段."""
         order = UnifiedOrder.create(
             "B001",
-            "BTC/USDT",
+            "rb2610",
             "BUY",
             "LIMIT",
             0.1,
@@ -361,7 +361,7 @@ class TestUnifiedOrderChannelSpecific:
         raw_data = {"raw_field": "raw_value", "nested": {"key": "value"}}
         order = UnifiedOrder.create(
             "R001",
-            "BTC/USDT",
+            "rb2610",
             "BUY",
             "LIMIT",
             0.1,
@@ -408,7 +408,7 @@ class TestUnifiedOrderEdgeCases:
         """测试零委托量订单."""
         order = UnifiedOrder.create(
             "E001",
-            "BTC/USDT",
+            "rb2610",
             "BUY",
             "LIMIT",
             0.0,

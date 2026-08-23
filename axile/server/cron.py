@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+from zoneinfo import ZoneInfo
+
 from apscheduler.triggers.cron import CronTrigger  # type: ignore[import-not-found]
+
+SCHEDULER_TIMEZONE = ZoneInfo("Asia/Shanghai")
 
 
 def is_blank_cron_expr(cron_expr: str | None) -> bool:
@@ -52,7 +56,7 @@ def parse_cron_expr(cron_expr: str) -> list[CronTrigger]:
         cron_parts = [ce.strip() for ce in cron_expr.split("|") if ce.strip()]
         if not cron_parts:
             raise ValueError("空表达式")
-        return [CronTrigger.from_crontab(ce) for ce in cron_parts]  # type: ignore[misc]
+        return [CronTrigger.from_crontab(ce, timezone=SCHEDULER_TIMEZONE) for ce in cron_parts]  # type: ignore[misc]
     except ValueError:
         raise
     except Exception as exc:

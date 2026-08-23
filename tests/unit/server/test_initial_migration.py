@@ -57,6 +57,7 @@ def test_initial_baseline_creates_the_current_schema() -> None:
             "execution_event",
             "portfolio",
             "portfolioaccount",
+            "schedule_skip",
         }
 
         for table_name, column_name in (
@@ -96,6 +97,20 @@ def test_initial_baseline_creates_the_current_schema() -> None:
         }
         assert "uq_execution_event_event_uid" in event_unique_constraints
 
+        event_type = {column["name"]: column for column in inspector.get_columns("execution_event")}["event_type"][
+            "type"
+        ]
+        assert "SCHEDULE_SKIPPED" not in getattr(event_type, "enums", ())
+
+        schedule_skip_foreign_keys = inspector.get_foreign_keys("schedule_skip")
+        assert any(
+            foreign_key["referred_table"] == "account"
+            and foreign_key["constrained_columns"] == ["account_id"]
+            and foreign_key["options"].get("ondelete") == "CASCADE"
+            for foreign_key in schedule_skip_foreign_keys
+        )
+        assert "ix_schedule_skip_account_triggered" in _index_names(inspector, "schedule_skip")
+
         portfolio_columns = {column["name"]: column for column in inspector.get_columns("portfolio")}
         assert portfolio_columns["custom_calc_py_code"]["nullable"] is False
 
@@ -113,6 +128,25 @@ def test_trading_calendar_migration_adds_calendar_table() -> None:
         calendar.upgrade()
 
         inspector = sa.inspect(connection)
-        assert "trading_calendar" in inspector.get_table_names()
-        primary_key = inspector.get_pk_constraint("trading_calendar")
-        assert primary_key["constrained_columns"] == ["exchange", "cal_date"]
+        assert {
+            "trading_calendar",
+            "trading_calendar_override",
+            "trading_calendar_config",
+        } <= set(inspector.get_table_names())
+        assert inspector.get_pk_constraint("trading_calendar")["constrained_columns"] == [
+            "calendar_id",
+            "cal_date",
+        ]
+        assert inspector.get_pk_constraint("trading_calendar_override")["constrained_columns"] == [
+            "calendar_id",
+            "cal_date",
+        ]
+        assert inspector.get_pk_constraint("trading_calendar_config")["constrained_columns"] == ["calendar_id"]
+        config_columns = {column["name"] for column in inspector.get_columns("trading_calendar_config")}
+        assert config_columns == {
+            "calendar_id",
+            "refresh_kind",
+            "function_code",
+            "last_sync_at",
+            "updated_at",
+        }

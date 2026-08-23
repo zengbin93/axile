@@ -26,8 +26,9 @@ import multiprocessing
 import sys
 import traceback
 from dataclasses import dataclass
+from datetime import date
 from multiprocessing.connection import Connection
-from typing import cast
+from typing import Any, cast
 
 from axile.server.sandbox.context_snapshot import ContextSnapshot, SnapshotContext
 
@@ -36,7 +37,9 @@ __all__ = [
     "DEFAULT_MEMORY_MB",
     "DEFAULT_WALL_TIMEOUT_SECONDS",
     "ScriptExecutionError",
+    "CalendarScriptResult",
     "ScriptResult",
+    "run_calendar_script",
     "run_portfolio_script",
 ]
 
@@ -123,6 +126,15 @@ class ScriptResult:
 
     ok: bool
     target: dict[str, float] | None = None
+    error: ScriptExecutionError | None = None
+
+
+@dataclass(slots=True)
+class CalendarScriptResult:
+    """自定义交易日历脚本的通用结果。"""
+
+    ok: bool
+    value: Any = None
     error: ScriptExecutionError | None = None
 
 
@@ -235,6 +247,73 @@ def _address_space_limit_bytes(memory_mb: int) -> int:
     return budget_bytes
 
 
+def _apply_windows_process_memory_limit(memory_mb: int) -> None:
+    """用 Job Object 限制当前 Windows 子进程的提交内存。"""
+    import ctypes
+    from ctypes import wintypes
+
+    class _JobObjectBasicLimitInformation(ctypes.Structure):
+        _fields_ = [
+            ("PerProcessUserTimeLimit", ctypes.c_longlong),
+            ("PerJobUserTimeLimit", ctypes.c_longlong),
+            ("LimitFlags", wintypes.DWORD),
+            ("MinimumWorkingSetSize", ctypes.c_size_t),
+            ("MaximumWorkingSetSize", ctypes.c_size_t),
+            ("ActiveProcessLimit", wintypes.DWORD),
+            ("Affinity", ctypes.c_size_t),
+            ("PriorityClass", wintypes.DWORD),
+            ("SchedulingClass", wintypes.DWORD),
+        ]
+
+    class _IoCounters(ctypes.Structure):
+        _fields_ = [
+            ("ReadOperationCount", ctypes.c_ulonglong),
+            ("WriteOperationCount", ctypes.c_ulonglong),
+            ("OtherOperationCount", ctypes.c_ulonglong),
+            ("ReadTransferCount", ctypes.c_ulonglong),
+            ("WriteTransferCount", ctypes.c_ulonglong),
+            ("OtherTransferCount", ctypes.c_ulonglong),
+        ]
+
+    class _JobObjectExtendedLimitInformation(ctypes.Structure):
+        _fields_ = [
+            ("BasicLimitInformation", _JobObjectBasicLimitInformation),
+            ("IoInfo", _IoCounters),
+            ("ProcessMemoryLimit", ctypes.c_size_t),
+            ("JobMemoryLimit", ctypes.c_size_t),
+            ("PeakProcessMemoryUsed", ctypes.c_size_t),
+            ("PeakJobMemoryUsed", ctypes.c_size_t),
+        ]
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.CreateJobObjectW.argtypes = [ctypes.c_void_p, wintypes.LPCWSTR]
+    kernel32.CreateJobObjectW.restype = wintypes.HANDLE
+    kernel32.SetInformationJobObject.argtypes = [wintypes.HANDLE, ctypes.c_int, ctypes.c_void_p, wintypes.DWORD]
+    kernel32.SetInformationJobObject.restype = wintypes.BOOL
+    kernel32.GetCurrentProcess.restype = wintypes.HANDLE
+    kernel32.AssignProcessToJobObject.argtypes = [wintypes.HANDLE, wintypes.HANDLE]
+    kernel32.AssignProcessToJobObject.restype = wintypes.BOOL
+    kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+    kernel32.CloseHandle.restype = wintypes.BOOL
+
+    job = kernel32.CreateJobObjectW(None, None)
+    if not job:
+        raise ctypes.WinError(ctypes.get_last_error())
+
+    information = _JobObjectExtendedLimitInformation()
+    information.BasicLimitInformation.LimitFlags = 0x100  # JOB_OBJECT_LIMIT_PROCESS_MEMORY
+    information.ProcessMemoryLimit = memory_mb * 1024 * 1024
+    if not kernel32.SetInformationJobObject(job, 9, ctypes.byref(information), ctypes.sizeof(information)):
+        error = ctypes.get_last_error()
+        kernel32.CloseHandle(job)
+        raise ctypes.WinError(error)
+    if not kernel32.AssignProcessToJobObject(job, kernel32.GetCurrentProcess()):
+        error = ctypes.get_last_error()
+        kernel32.CloseHandle(job)
+        raise ctypes.WinError(error)
+    # 子进程短生命周期内保留 Job handle；进程退出时由内核统一回收。
+
+
 def _apply_resource_limits(cpu_seconds: int, memory_mb: int) -> None:
     """
     在子进程内施加 CPU 与地址空间上限.
@@ -248,12 +327,16 @@ def _apply_resource_limits(cpu_seconds: int, memory_mb: int) -> None:
 
     Notes
     -----
-    ``resource`` 仅 POSIX 可用。Windows 上跳过这两道限制，仅保留进程隔离与墙钟
-    超时兜底——降级而非直接失败。
+    POSIX 使用 ``resource``；Windows 使用 Job Object 限制进程提交内存。Windows
+    没有对应的 CPU 秒数限制，仍由墙钟超时兜底。
     """
+    if sys.platform == "win32":
+        _apply_windows_process_memory_limit(memory_mb)
+        return
+
     try:
         import resource
-    except ImportError:  # pragma: no cover - 仅 Windows 触发
+    except ImportError:  # pragma: no cover - 非主流平台降级
         return
 
     for limit_name, value in (
@@ -355,6 +438,54 @@ def _execute_user_code(code: str, context: object | None) -> dict[str, float]:
     return cast("dict[str, float]", calc_func(context))
 
 
+def _execute_calendar_code(code: str, calendar_id: str, start: date, end: date) -> object:
+    """执行交易日历函数并返回其原始结果。"""
+    import inspect
+
+    namespace: dict[str, object] = {"date": date}
+    exec(code, namespace)  # noqa: S102 - 受限子进程内执行用户脚本
+    function = namespace.get("get_trading_calendar")
+    if not callable(function):
+        raise ValueError("get_trading_calendar 函数未找到或不可调用")
+    signature = inspect.signature(function)
+    if len(signature.parameters) != 3:
+        raise ValueError("get_trading_calendar 必须定义为 get_trading_calendar(calendar_id, start, end)")
+    return function(calendar_id, start, end)
+
+
+def _calendar_child_entry(
+    conn: Connection,
+    code: str,
+    calendar_id: str,
+    start: date,
+    end: date,
+    cpu_seconds: int,
+    memory_mb: int,
+) -> None:
+    """在隔离子进程中执行交易日历函数。"""
+    _apply_resource_limits(cpu_seconds, memory_mb)
+    try:
+        value = _execute_calendar_code(code, calendar_id, start, end)
+    except BaseException as exc:  # noqa: BLE001 - 需把脚本错误结构化回传
+        line, offset, error_type, message = _extract_error_fields(exc)
+        payload = {
+            "ok": False,
+            "error_line": line,
+            "error_offset": offset,
+            "error_type": error_type,
+            "error_message": message,
+            "traceback": traceback.format_exc(),
+        }
+    else:
+        payload = {"ok": True, "value": value}
+    try:
+        conn.send(payload)
+    except (BrokenPipeError, OSError):
+        pass
+    finally:
+        conn.close()
+
+
 def _terminate(process: multiprocessing.process.BaseProcess) -> None:
     """
     强制终止子进程，先 terminate 再 kill，确保不留僵尸.
@@ -434,6 +565,67 @@ def run_portfolio_script(
             parent_conn.close()
         except OSError:  # pragma: no cover - 管道已关闭
             pass
+
+
+def run_calendar_script(
+    code: str,
+    calendar_id: str,
+    start: date,
+    end: date,
+    *,
+    wall_timeout: float = DEFAULT_WALL_TIMEOUT_SECONDS,
+    cpu_seconds: int = DEFAULT_CPU_SECONDS,
+    memory_mb: int = DEFAULT_MEMORY_MB,
+) -> CalendarScriptResult:
+    """在公共脚本沙箱中执行自定义交易日历函数。"""
+    ctx = multiprocessing.get_context("spawn")
+    parent_conn, child_conn = ctx.Pipe(duplex=False)
+    process = ctx.Process(
+        target=_calendar_child_entry,
+        args=(child_conn, code, calendar_id, start, end, cpu_seconds, memory_mb),
+        name="axile-calendar-script",
+        daemon=True,
+    )
+    process.start()
+    child_conn.close()
+    try:
+        if not parent_conn.poll(wall_timeout):
+            return CalendarScriptResult(
+                ok=False,
+                error=ScriptExecutionError(
+                    f"自定义交易日历脚本执行超时（超过 {wall_timeout:.0f} 秒），已终止",
+                    error_type="TimeoutError",
+                ),
+            )
+        try:
+            payload = cast("dict[str, object]", parent_conn.recv())
+        except EOFError:
+            process.join(timeout=1.0)
+            return CalendarScriptResult(
+                ok=False,
+                error=ScriptExecutionError(
+                    f"自定义交易日历脚本异常退出（exitcode={process.exitcode}）",
+                    error_type="ResourceLimitExceeded",
+                ),
+            )
+        if payload.get("ok"):
+            return CalendarScriptResult(ok=True, value=payload.get("value"))
+        error_type = cast(str, payload.get("error_type") or "RuntimeError")
+        message = cast(str, payload.get("error_message") or "") or error_type
+        return CalendarScriptResult(
+            ok=False,
+            error=ScriptExecutionError(
+                message,
+                error_line=cast("int | None", payload.get("error_line")),
+                error_offset=cast("int | None", payload.get("error_offset")),
+                error_type=error_type,
+                error_message=message,
+                formatted_traceback=cast(str, payload.get("traceback") or ""),
+            ),
+        )
+    finally:
+        _terminate(process)
+        parent_conn.close()
 
 
 def _collect_result(
@@ -527,9 +719,3 @@ def _failure(message: str, *, error_type: str) -> ScriptResult:
             formatted_traceback=message,
         ),
     )
-
-
-if sys.platform == "win32":  # pragma: no cover - 平台差异说明
-    # Windows 无 resource 模块：仅保留进程隔离 + 墙钟超时 + 强杀，
-    # CPU/内存上限降级为不生效（见 _apply_resource_limits）。
-    pass

@@ -11,6 +11,54 @@ import type {
   PortfolioAccountList,
 } from '@/types/api'
 
+export type ScheduleCalendarStatus = 'not_required' | 'available_open' | 'available_closed' | 'unavailable'
+export type ScheduleUnavailableReason = 'not_configured' | 'uncovered' | 'read_failed'
+
+export interface SchedulePreview {
+  timezone: 'Asia/Shanghai'
+  evaluated_at: string
+  calendar: {
+    requirement: 'required' | 'not_required'
+    availability: 'available' | 'unavailable' | 'not_required'
+    unavailable_reason: ScheduleUnavailableReason | null
+    calendar_id: string | null
+    label: string | null
+    coverage_start: string | null
+    coverage_end: string | null
+  }
+  items: Array<{
+    scheduled_at: string
+    calendar_day: string
+    calendar_status: ScheduleCalendarStatus
+    action: 'execute' | 'skip'
+    unavailable_reason: ScheduleUnavailableReason | null
+  }>
+}
+
+export interface ScheduleSkipActivity {
+  kind: 'schedule_skip'
+  occurred_at: string
+  id: number
+  channel: string
+  reason_code: 'CALENDAR.CLOSED'
+  calendar_day: string
+  calendar_id: string
+  calendar_label: string
+}
+
+export interface ExecutionActivity {
+  kind: 'execution'
+  occurred_at: string
+  record: ExecuteRecordList['data'][number]
+}
+
+export type AccountActivity = ExecutionActivity | ScheduleSkipActivity
+
+export interface AccountActivityList {
+  data: AccountActivity[]
+  count: number
+}
+
 /** 仪表盘聚合：一次拿到所有账户的舰队卡数据。 */
 export function getDashboard(signal?: AbortSignal): Promise<AccountDashboard> {
   return apiGet<AccountDashboard>('/account/dashboard', signal)
@@ -34,6 +82,32 @@ export function getAccountControlPolicy(
 /** 账户下次调度执行时间。 */
 export function getNextRun(id: number, signal?: AbortSignal): Promise<AccountNextRun> {
   return apiGet<AccountNextRun>(`/account/${id}/next_run_time`, signal)
+}
+
+/** 只读预览未来原始 Cron 触发点及其日历动作。 */
+export function previewSchedule(
+  tradeChannel: string,
+  cronExpr: string,
+  signal?: AbortSignal,
+): Promise<SchedulePreview> {
+  return apiSend<SchedulePreview>('POST', '/account/schedule-preview', {
+    trade_channel: tradeChannel,
+    cron_expr: cronExpr,
+    limit: 5,
+  }, signal)
+}
+
+/** 执行与休市跳过组成的账户活动流。 */
+export function getAccountActivity(
+  id: number,
+  params: { skip?: number; limit?: number } = {},
+  signal?: AbortSignal,
+): Promise<AccountActivityList> {
+  const query = new URLSearchParams()
+  if (params.skip != null) query.set('skip', String(params.skip))
+  if (params.limit != null) query.set('limit', String(params.limit))
+  const suffix = query.size ? `?${query}` : ''
+  return apiGet<AccountActivityList>(`/account/${id}/activity${suffix}`, signal)
 }
 
 /**

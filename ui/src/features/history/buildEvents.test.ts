@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'bun:test'
 
 import { buildEvents } from './derive'
+import type { ScheduleSkipActivity } from '@/lib/api/accounts'
 import type { ExecuteRecord, PortfolioAccountRecord } from '@/types/api'
 
 /** 造一条执行记录。 */
@@ -18,6 +19,19 @@ function rec(id: number, ok: boolean, at: string, error?: string): ExecuteRecord
 /** 造一条绑定记录。 */
 function bind(portfolioId: number | null, at: string): PortfolioAccountRecord {
   return { portfolio_id: portfolioId, created_at: at } as PortfolioAccountRecord
+}
+
+function skip(id: number, at: string): ScheduleSkipActivity {
+  return {
+    kind: 'schedule_skip',
+    occurred_at: at,
+    id,
+    channel: 'ctp',
+    reason_code: 'CALENDAR.CLOSED',
+    calendar_day: at.slice(0, 10),
+    calendar_id: 'china',
+    calendar_label: '中国交易日历',
+  }
 }
 
 describe('buildEvents', () => {
@@ -56,5 +70,25 @@ describe('buildEvents', () => {
   it('无失败时不产生失败事件', () => {
     const events = buildEvents([bind(2, '2026-07-14T00:16:00')], [rec(1, true, '2026-07-14T00:20:00')])
     expect(events.every((e) => e.kind !== 'fail')).toBe(true)
+  })
+
+  it('连续休市折叠为中性跳过事件', () => {
+    const events = buildEvents(
+      [],
+      [],
+      [skip(2, '2026-07-14T09:31:00+08:00'), skip(1, '2026-07-14T09:30:00+08:00')],
+    )
+    expect(events).toHaveLength(1)
+    expect(events[0]).toMatchObject({
+      kind: 'skip',
+      tag: '跳过',
+      text: '连续 2 次排程因休市跳过',
+      executionId: null,
+    })
+  })
+
+  it('不可用放行不会凭空产生跳过事件', () => {
+    const events = buildEvents([], [rec(1, true, '2026-07-14T09:30:00+08:00')], [])
+    expect(events.every((event) => event.kind !== 'skip')).toBe(true)
   })
 })

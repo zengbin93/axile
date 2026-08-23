@@ -37,4 +37,8 @@ def create_executor_instance(account: Account) -> AbstractExecutor:
     set_trading_calendar = getattr(executor, "set_trading_calendar", None)
     if callable(set_trading_calendar):
         _ = set_trading_calendar(SqliteTradingCalendar.from_database_uri(str(settings.sqlalchemy_database_uri)))
+    set_channel_calendar = getattr(executor, "set_channel_calendar", None)
+    if callable(set_channel_calendar):
+        calendar = plugin.descriptor.calendar
+        _ = set_channel_calendar(calendar.calendar_id if calendar is not None else None)
     return executor

@@ -278,7 +278,7 @@ export function TimerQuickModal({
 
                       <div>
                         <div className="mb-1 text-sm font-[640]">
-                          下次执行 <span className="text-xs font-normal text-ink-3">预览 · 北京时间</span>
+                          下次排程 <span className="text-xs font-normal text-ink-3">预览 · 北京时间</span>
                         </div>
                         <div className="flex flex-wrap gap-x-3 gap-y-1">
                           {fires.length ? (

@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { Bitcoin, ChartCandlestick, CircleHelp, Landmark, Monitor, type LucideIcon } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
+import { Bitcoin, ChartCandlestick, CircleHelp, Landmark, Monitor, RadioTower, type LucideIcon } from 'lucide-react'
 import { Link, useNavigate } from '@/components/ui/nav'
 import { ExecutionTimeoutInput } from '@/features/account/ExecutionTimeoutInput'
 import { executionTimeoutError } from '@/features/account/executionTimeout'
@@ -7,7 +7,14 @@ import { LeverageInput } from '@/features/account/LeverageInput'
 import { leverageError } from '@/features/account/leverage'
 import { WizardPage, WizardNav } from '@/features/setup/WizardNav'
 import { Segmented } from '@/components/ui/Segmented'
-import { Select } from '@/components/ui/Select'
+import { ConnectionField } from '@/components/ui/ConnectionField'
+import { DirectoryPicker } from '@/components/ui/DirectoryPicker'
+import type { ClipboardCandidate } from '@/components/ui/connectionFieldClipboard'
+import {
+  connectionValueError,
+  normalizeMoneyValue,
+  type ConnectionValidationContext,
+} from '@/components/ui/connectionFieldValue'
 import { getLatestWeights } from '@/lib/api/portfolios'
 import { createAccount } from '@/lib/api/accounts'
 import { useDomainStore } from '@/stores/domain'
@@ -20,15 +27,17 @@ import {
   cronToExpr,
 } from '@/features/setup/cron'
 import { TimerEditor, type TimerEditorState } from '@/features/setup/TimerEditor'
-import { emptyAlgorithm, defaultAlgorithm, algoLabel, intentFromParams, validateAlgorithmParams } from '@/features/setup/algorithms'
+import { defaultAlgorithm, algoLabel, intentFromParams, validateAlgorithmParams } from '@/features/setup/algorithms'
 import { AlgorithmEditor } from '@/features/setup/AlgorithmEditor'
 import {
-  gmConnectionError,
-  normalizeGMConnection,
-  switchGMConnectionMode,
-  type GMConnectionMode,
-} from '@/features/setup/gmConnection'
-import type { ChannelAccountField, ChannelCapability } from '@/types/api'
+  channelAccountFieldVisible,
+  updateChannelAccountConfig,
+  visibleChannelAccountConfig,
+} from '@/features/setup/channelAccountFields'
+import type {
+  ChannelAccountField,
+  ChannelCapability,
+} from '@/types/api'
 
 /** 主交易算法的人话摘要：SINGLE-MAKER 用意图档，其余用算法名。 */
 const INTENT_TEXT: Record<string, string> = { save: '省成本', fill: '保成交', balance: '平衡' }
@@ -40,13 +49,12 @@ function algorithmSummary(algo: { method: string; params: Record<string, unknown
   return algoLabel(algo.method)
 }
 
-const MARKET_LABEL: Record<string, string> = { crypto: '加密货币', ashare: 'A股', ctp: '期货' }
-
 const CHANNEL_ICONS: Record<string, LucideIcon> = {
   bitcoin: Bitcoin,
   'chart-candlestick': ChartCandlestick,
   landmark: Landmark,
   monitor: Monitor,
+  'radio-tower': RadioTower,
 }
 
 function ChannelIcon({ name }: { name: string }) {
@@ -54,27 +62,8 @@ function ChannelIcon({ name }: { name: string }) {
   return <Icon aria-hidden="true" className="h-6 w-6" strokeWidth={1.8} />
 }
 
-/** 公开渠道在旧版后端下的连接字段兜底；新后端统一下发 account_form。 */
-const PUBLIC_CONNECT_FIELDS: Record<string, ChannelAccountField[]> = {
-  ctp: [
-    { name: 'broker_id', label: '期货公司代码 broker', input: 'text', required: true, placeholder: '如 9999' },
-    { name: 'investor_id', label: '投资者号 investor', input: 'text', required: true },
-    { name: 'password', label: '密码', input: 'password', required: true },
-    { name: 'td_front', label: '交易前置', input: 'text', required: true, placeholder: 'tcp://...' },
-    { name: 'md_front', label: '行情前置', input: 'text', required: true, placeholder: 'tcp://...' },
-    { name: 'app_id', label: '应用 ID appid（看穿式认证，可选）', input: 'text', required: false, placeholder: '如 client_xxx' },
-    { name: 'auth_code', label: '授权码 authcode（看穿式认证，可选）', input: 'text', required: false },
-  ],
-  gm: [
-    { name: 'account_id', label: '账号 ID', input: 'text', required: true },
-    { name: 'token', label: 'Token', input: 'password', required: true },
-  ],
-}
-
-function accountFields(channel: string, descriptor?: ChannelCapability): ChannelAccountField[] {
-  const fields = descriptor?.account_form.fields ?? PUBLIC_CONNECT_FIELDS[channel] ?? []
-  if (channel !== 'gm') return fields
-  return fields.filter((field) => field.name !== 'terminal_path' && field.name !== 'serv_addr')
+function accountFields(descriptor?: ChannelCapability): ChannelAccountField[] {
+  return descriptor?.account_form.fields ?? []
 }
 
 function accountConfigDefaults(fields: ChannelAccountField[]): Record<string, unknown> {
@@ -84,52 +73,13 @@ function accountConfigDefaults(fields: ChannelAccountField[]): Record<string, un
 function channelDraft(channel: ChannelCapability) {
   return {
     channel: channel.channel,
-    config: accountConfigDefaults(accountFields(channel.channel, channel)),
+    config: accountConfigDefaults(accountFields(channel)),
     algorithm: channel.defaults.trade_algorithm,
     longLeverage: String(channel.defaults.long_leverage),
     shortLeverage: String(channel.defaults.short_leverage),
     executionTimeout: String(channel.defaults.execution_timeout),
   }
 }
-
-const inputCls = 'w-full rounded-[11px] border border-ink-3/30 bg-surface px-3.5 py-3 text-[15px] outline-none focus:border-ink-2'
-const labelCls = 'mb-1.5 mt-4 block text-[13px] text-ink-2 first:mt-0'
-
-/** GM 两种连接方式：本机终端（Axile 负责启动）或终端 RPC 地址（连已运行的终端），二选一。 */
-const GM_CONNECTION_OPTIONS: {
-  value: GMConnectionMode
-  label: string
-  description: string
-  targetKey: string
-  fieldLabel: string
-  placeholder: string
-  hint: ReactNode
-}[] = [
-  {
-    value: 'terminal',
-    label: '本机终端',
-    description: 'Axile 与掘金终端同机，填写安装目录并由 Axile 检查或启动。',
-    targetKey: 'terminal_path',
-    fieldLabel: '掘金终端目录',
-    placeholder: '如 C:\\Program Files\\GoldMiner3',
-    hint: '填写包含 goldminer3.exe 的安装目录。',
-  },
-  {
-    value: 'service',
-    label: '终端 RPC 地址',
-    description: 'Axile 连接已经运行的终端，支持同机或异机部署。',
-    targetKey: 'serv_addr',
-    fieldLabel: '终端 RPC 地址',
-    placeholder: '如 192.168.1.20:7001',
-    hint: (
-      <>
-        先启动掘金终端。地址取自安装目录下 <code className="font-mono text-ink-2">resources\app\gmserv.json</code> 的{' '}
-        <code className="font-mono text-ink-2">default.hostAddr</code> 和 <code className="font-mono text-ink-2">default.rpcPort</code>
-        ；异机连接需填写 Axile 可访问的 IP，不能使用 127.0.0.1。
-      </>
-    ),
-  },
-]
 
 /* -------- 1 选渠道 -------- */
 export function AcctChannel() {
@@ -205,27 +155,157 @@ export function AcctChannel() {
 export function AcctConnect() {
   const { acct, setAcct } = useWizardStore()
   const descriptor = useChannelDescriptor(acct.channel)
-  const fields = accountFields(acct.channel, descriptor)
-  const gmModeButtonRefs = useRef<Partial<Record<GMConnectionMode, HTMLButtonElement | null>>>({})
-  const setField = (key: string, val: unknown) => setAcct({ config: { ...acct.config, [key]: val } })
-  const stringConfig = acct.config as Record<string, string>
-  const gmError = acct.channel === 'gm' ? gmConnectionError(stringConfig, acct.gmConnectionMode) : null
-  const missingRequired = fields.some((field) => {
-    if (!field.required) return false
-    const value = acct.config[field.name]
-    return value === undefined || value === null || (typeof value === 'string' && value.trim() === '')
-  })
-
-  const setGMConnectionMode = (mode: GMConnectionMode) => {
-    setAcct({
-      gmConnectionMode: mode,
-      config: switchGMConnectionMode(stringConfig, mode),
+  const navigate = useNavigate()
+  const toast = useToastStore((state) => state.toast)
+  const fields = accountFields(descriptor)
+  const [errors, setErrors] = useState<Record<string, string>>({})
+  const [directoryPickerField, setDirectoryPickerField] = useState<string | null>(null)
+  const fieldRefs = useRef<Record<string, HTMLInputElement | null>>({})
+  const setField = (key: string, val: unknown) => {
+    const config = updateChannelAccountConfig(fields, acct.config, key, val)
+    setAcct({ config })
+    setErrors((current) => {
+      const visible = new Set(fields.filter((field) => channelAccountFieldVisible(field, config)).map((field) => field.name))
+      return Object.fromEntries(Object.entries(current).filter(([name]) => name === 'name' || visible.has(name)))
     })
   }
 
-  const moveGMConnectionMode = (mode: GMConnectionMode) => {
-    setGMConnectionMode(mode)
-    gmModeButtonRefs.current[mode]?.focus()
+  const fieldValidationContext = (
+    field: Pick<ChannelAccountField, 'kind' | 'required' | 'label' | 'placeholder' | 'constraints'>,
+    value: string,
+  ): ConnectionValidationContext | null => {
+    if (field.kind === 'boolean' || field.kind === 'select') return null
+    return {
+      kind: field.kind,
+      value,
+      required: field.required,
+      label: field.label,
+      placeholder: field.placeholder,
+      constraints: field.constraints,
+    }
+  }
+
+  const validateScalarField = (
+    field: Pick<ChannelAccountField, 'kind' | 'required' | 'label' | 'placeholder' | 'constraints'>,
+    value: string,
+  ): string | null => {
+    const context = fieldValidationContext(field, value)
+    return context ? connectionValueError(context) : null
+  }
+
+  const setFieldError = (name: string, error: string | null) => {
+    setErrors((current) => {
+      if (error) return current[name] === error ? current : { ...current, [name]: error }
+      if (!(name in current)) return current
+      const next = { ...current }
+      delete next[name]
+      return next
+    })
+  }
+
+  const validateAccountName = (value: string) => {
+    setFieldError('name', connectionValueError({
+      kind: 'text',
+      value,
+      required: true,
+      label: '账户名称',
+    }))
+  }
+
+  const validateDynamicField = (field: ChannelAccountField, value: string) => {
+    if (!channelAccountFieldVisible(field, acct.config)) {
+      setFieldError(field.name, null)
+      return
+    }
+    const error = validateScalarField(field, value)
+    setFieldError(field.name, error)
+    if (!error && field.kind === 'money') {
+      const normalized = normalizeMoneyValue(value)
+      if (normalized !== null && normalized !== value) setField(field.name, normalized)
+    }
+  }
+
+  const fillMatchedEndpoints = (source: ChannelAccountField, candidates: ClipboardCandidate[]) => {
+    const group = source.clipboard?.group
+    if (!group) return false
+    const nextConfig = { ...acct.config }
+    const filled: string[] = []
+    const targets = fields.filter((field) => (
+      field.kind === 'endpoint'
+      && field.clipboard?.group === group
+      && channelAccountFieldVisible(field, nextConfig)
+    ))
+    for (const target of targets) {
+      if (String(nextConfig[target.name] ?? '').trim()) continue
+      const candidate = candidates.find((item) => item.role === target.clipboard?.role)
+      if (!candidate) continue
+      nextConfig[target.name] = candidate.value
+      filled.push(target.name)
+    }
+    if (filled.length === 0) {
+      toast('没有可自动填入的空地址字段')
+      return false
+    }
+    setAcct({ config: nextConfig })
+    setErrors((current) => Object.fromEntries(Object.entries(current).filter(([name]) => !filled.includes(name))))
+    return true
+  }
+
+  const scalarOrder = () => [
+    'name',
+    ...fields
+      .filter((field) => channelAccountFieldVisible(field, acct.config) && field.kind !== 'boolean' && field.kind !== 'select')
+      .map((field) => field.name),
+  ]
+
+  const moveFieldFocus = (name: string, direction: 1 | -1) => {
+    const order = scalarOrder()
+    const next = order[order.indexOf(name) + direction]
+    if (next) fieldRefs.current[next]?.focus()
+  }
+
+  const validateAndContinue = async () => {
+    if (!descriptor) {
+      toast('渠道描述尚未加载，请稍后重试')
+      return
+    }
+
+    const nextErrors: Record<string, string> = {}
+    const nameError = connectionValueError({
+      kind: 'text', value: acct.name, required: true, label: '账户名称',
+    })
+    if (nameError) nextErrors.name = nameError
+
+    for (const field of fields) {
+      if (!channelAccountFieldVisible(field, acct.config)) continue
+      const value = String(acct.config[field.name] ?? field.default ?? '')
+      if (field.kind === 'boolean') {
+        if (field.required && typeof acct.config[field.name] !== 'boolean') nextErrors[field.name] = `请选择${field.label}`
+        continue
+      }
+      if (field.kind === 'select') {
+        const options = field.options ?? []
+        if ((field.required && !value.trim()) || (value && !options.some((option) => option.value === value))) {
+          nextErrors[field.name] = `请选择${field.label}`
+        }
+        continue
+      }
+      const error = validateScalarField(field, value)
+      if (error) {
+        nextErrors[field.name] = error
+      }
+    }
+
+    setErrors(nextErrors)
+    const first = scalarOrder().find((name) => nextErrors[name])
+    if (Object.keys(nextErrors).length > 0) {
+      if (first) {
+        fieldRefs.current[first]?.focus({ preventScroll: false })
+        fieldRefs.current[first]?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+      }
+      return
+    }
+    navigate('/setup/acct/portfolio')
   }
 
   return (
@@ -236,10 +316,7 @@ export function AcctConnect() {
           title={`连接 ${descriptor?.label ?? acct.channel}`}
           lead={descriptor?.ui.account_connect_lead || '填好凭据即可；连通性在创建账户时由后端用真实凭据校验。'}
         >
-          <div className="max-w-[560px]">
-            <label className={labelCls}>账户名称</label>
-            <input className={inputCls} value={acct.name} onChange={(e) => setAcct({ name: e.target.value })} placeholder="给这个账户起个名字" />
-
+          <div className="max-w-[720px]">
             {descriptor?.account_form.notices.map((notice, index) => (
               <div
                 key={`${notice.tone}-${index}`}
@@ -250,131 +327,109 @@ export function AcctConnect() {
                 {notice.text}
               </div>
             ))}
-            {fields.map((field) => {
+            <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <div className="sm:col-span-2">
+                <ConnectionField
+                  key={`account-name-${acct.channel}`}
+                  ref={(node) => { fieldRefs.current.name = node }}
+                  label="账户名称"
+                  kind="text"
+                  value={acct.name}
+                  required
+                  placeholder="给这个账户起个名字"
+                  error={errors.name}
+                  onChange={(value) => {
+                    setAcct({ name: value })
+                    setErrors((current) => {
+                      if (!current.name) return current
+                      const next = { ...current }
+                      delete next.name
+                      return next
+                    })
+                  }}
+                  onBlur={validateAccountName}
+                  onNavigate={(direction) => moveFieldFocus('name', direction)}
+                />
+              </div>
+              {fields.map((field) => {
               const value = acct.config[field.name] ?? field.default ?? ''
+              const visible = channelAccountFieldVisible(field, acct.config)
               return (
-                <div key={field.name}>
-                  <label className={labelCls}>{field.label}</label>
-                  {field.input === 'boolean' ? (
-                    <Segmented
-                      value={value === true || value === 'true' ? 'true' : 'false'}
-                      options={[
-                        { value: 'false', label: '关闭' },
-                        { value: 'true', label: '启用' },
-                      ]}
-                      onChange={(next) => setField(field.name, next === 'true')}
-                    />
-                  ) : field.input === 'select' ? (
-                    <Select<string>
-                      className="w-full justify-between px-3.5 py-3 text-[15px]"
-                      value={String(value)}
-                      onChange={(next) => setField(field.name, next)}
-                      options={field.options ?? []}
-                    />
-                  ) : (
-                    <input
-                      className={inputCls}
-                      type={field.input}
-                      placeholder={field.placeholder}
-                      value={String(value)}
-                      onChange={(event) => {
-                        const nextValue =
-                          field.input === 'number'
-                            ? event.target.value === ''
-                              ? undefined
-                              : Number(event.target.value)
-                            : event.target.value
-                        setField(field.name, nextValue)
-                      }}
-                    />
-                  )}
-                  {field.help && <div className="mt-1 text-[12px] text-ink-3">{field.help}</div>}
+                <div
+                  key={`${acct.channel}:${field.name}`}
+                  inert={!visible}
+                  className={`${field.width === 'full' ? 'sm:col-span-2' : ''} grid transition-[grid-template-rows] duration-200 ease-[cubic-bezier(.4,0,.2,1)] motion-reduce:transition-none ${
+                    visible ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'
+                  }`}
+                >
+                  <div className="min-h-0 overflow-hidden">
+                    {field.kind === 'boolean' ? (
+                      <>
+                        <div className="mb-2 text-[13px] text-ink-2">{field.label}</div>
+                        <Segmented
+                          value={value === true || value === 'true' ? 'true' : 'false'}
+                          options={[
+                            { value: 'false', label: '关闭' },
+                            { value: 'true', label: '启用' },
+                          ]}
+                          onChange={(next) => setField(field.name, next === 'true')}
+                        />
+                        {field.help && <div className="mt-1 text-[12px] text-ink-3">{field.help}</div>}
+                        {errors[field.name] && <div className="mt-1 text-[12px] text-warn">{errors[field.name]}</div>}
+                      </>
+                    ) : field.kind === 'select' ? (
+                      <>
+                        <div className="mb-2 text-[13px] text-ink-2">{field.label}</div>
+                        <Segmented<string>
+                          value={String(value)}
+                          onChange={(next) => setField(field.name, next)}
+                          options={field.options ?? []}
+                        />
+                        {field.help && <div className="mt-1 text-[12px] text-ink-3">{field.help}</div>}
+                        {errors[field.name] && <div className="mt-1 text-[12px] text-warn">{errors[field.name]}</div>}
+                      </>
+                    ) : (
+                      <ConnectionField
+                        ref={(node) => { fieldRefs.current[field.name] = node }}
+                        label={field.label}
+                        kind={field.kind}
+                        clipboard={field.clipboard}
+                        constraints={field.constraints}
+                        onPasteBatchMatch={field.clipboard?.group
+                          ? (candidates) => fillMatchedEndpoints(field, candidates)
+                          : undefined}
+                        value={String(value)}
+                        required={field.required}
+                        placeholder={field.placeholder}
+                        help={field.help}
+                        error={errors[field.name]}
+                        onChange={(next) => setField(field.name, next === '' ? undefined : next)}
+                        onBlur={(fieldValue) => validateDynamicField(field, fieldValue)}
+                        onNavigate={(direction) => moveFieldFocus(field.name, direction)}
+                        onBrowse={field.kind === 'directory' ? () => setDirectoryPickerField(field.name) : undefined}
+                      />
+                    )}
+                  </div>
                 </div>
               )
-            })}
-            {acct.channel === 'gm' && (
-              <fieldset className="mt-4">
-                <legend className="text-[13px] text-ink-2">选择一种连接方式</legend>
-                <p className="mt-1 text-[12px] text-ink-3">只需配置其中一种。</p>
-                {/* fieldset 不映射为 radiogroup，选项仍是 radio 语义，故在此显式补 role 与名字。 */}
-                <div role="radiogroup" aria-label="连接方式" className="mt-3 divide-y divide-line border-y border-line">
-                  {GM_CONNECTION_OPTIONS.map((option) => {
-                    const selected = acct.gmConnectionMode === option.value
-                    // 色条两行恒在（未选中透明）：只给选中行加会让文字每次切换横移 3px。
-                    return (
-                      <div
-                        key={option.value}
-                        className={`border-l-[3px] pl-3 transition-colors duration-200 motion-reduce:transition-none ${
-                          selected ? 'border-accent' : 'border-transparent'
-                        }`}
-                      >
-                        <button
-                          ref={(node) => {
-                            gmModeButtonRefs.current[option.value] = node
-                          }}
-                          type="button"
-                          role="radio"
-                          aria-checked={selected}
-                          tabIndex={selected ? 0 : -1}
-                          className="group -mx-2 flex w-[calc(100%+1rem)] cursor-pointer items-start gap-3 rounded-lg bg-transparent px-2 py-3.5 text-left transition-colors duration-200 hover:bg-fill focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent motion-reduce:transition-none"
-                          onClick={() => setGMConnectionMode(option.value)}
-                          onKeyDown={(event) => {
-                            let nextMode: GMConnectionMode | null = null
-                            if (event.key === 'ArrowLeft' || event.key === 'ArrowUp' || event.key === 'Home') nextMode = 'terminal'
-                            if (event.key === 'ArrowRight' || event.key === 'ArrowDown' || event.key === 'End') nextMode = 'service'
-                            if (nextMode === null) return
-                            event.preventDefault()
-                            moveGMConnectionMode(nextMode)
-                          }}
-                        >
-                          <span>
-                            <span
-                              className={`block text-[16px] font-[620] transition-colors duration-200 motion-reduce:transition-none ${
-                                selected ? 'text-accent' : 'text-ink-1'
-                              }`}
-                            >
-                              {option.label}
-                            </span>
-                            <span className="mt-0.5 block text-[13px] leading-relaxed text-ink-2">{option.description}</span>
-                          </span>
-                        </button>
-                        {/*
-                          两个参数区都常挂，靠 grid-fr 在 0fr↔1fr 间收放：条件挂载会让下方选项
-                          瞬间上蹿、点击目标从光标底下跑掉。收放走布局流，兄弟自然 reflow，
-                          故此处不再叠 panel-fade-in（一个对象只跑一套范式）。
-                        */}
-                        <div
-                          inert={!selected}
-                          className={`grid transition-[grid-template-rows] duration-200 ease-[cubic-bezier(.4,0,.2,1)] motion-reduce:transition-none ${
-                            selected ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'
-                          }`}
-                        >
-                          <div className="min-h-0 overflow-hidden">
-                            <div className="pb-4">
-                              <label className="mb-1.5 block text-[13px] text-ink-2">{option.fieldLabel}</label>
-                              <input
-                                className={inputCls}
-                                placeholder={option.placeholder}
-                                value={String(acct.config[option.targetKey] ?? '')}
-                                onChange={(e) => setField(option.targetKey, e.target.value)}
-                              />
-                              <p className="mt-2 text-[12px] leading-relaxed text-ink-3">{option.hint}</p>
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    )
-                  })}
-                </div>
-              </fieldset>
-            )}
+              })}
+            </div>
           </div>
         </WizardPage>
       </div>
       <WizardNav
         prevTo="/setup/acct/channel"
-        nextTo="/setup/acct/portfolio"
-        nextDisabled={!acct.name.trim() || missingRequired || gmError !== null}
+        onNext={validateAndContinue}
+      />
+      <DirectoryPicker
+        open={directoryPickerField !== null}
+        initialPath={String(directoryPickerField ? acct.config[directoryPickerField] ?? '' : '')}
+        onClose={() => setDirectoryPickerField(null)}
+        onSelect={(path) => {
+          if (!directoryPickerField) return
+          setField(directoryPickerField, path)
+          setFieldError(directoryPickerField, null)
+        }}
       />
     </div>
   )
@@ -556,6 +611,7 @@ export function AcctTimer() {
       <div className="flex-1 overflow-y-auto">
         <WizardPage kicker="账户设置 · 5 / 6" title="什么时候自动执行？" lead="开启后 axile 按下面的节奏自动调仓。时间均为北京时间。">
           <TimerEditor
+            tradeChannel={acct.channel}
             market={market}
             value={timerValue}
             onChange={(next) => {
@@ -614,12 +670,9 @@ export function AcctConfirm() {
 
   const submit = async () => {
     try {
-      if (acct.channel === 'gm') {
-        const connectionError = gmConnectionError(acct.config as Record<string, string>, acct.gmConnectionMode)
-        if (connectionError) {
-          toast(`连接信息不完整：${connectionError}`)
-          return
-        }
+      if (!descriptor) {
+        toast('渠道描述尚未加载，请稍后重试')
+        return
       }
       const algo = acct.algorithm
       const paramErr = validateAlgorithmParams(algo.params)
@@ -640,13 +693,11 @@ export function AcctConfirm() {
       }
       const account = await createAccount({
         name: acct.name,
-        market: MARKET_LABEL[market] ?? descriptor?.market ?? market,
+        market: descriptor.portfolio.market_label,
         trade_channel: acct.channel,
         account_control_preset: 'default',
         account_control_override: null,
-        account_config: {
-          ...(acct.channel === 'gm' ? normalizeGMConnection(acct.config as Record<string, string>, acct.gmConnectionMode) : acct.config),
-        },
+        account_config: visibleChannelAccountConfig(accountFields(descriptor), acct.config),
         is_started: acct.autoOn,
         cron_expr: cronExpr,
         remark: '由建号向导创建',
@@ -655,7 +706,7 @@ export function AcctConfirm() {
         long_leverage: Number(acct.longLeverage),
         short_leverage: showShortLeverage ? Number(acct.shortLeverage) : 0,
         algorithm: algo,
-        empty_positions_algorithm: descriptor ? descriptor.defaults.empty_positions_algorithm : emptyAlgorithm(market),
+        empty_positions_algorithm: descriptor.defaults.empty_positions_algorithm,
         trade_rules: null,
         forbidden_symbols: null,
         risk_symbols: null,

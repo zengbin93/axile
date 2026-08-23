@@ -63,7 +63,17 @@ from axile.server.db.models.portfolio import (
     ValidateCustomCalcRequest,
     ValidateCustomCalcResponse,
 )
-from axile.server.db.models.trading_calendar import TradingCalendarRecord
+from axile.server.db.models.schedule import (
+    AccountActivityListPublic,
+    ExecutionActivity,
+    ScheduleSkip,
+    ScheduleSkipActivity,
+)
+from axile.server.db.models.trading_calendar import (
+    TradingCalendarConfig,
+    TradingCalendarOverride,
+    TradingCalendarRecord,
+)
 
 Portfolio.model_rebuild()
 Account.model_rebuild()
@@ -127,4 +137,10 @@ __all__ = [
     "ListResponse",
     "ListResponsePage",
     "TradingCalendarRecord",
+    "TradingCalendarConfig",
+    "TradingCalendarOverride",
+    "AccountActivityListPublic",
+    "ExecutionActivity",
+    "ScheduleSkip",
+    "ScheduleSkipActivity",
 ]

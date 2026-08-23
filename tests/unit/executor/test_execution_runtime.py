@@ -72,7 +72,17 @@ class _RuntimeExecutor(AbstractExecutor):
         self.logger = _Logger()
         super().__init__(
             TradeChannel.CTP,
-            CTPAccountConfig.model_validate({"broker_id": "b", "investor_id": "i", "password": "p"}),
+            CTPAccountConfig.model_validate(
+                {
+                    "broker_id": "b",
+                    "investor_id": "i",
+                    "password": "p",
+                    "td_front": "tcp://td:1",
+                    "md_front": "tcp://md:2",
+                    "app_id": "app",
+                    "auth_code": "auth",
+                }
+            ),
         )
 
     def _initialize_connection(self, account_config: CTPAccountConfig) -> None:
@@ -130,7 +140,7 @@ class _RuntimeExecutor(AbstractExecutor):
         )
 
     def _get_pending_orders_impl(self, symbol: str | None = None) -> list[UnifiedOrder]:
-        symbol = "BTCUSDT" if symbol is None else symbol
+        symbol = "rb2610" if symbol is None else symbol
         return [
             UnifiedOrder(
                 order_id=f"pending-{symbol}",
@@ -283,14 +293,14 @@ def test_runtime_owns_execution_internal_query_accessors() -> None:
 
     runtime._execution_query_runtime = _QueryRuntime()  # type: ignore[assignment]
 
-    orders = runtime.get_pending_orders_for_execution("BTCUSDT")
-    trades = runtime.query_trades_for_execution("BTCUSDT", "order-1")
+    orders = runtime.get_pending_orders_for_execution("rb2610")
+    trades = runtime.query_trades_for_execution("rb2610", "order-1")
 
     assert [order.order_id for order in orders] == ["pending-runtime"]
     assert [trade.trade_id for trade in trades] == ["trade-order-1"]
     assert captured == {
-        "pending_symbol": "BTCUSDT",
-        "trade_query": ("BTCUSDT", "order-1"),
+        "pending_symbol": "rb2610",
+        "trade_query": ("rb2610", "order-1"),
     }
 
 
@@ -299,8 +309,16 @@ def test_execute_releases_runtime_between_runs(monkeypatch) -> None:
     standard_input = UnifiedStandardInput.from_dict(
         {
             "channel_type": TradeChannel.CTP.value,
-            "account_config": {"broker_id": "b", "investor_id": "i", "password": "p"},
-            "curr_target": {"BTCUSDT": 0.1},
+            "account_config": {
+                "broker_id": "b",
+                "investor_id": "i",
+                "password": "p",
+                "td_front": "tcp://td:1",
+                "md_front": "tcp://md:2",
+                "app_id": "app",
+                "auth_code": "auth",
+            },
+            "curr_target": {"rb2610": 0.1},
             "algorithm": {"method": "TEST"},
         }
     )

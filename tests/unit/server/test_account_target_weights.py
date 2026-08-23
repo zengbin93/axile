@@ -110,40 +110,40 @@ def _patch_resolution(
 def test_account_target_weights_applies_long_leverage(monkeypatch) -> None:
     """多头目标应按 ``long_leverage`` 放大：策略净 50% × 3x → 展示 150%。"""
     session = _RouteSession(_build_account(long_leverage=3.0), _build_portfolio())
-    _patch_resolution(monkeypatch, portfolio_id=7, raw_target={"BTCUSDT": 0.5, "ETHUSDT": 0.5})
+    _patch_resolution(monkeypatch, portfolio_id=7, raw_target={"rb2610": 0.5, "ag2612": 0.5})
 
     response = TestClient(_build_app(session)).get("/account/1/target_weights")
 
     assert response.status_code == 200
-    assert response.json() == {"BTCUSDT": 1.5, "ETHUSDT": 1.5}
+    assert response.json() == {"rb2610": 1.5, "ag2612": 1.5}
 
 
 def test_account_target_weights_applies_short_leverage(monkeypatch) -> None:
     """空头目标（负权重）按 ``short_leverage`` 放大，多空各用各的乘数。"""
     session = _RouteSession(_build_account(long_leverage=1.0, short_leverage=2.0), _build_portfolio())
-    _patch_resolution(monkeypatch, portfolio_id=7, raw_target={"BTCUSDT": 0.5, "ETHUSDT": -0.5})
+    _patch_resolution(monkeypatch, portfolio_id=7, raw_target={"rb2610": 0.5, "ag2612": -0.5})
 
     response = TestClient(_build_app(session)).get("/account/1/target_weights")
 
     assert response.status_code == 200
-    assert response.json() == {"BTCUSDT": 0.5, "ETHUSDT": -1.0}
+    assert response.json() == {"rb2610": 0.5, "ag2612": -1.0}
 
 
 def test_account_target_weights_falls_back_to_channel_default_leverage(monkeypatch) -> None:
     """杠杆为 ``None`` 时回落到渠道默认（CTP 多头默认 3x）。"""
     session = _RouteSession(_build_account(long_leverage=None, short_leverage=None), _build_portfolio())
-    _patch_resolution(monkeypatch, portfolio_id=7, raw_target={"BTCUSDT": 0.5})
+    _patch_resolution(monkeypatch, portfolio_id=7, raw_target={"rb2610": 0.5})
 
     response = TestClient(_build_app(session)).get("/account/1/target_weights")
 
     assert response.status_code == 200
-    assert response.json() == {"BTCUSDT": 1.5}
+    assert response.json() == {"rb2610": 1.5}
 
 
 def test_account_target_weights_returns_empty_without_bound_portfolio(monkeypatch) -> None:
     """账户未绑定组合时返回空映射，交由前端降级。"""
     session = _RouteSession(_build_account(), _build_portfolio())
-    _patch_resolution(monkeypatch, portfolio_id=None, raw_target={"BTCUSDT": 0.5})
+    _patch_resolution(monkeypatch, portfolio_id=None, raw_target={"rb2610": 0.5})
 
     response = TestClient(_build_app(session)).get("/account/1/target_weights")
 
@@ -154,7 +154,7 @@ def test_account_target_weights_returns_empty_without_bound_portfolio(monkeypatc
 def test_account_target_weights_returns_404_for_unknown_account(monkeypatch) -> None:
     """账户不存在时返回 404。"""
     session = _RouteSession(None, _build_portfolio())
-    _patch_resolution(monkeypatch, portfolio_id=7, raw_target={"BTCUSDT": 0.5})
+    _patch_resolution(monkeypatch, portfolio_id=7, raw_target={"rb2610": 0.5})
 
     response = TestClient(_build_app(session)).get("/account/999/target_weights")
 

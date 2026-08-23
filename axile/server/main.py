@@ -71,17 +71,17 @@ def _validate_host(host: str) -> str:
         return candidate
 
     if lowered in _WILDCARD_HOSTS:
-        print(f"❌ 禁止绑定通配地址 {host!r}：为避免对外暴露，仅允许回环地址（127.0.0.0/8、localhost、::1）。")
+        print(f"[ERROR] 禁止绑定通配地址 {host!r}：为避免对外暴露，仅允许回环地址（127.0.0.0/8、localhost、::1）。")
         sys.exit(1)
 
     try:
         parsed_ip = ipaddress.ip_address(lowered.strip("[]"))
     except ValueError:
-        print(f"❌ 非法监听地址 {host!r}：仅允许回环地址（127.0.0.0/8、localhost、::1）。")
+        print(f"[ERROR] 非法监听地址 {host!r}：仅允许回环地址（127.0.0.0/8、localhost、::1）。")
         sys.exit(1)
 
     if not parsed_ip.is_loopback:
-        print(f"❌ 禁止绑定非回环地址 {host!r}：为避免对外暴露（如 0.0.0.0），仅允许回环地址。")
+        print(f"[ERROR] 禁止绑定非回环地址 {host!r}：为避免对外暴露（如 0.0.0.0），仅允许回环地址。")
         sys.exit(1)
 
     return candidate
@@ -198,7 +198,7 @@ def run_server(
     try:
         validate_workers_option(workers)
     except MultiWorkerNotSupportedError as exc:
-        print(f"❌ {exc}")
+        print(f"[ERROR] {exc}")
         sys.exit(1)
 
     if not reload:

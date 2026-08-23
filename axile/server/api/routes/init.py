@@ -2,20 +2,20 @@
 
 Notes
 -----
-本模块提供「未完成配置」时初始化向导所需的接口：查询就绪状态、测试交易日历
-与数据库连通性、写入 ``config.toml`` 并触发重启。所有接口**均不触达业务数据库**，
+本模块提供「未完成配置」时初始化向导所需的接口：查询就绪状态、测试数据库
+连通性、写入 ``config.toml`` 并触发重启。所有接口**均不触达业务数据库**，
 因此在服务端处于初始化向导模式（数据库尚未迁移）时也能正常工作。
 """
 
 import os
 import signal
-from datetime import date
+from datetime import date, timedelta
 from typing import Any, Literal
 
 import aiohttp
-from fastapi import APIRouter, BackgroundTasks, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, File, HTTPException, Query, UploadFile, status
 from loguru import logger
-from pydantic import BaseModel, TypeAdapter, ValidationError
+from pydantic import BaseModel, ConfigDict, TypeAdapter, ValidationError
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
 
@@ -27,6 +27,17 @@ from axile.common.config import (
     write_config_toml,
 )
 from axile.server.error_notifications import build_test_card
+from axile.server.trading_calendar import (
+    CALENDAR_INITIAL_HISTORY_DAYS,
+    CALENDAR_TARGET_FUTURE_DAYS,
+    CalendarFunctionResult,
+    CalendarInputEntry,
+    normalize_calendar_id,
+    parse_calendar_csv,
+    run_calendar_function,
+    stage_initial_calendars,
+    validate_calendar_entries,
+)
 
 router = APIRouter(prefix="/init", tags=["init"])
 
@@ -53,13 +64,6 @@ class InitStatus(BaseModel):
     configured: bool
     environment: str
     values: dict[str, Any]
-
-
-class TradingCalendarTestRequest(BaseModel):
-    """交易日历上游连通性测试载荷。"""
-
-    token: str
-    api: str
 
 
 class DbTestRequest(BaseModel):
@@ -92,15 +96,36 @@ class TestResult(BaseModel):
 class InitSaveRequest(BaseModel):
     """初始化向导保存载荷（对应 :class:`~axile.common.config.Settings` 的向导字段）."""
 
+    model_config = ConfigDict(extra="forbid")
+
     sqlalchemy_database_uri: str
-    trading_calendar_token: str = ""
-    trading_calendar_api: str = ""
+    trading_calendars: list["InitTradingCalendar"] = []
     exe_err_feishu_key: str = ""
     environment: Literal["local", "staging", "production"] = "local"
     app_log_dir: str = "./logs"
     axile_log_rotation: str = "1 day"
     algorithm_modules: list[str] = []
     algorithm_directories: list[str] = []
+
+
+class InitTradingCalendar(BaseModel):
+    """向导为一个日历选定的唯一刷新方式和已验证数据。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    calendar_id: str
+    refresh_kind: Literal["csv", "python"]
+    function_code: str = ""
+    entries: list[CalendarInputEntry]
+
+
+class InitCalendarPreview(BaseModel):
+    """初始化 CSV 校验结果；数据随最终保存载荷回传，不在服务端缓存。"""
+
+    start: date
+    end: date
+    total: int
+    entries: list[CalendarInputEntry]
 
 
 def _prefill_values() -> dict[str, Any]:
@@ -119,8 +144,6 @@ def _prefill_values() -> dict[str, Any]:
     """
     return {
         "sqlalchemy_database_uri": str(settings.sqlalchemy_database_uri),
-        "trading_calendar_token": settings.trading_calendar_token,
-        "trading_calendar_api": settings.trading_calendar_api,
         "exe_err_feishu_key": settings.exe_err_feishu_key,
         "environment": settings.environment,
         "app_log_dir": str(settings.app_log_dir),
@@ -140,27 +163,35 @@ def init_status() -> InitStatus:
     )
 
 
-@router.post("/test-trading-calendar")
-async def test_trading_calendar(payload: TradingCalendarTestRequest) -> TestResult:
-    """使用 SSE 当日记录测试 Axile 交易日历上游契约。"""
-    today = date.today().isoformat()
-    headers = {"Authorization": f"Bearer {payload.token.strip()}"} if payload.token.strip() else {}
-    params = {"exchange": "SSE", "start": today, "end": today}
+@router.post("/trading-calendar-csv", response_model=InitCalendarPreview)
+async def preview_initial_calendar_csv(
+    file: UploadFile = File(),
+    calendar_id: str = Query(default="china", alias="calendarId"),
+) -> InitCalendarPreview:
+    """校验初始化 CSV 并把记录直接返回给向导。"""
     try:
-        timeout = aiohttp.ClientTimeout(total=_HTTP_TIMEOUT_SECONDS)
-        async with aiohttp.ClientSession(timeout=timeout) as session:
-            async with session.get(payload.api.strip(), params=params, headers=headers) as response:
-                response.raise_for_status()
-                result = await response.json()
-    except Exception as exc:  # noqa: BLE001 - 网络/解析异常统一转为失败结果
-        return TestResult(ok=False, message=f"连接失败：{exc}")
-    if not isinstance(result, list) or not result:
-        return TestResult(ok=False, message="响应不是非空交易日历数组")
-    first = result[0]
-    required = {"exchange", "calDate", "isOpen", "pretradeDate"}
-    if not isinstance(first, dict) or not required.issubset(first):
-        return TestResult(ok=False, message="响应字段与交易日历契约不匹配")
-    return TestResult(ok=True, message="连接成功，交易日历契约有效")
+        entries = parse_calendar_csv(await file.read(), calendar_id=calendar_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return InitCalendarPreview(
+        start=min(item.cal_date for item in entries),
+        end=max(item.cal_date for item in entries),
+        total=len(entries),
+        entries=entries,
+    )
+
+
+@router.post("/test-trading-calendar-function", response_model=CalendarFunctionResult, response_model_by_alias=True)
+async def test_initial_calendar_function(payload: dict[str, str]) -> CalendarFunctionResult:
+    """以正式首次刷新范围试跑初始化 Python 日历。"""
+    calendar_id = normalize_calendar_id(payload.get("calendarId", "china"))
+    today = date.today()
+    return await run_calendar_function(
+        payload.get("functionCode", ""),
+        today - timedelta(days=CALENDAR_INITIAL_HISTORY_DAYS),
+        today + timedelta(days=CALENDAR_TARGET_FUTURE_DAYS),
+        calendar_id=calendar_id,
+    )
 
 
 @router.post("/test-db")
@@ -253,7 +284,7 @@ def init_save(payload: InitSaveRequest, background_tasks: BackgroundTasks) -> Te
     Raises
     ------
     HTTPException
-        数据库地址不合法、或交易日历 token 缺少接口地址时返回 422；写入文件失败时返回 500。
+        数据库地址不合法时返回 422；写入文件失败时返回 500。
     """
     try:
         _DSN_ADAPTER.validate_python(payload.sqlalchemy_database_uri)
@@ -263,16 +294,23 @@ def init_save(payload: InitSaveRequest, background_tasks: BackgroundTasks) -> Te
             detail=f"数据库地址不合法：{exc}",
         ) from exc
 
-    if payload.trading_calendar_token.strip() and not payload.trading_calendar_api.strip():
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="配置交易日历 token 时必须同时填写接口地址。",
-        )
+    staged: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for calendar in payload.trading_calendars:
+        calendar_id = normalize_calendar_id(calendar.calendar_id)
+        if calendar_id in seen:
+            raise HTTPException(status_code=422, detail=f"日历 {calendar_id} 只能配置一次")
+        seen.add(calendar_id)
+        try:
+            validate_calendar_entries(calendar.entries, calendar_id=calendar_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        if calendar.refresh_kind == "python" and not calendar.function_code.strip():
+            raise HTTPException(status_code=422, detail=f"日历 {calendar_id} 缺少 Python 函数")
+        staged.append(calendar.model_dump(mode="json"))
 
     values: dict[str, Any] = {
         "sqlalchemy_database_uri": payload.sqlalchemy_database_uri,
-        "trading_calendar_token": payload.trading_calendar_token,
-        "trading_calendar_api": payload.trading_calendar_api,
         "exe_err_feishu_key": payload.exe_err_feishu_key,
         "environment": payload.environment,
         "app_log_dir": payload.app_log_dir,
@@ -281,6 +319,7 @@ def init_save(payload: InitSaveRequest, background_tasks: BackgroundTasks) -> Te
         "algorithm_directories": payload.algorithm_directories,
     }
     try:
+        stage_initial_calendars(staged)
         write_config_toml(values)
     except OSError as exc:
         raise HTTPException(

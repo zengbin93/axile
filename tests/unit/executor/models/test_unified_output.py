@@ -10,15 +10,15 @@ from axile.executor.models.unified_output import ExecutionStatus, UnifiedStandar
 def _build_symbol_result_payload() -> dict[str, AlgorithmResult]:
     """构造一个最小可用的单品种结果对象。"""
     return {
-        "BTCUSDT": AlgorithmResult.model_validate(
+        "rb2610": AlgorithmResult.model_validate(
             {
-                "symbol": "BTCUSDT",
+                "symbol": "rb2610",
                 "algorithm": "TWAP",
                 "status": "SUCCEEDED",
                 "orders": [
                     {
                         "order_id": "1",
-                        "symbol": "BTCUSDT",
+                        "symbol": "rb2610",
                         "direction": "BUY",
                         "order_type": "LIMIT",
                         "volume": 1.0,
@@ -31,7 +31,7 @@ def _build_symbol_result_payload() -> dict[str, AlgorithmResult]:
                 "trades": [
                     {
                         "trade_id": "trade-1",
-                        "symbol": "BTCUSDT",
+                        "symbol": "rb2610",
                         "order_id": "1",
                         "trade_time": "2026-03-18T00:00:01",
                         "trade_volume": 1.0,
@@ -41,7 +41,7 @@ def _build_symbol_result_payload() -> dict[str, AlgorithmResult]:
                 ],
                 "target_volume": 0.25,
                 "first_tick": {
-                    "symbol": "BTCUSDT",
+                    "symbol": "rb2610",
                     "last_price": 100.0,
                     "bid_price": 99.5,
                     "ask_price": 100.5,
@@ -65,7 +65,7 @@ def _build_account_assets_payload() -> UnifiedAccountAssets:
             "available_cash": 100.0,
             "total_asset": 150.0,
             "market_value": 50.0,
-            "currency": "USDT",
+            "currency": "CNY",
             "positions": [],
         }
     )
@@ -83,13 +83,13 @@ def test_constructor_converts_nested_objects() -> None:
         channel_type=TradeChannel("external"),
     )
 
-    assert output.account_assets.currency == "USDT"
+    assert output.account_assets.currency == "CNY"
     assert len(output.orders) == 1
     assert len(output.trades) == 1
     assert output.trades[0].order_id == "1"
-    assert output.orders[0].symbol == "BTCUSDT"
-    assert output.first_ticks["BTCUSDT"].ask_price == 100.5
-    assert output.target_volume == {"BTCUSDT": 0.25}
+    assert output.orders[0].symbol == "rb2610"
+    assert output.first_ticks["rb2610"].ask_price == 100.5
+    assert output.target_volume == {"rb2610": 0.25}
     assert output.execution_time == 1.25
     assert output.extra["channel_type"] == "external"
 
@@ -102,15 +102,15 @@ def test_constructor_parses_symbol_results() -> None:
         memory={},
         status=ExecutionStatus.PARTIAL,
         symbol_results={
-            "BTCUSDT": AlgorithmResult.model_validate(
+            "rb2610": AlgorithmResult.model_validate(
                 {
-                    "symbol": "BTCUSDT",
+                    "symbol": "rb2610",
                     "algorithm": "TWAP",
                     "status": "SUCCEEDED",
                     "orders": [],
                     "target_volume": 1.0,
                     "first_tick": {
-                        "symbol": "BTCUSDT",
+                        "symbol": "rb2610",
                         "last_price": 100.0,
                         "bid_price": 99.5,
                         "ask_price": 100.5,
@@ -124,12 +124,12 @@ def test_constructor_parses_symbol_results() -> None:
                     "memory": {"step": "done"},
                 }
             ),
-            "ETHUSDT": AlgorithmResult.model_validate(
+            "ag2612": AlgorithmResult.model_validate(
                 {
-                    "symbol": "ETHUSDT",
+                    "symbol": "ag2612",
                     "algorithm": "VWAP",
                     "status": "FAILED",
-                    "error": "ETHUSDT failed",
+                    "error": "ag2612 failed",
                     "orders": [],
                     "target_volume": None,
                     "first_tick": None,
@@ -140,14 +140,14 @@ def test_constructor_parses_symbol_results() -> None:
         channel_type=TradeChannel("external"),
     )
 
-    assert output.symbol_results["BTCUSDT"].symbol == "BTCUSDT"
-    assert output.symbol_results["BTCUSDT"].algorithm == "TWAP"
-    assert output.symbol_results["BTCUSDT"].status == ExecutionStatus.SUCCEEDED
-    assert output.symbol_results["BTCUSDT"].target_volume == 1.0
-    assert output.symbol_results["BTCUSDT"].first_tick is not None
-    assert output.symbol_results["BTCUSDT"].first_tick.ask_price == 100.5
-    assert output.symbol_results["ETHUSDT"].status == ExecutionStatus.FAILED
-    assert output.symbol_results["ETHUSDT"].error == "ETHUSDT failed"
+    assert output.symbol_results["rb2610"].symbol == "rb2610"
+    assert output.symbol_results["rb2610"].algorithm == "TWAP"
+    assert output.symbol_results["rb2610"].status == ExecutionStatus.SUCCEEDED
+    assert output.symbol_results["rb2610"].target_volume == 1.0
+    assert output.symbol_results["rb2610"].first_tick is not None
+    assert output.symbol_results["rb2610"].first_tick.ask_price == 100.5
+    assert output.symbol_results["ag2612"].status == ExecutionStatus.FAILED
+    assert output.symbol_results["ag2612"].error == "ag2612 failed"
     assert output.status == ExecutionStatus.PARTIAL
 
 
@@ -220,12 +220,12 @@ def test_model_dump_keeps_symbol_results_as_main_payload() -> None:
         "success",
         "extra",
     }
-    assert dumped["symbol_results"]["BTCUSDT"]["target_volume"] == 0.25
-    assert dumped["symbol_results"]["BTCUSDT"]["first_tick"]["ask_price"] == 100.5
+    assert dumped["symbol_results"]["rb2610"]["target_volume"] == 0.25
+    assert dumped["symbol_results"]["rb2610"]["first_tick"]["ask_price"] == 100.5
     assert len(output.orders) == 1
     assert len(output.trades) == 1
-    assert output.target_volume == {"BTCUSDT": 0.25}
-    assert output.first_ticks["BTCUSDT"].ask_price == 100.5
+    assert output.target_volume == {"rb2610": 0.25}
+    assert output.first_ticks["rb2610"].ask_price == 100.5
 
 
 def test_output_aggregates_symbol_trades_separately_from_orders() -> None:
@@ -235,14 +235,14 @@ def test_output_aggregates_symbol_trades_separately_from_orders() -> None:
         memory={},
         status=ExecutionStatus.SUCCEEDED,
         symbol_results={
-            "BTCUSDT": AlgorithmResult(
-                symbol="BTCUSDT",
+            "rb2610": AlgorithmResult(
+                symbol="rb2610",
                 algorithm="TWAP",
                 orders=[],
                 trades=[
                     TradeRecord(
                         trade_id="trade-1",
-                        symbol="BTCUSDT",
+                        symbol="rb2610",
                         order_id="order-1",
                         trade_time="2026-03-25T10:00:00",
                         trade_volume=1.0,

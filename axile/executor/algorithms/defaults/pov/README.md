@@ -48,7 +48,7 @@ from axile.executor.models.unified_input import UnifiedStandardInput
 standard_input = UnifiedStandardInput(
     channel_type=...,
     account_config=...,
-    curr_target={"BTCUSDT": 0.03},  # 目标权重（各渠道语义见 sizing_mode）
+    curr_target={"rb2610": 0.03},  # 目标权重（各渠道语义见 sizing_mode）
     algorithm={
         "method": "POV",
         "params": {

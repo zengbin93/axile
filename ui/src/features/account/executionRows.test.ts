@@ -19,16 +19,16 @@ describe('symbolRows', () => {
   it('只挑逐只决策/跳过事件，忽略生命周期事件', () => {
     const rows = symbolRows([
       ev({ event_type: 'execution_started', symbol: null }),
-      ev({ event_type: 'symbol_decision_made', symbol: 'BTCUSDT', status: 'SUCCESS' }),
+      ev({ event_type: 'symbol_decision_made', symbol: 'rb2610', status: 'SUCCESS' }),
     ])
-    expect(rows).toEqual([{ symbol: 'BTCUSDT', status: 'SUCCESS', reason: '' }])
+    expect(rows).toEqual([{ symbol: 'rb2610', status: 'SUCCESS', reason: '' }])
   })
 
   it('失败事件把 details.debug.error 作为原因显出', () => {
     const rows = symbolRows([
       ev({
         event_type: 'symbol_decision_made',
-        symbol: 'ETHUSDT',
+        symbol: 'ag2612',
         status: 'ERROR',
         details: { debug: { error: "'dict' object has no attribute 'max_wait_seconds'" } },
       }),
@@ -38,7 +38,7 @@ describe('symbolRows', () => {
   })
 
   it('跳过事件在无 error 时回退到 reason_code', () => {
-    const rows = symbolRows([ev({ event_type: 'symbol_skipped', symbol: 'SOLUSDT', reason_code: 'COMMON.SYMBOL_SKIPPED' })])
+    const rows = symbolRows([ev({ event_type: 'symbol_skipped', symbol: 'au2612', reason_code: 'COMMON.SYMBOL_SKIPPED' })])
     expect(rows[0]?.reason).toBe('COMMON.SYMBOL_SKIPPED')
   })
 })
@@ -60,7 +60,7 @@ describe('lifecycleNotes', () => {
 
   it('排除逐只事件，避免与 symbolRows 重复', () => {
     const notes = lifecycleNotes([
-      ev({ event_type: 'symbol_decision_made', symbol: 'ETHUSDT', status: 'ERROR', details: { debug: { error: 'x' } } }),
+      ev({ event_type: 'symbol_decision_made', symbol: 'ag2612', status: 'ERROR', details: { debug: { error: 'x' } } }),
     ])
     expect(notes).toHaveLength(0)
   })

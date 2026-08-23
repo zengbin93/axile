@@ -15,7 +15,7 @@ function ev(patch: Partial<ExecutionEvent>): ExecutionEvent {
     status: 'INFO',
     reason_code: '',
     reason_family: 'EXECUTION_STRATEGY',
-    symbol: 'BTCUSDT',
+    symbol: 'rb2610',
     order_id: null,
     client_order_id: null,
     ts_local_created: '2026-07-14T23:17:08',
@@ -52,7 +52,7 @@ describe('buildSymbolActionStream', () => {
           details: { order: { direction: 'OrderDirection.BUY', volume: 0.0756, price: 61990 } },
         }),
       ],
-      'BTCUSDT',
+      'rb2610',
     )
 
     expect(lines.map((l) => l.text)).toEqual([
@@ -78,7 +78,7 @@ describe('buildSymbolActionStream', () => {
         ev({ event_type: 'order_terminal', seq: 3, status: 'SUCCESS', order_id: 'o1', ts_local_created: '2026-07-14T23:17:14', details: { order: { direction: 'OrderDirection.BUY', terminal_status: 'CANCELED', volume: 1, filled_volume: 0 } } }),
         ev({ event_type: 'order_terminal', seq: 4, status: 'SUCCESS', order_id: 'o2', ts_local_created: '2026-07-14T23:17:20', details: { order: { direction: 'OrderDirection.BUY', terminal_status: 'FILLED', volume: 1, filled_volume: 1, avg_price: 101 } } }),
       ],
-      'BTCUSDT',
+      'rb2610',
     )
 
     expect(lines.map((l) => l.text)).toEqual([
@@ -90,16 +90,16 @@ describe('buildSymbolActionStream', () => {
 
   it('只取目标品种；跳过记为断点', () => {
     const events = [
-      ev({ event_type: 'symbol_skipped', symbol: 'ETHUSDT', seq: 1, reason_code: 'COMMON.SYMBOL_SKIPPED' }),
-      ev({ event_type: 'symbol_decision_made', symbol: 'BTCUSDT', seq: 2, details: { decision: { target_volume: 0.5 } } }),
+      ev({ event_type: 'symbol_skipped', symbol: 'ag2612', seq: 1, reason_code: 'COMMON.SYMBOL_SKIPPED' }),
+      ev({ event_type: 'symbol_decision_made', symbol: 'rb2610', seq: 2, details: { decision: { target_volume: 0.5 } } }),
     ]
-    const eth = buildSymbolActionStream(events, 'ETHUSDT')
-    expect(eth.map((l) => [l.text, l.broken])).toEqual([['跳过 · COMMON.SYMBOL_SKIPPED', true]])
-    expect(buildSymbolActionStream(events, 'BTCUSDT').length).toBe(1)
+    const ag = buildSymbolActionStream(events, 'ag2612')
+    expect(ag.map((l) => [l.text, l.broken])).toEqual([['跳过 · COMMON.SYMBOL_SKIPPED', true]])
+    expect(buildSymbolActionStream(events, 'rb2610').length).toBe(1)
   })
 
   it('无该品种事件 → 空流', () => {
-    expect(buildSymbolActionStream([], 'BTCUSDT')).toEqual([])
+    expect(buildSymbolActionStream([], 'rb2610')).toEqual([])
   })
 
   it('按渠道描述追加数量与价格单位', () => {
@@ -110,10 +110,10 @@ describe('buildSymbolActionStream', () => {
           details: { order: { direction: 'OrderDirection.BUY', volume: 0.001234, price: 62000 } },
         }),
       ],
-      'BTCUSDT',
-      { quantityLabel: '基础资产', quantityMaxDecimals: 3, priceLabel: 'USDT' },
+      'rb2610',
+      { quantityLabel: '基础资产', quantityMaxDecimals: 3, priceLabel: 'CNY' },
     )
 
-    expect(lines[0]?.text).toBe('挂单 买 0.001 基础资产 @62,000 USDT')
+    expect(lines[0]?.text).toBe('挂单 买 0.001 基础资产 @62,000 CNY')
   })
 })

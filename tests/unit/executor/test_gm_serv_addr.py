@@ -133,6 +133,7 @@ def test_initialize_connection_uses_serv_addr_without_starting_terminal(
     """serv_addr 模式下初始化仅保存配置，不应直调 gm.api 或拉起终端。"""
     executor = _build_executor()
     config = GMAccountConfig(
+        connection_mode="service",
         account_id="account-id",
         token="token",
         serv_addr="127.0.0.1:7001",
@@ -159,14 +160,15 @@ def test_initialize_connection_keeps_terminal_path_flow_when_serv_addr_missing(
     """terminal_path 模式下仅保留本地终端启动，不再直调 gm.api。"""
     executor = _build_executor()
     config = GMAccountConfig(
+        connection_mode="terminal",
         account_id="account-id",
         token="token",
-        terminal_path="/tmp/gm",
+        terminal_path="C:\\GM",
     )
     monkeypatch.setattr(
         executor,
         "_start_gm_desktop_if_not",
-        lambda terminal_path: terminal_path == "/tmp/gm",
+        lambda terminal_path: terminal_path == "C:\\GM",
     )
 
     executor._initialize_connection(config)
@@ -178,6 +180,7 @@ def test_verify_connection_skips_status_rpc_in_serv_addr_mode(monkeypatch: pytes
     """bridge-only 模式下连接校验应走 bridge，而不是账户状态 RPC。"""
     executor = _build_executor()
     executor._gm_config = GMAccountConfig(
+        connection_mode="service",
         account_id="account-id",
         token="token",
         serv_addr="127.0.0.1:7001",
@@ -198,6 +201,7 @@ def test_verify_connection_uses_full_bridge_startup_timeout(monkeypatch: pytest.
     """执行前连接校验不应比 bridge 正常启动路径更苛刻。"""
     executor = _build_executor()
     executor._gm_config = GMAccountConfig(
+        connection_mode="service",
         account_id="account-id",
         token="token",
         serv_addr="127.0.0.1:7001",
@@ -666,6 +670,7 @@ def test_get_account_assets_uses_bridge_runtime_in_serv_addr_mode(monkeypatch: p
     executor = _build_executor()
     executor.account_id = "account-id"
     executor._gm_config = GMAccountConfig(
+        connection_mode="service",
         account_id="account-id",
         token="token",
         serv_addr="127.0.0.1:7001",
@@ -739,6 +744,7 @@ def test_get_market_data_uses_bridge_runtime_in_serv_addr_mode(monkeypatch: pyte
     executor = _build_executor()
     executor.account_id = "account-id"
     executor._gm_config = GMAccountConfig(
+        connection_mode="service",
         account_id="account-id",
         token="token",
         serv_addr="127.0.0.1:7001",
@@ -784,6 +790,7 @@ def test_place_order_uses_bridge_runtime_in_serv_addr_mode(monkeypatch: pytest.M
     executor.account_id = "account-id"
     executor._execution_order_ids = set()
     executor._gm_config = GMAccountConfig(
+        connection_mode="service",
         account_id="account-id",
         token="token",
         serv_addr="127.0.0.1:7001",
@@ -852,6 +859,7 @@ def test_pending_and_cancel_order_use_bridge_runtime_in_serv_addr_mode(
     executor = _build_executor()
     executor.account_id = "account-id"
     executor._gm_config = GMAccountConfig(
+        connection_mode="service",
         account_id="account-id",
         token="token",
         serv_addr="127.0.0.1:7001",

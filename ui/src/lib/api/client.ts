@@ -49,14 +49,26 @@ export async function apiGet<T>(path: string, signal?: AbortSignal): Promise<T> 
 
 /** 发起带 JSON body 的写请求（POST/PATCH/DELETE）。 */
 export async function apiSend<T>(
-  method: 'POST' | 'PATCH' | 'DELETE',
+  method: 'POST' | 'PUT' | 'PATCH' | 'DELETE',
   path: string,
   body?: unknown,
+  signal?: AbortSignal,
 ): Promise<T> {
   const res = await fetch(BASE + path, {
     method,
     headers: headers(),
     body: body === undefined ? undefined : JSON.stringify(body),
+    signal,
   })
+  return parse<T>(res)
+}
+
+/** 上传 multipart 文件；浏览器负责生成 Content-Type boundary。 */
+export async function apiUpload<T>(path: string, file: File): Promise<T> {
+  const body = new FormData()
+  body.append('file', file)
+  const uploadHeaders: Record<string, string> = {}
+  if (API_PASSWORD) uploadHeaders['x-api-password'] = API_PASSWORD
+  const res = await fetch(BASE + path, { method: 'POST', headers: uploadHeaders, body })
   return parse<T>(res)
 }

@@ -39,7 +39,17 @@ class _TerminationTestExecutor(AbstractExecutor):
         self.cancel_attempts: list[tuple[str, str]] = []
         super().__init__(
             TradeChannel.CTP,
-            CTPAccountConfig.model_validate({"broker_id": "b", "investor_id": "i", "password": "p"}),
+            CTPAccountConfig.model_validate(
+                {
+                    "broker_id": "b",
+                    "investor_id": "i",
+                    "password": "p",
+                    "td_front": "tcp://td:1",
+                    "md_front": "tcp://md:2",
+                    "app_id": "app",
+                    "auth_code": "auth",
+                }
+            ),
         )
 
     def _initialize_connection(self, account_config: CTPAccountConfig) -> None:
@@ -162,7 +172,7 @@ def _filled_order(symbol: str, order_id: str) -> UnifiedOrder:
 
 def test_execution_session_termination_cancel_pending_queries_and_cancels_current_symbol_orders() -> None:
     """session 的 cancel_pending 终止应先 query 当前 symbol，再逐笔 cancel。"""
-    executor = _TerminationTestExecutor(execution_orders=[_active_order("ETHUSDT", "order-fail")])
+    executor = _TerminationTestExecutor(execution_orders=[_active_order("ag2612", "order-fail")])
     cancel_event = Event()
     cancel_event.set()
     executor.set_termination_controller(
@@ -172,7 +182,7 @@ def test_execution_session_termination_cancel_pending_queries_and_cancels_curren
             mode_provider=lambda: "cancel_pending",
         )
     )
-    session = ExecutionSession(owner=executor, symbol="ETHUSDT")
+    session = ExecutionSession(owner=executor, symbol="ag2612")
 
     with pytest.raises(ExecutionTerminated) as exc_info:
         session.handle_termination_checkpoint()
@@ -181,12 +191,12 @@ def test_execution_session_termination_cancel_pending_queries_and_cancels_curren
     assert exc_info.value.mode == "cancel_pending"
     assert exc_info.value.cancel_failed_order_ids == ["order-fail"]
     assert exc_info.value.acked_at is not None
-    assert executor.cancel_attempts == [("ETHUSDT", "order-fail")]
+    assert executor.cancel_attempts == [("ag2612", "order-fail")]
 
 
 def test_base_executor_handle_termination_checkpoint_only_acknowledges_and_raises() -> None:
     """AbstractExecutor 检查点本身不再负责批量撤单。"""
-    executor = _TerminationTestExecutor(execution_orders=[_active_order("ETHUSDT", "order-fail")])
+    executor = _TerminationTestExecutor(execution_orders=[_active_order("ag2612", "order-fail")])
     cancel_event = Event()
     cancel_event.set()
     executor.set_termination_controller(
@@ -198,7 +208,7 @@ def test_base_executor_handle_termination_checkpoint_only_acknowledges_and_raise
     )
 
     with pytest.raises(ExecutionTerminated) as exc_info:
-        executor.handle_termination_checkpoint("ETHUSDT")
+        executor.handle_termination_checkpoint("ag2612")
 
     assert exc_info.value.cancel_failed_order_ids == []
     assert executor.cancel_attempts == []
@@ -253,7 +263,7 @@ def test_runtime_sleep_or_terminate_sleeps_full_when_not_requested() -> None:
     clock = _FakeClock()
     previous = _use_clock(clock)
     try:
-        runtime.sleep_or_terminate(5.0, "ETHUSDT")
+        runtime.sleep_or_terminate(5.0, "ag2612")
     finally:
         set_default_clock(previous)
 
@@ -275,7 +285,7 @@ def test_runtime_sleep_or_terminate_interrupts_when_event_set_mid_wait() -> None
     previous = _use_clock(clock)
     try:
         with pytest.raises(ExecutionTerminated) as exc_info:
-            runtime.sleep_or_terminate(60.0, "ETHUSDT")
+            runtime.sleep_or_terminate(60.0, "ag2612")
     finally:
         set_default_clock(previous)
 
@@ -295,7 +305,7 @@ def test_runtime_sleep_or_terminate_raises_immediately_when_already_requested() 
     previous = _use_clock(clock)
     try:
         with pytest.raises(ExecutionTerminated):
-            runtime.sleep_or_terminate(5.0, "ETHUSDT")
+            runtime.sleep_or_terminate(5.0, "ag2612")
     finally:
         set_default_clock(previous)
 
@@ -336,7 +346,7 @@ def test_runtime_sleep_or_terminate_returns_immediately_for_non_positive_seconds
 
 def test_session_sleep_or_terminate_interrupts_and_cancels_pending_orders() -> None:
     """session 片间等待被 terminate 唤醒时，应走 symbol 维度 cancel_pending 再抛出."""
-    executor = _TerminationTestExecutor(execution_orders=[_active_order("ETHUSDT", "order-fail")])
+    executor = _TerminationTestExecutor(execution_orders=[_active_order("ag2612", "order-fail")])
     cancel_event = Event()
     controller = ExecutionTerminationController(
         cancel_event=cancel_event,
@@ -344,7 +354,7 @@ def test_session_sleep_or_terminate_interrupts_and_cancels_pending_orders() -> N
         mode_provider=lambda: "cancel_pending",
     )
     runtime = _build_runtime_with_controller(executor, controller)
-    session = ExecutionSession(owner=executor, runtime=runtime, symbol="ETHUSDT")
+    session = ExecutionSession(owner=executor, runtime=runtime, symbol="ag2612")
     clock = _FakeClock(wake_event=cancel_event)
     previous = _use_clock(clock)
     try:
@@ -355,7 +365,7 @@ def test_session_sleep_or_terminate_interrupts_and_cancels_pending_orders() -> N
 
     assert exc_info.value.mode == "cancel_pending"
     assert exc_info.value.cancel_failed_order_ids == ["order-fail"]
-    assert executor.cancel_attempts == [("ETHUSDT", "order-fail")]
+    assert executor.cancel_attempts == [("ag2612", "order-fail")]
 
 
 def test_session_sleep_or_terminate_sleeps_full_when_not_requested() -> None:
@@ -363,7 +373,7 @@ def test_session_sleep_or_terminate_sleeps_full_when_not_requested() -> None:
     executor = _TerminationTestExecutor()
     controller = ExecutionTerminationController(cancel_event=Event())
     runtime = _build_runtime_with_controller(executor, controller)
-    session = ExecutionSession(owner=executor, runtime=runtime, symbol="ETHUSDT")
+    session = ExecutionSession(owner=executor, runtime=runtime, symbol="ag2612")
     clock = _FakeClock()
     previous = _use_clock(clock)
     try:
@@ -378,7 +388,7 @@ def test_session_sleep_or_terminate_sleeps_full_when_not_requested() -> None:
 def test_session_sleep_or_terminate_without_runtime_falls_back_to_plain_sleep() -> None:
     """无活跃 runtime 时退化为纯 sleep，保持既有行为不回归."""
     executor = _TerminationTestExecutor()
-    session = ExecutionSession(owner=executor, symbol="ETHUSDT")
+    session = ExecutionSession(owner=executor, symbol="ag2612")
     clock = _FakeClock()
     previous = _use_clock(clock)
     try:

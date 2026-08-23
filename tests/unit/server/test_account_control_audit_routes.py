@@ -164,7 +164,7 @@ def test_account_control_execution_events_route_supports_filters_and_uses_contro
         limit: int = 200,
     ) -> AccountControlAuditEventPage:
         assert execution_id == "exec-1"
-        assert symbol == "BTCUSDT"
+        assert symbol == "rb2610"
         assert operation == "place_order"
         assert skip == 0
         assert limit == 2
@@ -178,7 +178,7 @@ def test_account_control_execution_events_route_supports_filters_and_uses_contro
                     seq=1,
                     channel=TradeChannel.CTP,
                     operation="place_order",
-                    symbol="BTCUSDT",
+                    symbol="rb2610",
                     metadata_={"order_id": "oid-1"},
                     decision=AccountControlDecision.ALLOWED,
                     counted=True,
@@ -199,7 +199,7 @@ def test_account_control_execution_events_route_supports_filters_and_uses_contro
     response = client.get(
         "/account/executions/exec-1/control/events",
         params={
-            "symbol": "BTCUSDT",
+            "symbol": "rb2610",
             "operation": "place_order",
             "limit": 2,
         },
@@ -219,7 +219,7 @@ def test_account_control_execution_events_route_supports_filters_and_uses_contro
                 "seq": 1,
                 "channel": "ctp",
                 "operation": "place_order",
-                "symbol": "BTCUSDT",
+                "symbol": "rb2610",
                 "metadata": {"order_id": "oid-1"},
                 "decision": "allowed",
                 "counted": True,

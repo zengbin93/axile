@@ -31,7 +31,7 @@ class TestDeterminePositionSide:
         """创建模拟的执行器."""
         executor = MagicMock()
         executor.logger = MagicMock()
-        executor.symbol = "BTC"
+        executor.symbol = "rb2610"
         return executor
 
     @pytest.fixture
@@ -54,7 +54,7 @@ class TestDeterminePositionSide:
 
     def test_sell_closing_long_position(self, executor, account_assets_with_long):
         """测试卖出时平多头持仓."""
-        executor.symbol = "BTC"
+        executor.symbol = "rb2610"
         executor.get_positions = Mock(return_value=[(1.0, PositionDirection.LONG), (0.5, PositionDirection.SHORT)])
 
         result = determine_position_side(
@@ -68,7 +68,7 @@ class TestDeterminePositionSide:
 
     def test_buy_closing_short_position(self, executor, account_assets_with_short):
         """测试买入时平空头持仓."""
-        executor.symbol = "ETH"
+        executor.symbol = "ag2612"
         executor.get_positions = Mock(return_value=[(0.5, PositionDirection.SHORT), (1.0, PositionDirection.LONG)])
 
         result = determine_position_side(
@@ -82,7 +82,7 @@ class TestDeterminePositionSide:
 
     def test_sell_no_long_position(self, executor, account_assets_empty):
         """测试卖出但没有多头持仓."""
-        executor.symbol = "BTC"
+        executor.symbol = "rb2610"
         executor.get_positions = Mock(return_value=[])
 
         result = determine_position_side(
@@ -96,7 +96,7 @@ class TestDeterminePositionSide:
 
     def test_buy_no_short_position(self, executor, account_assets_empty):
         """测试买入但没有空头持仓."""
-        executor.symbol = "ETH"
+        executor.symbol = "ag2612"
         executor.get_positions = Mock(return_value=[])
 
         result = determine_position_side(
@@ -111,7 +111,7 @@ class TestDeterminePositionSide:
     def test_get_positions_error_handling(self, executor):
         """测试获取持仓失败时的错误处理."""
         assets = MagicMock()
-        executor.symbol = "BTC"
+        executor.symbol = "rb2610"
         executor.get_positions = Mock(side_effect=Exception("Connection error"))
 
         result = determine_position_side(
@@ -126,7 +126,7 @@ class TestDeterminePositionSide:
         executor.logger.warning.assert_called_once()
         # 验证调用包含错误信息
         call_args = str(executor.logger.warning.call_args)
-        assert "获取 BTC 持仓失败" in call_args
+        assert "获取 rb2610 持仓失败" in call_args
 
 
 class TestSetupOrderTracker:
@@ -137,14 +137,14 @@ class TestSetupOrderTracker:
         """创建模拟的执行器."""
         executor = MagicMock()
         executor.logger = MagicMock()
-        executor.symbol = "BTC"
+        executor.symbol = "rb2610"
         return executor
 
     @pytest.fixture
     def price_data(self):
         """创建模拟的单品种市场数据."""
         return UnifiedPriceData(
-            symbol="BTC",
+            symbol="rb2610",
             last_price=50000,
             bid_price=49990,
             ask_price=50010,
@@ -195,7 +195,7 @@ class TestSetupOrderTracker:
             assert executor.register_price_callback.called
 
             # 验证价格数据初始化
-            assert tracker.latest_prices == {"BTC": price_data}
+            assert tracker.latest_prices == {"rb2610": price_data}
 
             # 验证日志记录
             assert executor.logger.debug.called
@@ -257,7 +257,7 @@ class TestTeardownOrderTracker:
         """创建模拟的执行器."""
         executor = MagicMock()
         executor.logger = MagicMock()
-        executor.symbol = "BTC"
+        executor.symbol = "rb2610"
         return executor
 
     @pytest.fixture
@@ -331,7 +331,7 @@ class TestSubmitAndTrackOrder:
         """创建模拟的执行器."""
         executor = MagicMock()
         executor.logger = MagicMock()
-        executor.symbol = "BTC"
+        executor.symbol = "rb2610"
         return executor
 
     @pytest.fixture
@@ -450,7 +450,7 @@ class TestIntegration:
         """创建完整的模拟执行器."""
         executor = MagicMock()
         executor.logger = MagicMock()
-        executor.symbol = "BTC"
+        executor.symbol = "rb2610"
         return executor
 
     def test_full_order_workflow(self, mock_executor):
@@ -469,7 +469,7 @@ class TestIntegration:
             tracker = setup_order_tracker(
                 mock_executor,
                 UnifiedPriceData(
-                    symbol="BTC",
+                    symbol="rb2610",
                     last_price=50000,
                     bid_price=49990,
                     ask_price=50010,
@@ -509,7 +509,7 @@ class TestIntegration:
 def _intent_executor(min_notional, last_price=0.0):
     """构造供 resolve_reduce_intent 测试使用的执行器桩."""
     executor = MagicMock()
-    executor.symbol = "BTCUSDT"
+    executor.symbol = "rb2610"
     executor.logger = MagicMock()
     executor.get_min_notional = Mock(return_value=min_notional)
     if last_price:
@@ -589,7 +589,7 @@ class TestSubmitAndTrackOrderProjection:
 
     def _executor(self, min_notional=50.0, last_price=100.0):
         executor = MagicMock()
-        executor.symbol = "BTCUSDT"
+        executor.symbol = "rb2610"
         executor.logger = MagicMock()
         executor.get_min_notional = Mock(return_value=min_notional)
         market = MagicMock()

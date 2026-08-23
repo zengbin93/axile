@@ -69,7 +69,15 @@ def _build_account(
         name="ctp-testnet-sim",
         market="期货",
         trade_channel=trade_channel,
-        account_config={"broker_id": "9999", "investor_id": "test", "password": "test"},
+        account_config={
+            "broker_id": "9999",
+            "investor_id": "test",
+            "password": "test",
+            "td_front": "tcp://td:1",
+            "md_front": "tcp://md:2",
+            "app_id": "app",
+            "auth_code": "auth",
+        },
         is_started=True,
         cron_expr="*/5 * * * *",
         remark=None,
@@ -95,7 +103,15 @@ def _account_payload() -> dict[str, object]:
         "name": "ctp-testnet-sim",
         "market": "期货",
         "trade_channel": "ctp",
-        "account_config": {"broker_id": "9999", "investor_id": "test", "password": "test"},
+        "account_config": {
+            "broker_id": "9999",
+            "investor_id": "test",
+            "password": "test",
+            "td_front": "tcp://td:1",
+            "md_front": "tcp://md:2",
+            "app_id": "app",
+            "auth_code": "auth",
+        },
         "is_started": True,
         "cron_expr": "*/5 * * * *",
         "remark": None,
@@ -191,6 +207,100 @@ def test_create_account_rejects_incompatible_account_control_preset(monkeypatch)
     assert response.status_code == 422
     assert "不兼容" in response.json()["detail"]
     assert session.account is None
+
+
+def test_create_account_rejects_invalid_channel_config_with_field_location() -> None:
+    """创建接口应在落库前按渠道模型校验，并返回稳定字段位置。"""
+    session = _RouteSession()
+    payload = _account_payload()
+    account_config = payload["account_config"]
+    assert isinstance(account_config, dict)
+    account_config["td_front"] = "tcp://host"
+
+    response = TestClient(_build_app(session)).post("/account/", json=payload)
+
+    assert response.status_code == 422
+    assert response.json()["detail"].startswith("account_config.td_front:")
+    assert session.account is None
+
+
+def test_create_account_rejects_unknown_channel_config_field() -> None:
+    """渠道模型未声明的字段不能进入账户配置。"""
+    session = _RouteSession()
+    payload = _account_payload()
+    account_config = payload["account_config"]
+    assert isinstance(account_config, dict)
+    account_config["legacy_option"] = True
+
+    response = TestClient(_build_app(session)).post("/account/", json=payload)
+
+    assert response.status_code == 422
+    assert response.json()["detail"].startswith("account_config.legacy_option:")
+    assert session.account is None
+
+
+def test_create_account_persists_normalized_channel_config(monkeypatch: pytest.MonkeyPatch) -> None:
+    """创建账户只持久化当前模式字段，并写入渠道模型默认值。"""
+    monkeypatch.setattr(account_crud_routes, "parse_cron_expr", lambda _expr: ["fake-trigger"])
+    monkeypatch.setattr(account_crud_routes, "add_record_portfolio_account", _noop_async)
+    monkeypatch.setattr(account_crud_routes, "create_job", _noop_async)
+    monkeypatch.setattr(account_crud_routes, "reconcile_china_channel_account", _noop_async)
+    session = _RouteSession()
+    payload = _account_payload()
+    payload["trade_channel"] = "tq"
+    payload["brokerage"] = "tq"
+    payload["account_config"] = {
+        "channel_type": "ctp",
+        "account_mode": "sim",
+        "tq_username": "user",
+        "tq_password": "secret",
+        "broker_name": "hidden-broker",
+        "account_id": "hidden-account",
+        "account_password": "hidden-password",
+    }
+
+    response = TestClient(_build_app(session)).post("/account/", json=payload)
+
+    assert response.status_code == 201
+    expected = {
+        "account_mode": "sim",
+        "tq_username": "user",
+        "tq_password": "secret",
+        "initial_balance": 10_000_000.0,
+    }
+    assert response.json()["account_config"] == expected
+    assert session.account is not None
+    assert session.account.account_config == expected
+
+
+def test_update_account_persists_normalized_channel_config(monkeypatch: pytest.MonkeyPatch) -> None:
+    """更新账户与创建使用同一规范化落库路径。"""
+    monkeypatch.setattr(account_routes, "_reconcile_account_job", _noop_async)
+    monkeypatch.setattr(account_crud_routes, "reconcile_china_channel_account", _noop_async)
+    session = _RouteSession(_build_account())
+
+    response = TestClient(_build_app(session)).patch(
+        "/account/1",
+        json={
+            "trade_channel": "tq",
+            "account_config": {
+                "channel_type": "gm",
+                "account_mode": "kq",
+                "tq_username": "user",
+                "tq_password": "secret",
+                "broker_name": "hidden-broker",
+                "account_id": "hidden-account",
+                "account_password": "hidden-password",
+                "initial_balance": 12345,
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    expected = {"account_mode": "kq", "tq_username": "user", "tq_password": "secret"}
+    assert response.json()["account_config"] == expected
+    assert session.account is not None
+    assert session.account.account_config == expected
 
 
 def test_update_account_can_switch_account_control_preset(monkeypatch) -> None:

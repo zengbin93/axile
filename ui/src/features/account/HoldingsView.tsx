@@ -122,7 +122,7 @@ export function HoldingsView({
   target: LatestWeights
   /** 账户总权益，作为当前权重的归一分母、也作市值换算基数。 */
   equity: number
-  /** 计价货币代码（USDT/CNY），在头部权益处「说一次」立单位锚；拿不到时不显示。 */
+  /** 计价货币代码，在头部权益处「说一次」立单位锚；拿不到时不显示。 */
   currency?: string
 }) {
   const plan = rebalancePlan(positions, target, equity)

@@ -14,7 +14,7 @@ function item(over: Partial<AccountDashboardItem>): AccountDashboardItem {
     is_scheduled: false,
     next_run_time: null,
     total_asset: 0,
-    currency: 'USDT',
+    currency: 'CNY',
     holdings_count: 0,
     position_weights: [],
     equity_series: [],

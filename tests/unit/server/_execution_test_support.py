@@ -129,8 +129,8 @@ class FakeExecutor:
             execution_time=0.1,
             channel_type=TradeChannel.CTP,
             symbol_results={
-                "ETHUSDT": AlgorithmResult(
-                    symbol="ETHUSDT",
+                "ag2612": AlgorithmResult(
+                    symbol="ag2612",
                     algorithm="SINGLE-MAKER",
                     status=ExecutionStatus.SUCCEEDED,
                     orders=[],
@@ -243,7 +243,15 @@ def build_account(**overrides: object) -> Account:
         "trade_channel": TradeChannel.CTP,
         "account_control_preset": "default",
         "account_control_override": None,
-        "account_config": {"broker_id": "9999", "investor_id": "test", "password": "test"},
+        "account_config": {
+            "broker_id": "9999",
+            "investor_id": "test",
+            "password": "test",
+            "td_front": "tcp://td:1",
+            "md_front": "tcp://md:2",
+            "app_id": "app",
+            "auth_code": "auth",
+        },
         "is_started": True,
         "cron_expr": "3,6,9 * * * *",
         "remark": None,

@@ -19,11 +19,11 @@ def test_shared_helper_functions_cover_summary_and_algorithm_resolution() -> Non
     summary = build_execution_summary_from_symbol_results(
         {
             "symbol_results": {
-                "BTCUSDT": {"status": "SUCCEEDED", "orders": [1]},
-                "ETHUSDT": {"status": "BLOCKED", "orders": [1, 2]},
-                "SOLUSDT": {"status": "FAILED", "orders": "bad"},
-                "BNBUSDT": {"status": "NOOP", "orders": []},
-                "XRPUSDT": "not-a-dict",
+                "rb2610": {"status": "SUCCEEDED", "orders": [1]},
+                "ag2612": {"status": "BLOCKED", "orders": [1, 2]},
+                "au2612": {"status": "FAILED", "orders": "bad"},
+                "m2609": {"status": "NOOP", "orders": []},
+                "SR609": "not-a-dict",
             }
         }
     )
@@ -39,9 +39,9 @@ def test_shared_helper_functions_cover_summary_and_algorithm_resolution() -> Non
         count_orders_from_symbol_results(
             {
                 "symbol_results": {
-                    "BTCUSDT": {"orders": [1]},
-                    "ETHUSDT": {"orders": [1, 2]},
-                    "SOLUSDT": {"orders": "bad"},
+                    "rb2610": {"orders": [1]},
+                    "ag2612": {"orders": [1, 2]},
+                    "au2612": {"orders": "bad"},
                 }
             }
         )

@@ -2,7 +2,10 @@ import { useState } from 'react'
 import { ThemeToggle } from '@/components/ThemeToggle'
 import { Toast } from '@/components/Toast'
 import { ConfirmModal, type ConfirmSpec } from '@/components/ui/ConfirmModal'
+import { Segmented } from '@/components/ui/Segmented'
 import { Select } from '@/components/ui/Select'
+import { CalendarSetupStep } from '@/features/init/CalendarSetupStep'
+import type { CalendarSetupSnapshot } from '@/features/init/calendarSetupState'
 import { WizardPage } from '@/features/setup/WizardNav'
 import { ApiError } from '@/lib/api/client'
 import {
@@ -10,7 +13,6 @@ import {
   saveInit,
   testDb,
   testFeishu,
-  testTradingCalendar,
   type InitValues,
 } from '@/lib/api/init'
 import { useToastStore } from '@/stores/ui'
@@ -50,7 +52,7 @@ const COPY: Record<WizardMode, Copy> = {
     confirmLead: '确认无误后保存；axile 会写入配置并自动重启进入正常模式。',
     saveLabel: '保存并启动',
     savingLabel: '启动中…',
-    savedToast: '配置已保存，axile 正在启动…',
+    savedToast: '配置已保存，axile 即将退出…',
   },
   edit: {
     brand: '系统配置',
@@ -63,15 +65,13 @@ const COPY: Record<WizardMode, Copy> = {
   },
 }
 
-// 两个可选集成各自成步（都带「测试」按钮，需要按钮+结果的横向空间）：交易日历、执行告警飞书。
-// 数据库/环境/日志等有可用默认值、无需连通性自检，收进确认页的「高级选项」。
-const STEP_LABELS = ['交易日历', '执行告警'] as const
+// 可选告警集成独立成步；数据库/环境/日志等有可用默认值，收进确认页高级选项。
+const INIT_STEP_LABELS = ['交易日历', '执行告警'] as const
+const EDIT_STEP_LABELS = ['执行告警'] as const
 
 /** 表单草稿；`algorithm_modules` / `algorithm_directories` 以每行一项的文本承载，保存时切分为数组。 */
 interface Draft {
   sqlalchemy_database_uri: string
-  trading_calendar_token: string
-  trading_calendar_api: string
   exe_err_feishu_key: string
   environment: string
   app_log_dir: string
@@ -128,34 +128,31 @@ function TestRow({
 /**
  * 左侧步骤栏。
  *
- * `freeNav=false`（init 向导）：逐级解锁，仅「已完成 / 当前」可点击回跳，已完成项打绿勾。
- * `freeNav=true`（edit 设置页）：各节可任意跳转、不显示进度绿勾——系统已配好，这里是随取随改的导航而非线性流程。
+ * 初始化向导逐级解锁，仅「已完成 / 当前」可点击回跳，已完成项打绿勾。
  */
 function Rail({
   step,
   steps,
   title,
   onJump,
-  freeNav = false,
 }: {
   step: number
   steps: readonly string[]
   title: string
   onJump: (i: number) => void
-  freeNav?: boolean
 }) {
   return (
-    <aside className="w-[248px] flex-none overflow-y-auto border-r border-line bg-surface px-[18px] py-7">
-      <div className="px-2.5 pb-3.5 text-xs font-semibold tracking-wide text-ink-3">{title}</div>
+    <aside className="flex w-full flex-none overflow-x-auto border-b border-line bg-surface px-3 py-2 sm:block sm:w-[248px] sm:overflow-y-auto sm:border-b-0 sm:border-r sm:px-[18px] sm:py-7">
+      <div className="hidden px-2.5 pb-3.5 text-xs font-semibold tracking-wide text-ink-3 sm:block">{title}</div>
       {steps.map((label, i) => {
-        const done = !freeNav && i < step
+        const done = i < step
         const cur = i === step
-        const clickable = freeNav || i <= step
+        const clickable = i <= step
         return (
           <button
             key={label}
             onClick={() => clickable && onJump(i)}
-            className={`flex w-full items-center gap-3 rounded-[10px] p-2.5 text-left text-[14px] ${
+            className={`flex w-auto min-w-fit flex-none items-center gap-2 rounded-[10px] p-2.5 text-left text-[13px] sm:w-full sm:gap-3 sm:text-[14px] ${
               cur ? 'bg-accent-soft font-semibold text-ink-1' : 'text-ink-2'
             } ${clickable ? 'cursor-pointer' : 'cursor-default'}`}
           >
@@ -183,8 +180,8 @@ function Rail({
  *
  * 两种模式共用一套表单，但**导航范式不同**：
  * - `init`=首启初始化（由 `AppRoot` 在未配置时整屏渲染）：线性向导，逐级「下一步」推进，Rail 仅回跳已过步骤。
- * - `edit`=已配置后从齿轮进入的系统配置（由 `SystemConfigPage` 承载，带关闭回调）：**设置页**，
- *   Rail 各节任意跳转、页脚常驻「保存并重启」，可从任意节直接保存——系统早已配好，无须逐级点按。
+ * - `edit`=已配置后从齿轮进入的系统配置（由 `SystemConfigPage` 承载）：**设置页**，
+ *   页内分段可任意切换，页脚常驻「保存并重启」——系统早已配好，无须逐级点按。
  *
  * 采集数据库地址与可选外部集成配置，保存后后端写入 config.toml 并自重启；
  * 期间轮询 `/init/status`，就绪后刷新页面进入正常应用。编辑态保存前先弹确认（重启会中断执行）。
@@ -192,30 +189,28 @@ function Rail({
 export function InitWizard({
   initial,
   mode = 'init',
-  onClose,
 }: {
   initial: InitValues
   /** 运行模式，默认首启初始化。 */
   mode?: WizardMode
-  /** 编辑态的关闭回调（返回主应用）；首启态不传。 */
-  onClose?: () => void
 }) {
-  const copy = COPY[mode]
-  const steps = [...STEP_LABELS, copy.confirmTitle]
   const isEdit = mode === 'edit'
+  const copy = COPY[mode]
+  const steps = [...(isEdit ? EDIT_STEP_LABELS : INIT_STEP_LABELS), copy.confirmTitle]
 
   const toast = useToastStore((s) => s.toast)
   const [step, setStep] = useState(0)
   const [saving, setSaving] = useState(false)
   const [dbTest, setDbTest] = useState<TestState>(null)
-  const [calendarTest, setCalendarTest] = useState<TestState>(null)
+  const [calendarSetup, setCalendarSetup] = useState<CalendarSetupSnapshot>({
+    calendars: [],
+    summary: [],
+  })
   const [feishuTest, setFeishuTest] = useState<TestState>(null)
   const [confirm, setConfirm] = useState<ConfirmSpec | null>(null)
 
   const [draft, setDraft] = useState<Draft>({
     sqlalchemy_database_uri: initial.sqlalchemy_database_uri || DEFAULT_DB_URI,
-    trading_calendar_token: initial.trading_calendar_token ?? '',
-    trading_calendar_api: initial.trading_calendar_api ?? '',
     exe_err_feishu_key: initial.exe_err_feishu_key ?? '',
     environment: initial.environment || 'local',
     app_log_dir: initial.app_log_dir || './logs',
@@ -240,15 +235,6 @@ export function InitWizard({
       setFeishuTest(await testFeishu(draft.exe_err_feishu_key))
     } catch (e) {
       setFeishuTest({ ok: false, message: errText(e) })
-    }
-  }
-
-  const runCalendarTest = async () => {
-    setCalendarTest('busy')
-    try {
-      setCalendarTest(await testTradingCalendar(draft.trading_calendar_token, draft.trading_calendar_api))
-    } catch (e) {
-      setCalendarTest({ ok: false, message: errText(e) })
     }
   }
 
@@ -277,6 +263,7 @@ export function InitWizard({
           .filter(Boolean)
       await saveInit({
         ...draft,
+        ...(!isEdit ? { trading_calendars: calendarSetup.calendars } : {}),
         algorithm_modules: splitLines(draft.algorithm_modules),
         algorithm_directories: splitLines(draft.algorithm_directories),
       })
@@ -304,10 +291,10 @@ export function InitWizard({
   }
 
   const confirmStep = steps.length - 1
+  const calendarStep = 0
+  const alertStep = isEdit ? 0 : 1
   const nextDisabled = step === confirmStep && !draft.sqlalchemy_database_uri.trim()
-
-  const calendarHalf = Boolean(draft.trading_calendar_token.trim()) && !draft.trading_calendar_api.trim()
-  const saveDisabled = saving || !draft.sqlalchemy_database_uri.trim() || calendarHalf
+  const saveDisabled = saving || !draft.sqlalchemy_database_uri.trim()
 
   // edit 态是设置页而非向导：kicker 去掉「n / N」序号，只留分节标签。
   const kickerOf = (n: number) => (isEdit ? copy.kicker : `${copy.kicker} · ${n} / ${steps.length}`)
@@ -318,58 +305,44 @@ export function InitWizard({
   }
 
   return (
-    <div className="flex h-screen flex-col">
-      <header className="flex h-14 flex-none items-center gap-3.5 border-b border-line bg-surface px-6">
-        <span className="font-[650] tracking-wide">axile</span>
-        <span className="text-[14px] text-ink-2">· {copy.brand}</span>
-        <span className="ml-auto" />
-        <ThemeToggle />
-        {isEdit && onClose && (
-          <button
-            className="cursor-pointer rounded-chip border border-line px-3 py-1.5 text-[13px] text-ink-2 hover:border-ink-3/40 hover:text-ink-1"
-            onClick={onClose}
-          >
-            关闭
-          </button>
-        )}
-      </header>
+    <div className={`flex flex-col ${isEdit ? 'h-full' : 'h-screen'}`}>
+      {!isEdit && (
+        <header className="flex h-14 flex-none items-center gap-3.5 border-b border-line bg-surface px-6">
+          <span className="font-[650] tracking-wide">axile</span>
+          <span className="text-[14px] text-ink-2">· {copy.brand}</span>
+          <span className="ml-auto" />
+          <ThemeToggle />
+        </header>
+      )}
 
-      <div className="flex flex-1 overflow-hidden">
-        <Rail step={step} steps={steps} title={copy.brand} onJump={setStep} freeNav={isEdit} />
+      <div className="flex flex-1 flex-col overflow-hidden sm:flex-row">
+        {!isEdit && <Rail step={step} steps={steps} title={copy.brand} onJump={setStep} />}
         <div className="flex flex-1 flex-col overflow-hidden">
-          <div className="flex-1 overflow-y-auto">
-            {step === 0 && (
+          <div className="flex-1 overflow-y-auto [scrollbar-gutter:stable]">
+            {isEdit && (
+              <div className="mx-auto max-w-[820px] px-5 pt-6 sm:px-12">
+                <Segmented
+                  size="sm"
+                  value={step === alertStep ? 'alert' : 'confirm'}
+                  options={[
+                    { value: 'alert', label: '执行告警' },
+                    { value: 'confirm', label: '确认并保存' },
+                  ]}
+                  onChange={(value) => setStep(value === 'alert' ? alertStep : confirmStep)}
+                />
+              </div>
+            )}
+            {!isEdit && step === calendarStep && (
               <WizardPage
                 kicker={kickerOf(1)}
-                title="交易日历（选填）"
-                lead="配置兼容接口后，axile 会把 SSE 与 CFFEX 日历保存到本地数据库，并在覆盖不足时自动补齐。接口地址留空则使用工作日回退。"
+                title="配置交易日历"
+                lead="为当前交易渠道选择一种日历刷新方式（选填）。未配置时自动排程继续执行，后续可在设置中补充或替换并添加人工覆盖。"
               >
-                <div className="max-w-[560px]">
-                  <label className={labelCls}>交易日历接口</label>
-                  <input
-                    className={inputCls}
-                    value={draft.trading_calendar_api}
-                    onChange={(e) => set({ trading_calendar_api: e.target.value })}
-                    placeholder="https://example.com/trading-calendar"
-                  />
-                  <label className={labelCls}>Bearer 令牌（选填）</label>
-                  <input
-                    className={inputCls}
-                    type="password"
-                    value={draft.trading_calendar_token}
-                    onChange={(e) => set({ trading_calendar_token: e.target.value })}
-                    placeholder="接口无需鉴权时留空"
-                  />
-                  <TestRow
-                    state={calendarTest}
-                    onTest={runCalendarTest}
-                    disabled={!draft.trading_calendar_api.trim()}
-                  />
-                </div>
+                <CalendarSetupStep onChange={setCalendarSetup} />
               </WizardPage>
             )}
 
-            {step === 1 && (
+            {step === alertStep && (
               <WizardPage
                 kicker={kickerOf(2)}
                 title="执行错误告警（选填）"
@@ -393,7 +366,7 @@ export function InitWizard({
               </WizardPage>
             )}
 
-            {step === 2 && (
+            {step === confirmStep && (
               <WizardPage
                 kicker={kickerOf(steps.length)}
                 title={copy.confirmTitle}
@@ -402,8 +375,11 @@ export function InitWizard({
                 <div className="max-w-[560px]">
                   <dl className="rounded-[14px] border border-line bg-surface px-4 py-2 text-[14px]">
                     {[
-                      ['交易日历', draft.trading_calendar_api ? '已配置自动同步' : '（未配置 · 工作日回退）'],
-                      ['日历鉴权', draft.trading_calendar_token ? '已填写 Bearer 令牌' : '（无需鉴权）'],
+                      ...(!isEdit
+                        ? (calendarSetup.summary.length > 0
+                            ? calendarSetup.summary.map((value, index) => [`交易日历 ${index + 1}`, value])
+                            : [['交易日历', '未配置，自动排程继续执行']])
+                        : []),
                       ['执行告警', draft.exe_err_feishu_key ? '已配置飞书推送' : '（未配置 · 不推送）'],
                     ].map(([k, v]) => (
                       <div key={k} className="flex justify-between gap-4 border-b border-line py-2.5 last:border-0">
@@ -476,13 +452,13 @@ export function InitWizard({
             )}
           </div>
 
-          <div className="flex gap-3 border-t border-line bg-surface px-12 py-3.5">
+          <div className="flex gap-3 border-t border-line bg-surface px-5 py-3.5 sm:px-12">
             {isEdit ? (
               // edit=设置页：右侧常驻「保存并重启」，可从任意节直接保存（经确认弹窗）。
               <>
                 <span className="flex-1" />
                 <button
-                  className="cursor-pointer rounded-[11px] border border-ink-1 bg-ink-1 px-[22px] py-2.5 text-[14px] font-[550] text-surface disabled:opacity-45"
+                  className="shrink-0 cursor-pointer whitespace-nowrap rounded-[11px] border border-ink-1 bg-ink-1 px-[22px] py-2.5 text-[14px] font-[550] text-surface disabled:opacity-45"
                   onClick={onSave}
                   disabled={saveDisabled}
                 >
@@ -502,7 +478,7 @@ export function InitWizard({
                 )}
                 <span className="flex-1" />
                 <button
-                  className="cursor-pointer rounded-[11px] border border-ink-1 bg-ink-1 px-[22px] py-2.5 text-[14px] font-[550] text-surface disabled:opacity-45"
+                  className="shrink-0 cursor-pointer whitespace-nowrap rounded-[11px] border border-ink-1 bg-ink-1 px-[22px] py-2.5 text-[14px] font-[550] text-surface disabled:opacity-45"
                   onClick={onNext}
                   disabled={nextDisabled || saving}
                 >

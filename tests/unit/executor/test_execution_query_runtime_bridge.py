@@ -39,9 +39,9 @@ def test_bridge_patches_pending_snapshot_from_place_order_result() -> None:
     bridge = ExecutionQueryRuntimeBridge(
         type("_Owner", (), {"get_active_execution_query_runtime": lambda self: _Runtime()})()
     )
-    order = _make_order("BTCUSDT", "order-1")
+    order = _make_order("rb2610", "order-1")
 
-    patched = bridge.handle_place_order_result(order, fallback_symbol="BTCUSDT")
+    patched = bridge.handle_place_order_result(order, fallback_symbol="rb2610")
 
     assert patched is True
     assert applied_orders == [order]
@@ -51,9 +51,9 @@ def test_bridge_resolves_trade_invalidation_scope_from_trade_record() -> None:
     bridge = ExecutionQueryRuntimeBridge(
         type("_Owner", (), {"get_active_execution_query_runtime": lambda self: None})()
     )
-    trade = _make_trade("ETHUSDT", "order-2", "trade-1")
+    trade = _make_trade("ag2612", "order-2", "trade-1")
 
-    assert bridge.resolve_trade_invalidation_scope(trade) == ("ETHUSDT", "order-2")
+    assert bridge.resolve_trade_invalidation_scope(trade) == ("ag2612", "order-2")
 
 
 def test_bridge_invalidates_trade_snapshot_when_patch_is_unavailable() -> None:
@@ -66,9 +66,9 @@ def test_bridge_invalidates_trade_snapshot_when_patch_is_unavailable() -> None:
     bridge = ExecutionQueryRuntimeBridge(
         type("_Owner", (), {"get_active_execution_query_runtime": lambda self: _Runtime()})()
     )
-    trade = _make_trade("SOLUSDT", "order-3", "trade-2")
+    trade = _make_trade("au2612", "order-3", "trade-2")
 
     patched = bridge.handle_trade_record(trade)
 
     assert patched is False
-    assert invalidated == [("SOLUSDT", "order-3")]
+    assert invalidated == [("au2612", "order-3")]

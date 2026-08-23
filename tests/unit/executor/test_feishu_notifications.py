@@ -216,7 +216,17 @@ def test_execute_with_feishu_key_uses_extracted_sender(monkeypatch) -> None:
     """AbstractExecutor.execute 应通过有界后台派发器投递异步通知，而非裸起线程。"""
     executor = _FeishuAwareExecutor(
         TradeChannel.CTP,
-        CTPAccountConfig.model_validate({"broker_id": "b", "investor_id": "i", "password": "p"}),
+        CTPAccountConfig.model_validate(
+            {
+                "broker_id": "b",
+                "investor_id": "i",
+                "password": "p",
+                "td_front": "tcp://td:1",
+                "md_front": "tcp://md:2",
+                "app_id": "app",
+                "auth_code": "auth",
+            }
+        ),
     )
     sent: list[tuple[object, object, object]] = []
 
@@ -244,8 +254,16 @@ def test_execute_with_feishu_key_uses_extracted_sender(monkeypatch) -> None:
     standard_input = UnifiedStandardInput.from_dict(
         {
             "channel_type": TradeChannel.CTP.value,
-            "account_config": {"broker_id": "b", "investor_id": "i", "password": "p"},
-            "curr_target": {"BTCUSDT": 0.1},
+            "account_config": {
+                "broker_id": "b",
+                "investor_id": "i",
+                "password": "p",
+                "td_front": "tcp://td:1",
+                "md_front": "tcp://md:2",
+                "app_id": "app",
+                "auth_code": "auth",
+            },
+            "curr_target": {"rb2610": 0.1},
             "algorithm": {"method": "TEST"},
             "feishu_key": "hook-exec",
         }
@@ -291,7 +309,7 @@ def test_empty_positions_uses_extracted_sender(monkeypatch) -> None:
             market_value=100.0,
             positions=[
                 Position(
-                    symbol="BTCUSDT",
+                    symbol="rb2610",
                     volume=1.0,
                     available_volume=1.0,
                     market_value=100.0,
@@ -301,7 +319,17 @@ def test_empty_positions_uses_extracted_sender(monkeypatch) -> None:
             ],
         ),
     )
-    executor.account_config = CTPAccountConfig.model_validate({"broker_id": "b", "investor_id": "i", "password": "p"})
+    executor.account_config = CTPAccountConfig.model_validate(
+        {
+            "broker_id": "b",
+            "investor_id": "i",
+            "password": "p",
+            "td_front": "tcp://td:1",
+            "md_front": "tcp://md:2",
+            "app_id": "app",
+            "auth_code": "auth",
+        }
+    )
 
     result = executor.empty_positions(feishu_key="hook-empty")
 
@@ -322,7 +350,7 @@ def test_send_execute_results_to_feishu_builds_expected_card(monkeypatch) -> Non
 
     order = UnifiedOrder(
         order_id="order-1",
-        symbol="BTCUSDT",
+        symbol="rb2610",
         direction=OrderDirection.BUY,
         order_type=OrderType.LIMIT,
         volume=1.0,
@@ -336,7 +364,7 @@ def test_send_execute_results_to_feishu_builds_expected_card(monkeypatch) -> Non
             market_value=100.0,
             positions=[
                 Position(
-                    symbol="BTCUSDT",
+                    symbol="rb2610",
                     volume=1.0,
                     available_volume=1.0,
                     market_value=100.0,
@@ -346,14 +374,14 @@ def test_send_execute_results_to_feishu_builds_expected_card(monkeypatch) -> Non
             ],
         ),
         symbol_results={
-            "BTCUSDT": AlgorithmResult(
-                symbol="BTCUSDT",
+            "rb2610": AlgorithmResult(
+                symbol="rb2610",
                 algorithm="TEST",
                 orders=[order],
                 trades=[
                     TradeRecord(
                         trade_id="trade-1",
-                        symbol="BTCUSDT",
+                        symbol="rb2610",
                         order_id="order-1",
                         trade_time="2026-03-25 14:00:00",
                         trade_volume=1.0,
@@ -382,7 +410,7 @@ def test_send_execute_results_to_feishu_builds_expected_card(monkeypatch) -> Non
     assert template_variable["algorithm"] == "Unknown"
     assert template_variable["positions"] == [
         {
-            "symbol": "BTCUSDT",
+            "symbol": "rb2610",
             "direction": "多头",
             "market_value": "100.00",
             "volume": "1.0000",
@@ -392,7 +420,7 @@ def test_send_execute_results_to_feishu_builds_expected_card(monkeypatch) -> Non
     ]
     assert template_variable["trades"] == [
         {
-            "symbol": "BTCUSDT",
+            "symbol": "rb2610",
             "dt": "2026-03-25 14:00:00",
             "operate": "开多",
             "volume": "1.0000",

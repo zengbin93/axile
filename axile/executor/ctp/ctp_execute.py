@@ -292,7 +292,7 @@ class CTPExecutor(AbstractExecutor, UnifiedCallbackClient):
 
     @override
     def _check_trading_time(self):
-        return self._is_exchange_open("CFFEX")
+        return self._is_channel_calendar_open()
 
     @override
     def get_account_assets(self):

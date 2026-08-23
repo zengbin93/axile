@@ -8,6 +8,7 @@ Examples
 >>> from axile.executor.gm import GMExecutor
 >>> from axile.executor.models.unified_input import GMAccountConfig
 >>> config = GMAccountConfig(
+...     connection_mode="terminal",
 ...     account_id="your_account_id",
 ...     token="your_token",
 ...     terminal_path="C:/goldminer3",
@@ -127,12 +128,12 @@ class GMExecutor(AbstractExecutor, UnifiedCallbackClient):
         self._gm_config = account_config
         self.account_id = account_config.account_id
 
-        if account_config.serv_addr:
+        if account_config.connection_mode == "service":
             self.just_started = False
         else:
             terminal_path = account_config.terminal_path
             if terminal_path is None:
-                raise ValueError("GMAccountConfig 缺少 terminal_path 或 serv_addr")
+                raise RuntimeError("GM terminal 模式缺少终端目录")
             self.just_started = self._start_gm_desktop_if_not(terminal_path)
 
         logger.success(f"[GM] 账户 {self.account_id} 初始化完成，GM runtime 将通过 bridge 懒启动")
@@ -148,7 +149,7 @@ class GMExecutor(AbstractExecutor, UnifiedCallbackClient):
 
     def _check_trading_time(self) -> bool:
         """检查是否在交易时间."""
-        return self._is_exchange_open("SSE")
+        return self._is_channel_calendar_open()
 
     # ==================== 回调模式方法 ====================
 

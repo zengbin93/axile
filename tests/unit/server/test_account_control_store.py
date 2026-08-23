@@ -122,7 +122,7 @@ def test_load_daily_counters_aggregates_account_and_symbol_scopes() -> None:
                         bucket_type=AccountControlBucketType.DAY,
                         bucket_start="2026-03-22T00:00:00",
                         scope_type=AccountControlScopeType.SYMBOL,
-                        symbol="BTCUSDT",
+                        symbol="rb2610",
                         operation="place_order",
                         delta_count=5,
                         delta_uid="delta-day-symbol-d",
@@ -166,7 +166,7 @@ def test_load_daily_counters_aggregates_account_and_symbol_scopes() -> None:
                     bucket_type=AccountControlBucketType.DAY,
                     bucket_start="2026-03-22T00:00:00",
                     operation="place_order",
-                    symbol="BTCUSDT",
+                    symbol="rb2610",
                 )
                 == 5
             )
@@ -251,7 +251,7 @@ def test_flush_execution_records_persists_allowed_blocked_and_failed_facts() -> 
                         bucket_type=AccountControlBucketType.DAY,
                         bucket_start="2026-03-22T00:00:00",
                         scope_type=AccountControlScopeType.SYMBOL,
-                        symbol="BTCUSDT",
+                        symbol="rb2610",
                         operation="place_order",
                         delta_count=1,
                         delta_uid="delta-allowed-symbol",
@@ -265,7 +265,7 @@ def test_flush_execution_records_persists_allowed_blocked_and_failed_facts() -> 
                         seq=1,
                         channel=TradeChannel.CTP,
                         operation="place_order",
-                        symbol="BTCUSDT",
+                        symbol="rb2610",
                         metadata={"order_id": "oid-1"},
                         decision=AccountControlDecision.ALLOWED,
                         counted=True,
@@ -280,7 +280,7 @@ def test_flush_execution_records_persists_allowed_blocked_and_failed_facts() -> 
                         seq=2,
                         channel=TradeChannel.CTP,
                         operation="place_order",
-                        symbol="BTCUSDT",
+                        symbol="rb2610",
                         metadata={},
                         decision=AccountControlDecision.BLOCKED,
                         counted=False,
@@ -295,7 +295,7 @@ def test_flush_execution_records_persists_allowed_blocked_and_failed_facts() -> 
                         seq=3,
                         channel=TradeChannel.CTP,
                         operation="query_order",
-                        symbol="BTCUSDT",
+                        symbol="rb2610",
                         metadata={},
                         decision=AccountControlDecision.ALLOWED,
                         counted=True,
@@ -366,7 +366,7 @@ def test_flush_execution_records_is_idempotent() -> None:
                     seq=1,
                     channel=TradeChannel.CTP,
                     operation="cancel_order",
-                    symbol="ETHUSDT",
+                    symbol="ag2612",
                     metadata={"order_id": "oid-2"},
                     decision=AccountControlDecision.ALLOWED,
                     counted=True,
@@ -428,7 +428,7 @@ def test_load_recent_allowed_timestamps_reads_account_and_symbol_scopes() -> Non
                         seq=1,
                         channel=TradeChannel.CTP,
                         operation="place_order",
-                        symbol="BTCUSDT",
+                        symbol="rb2610",
                         metadata={"order_id": "oid-1"},
                         decision=AccountControlDecision.ALLOWED,
                         counted=True,
@@ -444,7 +444,7 @@ def test_load_recent_allowed_timestamps_reads_account_and_symbol_scopes() -> Non
                         seq=2,
                         channel=TradeChannel.CTP,
                         operation="place_order",
-                        symbol="BTCUSDT",
+                        symbol="rb2610",
                         metadata={},
                         decision=AccountControlDecision.BLOCKED,
                         counted=False,
@@ -476,7 +476,7 @@ def test_load_recent_allowed_timestamps_reads_account_and_symbol_scopes() -> Non
                         seq=4,
                         channel=TradeChannel.CTP,
                         operation="place_order",
-                        symbol="BTCUSDT",
+                        symbol="rb2610",
                         metadata={"order_id": "oid-2"},
                         decision=AccountControlDecision.ALLOWED,
                         counted=True,
@@ -496,14 +496,14 @@ def test_load_recent_allowed_timestamps_reads_account_and_symbol_scopes() -> Non
             assert (
                 snapshot.get_last_allowed_at_ms(
                     "place_order",
-                    symbol="BTCUSDT",
+                    symbol="rb2610",
                 )
                 == 1_763_226_662_000
             )
             assert (
                 snapshot.get_last_allowed_at_ms(
                     "place_order",
-                    symbol="ETHUSDT",
+                    symbol="ag2612",
                 )
                 is None
             )

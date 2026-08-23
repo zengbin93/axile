@@ -1,19 +1,90 @@
-import { useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate } from '@/components/ui/nav'
 import { WizardPage, WizardNav } from '@/features/setup/WizardNav'
-import { ChoiceGroup } from '@/components/ui/ChoiceGroup'
 import { ConfirmModal, type ConfirmSpec } from '@/components/ui/ConfirmModal'
 import { CustomFunctionEditor } from '@/features/portfolio/CustomFunctionEditor'
 import { createPortfolio } from '@/lib/api/portfolios'
 import { useWizardStore } from '@/stores/wizard'
 import { useToastStore } from '@/stores/ui'
 import { useDomainStore } from '@/stores/domain'
+import { useChannelCatalogStore } from '@/stores/channels'
+import {
+  portfolioMarketOptions,
+  portfolioTemplate,
+  selectPortfolioMarket,
+  type PortfolioMarketOption,
+} from '@/features/portfolio/portfolioMarkets'
 
-const MARKETS = ['加密货币', 'A股', '期货']
+function usePortfolioMarkets() {
+  const channels = useChannelCatalogStore((state) => state.channels)
+  return useMemo(() => portfolioMarketOptions(channels ?? []), [channels])
+}
+
+function MarketChoiceGroup({
+  value,
+  options,
+  onChange,
+}: {
+  value: string
+  options: PortfolioMarketOption[]
+  onChange: (value: string) => void
+}) {
+  return (
+    <div role="radiogroup" aria-label="市场" className="grid gap-px overflow-hidden rounded-[8px] border border-line bg-line sm:grid-cols-3">
+      {options.map((option) => {
+        const selected = option.value === value
+        const examples = option.exampleSymbols.slice(0, 2).join(' · ')
+        return (
+          <button
+            key={option.value}
+            type="button"
+            role="radio"
+            aria-checked={selected}
+            className={`relative flex min-h-[76px] min-w-0 items-center bg-surface px-4 py-3 text-left transition-colors ${
+              selected ? 'bg-accent-soft' : 'hover:bg-bg-subtle'
+            }`}
+            onClick={() => onChange(option.value)}
+          >
+            <span className="min-w-0 flex-1">
+              <span className={`block text-[14px] font-[620] ${selected ? 'text-ink-1' : 'text-ink-2'}`}>{option.label}</span>
+              <span className="mt-1 block truncate text-[12px] text-ink-3">{examples}</span>
+            </span>
+            {selected && <span aria-hidden className="absolute inset-y-0 left-0 w-0.5 bg-accent sm:inset-x-0 sm:top-auto sm:bottom-0 sm:h-0.5 sm:w-auto" />}
+          </button>
+        )
+      })}
+    </div>
+  )
+}
 
 /* ---------------- 1 命名 ---------------- */
 export function PfName() {
   const { pf, setPf } = useWizardStore()
+  const markets = usePortfolioMarkets()
+  const loading = useChannelCatalogStore((state) => state.loading)
+  const error = useChannelCatalogStore((state) => state.error)
+  const refresh = useChannelCatalogStore((state) => state.refresh)
+  const selectedMarket = markets.find((market) => market.value === pf.market) ?? null
+
+  useEffect(() => {
+    if (markets.length === 0) return
+    const nextMarket = selectedMarket ?? markets[0]
+    const next = selectPortfolioMarket(pf, nextMarket, markets)
+    if (
+      next.market !== pf.market ||
+      next.customCode !== pf.customCode ||
+      next.templateMarket !== pf.templateMarket
+    ) {
+      setPf({ ...next, verified: null })
+    }
+  }, [markets, pf, selectedMarket, setPf])
+
+  const changeMarket = (market: string) => {
+    const nextMarket = markets.find((option) => option.value === market)
+    if (!nextMarket) return
+    setPf({ ...selectPortfolioMarket(pf, nextMarket, markets), verified: null })
+  }
+
   return (
     <div className="flex h-full flex-col">
       <div className="flex-1">
@@ -27,15 +98,21 @@ export function PfName() {
               placeholder="例如：我的趋势组合"
             />
             <label className="mb-1.5 mt-5 block text-[13px] text-ink-2">市场</label>
-            <ChoiceGroup
+            <MarketChoiceGroup
               value={pf.market}
-              options={MARKETS.map((m) => ({ value: m, label: m }))}
-              onChange={(m) => setPf({ market: m })}
+              options={markets}
+              onChange={changeMarket}
             />
+            {loading && markets.length === 0 && <p className="mt-2 text-[13px] text-ink-2">加载市场…</p>}
+            {error && markets.length === 0 && (
+              <button type="button" className="mt-2 text-[13px] text-warn hover:underline" onClick={() => void refresh()}>
+                市场目录加载失败，点击重试
+              </button>
+            )}
           </div>
         </WizardPage>
       </div>
-      <WizardNav nextTo="/setup/pf/define" nextDisabled={!pf.name.trim()} />
+      <WizardNav nextTo="/setup/pf/define" nextDisabled={!pf.name.trim() || selectedMarket == null} />
     </div>
   )
 }
@@ -43,16 +120,22 @@ export function PfName() {
 /* ---------------- 2 定义策略 ---------------- */
 export function PfDefine() {
   const { pf, setPf } = useWizardStore()
+  const markets = usePortfolioMarkets()
+  const selectedMarket = markets.find((market) => market.value === pf.market) ?? null
   const navigate = useNavigate()
   const toast = useToastStore((s) => s.toast)
   const refreshPortfolios = useDomainStore((s) => s.refreshPortfolios)
   const [confirm, setConfirm] = useState<ConfirmSpec | null>(null)
 
   const doCreate = async () => {
+    if (!selectedMarket) {
+      toast('当前市场不可用，请返回上一步重新选择')
+      return
+    }
     try {
       const created = await createPortfolio({
         name: pf.name,
-        market: pf.market,
+        market: selectedMarket.label,
         custom_calc_py_code: pf.customCode,
       })
       setPf({ savedId: created.id })
@@ -80,16 +163,41 @@ export function PfDefine() {
     await doCreate()
   }
 
-  const canNext = pf.customCode.trim().length > 0
+  const canNext = pf.customCode.trim().length > 0 && selectedMarket != null
+  const templateMismatch = pf.templateMarket !== null && pf.templateMarket !== pf.market
 
   return (
     <div className="flex h-full flex-col">
       {/* 预留滚动条槽位：验证结果出现使内容超出一屏、滚动条切入时，居中列不会左右抖动。 */}
       <div className="flex-1 overflow-y-auto [scrollbar-gutter:stable]">
         <WizardPage kicker="组合设置 · 2 / 3" title="这个组合交易什么？">
+          <div
+            inert={!templateMismatch}
+            className={`grid transition-[grid-template-rows] duration-200 ease-[cubic-bezier(.4,0,.2,1)] motion-reduce:transition-none ${templateMismatch ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'}`}
+          >
+            <div className="min-h-0 overflow-hidden">
+              <div className="mb-4 flex items-center justify-between gap-4 border-l-[3px] border-warn bg-warn-soft px-4 py-3 text-[13px]">
+                <span className="text-ink-2">当前代码来自其他市场。</span>
+                <button
+                  type="button"
+                  className="shrink-0 font-[550] text-warn hover:underline"
+                  onClick={() => {
+                    if (!selectedMarket) return
+                    setPf({
+                      customCode: portfolioTemplate(selectedMarket),
+                      templateMarket: selectedMarket.value,
+                      verified: null,
+                    })
+                  }}
+                >
+                  换成{selectedMarket?.label ?? '当前市场'}示例
+                </button>
+              </div>
+            </div>
+          </div>
           <CustomFunctionEditor
             code={pf.customCode}
-            onChange={(customCode) => setPf({ customCode })}
+            onChange={(customCode) => setPf({ customCode, verified: null })}
             onVerifiedChange={(v) => setPf({ verified: v })}
           />
         </WizardPage>

@@ -8,6 +8,7 @@
  * - 整体限量到 cap 行，其余交给「完整回看」。
  */
 import { formatMoney } from '@/lib/derive'
+import type { AccountActivity } from '@/lib/api/accounts'
 import type { ExecuteRecord } from '@/types/api'
 
 type Kind = 'fill' | 'clear' | 'noop' | 'fail' | 'terminated'
@@ -17,6 +18,7 @@ export type RecentRow =
   | { type: 'noop'; key: string; time: string; count: number }
   | { type: 'fail'; key: string; time: string; count: number; saturated: boolean; executionId: string | null }
   | { type: 'terminated'; key: string; time: string; count: number; executionId: string | null }
+  | { type: 'skip'; key: string; time: string; count: number }
 
 /** 本次执行相对上次改动了多少个品种的目标。 */
 function changedCount(r: ExecuteRecord): number {
@@ -72,29 +74,42 @@ export interface RecentResult {
  * fetchLimit : 拉取时用的 limit；用于判断末尾的失败/空跑组是否「饱和」（窗口拉满、
  *              库里可能还有更多同类，展示为 N+）。
  */
-export function buildRecentRows(
-  records: ExecuteRecord[],
+/** 把统一账户活动流折叠为近期展示行。 */
+export function buildRecentActivity(
+  activity: AccountActivity[],
   opts: { cap?: number; fetchLimit?: number } = {},
 ): RecentResult {
   const cap = opts.cap ?? 6
-  const fetchLimit = opts.fetchLimit ?? records.length
-  const windowFull = records.length >= fetchLimit
+  const fetchLimit = opts.fetchLimit ?? activity.length
+  const windowFull = activity.length >= fetchLimit
 
   const all: RecentRow[] = []
   let i = 0
-  while (i < records.length) {
-    const k = kindOf(records[i])
+  while (i < activity.length) {
+    const current = activity[i]
+    if (current.kind === 'schedule_skip') {
+      let j = i + 1
+      while (j < activity.length && activity[j].kind === 'schedule_skip') j += 1
+      all.push({ type: 'skip', key: `s${current.id}`, time: current.occurred_at, count: j - i })
+      i = j
+      continue
+    }
+    const k = kindOf(current.record)
     if (k === 'fill' || k === 'clear') {
-      all.push(fillRow(records[i], i, k))
+      all.push(fillRow(current.record, i, k))
       i += 1
       continue
     }
     // 折叠一段连续的同类（noop / fail / terminated）
     let j = i
-    while (j < records.length && kindOf(records[j]) === k) j += 1
-    const run = records.slice(i, j)
+    while (j < activity.length) {
+      const candidate = activity[j]
+      if (candidate.kind !== 'execution' || kindOf(candidate.record) !== k) break
+      j += 1
+    }
+    const run = activity.slice(i, j).map((item) => item.kind === 'execution' ? item.record : null).filter((item): item is ExecuteRecord => item != null)
     const latest = run[0]
-    const saturated = j === records.length && windowFull
+    const saturated = j === activity.length && windowFull
     if (k === 'noop') {
       all.push({ type: 'noop', key: `n${i}`, time: latest.created_at, count: run.length })
     } else if (k === 'terminated') {

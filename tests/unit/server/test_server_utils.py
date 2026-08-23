@@ -44,7 +44,15 @@ def _build_account() -> Account:
         trade_channel=TradeChannel.CTP,
         account_control_preset="default",
         account_control_override=None,
-        account_config={"broker_id": "9999", "investor_id": "test", "password": "test"},
+        account_config={
+            "broker_id": "9999",
+            "investor_id": "test",
+            "password": "test",
+            "td_front": "tcp://td:1",
+            "md_front": "tcp://md:2",
+            "app_id": "app",
+            "auth_code": "auth",
+        },
         is_started=True,
         cron_expr="*/5 * * * *",
         remark=None,
@@ -141,14 +149,14 @@ def test_append_error_execute_record_sanitizes_account_config() -> None:
     record = asyncio.run(
         execution_records.append_error_execute_record(
             account_id=1,
-            raw_input={"account_config": {"secret": "x"}, "symbol": "BTCUSDT"},
+            raw_input={"account_config": {"secret": "x"}, "symbol": "rb2610"},
             msg="boom",
             session_factory=lambda: fake_session,
         )
     )
 
     assert fake_session.committed is True
-    assert record.raw_input == {"symbol": "BTCUSDT"}
+    assert record.raw_input == {"symbol": "rb2610"}
     assert record.raw_result == {"msg": "boom"}
     assert record.is_success == 0
 
@@ -168,14 +176,14 @@ def test_append_terminated_execute_record_persists_termination_metadata() -> Non
             finished_at="2026-03-22T18:00:02",
             cancel_attempted=True,
             cancel_failed_order_ids=["oid-1"],
-            raw_input={"account_config": {"secret": "x"}, "symbol": "ETHUSDT"},
+            raw_input={"account_config": {"secret": "x"}, "symbol": "ag2612"},
             raw_result={"summary": {"filled": 0}},
             session_factory=lambda: fake_session,
         )
     )
 
     assert fake_session.committed is True
-    assert record.raw_input == {"symbol": "ETHUSDT"}
+    assert record.raw_input == {"symbol": "ag2612"}
     assert record.raw_result["task_status"] == ExecutionTaskStatus.TERMINATED.value
     assert record.raw_result["execution_kind"] == ExecutionKind.CLEAR_POSITIONS.value
     assert record.raw_result["termination"]["cancel_failed_order_ids"] == ["oid-1"]

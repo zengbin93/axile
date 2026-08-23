@@ -6,7 +6,7 @@ from pydantic import ValidationError
 from axile.server.api.routes.portfolio import _ensure_weight_mapping
 from axile.server.db.models import PortfolioCreate, PortfolioUpdate
 
-CODE = "def calculate_portfolio(context):\n    return {'BTCUSDT': 1.0}\n"
+CODE = "def calculate_portfolio(context):\n    return {'rb2610': 1.0}\n"
 
 
 def test_create_requires_non_empty_custom_function() -> None:
@@ -35,7 +35,7 @@ def test_update_rejects_null_or_blank_custom_function() -> None:
 
 @pytest.mark.parametrize(
     "target",
-    [[], {1: 0.5}, {"BTCUSDT": True}, {"BTCUSDT": "0.5"}, {"BTCUSDT": float("inf")}],
+    [[], {1: 0.5}, {"rb2610": True}, {"rb2610": "0.5"}, {"rb2610": float("inf")}],
 )
 def test_target_must_be_finite_symbol_weight_mapping(target: object) -> None:
     with pytest.raises(ValueError):
@@ -43,4 +43,4 @@ def test_target_must_be_finite_symbol_weight_mapping(target: object) -> None:
 
 
 def test_target_accepts_numeric_weights() -> None:
-    _ensure_weight_mapping({"BTCUSDT": 1, "ETHUSDT": -0.25})
+    _ensure_weight_mapping({"rb2610": 1, "ag2612": -0.25})

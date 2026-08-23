@@ -16,15 +16,48 @@ export interface AlgorithmRef {
 }
 
 /** 渠道账户配置字段。 */
+export interface ChannelAccountFieldConstraints {
+  endpoint?: {
+    scheme: 'required' | 'optional' | 'forbidden'
+    allowed_schemes: Array<'tcp' | 'http' | 'https' | 'ftp' | 'ws' | 'wss'>
+    port: 'required' | 'optional'
+    allow_path: boolean
+  } | null
+  number?: {
+    gt?: number | null
+    gte?: number | null
+  } | null
+}
+
+export interface ChannelAccountFieldClipboard {
+  role: 'trading' | 'market-data' | 'rpc' | 'proxy'
+  group?: string | null
+}
+
 export interface ChannelAccountField {
   name: string
   label: string
-  input: 'text' | 'password' | 'number' | 'boolean' | 'select'
+  kind: 'text' | 'identifier' | 'secret' | 'endpoint' | 'directory' | 'money' | 'boolean' | 'select'
+  width: 'half' | 'full'
   required: boolean
   placeholder?: string
   help?: string
   default?: unknown
   options?: Array<{ value: string; label: string }>
+  visible_when?: { field: string; equals: unknown }
+  constraints?: ChannelAccountFieldConstraints | null
+  clipboard?: ChannelAccountFieldClipboard | null
+}
+
+export interface DirectoryEntry {
+  name: string
+  path: string
+}
+
+export interface DirectoryListing {
+  path: string | null
+  parent: string | null
+  entries: DirectoryEntry[]
 }
 
 /** 单个渠道的依赖可用性，对应 `ChannelCapabilityPublic`。 */
@@ -39,6 +72,11 @@ export interface ChannelCapability {
   missing_packages: string[]
   /** 安装该渠道依赖所用 extra 名（`uv sync --extra <extra>`）。 */
   install_extra: string | null
+  calendar?: { calendar_id: string; label: string } | null
+  portfolio: {
+    market_label: string
+    example_symbols: string[]
+  }
   market: string
   currency: string
   units: {

@@ -23,7 +23,7 @@ class _Logger:
 def _make_order() -> UnifiedOrder:
     return UnifiedOrder(
         order_id="123",
-        symbol="BTCUSDT",
+        symbol="rb2610",
         direction=OrderDirection.SELL,
         order_type=OrderType.LIMIT,
         volume=1.0,
@@ -67,7 +67,7 @@ class _PlainOwner:
 
 
 def _session(owner: object) -> ExecutionSession:
-    return ExecutionSession(owner=cast("Any", owner), symbol="BTCUSDT")
+    return ExecutionSession(owner=cast("Any", owner), symbol="rb2610")
 
 
 def test_session_proxies_reconcile_to_capable_owner() -> None:
@@ -75,16 +75,16 @@ def test_session_proxies_reconcile_to_capable_owner() -> None:
     owner = _CapableOwner()
     session = _session(owner)
 
-    result = session.reconcile_terminal_order("BTCUSDT", "123")
+    result = session.reconcile_terminal_order("rb2610", "123")
 
-    assert owner.reconcile_calls == [("BTCUSDT", "123")]
+    assert owner.reconcile_calls == [("rb2610", "123")]
     assert result is owner.terminal
 
 
 def test_session_reconcile_returns_none_when_owner_incapable() -> None:
     """无能力 owner：reconcile 返回 None，等价跳过对账，不抛."""
     session = _session(_PlainOwner())
-    assert session.reconcile_terminal_order("BTCUSDT", "123") is None
+    assert session.reconcile_terminal_order("rb2610", "123") is None
 
 
 def test_session_proxies_channel_health() -> None:

@@ -11,6 +11,7 @@ import asyncio
 import json
 from dataclasses import dataclass
 
+from axile.common.trade_channel import TradeChannel
 from axile.server.db.models import Account
 from axile.server.execution.audit_sink import build_server_execution_audit_sink
 from axile.server.execution.execution_account_control import (
@@ -86,12 +87,15 @@ def _resolve_executor(
         复用或新建后的执行器实例。
     """
     signature = _config_signature(account)
+    requires_exact_trading_day = account.trade_channel == TradeChannel.CTP
     # worker 只在“账户相同且配置签名相同”时复用执行器，避免把旧连接状态带到新配置里。
     if state.executor is not None and state.account_id == account.id and state.config_signature == signature:
         verify = getattr(state.executor, "_verify_connection", None)
         connected = not callable(verify) or bool(verify())
         trading_day = str(getattr(state.executor, "_trading_day", "") or "")
-        if connected and (not expected_trading_day or trading_day == expected_trading_day):
+        if connected and (
+            not expected_trading_day or not requires_exact_trading_day or trading_day == expected_trading_day
+        ):
             return state.executor
 
     if state.executor is not None:
@@ -102,7 +106,7 @@ def _resolve_executor(
     state.executor = create_executor_instance(account)
     state.account_id = account.id
     state.config_signature = signature
-    if expected_trading_day:
+    if expected_trading_day and requires_exact_trading_day:
         trading_day = str(getattr(state.executor, "_trading_day", "") or "")
         if trading_day != expected_trading_day:
             _close_executor(state.executor)

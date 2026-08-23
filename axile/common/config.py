@@ -53,10 +53,6 @@ class Settings(BaseSettings):
         当前运行环境标识。
     sqlalchemy_database_uri : SqliteDsn
         SQLAlchemy 使用的数据库连接地址。
-    trading_calendar_api : str
-        与胜可知交易日历契约兼容的上游接口地址。
-    trading_calendar_token : str
-        交易日历上游访问令牌；为空时不执行自动同步。
     exe_err_feishu_key : str
         执行异常通知使用的飞书机器人密钥。
     app_log_dir : Path
@@ -87,8 +83,6 @@ class Settings(BaseSettings):
     environment: Literal["local", "staging", "production"] = "local"
 
     sqlalchemy_database_uri: SqliteDsn = MultiHostUrl("sqlite+aiosqlite:///./axile.db")
-    trading_calendar_api: str = ""
-    trading_calendar_token: str = ""
     exe_err_feishu_key: str = ""
     app_log_dir: Path = Path("./logs")
     axile_log_rotation: str = "1 day"

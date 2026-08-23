@@ -26,7 +26,7 @@ const EXAMPLES: { key: string; title: string; desc: string; code: string }[] = [
     desc: '最简单的等权组合，不依赖任何账户状态。',
     code: `def calculate_portfolio(context):
     # 返回 {品种: 目标权重}
-    return {"BTCUSDT": 0.5, "ETHUSDT": 0.5}`,
+    return {"rb2610": 0.5, "ag2612": 0.5}`,
   },
   {
     key: 'dd',
@@ -37,7 +37,7 @@ const EXAMPLES: { key: string; title: string; desc: string; code: string }[] = [
     if context.today_max_drawdown > 0.05:
         return {}                          # 回撤超 5% 清仓
     scale = 0.5 if context.today_max_drawdown > 0.02 else 1.0
-    return {"BTCUSDT": 0.5 * scale, "ETHUSDT": 0.5 * scale}`,
+    return {"rb2610": 0.5 * scale, "ag2612": 0.5 * scale}`,
   },
   {
     key: 'loss',
@@ -47,7 +47,7 @@ const EXAMPLES: { key: string; title: string; desc: string; code: string }[] = [
     # 连续亏损达阈值则清仓观望
     if context.consecutive_loss_days >= 3:
         return {}
-    return {"BTCUSDT": 0.5, "ETHUSDT": 0.5}`,
+    return {"rb2610": 0.5, "ag2612": 0.5}`,
   },
 ]
 
@@ -105,8 +105,11 @@ export function CustomCalcDocPage() {
           <CodeBlock
             code={`def calculate_portfolio(context):
     # 返回 {品种: 目标权重}，例如 0.5 表示半仓多头，-0.5 表示半仓空头
-    return {"BTCUSDT": 0.5, "ETHUSDT": 0.5}`}
+    return {"rb2610": 0.5, "ag2612": 0.5}`}
           />
+          <p className="mt-3 text-[13px] leading-relaxed text-ink-3">
+            标的格式由交易渠道决定；新建组合时请以当前市场自动生成的示例为准。
+          </p>
         </div>
 
         {/* context 字段 */}

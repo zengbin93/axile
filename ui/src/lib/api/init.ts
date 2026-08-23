@@ -1,11 +1,30 @@
 /** 首启初始化向导接口。 */
-import { apiGet, apiSend } from '@/lib/api/client'
+import { apiGet, apiSend, apiUpload } from '@/lib/api/client'
+import type { CalendarFunctionResult } from '@/lib/api/tradingCalendar'
+
+export interface InitCalendarEntry {
+  calendar_id: string
+  cal_date: string
+  is_open: boolean
+}
+
+export interface InitTradingCalendar {
+  calendar_id: string
+  refresh_kind: 'csv' | 'python'
+  function_code?: string
+  entries: InitCalendarEntry[]
+}
+
+export interface InitCalendarPreview {
+  start: string
+  end: string
+  total: number
+  entries: InitCalendarEntry[]
+}
 
 /** 向导各字段的预填值（对应后端 Settings 的向导字段）。 */
 export interface InitValues {
   sqlalchemy_database_uri: string
-  trading_calendar_token: string
-  trading_calendar_api: string
   /** 执行错误告警飞书机器人 key（系统级，区别于账户各自的 `feishu_key`）；空串表示不推送。 */
   exe_err_feishu_key: string
   environment: string
@@ -13,6 +32,7 @@ export interface InitValues {
   axile_log_rotation: string
   algorithm_modules: string[]
   algorithm_directories: string[]
+  trading_calendars?: InitTradingCalendar[]
 }
 
 /** 初始化就绪状态与预填值。 */
@@ -50,11 +70,6 @@ export function peekInitValues(): InitValues | null {
   return cachedInitValues
 }
 
-/** 测试交易日历兼容接口。 */
-export function testTradingCalendar(token: string, api: string): Promise<TestResult> {
-  return apiSend<TestResult>('POST', '/init/test-trading-calendar', { token, api })
-}
-
 /** 测试数据库连通性。 */
 export function testDb(uri: string): Promise<TestResult> {
   return apiSend<TestResult>('POST', '/init/test-db', { uri })
@@ -63,6 +78,14 @@ export function testDb(uri: string): Promise<TestResult> {
 /** 测试执行告警飞书机器人连通性（向其推送一张联通测试卡片）。 */
 export function testFeishu(key: string): Promise<TestResult> {
   return apiSend<TestResult>('POST', '/init/test-feishu', { key })
+}
+
+export function previewInitCalendarCsv(calendarId: string, file: File): Promise<InitCalendarPreview> {
+  return apiUpload<InitCalendarPreview>(`/init/trading-calendar-csv?calendarId=${encodeURIComponent(calendarId)}`, file)
+}
+
+export function testInitCalendarFunction(calendarId: string, functionCode: string): Promise<CalendarFunctionResult> {
+  return apiSend<CalendarFunctionResult>('POST', '/init/test-trading-calendar-function', { calendarId, functionCode })
 }
 
 /** 保存初始化配置；成功后后端将自退出并由 supervisor 拉起重启。 */

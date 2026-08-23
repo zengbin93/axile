@@ -71,8 +71,8 @@ def test_calculate_target_volume_does_not_restore_forbidden_symbols_from_last_ta
         positions=[],
     )
     market_data = {
-        "ADAUSDT": UnifiedPriceData(
-            symbol="ADAUSDT",
+        "MA609": UnifiedPriceData(
+            symbol="MA609",
             last_price=1.0,
             bid_price=1.0,
             ask_price=1.0,
@@ -87,15 +87,15 @@ def test_calculate_target_volume_does_not_restore_forbidden_symbols_from_last_ta
 
     result = AbstractExecutor.calculate_target_volume_base(
         fake_self,
-        curr_target={"ADAUSDT": 0.1},
+        curr_target={"MA609": 0.1},
         account_assets=account_assets,
         market_data=market_data,
         trade_rules={},
-        last_target={"BTCUSDT": 0.2},
-        forbidden_symbols=["BTCUSDT"],
+        last_target={"rb2610": 0.2},
+        forbidden_symbols=["rb2610"],
     )
 
-    assert result == {"ADAUSDT": 10.0}
+    assert result == {"MA609": 10.0}
     assert logger.messages == []
 
 
@@ -133,7 +133,7 @@ def test_trade_serializes_success_result_to_json_safe_dict(
     monkeypatch.setattr(execution_lifecycle, "create_executor_instance", lambda _account: FakeExecutor())
     monkeypatch.setattr(execution_backend, "_append_output_record", fake_append_output_record)
 
-    _ = asyncio.run(rebalance_execution.trade(account, {"ETHUSDT": 0.1}))
+    _ = asyncio.run(rebalance_execution.trade(account, {"ag2612": 0.1}))
 
     result = captured["result"]
     assert isinstance(result, dict)
@@ -150,7 +150,7 @@ def test_trade_serializes_success_result_to_json_safe_dict(
         "success",
         "extra",
     }
-    assert result["symbol_results"]["ETHUSDT"]["algorithm"] == "SINGLE-MAKER"
+    assert result["symbol_results"]["ag2612"]["algorithm"] == "SINGLE-MAKER"
     assert captured["execution_id"] is None
 
 
@@ -190,15 +190,15 @@ def test_trade_builds_model_before_execute_and_persists_dict(
     monkeypatch.setattr(execution_lifecycle, "create_executor_instance", lambda _account: fake_executor)
     monkeypatch.setattr(execution_backend, "_append_output_record", fake_append_output_record)
 
-    _ = asyncio.run(rebalance_execution.trade(account, {"ETHUSDT": 0.1}))
+    _ = asyncio.run(rebalance_execution.trade(account, {"ag2612": 0.1}))
 
     assert isinstance(fake_executor.execute_input, UnifiedStandardInput)
-    assert fake_executor.execute_input.curr_target == {"ETHUSDT": 0.1}
+    assert fake_executor.execute_input.curr_target == {"ag2612": 0.1}
     assert fake_executor.execute_input.feishu_key == "secret-feishu-key"
 
     raw_input = captured["raw_input"]
     assert isinstance(raw_input, dict)
-    assert raw_input["curr_target"] == {"ETHUSDT": 0.1}
+    assert raw_input["curr_target"] == {"ag2612": 0.1}
     assert raw_input["feishu_key"] == "secret-feishu-key"
     assert "account_config" in raw_input
 
@@ -215,6 +215,7 @@ def test_trade_defaults_gm_ashare_short_leverage_to_zero_when_unset(
         account_config={
             "account_id": "gm-account",
             "token": "token",
+            "connection_mode": "service",
             "serv_addr": "127.0.0.1:7001",
         },
         long_leverage=None,
@@ -276,6 +277,7 @@ def test_trade_routes_gm_account_to_worker_manager(
         account_config={
             "account_id": "gm-account",
             "token": "token",
+            "connection_mode": "service",
             "serv_addr": "127.0.0.1:7001",
         },
     )
@@ -386,7 +388,7 @@ def test_trade_routes_ctp_account_to_worker_manager_when_policy_is_process(
     _ = asyncio.run(
         rebalance_execution.trade(
             account,
-            {"BTCUSDT": 0.12},
+            {"rb2610": 0.12},
             execution_id="exec-ctp-worker-policy-1",
             trigger_source="manual",
         )
@@ -409,6 +411,7 @@ def test_trade_persists_failed_gm_worker_output(
         account_config={
             "account_id": "gm-account",
             "token": "token",
+            "connection_mode": "service",
             "serv_addr": "127.0.0.1:7001",
         },
     )
@@ -573,7 +576,7 @@ def test_trade_passes_execution_id_to_persisted_record(
     _ = asyncio.run(
         rebalance_execution.trade(
             account,
-            {"ETHUSDT": 0.1},
+            {"ag2612": 0.1},
             execution_id="exec-test-1",
         )
     )
@@ -585,7 +588,7 @@ def test_trade_emits_execution_events_and_artifacts(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """成功执行交易时，应写入 execution 事件与附件。"""
-    account = build_account(trade_rules={"ETHUSDT": {"min_notional": 5.0}})
+    account = build_account(trade_rules={"ag2612": {"min_notional": 5.0}})
     captured_events: list[tuple[str, str]] = []
     captured_artifacts: list[str] = []
     execution_summary_content: dict[str, object] | None = None
@@ -639,7 +642,7 @@ def test_trade_emits_execution_events_and_artifacts(
     _ = asyncio.run(
         rebalance_execution.trade(
             account,
-            {"ETHUSDT": 0.1},
+            {"ag2612": 0.1},
             execution_id="exec-audit-1",
             trigger_source="manual",
         )
@@ -669,10 +672,10 @@ def test_trade_emits_execution_events_and_artifacts(
     assert account_block["source_before"] == "real"
     assert account_block["equity_before"] == 1000.0
     symbols = cast("list[dict[str, object]]", reconciliation["symbols"])
-    eth_row = next(row for row in symbols if row["symbol"] == "ETHUSDT")
-    assert eth_row["target"] == 0.1
-    assert eth_row["after"] == 0.0
-    assert eth_row["reached"] is False
+    ag_row = next(row for row in symbols if row["symbol"] == "ag2612")
+    assert ag_row["target"] == 0.1
+    assert ag_row["after"] == 0.0
+    assert ag_row["reached"] is False
     assert target_snapshot_content is not None
 
 
@@ -754,7 +757,7 @@ def test_trade_prepares_execution_runtime_before_pre_execute_audit_events(
     _ = asyncio.run(
         rebalance_execution.trade(
             account,
-            {"ETHUSDT": 0.1},
+            {"ag2612": 0.1},
             execution_id="exec-runtime-seq-1",
             trigger_source="manual",
         )
@@ -857,7 +860,7 @@ def test_trade_persists_unsuccessful_output_without_marking_success(
     record = asyncio.run(
         rebalance_execution.trade(
             account,
-            {"ETHUSDT": 0.1},
+            {"ag2612": 0.1},
             execution_id="exec-unsuccessful-1",
             trigger_source="manual",
         )
@@ -931,7 +934,7 @@ def test_trade_binds_account_control_guard(
     _ = asyncio.run(
         rebalance_execution.trade(
             account,
-            {"ETHUSDT": 0.1},
+            {"ag2612": 0.1},
             execution_id="exec-bind-1",
         )
     )
@@ -947,7 +950,12 @@ def test_trade_binds_account_control_guard(
 def test_standard_input_accepts_database_trade_channel_string() -> None:
     """Text 列读回普通 str 时，调仓输入仍应能正常构造。"""
     account = build_account(
-        account_config={"account_id": "gm-account", "token": "token", "serv_addr": "127.0.0.1:7001"}
+        account_config={
+            "account_id": "gm-account",
+            "token": "token",
+            "connection_mode": "service",
+            "serv_addr": "127.0.0.1:7001",
+        }
     )
     account.trade_channel = cast("TradeChannel", "gm")
 
@@ -969,7 +977,7 @@ def test_account_execution_timeout_flows_into_standard_input() -> None:
 
     standard_input = rebalance_execution._build_rebalance_standard_input(
         account=account,
-        curr_target={"ETHUSDT": 0.1},
+        curr_target={"ag2612": 0.1},
         last_target={},
         execution_id="exec-timeout-1",
         trigger_source="scheduler",
@@ -985,7 +993,15 @@ def test_standard_input_execution_timeout_defaults_to_180() -> None:
     """未显式提供时，标准输入的总超时应回落到 180 秒的默认额度。"""
     payload: dict[str, object] = {
         "channel_type": TradeChannel.CTP.value,
-        "account_config": {"broker_id": "9999", "investor_id": "test", "password": "test"},
+        "account_config": {
+            "broker_id": "9999",
+            "investor_id": "test",
+            "password": "test",
+            "td_front": "tcp://td:1",
+            "md_front": "tcp://md:2",
+            "app_id": "app",
+            "auth_code": "auth",
+        },
         "curr_target": {},
         "last_target": {},
     }
