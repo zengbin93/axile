@@ -299,7 +299,7 @@ def test_custom_function_can_use_registered_channel_target_transform() -> None:
     result = run_portfolio_script(script)
 
     assert result.ok, f"渠道目标转换工具调用失败: {result.error}"
-    assert result.target == {"SHSE.600000": 0.2}
+    assert result.target == {"600000.SH": 0.2}
 
 
 def test_network_library_import_is_allowed() -> None:

@@ -192,7 +192,7 @@ def test_from_gm_price_keeps_top5_levels_and_raw_tick() -> None:
 
     price = gm_common_module.from_gm_price(tick)
 
-    assert price.symbol == "SHSE.600000"
+    assert price.symbol == "600000.SH"
     assert price.bid_price == 12.33
     assert price.bid_price_2 == 12.32
     assert price.bid_price_3 == 0.0
@@ -225,7 +225,7 @@ def test_callback_strategy_tick_conversion_preserves_levels_without_raw_data() -
 
     price = gm_strategy_module._convert_tick_to_unified(tick)
 
-    assert price.symbol == "SHSE.600000"
+    assert price.symbol == "600000.SH"
     assert price.bid_price == 12.33
     assert price.bid_price_2 == 12.32
     assert price.bid_price_3 == 0.0
@@ -239,7 +239,7 @@ def test_callback_strategy_tick_conversion_preserves_levels_without_raw_data() -
     assert price.volume == 66.0
     assert price.timestamp == int(tick.created_at.timestamp() * 1000)
     assert price.update_time == "2026-03-28 09:30:00.123"
-    assert price.extra == {"channel_type": TradeChannel.GM}
+    assert price.extra == {"channel_type": TradeChannel.GM, "gm_symbol": "SHSE.600000"}
 
 
 def test_gm_executor_and_strategy_share_same_sdk_bridge_dispatch(monkeypatch: pytest.MonkeyPatch) -> None:

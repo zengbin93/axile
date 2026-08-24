@@ -2,7 +2,7 @@
  * 薄 API 客户端 —— 统一 baseURL、鉴权头与错误归一。
  *
  * 后端绑定 loopback、无应用级鉴权；仅当设置了 `x-api-password` 时附带。
- * dev 下 `/api` 由 Vite 代理到 127.0.0.1:8000（见 vite.config.ts）。
+ * dev 下 `/api` 由 Vite 代理到 127.0.0.1:1419（见 vite.config.ts）。
  */
 
 const BASE = '/api/v1'

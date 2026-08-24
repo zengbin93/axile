@@ -260,8 +260,8 @@ def test_trade_defaults_gm_ashare_short_leverage_to_zero_when_unset(
     assert len(manager.trade_calls) == 1
     standard_input = cast(UnifiedStandardInput, manager.trade_calls[0]["standard_input"])
     assert standard_input.curr_target == {
-        "SHSE.600000": 0.13,
-        "SHSE.588000": 0.0,
+        "600000.SH": 0.13,
+        "588000.SH": 0.0,
     }
 
 
@@ -335,7 +335,8 @@ def test_trade_routes_gm_account_to_worker_manager(
 
     assert len(manager.trade_calls) == 1
     trade_call = manager.trade_calls[0]
-    assert cast(UnifiedStandardInput, trade_call["standard_input"]).curr_target == {"SHSE.600000": 0.12}
+    assert cast(UnifiedStandardInput, trade_call["standard_input"]).curr_target == {"600000.SH": 0.12}
+    assert cast("dict[str, object]", trade_call["audit_input"])["curr_target"] == {"600000.SH": 0.12}
     assert trade_call["execution_id"] == "exec-gm-worker-trade-1"
     assert trade_call["trigger_source"] == "manual"
     assert trade_call["cleanup"] is True
@@ -962,12 +963,14 @@ def test_standard_input_accepts_database_trade_channel_string() -> None:
     standard_input = rebalance_execution._build_rebalance_standard_input(
         account=account,
         curr_target={"SHSE.600000": 0.1},
-        last_target={},
+        last_target={"SZSE.000001": 0.2},
         execution_id="exec-db-channel-1",
         trigger_source="scheduler",
     )
 
     assert standard_input.channel_type == TradeChannel.GM
+    assert standard_input.curr_target == {"600000.SH": 0.1}
+    assert standard_input.last_target == {"000001.SZ": 0.2}
     assert cast("dict[str, object]", standard_input.extra["audit"])["channel"] == "gm"
 
 

@@ -30,6 +30,7 @@ from typing import Any, cast, override
 import psutil
 from loguru import logger
 
+from axile.common.gm_symbols import GM_SYMBOL_RESOLVER, normalize_gm_standard_input
 from axile.common.trade_channel import TradeChannel
 from axile.executor.abstract_executor.base import AbstractExecutor
 from axile.executor.constants.order_status import OrderStatus
@@ -62,7 +63,7 @@ from axile.executor.models.unified_callback import (
     TradeRecordCallback,
     UnifiedCallbackClient,
 )
-from axile.executor.models.unified_input import AccountConfig, GMAccountConfig
+from axile.executor.models.unified_input import AccountConfig, GMAccountConfig, UnifiedStandardInput
 from axile.executor.models.unified_order import OrderDirection, OrderType, TradeRecord, UnifiedOrder
 from axile.executor.models.unified_price import UnifiedPriceData
 
@@ -75,8 +76,8 @@ __all__ = [
 
 
 def _is_gm_ashare_symbol(symbol: str) -> bool:
-    """判断是否为 GM A 股标的."""
-    return symbol.startswith("SHSE.") or symbol.startswith("SZSE.")
+    """判断是否为 Axile 统一格式的沪深北 A 股标的."""
+    return symbol.endswith((".SH", ".SZ", ".BJ"))
 
 
 # ==================== GM 执行器 ====================
@@ -117,6 +118,14 @@ class GMExecutor(AbstractExecutor, UnifiedCallbackClient):
         # 若回调启动失败，构造不会抛异常，由后续查询链路按可用方式执行。
         self.start_callback_monitoring()
         self._register_execution_query_runtime_callback_observers()
+
+    def _normalize_symbol(self, symbol: str) -> str:
+        """将 GM 或 Tushare A 股代码统一为 Tushare 格式."""
+        return GM_SYMBOL_RESOLVER.to_axile(GM_SYMBOL_RESOLVER.to_gm(symbol))
+
+    def _normalize_standard_input(self, standard_input: UnifiedStandardInput) -> UnifiedStandardInput:
+        """在 planning 前统一标准输入中的 A 股代码."""
+        return normalize_gm_standard_input(standard_input)
 
     # ==================== 连接管理方法 ====================
 
@@ -194,21 +203,24 @@ class GMExecutor(AbstractExecutor, UnifiedCallbackClient):
         Parameters
         ----------
         symbols : list[str]
-            要订阅的标的列表，例如 ``["SHSE.600000", "SZSE.000001"]``。
+            要订阅的标的列表，例如 ``["600000.SH", "000001.SZ"]``；
+            同时兼容 GM 原生格式。
 
         Notes
         -----
         如果回调监控已经启动，会尝试通过当前 bridge 动态补订阅新增标的。
         """
-        new_symbols = [symbol for symbol in symbols if symbol and symbol not in self._subscribe_symbols]
-        self._subscribe_symbols = list(dict.fromkeys(self._subscribe_symbols + symbols))
+        self._subscribe_symbols = [self._normalize_symbol(symbol) for symbol in self._subscribe_symbols]
+        normalized_symbols = [self._normalize_symbol(symbol) for symbol in symbols if symbol]
+        new_symbols = [symbol for symbol in normalized_symbols if symbol not in self._subscribe_symbols]
+        self._subscribe_symbols = list(dict.fromkeys(self._subscribe_symbols + normalized_symbols))
 
         if new_symbols and self._strategy_bridge is not None and self._strategy_bridge.is_running():
-            self._strategy_bridge.request_symbols(new_symbols)
+            self._strategy_bridge.request_symbols([GM_SYMBOL_RESOLVER.to_gm(symbol) for symbol in new_symbols])
             logger.info(f"[GM] 已动态更新行情订阅: {new_symbols}")
             return
 
-        logger.info(f"[GM] 已添加行情订阅: {symbols}")
+        logger.info(f"[GM] 已添加行情订阅: {normalized_symbols}")
 
     def stop_callback_monitoring(self) -> None:
         """停止回调监控."""
@@ -238,11 +250,18 @@ class GMExecutor(AbstractExecutor, UnifiedCallbackClient):
         subscribe_symbols: list[str] | None = None,
     ) -> GMStrategyBridge:
         """确保当前执行器的 bridge runtime 已启动."""
-        all_symbols = list(dict.fromkeys(self._subscribe_symbols + (subscribe_symbols or [])))
+        self._subscribe_symbols = [self._normalize_symbol(symbol) for symbol in self._subscribe_symbols]
+        all_symbols = list(
+            dict.fromkeys(
+                self._subscribe_symbols
+                + [self._normalize_symbol(symbol) for symbol in (subscribe_symbols or []) if symbol]
+            )
+        )
+        gm_symbols = [GM_SYMBOL_RESOLVER.to_gm(symbol) for symbol in all_symbols]
 
         if self._strategy_bridge and self._strategy_bridge.is_running():
             if all_symbols:
-                self._strategy_bridge.request_symbols(all_symbols)
+                self._strategy_bridge.request_symbols(gm_symbols)
             self._callback_monitoring = True
             return self._strategy_bridge
 
@@ -257,7 +276,7 @@ class GMExecutor(AbstractExecutor, UnifiedCallbackClient):
             account_id=self._gm_config.account_id,
             callback_dispatcher=self._callback_dispatcher,
             serv_addr=self._gm_config.serv_addr,
-            subscribe_symbols=all_symbols,
+            subscribe_symbols=gm_symbols,
         )
         if not bridge.start(timeout=timeout):
             raise RuntimeError("GM bridge 启动失败")
@@ -347,13 +366,17 @@ class GMExecutor(AbstractExecutor, UnifiedCallbackClient):
             direction = PositionDirection.LONG if pos_dict.get("side", 1) == 1 else PositionDirection.SHORT
 
             position = Position.model_construct(
-                symbol=str(pos_dict.get("symbol", "")),
+                symbol=GM_SYMBOL_RESOLVER.to_axile(str(pos_dict.get("symbol", ""))),
                 volume=float(pos_dict.get("volume", 0)),
                 available_volume=float(pos_dict.get("available", 0)),
                 market_value=float(pos_dict.get("market_value", 0)),
                 direction=direction,
                 avg_price=0.0,
-                extra={"channel_type": TradeChannel.GM},
+                extra={
+                    "channel_type": TradeChannel.GM,
+                    "gm_symbol": str(pos_dict.get("symbol", "")),
+                    "raw_position_data": pos_dict,
+                },
             )
             unified_positions.append(position)
 
@@ -377,14 +400,16 @@ class GMExecutor(AbstractExecutor, UnifiedCallbackClient):
 
     def get_market_data(self, symbols: list[str]) -> dict[str, UnifiedPriceData]:
         """获取市场数据."""
-        logger.info(f"[GM] 开始获取以下标的的实时行情快照: {symbols}")
+        normalized_symbols = [self._normalize_symbol(symbol) for symbol in symbols]
+        gm_symbols = [GM_SYMBOL_RESOLVER.to_gm(symbol) for symbol in normalized_symbols]
+        logger.info(f"[GM] 开始获取以下标的的实时行情快照: {normalized_symbols}")
 
         market_data: dict[str, UnifiedPriceData] = {}
         try:
-            logger.info(f"[GM] 准备调用 current 获取行情快照, symbol_count={len(symbols)}")
-            current_ticks = self._call_bridge(CurrentRequest(symbols=symbols), timeout=10.0)
+            logger.info(f"[GM] 准备调用 current 获取行情快照, symbol_count={len(gm_symbols)}")
+            current_ticks = self._call_bridge(CurrentRequest(symbols=gm_symbols), timeout=10.0)
             logger.info(
-                f"[GM] current 调用完成, symbol_count={len(symbols)}, tick_count={len(current_ticks) if current_ticks else 0}"
+                f"[GM] current 调用完成, symbol_count={len(gm_symbols)}, tick_count={len(current_ticks) if current_ticks else 0}"
             )
 
             if not current_ticks:
@@ -493,6 +518,7 @@ class GMExecutor(AbstractExecutor, UnifiedCallbackClient):
         bool
             撤销请求提交成功时返回 ``True``，否则返回 ``False``。
         """
+        symbol = self._normalize_symbol(symbol)
         if not self.account_id:
             logger.warning("[GM] 无法撤销订单：账户ID未设置")
             return False
@@ -510,6 +536,7 @@ class GMExecutor(AbstractExecutor, UnifiedCallbackClient):
     @override
     def _query_trades_impl(self, symbol: str, order_id: str) -> list[TradeRecord]:
         """获取指定订单的成交明细."""
+        symbol = self._normalize_symbol(symbol)
         return [
             trade
             for trade in self._query_trade_records()
@@ -565,6 +592,7 @@ class GMExecutor(AbstractExecutor, UnifiedCallbackClient):
         **_kwargs: object,
     ) -> UnifiedOrder:
         """下单，返回统一订单模型."""
+        symbol = self._normalize_symbol(symbol)
         if not self.account_id:
             raise ValueError("账户ID未初始化")
 
@@ -584,7 +612,7 @@ class GMExecutor(AbstractExecutor, UnifiedCallbackClient):
         try:
             order_result = self._call_bridge(
                 OrderVolumeRequest(
-                    symbol=symbol,
+                    symbol=GM_SYMBOL_RESOLVER.to_gm(symbol),
                     volume=gm_volume,
                     side=side,
                     order_type=gm_order_type,
@@ -627,6 +655,7 @@ class GMExecutor(AbstractExecutor, UnifiedCallbackClient):
 
     def _get_available_long_volume(self, symbol: str) -> float:
         """获取指定标的当前可平的多头数量."""
+        symbol = self._normalize_symbol(symbol)
         if not self.account_id:
             return 0.0
 
@@ -639,7 +668,7 @@ class GMExecutor(AbstractExecutor, UnifiedCallbackClient):
         available_long_volume = 0.0
         for pos in positions:  # pyright: ignore[reportUnknownVariableType]
             pos_dict = cast("dict[str, Any]", pos)
-            if str(pos_dict.get("symbol", "")) != symbol:
+            if GM_SYMBOL_RESOLVER.to_axile(str(pos_dict.get("symbol", ""))) != symbol:
                 continue
             if int(pos_dict.get("side", 1)) != 1:
                 continue
@@ -649,12 +678,15 @@ class GMExecutor(AbstractExecutor, UnifiedCallbackClient):
 
     def _get_pending_orders_impl(self, symbol: str | None = None) -> list[UnifiedOrder]:
         """获取未完成订单."""
+        if symbol is not None:
+            symbol = self._normalize_symbol(symbol)
         return [order for order in self._query_unfinished_order_records() if symbol is None or order.symbol == symbol]
 
     @override
     def get_tick_size(self, symbol: str) -> float | None:
         """获取品种的最小价格变动单位."""
         try:
+            symbol = self._normalize_symbol(symbol)
             code_parts = symbol.split(".")
             code = code_parts[0] if code_parts else symbol
 
@@ -820,6 +852,7 @@ class GMExecutor(AbstractExecutor, UnifiedCallbackClient):
             {
                 "cl_ord_id": cl_ord_id,
                 "exchange_order_id": None,
+                "gm_symbol": GM_SYMBOL_RESOLVER.to_gm(symbol),
             }
         )
         return provisional_order

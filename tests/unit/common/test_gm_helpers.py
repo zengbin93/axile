@@ -10,6 +10,8 @@ from axile.common.gm_helpers import to_gm_symbol
     [
         ("600000.SH", "SHSE.600000"),
         ("000001.SZ", "SZSE.000001"),
+        ("920000.BJ", "BJSE.920000"),
+        ("SHSE.600000", "SHSE.600000"),
     ],
 )
 def test_to_gm_symbol_converts_supported_tushare_codes(symbol: str, expected: str) -> None:
@@ -17,10 +19,10 @@ def test_to_gm_symbol_converts_supported_tushare_codes(symbol: str, expected: st
 
 
 def test_to_gm_symbol_rejects_unknown_exchange_suffix() -> None:
-    with pytest.raises(ValueError, match="不支持的交易所后缀"):
-        to_gm_symbol("600000.BJ")
+    with pytest.raises(ValueError, match="格式或交易所不受支持"):
+        to_gm_symbol("600000.HK")
 
 
 def test_to_gm_symbol_rejects_malformed_symbol() -> None:
-    with pytest.raises(ValueError, match="股票代码格式错误"):
+    with pytest.raises(ValueError, match="格式或交易所不受支持"):
         to_gm_symbol("600000SH")

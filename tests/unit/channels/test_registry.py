@@ -342,7 +342,7 @@ def test_builtin_target_transforms_are_available_from_registry() -> None:
     assert gm_result.to_dict("records") == [
         {
             "strategy": "alpha",
-            "symbol": "SHSE.600000",
+            "symbol": "600000.SH",
             "weight": 0.5,
             "contribution": pytest.approx(0.2),
         }

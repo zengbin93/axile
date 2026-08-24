@@ -43,12 +43,8 @@ def _contribution_target(config: dict[str, float], frame: pd.DataFrame) -> pd.Da
 
 
 def _gm_target(config: dict[str, float], frame: pd.DataFrame) -> pd.DataFrame:
-    """计算掘金渠道目标贡献度并转换证券代码格式."""
-    from axile.common.gm_helpers import to_gm_symbol
-
-    weighted = _contribution_target(config, frame)
-    weighted["symbol"] = weighted["symbol"].astype(object).apply(lambda value: to_gm_symbol(str(value)))
-    return weighted
+    """计算掘金目标贡献度并保持 Axile 通用证券代码."""
+    return _contribution_target(config, frame.copy())
 
 
 def _tq_target(config: dict[str, float], frame: pd.DataFrame) -> pd.DataFrame:

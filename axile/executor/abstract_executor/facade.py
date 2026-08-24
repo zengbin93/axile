@@ -99,8 +99,11 @@ class AbstractExecutorFacadeMixin:
             下单后返回的统一订单对象。
         """
         executor = _executor(self)
-        order = executor._place_order_impl(symbol, direction, order_type, volume, price, **kwargs)
-        executor.get_execution_query_runtime_bridge().handle_place_order_result(order, fallback_symbol=symbol)
+        normalized_symbol = executor._normalize_symbol(symbol)
+        order = executor._place_order_impl(normalized_symbol, direction, order_type, volume, price, **kwargs)
+        executor.get_execution_query_runtime_bridge().handle_place_order_result(
+            order, fallback_symbol=normalized_symbol
+        )
         return order
 
     @controlled_operation(
@@ -122,7 +125,9 @@ class AbstractExecutorFacadeMixin:
         list[UnifiedOrder]
             当前仍未完成的订单列表。
         """
-        return _executor(self)._get_pending_orders_impl(symbol)
+        executor = _executor(self)
+        normalized_symbol = None if symbol is None else executor._normalize_symbol(symbol)
+        return executor._get_pending_orders_impl(normalized_symbol)
 
     @controlled_operation(
         "query_trades",
@@ -146,7 +151,8 @@ class AbstractExecutorFacadeMixin:
         list[TradeRecord]
             指定订单关联的成交明细列表。
         """
-        return _executor(self)._query_trades_impl(symbol, order_id)
+        executor = _executor(self)
+        return executor._query_trades_impl(executor._normalize_symbol(symbol), order_id)
 
     def cancel_all_orders(self) -> None:
         """
@@ -383,9 +389,10 @@ class AbstractExecutorFacadeMixin:
             撤单提交成功时返回 ``True``。
         """
         executor = _executor(self)
-        canceled = executor._cancel_order_impl(symbol, order_id)
+        normalized_symbol = executor._normalize_symbol(symbol)
+        canceled = executor._cancel_order_impl(normalized_symbol, order_id)
         if canceled:
-            executor.get_execution_query_runtime_bridge().handle_cancel_order_result(symbol, order_id)
+            executor.get_execution_query_runtime_bridge().handle_cancel_order_result(normalized_symbol, order_id)
         return canceled
 
     def _get_operation_display(self, order: UnifiedOrder) -> str:

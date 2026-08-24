@@ -65,9 +65,13 @@ def resolve_controlled_call_context(
         已解析好的受控调用上下文。
     """
     # 装饰器默认约定“第一个位置参数是宿主对象”，这样同步和异步包装都能共用同一套解析逻辑。
+    symbol = _resolve_value_from_arguments(bound_arguments, arg_name=symbol_arg)
+    normalize_symbol = getattr(owner, "_normalize_symbol", None)
+    if symbol is not None and callable(normalize_symbol):
+        symbol = normalize_symbol(symbol)
     return ControlledCallContext(
         guard=_resolve_guard_from_owner(owner),
-        symbol=_resolve_value_from_arguments(bound_arguments, arg_name=symbol_arg),
+        symbol=symbol,
         metadata=normalize_metadata(None if metadata_resolver is None else metadata_resolver(bound_arguments)),
     )
 

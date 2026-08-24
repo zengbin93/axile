@@ -3,12 +3,13 @@
 
 def to_gm_symbol(symbol: str) -> str:
     """
-    将 Tushare 股票代码转换为掘金量化（GM）格式.
+    将 Axile 或 GM 股票代码转换为掘金量化（GM）格式.
 
     Parameters
     ----------
     symbol : str
-        Tushare 格式的股票代码，格式为 ``代码.交易所``，例如 ``600000.SH``。
+        Tushare 格式 ``代码.交易所`` 或 GM 格式 ``交易所.代码``，
+        例如 ``600000.SH`` 或 ``SHSE.600000``。
 
     Returns
     -------
@@ -27,22 +28,11 @@ def to_gm_symbol(symbol: str) -> str:
 
     - ``SH`` -> ``SHSE``（上证）
     - ``SZ`` -> ``SZSE``（深证）
+    - ``BJ`` -> ``BJSE``（北证）
 
     调用方通常会把 ``ValueError`` 视作用户输入错误，因此这里仅对输入格式与
     不支持的交易所后缀抛出 ``ValueError``，不再额外包装其他异常层级。
     """
-    exchange_map = {
-        "SH": "SHSE",
-        "SZ": "SZSE",
-    }
+    from axile.common.gm_symbols import GM_SYMBOL_RESOLVER
 
-    try:
-        code_part, exchange_suffix = symbol.split(".")
-    except ValueError as exc:
-        raise ValueError(f"股票代码格式错误: {symbol}，预期格式为 代码.交易所。") from exc
-
-    gm_exchange = exchange_map.get(exchange_suffix)
-    if gm_exchange is None:
-        raise ValueError(f"不支持的交易所后缀: {exchange_suffix}，输入格式: {symbol}")
-
-    return f"{gm_exchange}.{code_part}"
+    return GM_SYMBOL_RESOLVER.to_gm(symbol)

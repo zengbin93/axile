@@ -186,7 +186,7 @@ def test_place_order_blocked_before_real_order_volume_call(monkeypatch: pytest.M
     assert len(events) == 1
     assert events[0].operation == "place_order"
     assert events[0].decision == AccountControlDecision.BLOCKED
-    assert events[0].symbol == "SHSE.600000"
+    assert events[0].symbol == "600000.SH"
 
 
 def test_cancel_order_consumes_cancel_order_budget(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -683,7 +683,7 @@ def test_query_trade_records_returns_unified_trade_records(monkeypatch: pytest.M
     trades = executor._query_trade_records()
 
     assert len(trades) == 1
-    assert trades[0].symbol == "SHSE.600000"
+    assert trades[0].symbol == "600000.SH"
     assert trades[0].order_id == "gm-cl-1"
     assert trades[0].extra["account_id"] == "gm-account"
     assert trades[0].extra["exchange_order_id"] == "exchange-1"
@@ -717,7 +717,7 @@ def test_query_unfinished_order_records_returns_unified_orders(monkeypatch: pyte
 
     assert len(orders) == 1
     assert orders[0].order_id == "gm-cl-1"
-    assert orders[0].symbol == "SHSE.600000"
+    assert orders[0].symbol == "600000.SH"
     assert orders[0].extra["account_id"] == "gm-account"
     assert orders[0].extra["exchange_order_id"] == "exchange-1"
 
@@ -750,6 +750,6 @@ def test_query_order_records_returns_unified_orders(monkeypatch: pytest.MonkeyPa
 
     assert len(orders) == 1
     assert orders[0].order_id == "gm-cl-1"
-    assert orders[0].symbol == "SHSE.600000"
+    assert orders[0].symbol == "600000.SH"
     assert orders[0].extra["account_id"] == "gm-account"
     assert orders[0].extra["exchange_order_id"] == "exchange-1"

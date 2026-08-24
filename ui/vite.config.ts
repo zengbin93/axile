@@ -18,7 +18,7 @@ export default defineConfig({
     proxy: {
       // 后端 axile 服务（本机 loopback）。dev 下把 /api 透传过去。
       '/api': {
-        target: 'http://127.0.0.1:8000',
+        target: 'http://127.0.0.1:1419',
         changeOrigin: true,
       },
     },

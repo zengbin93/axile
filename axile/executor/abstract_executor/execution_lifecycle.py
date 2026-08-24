@@ -79,6 +79,8 @@ class AbstractExecutorExecutionLifecycleMixin(AbstractExecutorExecutionRuntimeFa
             if not isinstance(standard_input, executor._unified_input_type()):
                 raise TypeError("standard_input 必须是 UnifiedStandardInput")
 
+            standard_input = executor._normalize_standard_input(standard_input)
+
             executor.logger.debug(f"[{executor.channel_type.value}] 开始执行交易")
             executor._ensure_connection()
             # 总超时的计时零点：连接已就绪、planning 尚未开始，因此执行器构造与登录耗时
@@ -177,15 +179,17 @@ class AbstractExecutorExecutionLifecycleMixin(AbstractExecutorExecutionRuntimeFa
 
     def _get_pending_orders_for_execution(self, symbol: str) -> list[UnifiedOrder]:
         """execution-internal 挂单查询入口."""
-        return cast(
-            "list[UnifiedOrder]", _executor(self).require_execution_runtime().get_pending_orders_for_execution(symbol)
-        )
+        executor = _executor(self)
+        symbol = executor._normalize_symbol(symbol)
+        return cast("list[UnifiedOrder]", executor.require_execution_runtime().get_pending_orders_for_execution(symbol))
 
     def _query_trades_for_execution(self, symbol: str, order_id: str) -> list[TradeRecord]:
         """execution-internal 成交查询入口."""
+        executor = _executor(self)
+        symbol = executor._normalize_symbol(symbol)
         return cast(
             "list[TradeRecord]",
-            _executor(self).require_execution_runtime().query_trades_for_execution(symbol, order_id),
+            executor.require_execution_runtime().query_trades_for_execution(symbol, order_id),
         )
 
     def _run_execution_shared_fetch[R](

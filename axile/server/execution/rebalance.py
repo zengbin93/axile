@@ -12,6 +12,8 @@ from typing import cast
 
 import loguru
 
+from axile.common.gm_symbols import normalize_gm_standard_input
+from axile.common.trade_channel import TradeChannel
 from axile.domain.execution import ExecutionKind
 from axile.executor.models.unified_input import UnifiedStandardInput
 from axile.executor.termination import ExecutionTerminated
@@ -267,7 +269,7 @@ def _build_rebalance_standard_input(
         传递给执行器的统一标准输入。
     """
     feishu_key = account.feishu_key if account.feishu_key and len(account.feishu_key) else None
-    return UnifiedStandardInput.from_dict(
+    standard_input = UnifiedStandardInput.from_dict(
         {
             "curr_target": curr_target,
             "last_target": last_target,
@@ -291,6 +293,9 @@ def _build_rebalance_standard_input(
             },
         }
     )
+    if account.trade_channel == TradeChannel.GM:
+        return normalize_gm_standard_input(standard_input)
+    return standard_input
 
 
 async def _build_rebalance_backend_request(

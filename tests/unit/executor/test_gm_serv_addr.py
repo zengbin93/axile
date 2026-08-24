@@ -713,6 +713,8 @@ def test_get_account_assets_uses_bridge_runtime_in_serv_addr_mode(monkeypatch: p
 
     assert assets.available_cash == 220600.45
     assert len(assets.positions) == 1
+    assert assets.positions[0].symbol == "510180.SH"
+    assert assets.positions[0].extra["gm_symbol"] == "SHSE.510180"
     assert bridge_calls == [
         ("get_position", {"account_id": "account-id"}),
         ("get_cash", {"account_id": "account-id"}),
@@ -735,7 +737,7 @@ def test_subscribe_price_requests_symbols_when_bridge_is_running() -> None:
 
     executor.subscribe_price(["SHSE.600000", "SZSE.000001"])
 
-    assert executor._subscribe_symbols == ["SHSE.600000", "SZSE.000001"]
+    assert executor._subscribe_symbols == ["600000.SH", "000001.SZ"]
     assert requested_symbols == [["SZSE.000001"]]
 
 
@@ -780,7 +782,7 @@ def test_get_market_data_uses_bridge_runtime_in_serv_addr_mode(monkeypatch: pyte
 
     market_data = executor.get_market_data(["SHSE.510180"])
 
-    assert set(market_data) == {"SHSE.510180"}
+    assert set(market_data) == {"510180.SH"}
     assert bridge_calls == [("current", {"symbols": ["SHSE.510180"]})]
 
 
@@ -835,6 +837,8 @@ def test_place_order_uses_bridge_runtime_in_serv_addr_mode(monkeypatch: pytest.M
     )
 
     assert order.order_id == "gm-cl-1"
+    assert order.symbol == "600000.SH"
+    assert order.extra["gm_symbol"] == "SHSE.600000"
     assert bridge_calls == [
         (
             "order_volume",

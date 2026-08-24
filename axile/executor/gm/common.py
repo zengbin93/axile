@@ -14,6 +14,7 @@ from gm.api import (  # type: ignore  # pyright: ignore[reportUnknownVariableTyp
     OrderType_Limit,
 )
 
+from axile.common.gm_symbols import GM_SYMBOL_RESOLVER
 from axile.common.trade_channel import TradeChannel
 from axile.executor.constants.order_status import OrderStatus
 from axile.executor.models.unified_order import (
@@ -35,12 +36,13 @@ def from_gm_price(
     ask_prices: list[Any] = tick["ask_price"] if tick["ask_price"] else []
     bid_volumes: list[Any] = tick["bid_volume"] if tick["bid_volume"] else []
     ask_volumes: list[Any] = tick["ask_volume"] if tick["ask_volume"] else []
-    extra: dict[str, object] = {"channel_type": channel_type}
+    gm_symbol = str(tick["symbol"])
+    extra: dict[str, object] = {"channel_type": channel_type, "gm_symbol": gm_symbol}
     if include_raw_data:
         extra["raw_data"] = tick
 
     return UnifiedPriceData.model_construct(
-        symbol=tick["symbol"],
+        symbol=GM_SYMBOL_RESOLVER.to_axile(gm_symbol),
         last_price=float(tick["price"]),
         bid_price=float(bid_prices[0]) if len(bid_prices) > 0 else 0.0,
         bid_price_2=float(bid_prices[1]) if len(bid_prices) > 1 else 0.0,
@@ -138,6 +140,7 @@ def convert_gm_trade_to_trade_record(trade: dict[str, Any]) -> TradeRecord:
     trade_volume = float(trade.get("volume", 0))
     trade_price = float(trade.get("price", 0))
 
+    gm_symbol = str(trade.get("symbol", ""))
     return TradeRecord.create(
         trade_id=_build_gm_trade_id(
             exec_id=trade.get("exec_id"),
@@ -148,7 +151,7 @@ def convert_gm_trade_to_trade_record(trade: dict[str, Any]) -> TradeRecord:
             trade_volume=trade_volume,
             trade_price=trade_price,
         ),
-        symbol=str(trade.get("symbol", "")),
+        symbol=GM_SYMBOL_RESOLVER.to_axile(gm_symbol),
         order_id=str(trade.get("cl_ord_id") or trade.get("order_id") or ""),
         trade_time=trade_time,
         trade_volume=trade_volume,
@@ -157,6 +160,7 @@ def convert_gm_trade_to_trade_record(trade: dict[str, Any]) -> TradeRecord:
             "channel_type": TradeChannel.GM,
             "account_id": trade.get("account_id"),
             "symbol": trade.get("symbol", ""),
+            "gm_symbol": gm_symbol,
             "cl_ord_id": trade.get("cl_ord_id"),
             "exchange_order_id": trade.get("order_id"),
             "raw_trade_data": trade,
@@ -177,9 +181,10 @@ def convert_gm_order_to_unified(order: dict[str, Any]) -> UnifiedOrder:
 
     actionable_order_id = _get_gm_actionable_order_id(order)
 
+    gm_symbol = str(order.get("symbol", ""))
     unified_order = UnifiedOrder.create(
         order_id=actionable_order_id,
-        symbol=str(order.get("symbol", "")),
+        symbol=GM_SYMBOL_RESOLVER.to_axile(gm_symbol),
         direction=convert_gm_side_to_direction(order.get("side", 0)).value,
         order_type=convert_gm_order_type_to_type(order.get("order_type", 0)).value,
         volume=float(order.get("volume", 0)),
@@ -194,6 +199,7 @@ def convert_gm_order_to_unified(order: dict[str, Any]) -> UnifiedOrder:
     unified_order.extra.update(
         {
             "account_id": order.get("account_id"),
+            "gm_symbol": gm_symbol,
             "cl_ord_id": order.get("cl_ord_id"),
             "exchange_order_id": order.get("order_id"),
             "order_style": order.get("order_style"),
