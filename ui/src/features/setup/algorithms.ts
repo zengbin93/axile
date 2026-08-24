@@ -12,6 +12,23 @@ export type { AlgorithmRef } from '@/types/api'
 
 export type Intent = 'save' | 'fill' | 'balance'
 
+export const SINGLE_MAKER_DEFAULT_PARAMS: Readonly<Record<string, unknown>> = {
+  price_strategy: 'ACTIVE',
+  max_wait_seconds: 60,
+  chase_enabled: false,
+  chase_ticks: 1,
+  max_chase_count: 5,
+  chase_interval: 5,
+  on_missing_book: 'skip',
+}
+
+const SINGLE_MAKER_PARAM_KEYS = new Set(Object.keys(SINGLE_MAKER_DEFAULT_PARAMS))
+
+/** 用服务端默认值补齐 SINGLE-MAKER 参数，仅供展示与语义比较。 */
+export function effectiveSingleMakerParams(params: Record<string, unknown>): Record<string, unknown> {
+  return { ...SINGLE_MAKER_DEFAULT_PARAMS, ...params }
+}
+
 /** 意图文案随市场变（挂单在不同市场省的东西不同）。 */
 export const INTENT_COPY: Record<Market, Record<Intent, { title: string; desc: string; note: string; warn?: boolean }>> = {
   crypto: {
@@ -56,16 +73,28 @@ export function resolveAlgorithm(intent: Intent, market: Market): AlgorithmRef {
 /**
  * 校验算法参数是否满足后端约束，镜像 `BaseAlgorithmParams` / `ChaseParamsMixin`。
  *
- * 只校验存在且相关的键（max_wait_seconds / 追单族），其余键忽略。返回首个违规
- * 文案；全部合法返回 `null`。用于在提交前拦下非法 params，避免重蹈「参数被后端
- * 吞成 dict、执行到算法内部才炸」的覆辙。
+ * 校验存在且相关的枚举、时长与追单参数，其余键忽略。返回首个违规文案；全部合法
+ * 返回 `null`。用于在提交前拦下非法 params，避免重蹈「参数被后端吞成 dict、执行
+ * 到算法内部才炸」的覆辙。
  */
 export function validateAlgorithmParams(params: Record<string, unknown>): string | null {
   const num = (k: string): number | undefined => (typeof params[k] === 'number' ? (params[k] as number) : undefined)
+  const has = (k: string): boolean => Object.prototype.hasOwnProperty.call(params, k)
+
+  if (has('price_strategy') && params.price_strategy !== 'PASSIVE' && params.price_strategy !== 'ACTIVE') {
+    return `下单价格（price_strategy）必须是 PASSIVE 或 ACTIVE`
+  }
+  if (has('on_missing_book') && !['skip', 'active', 'market'].includes(String(params.on_missing_book))) {
+    return `盘口缺失策略（on_missing_book）必须是 skip、active 或 market`
+  }
+  if (has('chase_enabled') && typeof params.chase_enabled !== 'boolean') {
+    return `追单开关（chase_enabled）必须是布尔值`
+  }
 
   const wait = num('max_wait_seconds')
+  if (has('max_wait_seconds') && wait === undefined) return `单次等待时间（max_wait_seconds）必须是数字`
   if (wait !== undefined && (!Number.isInteger(wait) || wait < 1 || wait > 3600)) {
-    return `max_wait_seconds 需为 1–3600 的整数，当前 ${wait}`
+    return `单次等待时间（max_wait_seconds）需为 1–3600 的整数，当前 ${wait}`
   }
 
   // 切片类算法的数值参数：镜像各自 params 模型与编辑器 NumRow 的边界，
@@ -95,9 +124,18 @@ export function validateAlgorithmParams(params: Record<string, unknown>): string
     const ticks = num('chase_ticks')
     const count = num('max_chase_count')
     const interval = num('chase_interval')
-    if (ticks !== undefined && (ticks < 1 || ticks > 100)) return `启用追单时 chase_ticks 需在 1–100，当前 ${ticks}`
-    if (count !== undefined && (count < 1 || count > 50)) return `启用追单时 max_chase_count 需在 1–50，当前 ${count}`
-    if (interval !== undefined && (interval < 0.1 || interval > 300)) return `启用追单时 chase_interval 需在 0.1–300s，当前 ${interval}`
+    if (has('chase_ticks') && ticks === undefined) return `价格偏离（chase_ticks）必须是数字`
+    if (has('max_chase_count') && count === undefined) return `最大追单次数（max_chase_count）必须是数字`
+    if (has('chase_interval') && interval === undefined) return `追单间隔（chase_interval）必须是数字`
+    if (ticks !== undefined && (!Number.isInteger(ticks) || ticks < 1 || ticks > 100)) {
+      return `启用追单时价格偏离（chase_ticks）需为 1–100 的整数，当前 ${ticks}`
+    }
+    if (count !== undefined && (!Number.isInteger(count) || count < 1 || count > 50)) {
+      return `启用追单时最大追单次数（max_chase_count）需为 1–50 的整数，当前 ${count}`
+    }
+    if (interval !== undefined && (!Number.isFinite(interval) || interval < 0.1 || interval > 300)) {
+      return `启用追单时追单间隔（chase_interval）需在 0.1–300s，当前 ${interval}`
+    }
     if (count !== undefined && interval !== undefined && count * interval > 600) {
       return `追单总时长（max_chase_count×chase_interval=${count * interval}s）不应超过 600s`
     }
@@ -167,12 +205,37 @@ export function seedParams(method: string, market: Market): Record<string, unkno
  * 挂单且等待封顶 3600s、``balance`` 被动挂单且追单。
  */
 export function intentFromParams(params: Record<string, unknown>): Intent | null {
-  const ps = params.price_strategy
-  const chase = params.chase_enabled
-  const wait = params.max_wait_seconds
-  if (ps === 'ACTIVE' && chase === false) return 'fill'
-  if (ps === 'PASSIVE' && chase === true) return wait === 3600 ? 'save' : 'balance'
+  if (Object.keys(params).some((key) => !SINGLE_MAKER_PARAM_KEYS.has(key))) return null
+
+  const actual = effectiveSingleMakerParams(params)
+  for (const intent of ['save', 'fill', 'balance'] as const) {
+    const expected = effectiveSingleMakerParams(resolveAlgorithm(intent, 'crypto').params)
+    const keys = actual.chase_enabled === false
+      ? ['price_strategy', 'max_wait_seconds', 'chase_enabled', 'on_missing_book']
+      : [...SINGLE_MAKER_PARAM_KEYS]
+    if (keys.every((key) => actual[key] === expected[key])) return intent
+  }
   return null
+}
+
+/** SINGLE-MAKER 当前有效参数的一句话摘要。 */
+export function describeSingleMakerParams(params: Record<string, unknown>): string {
+  const effective = effectiveSingleMakerParams(params)
+  const price = effective.price_strategy === 'PASSIVE'
+    ? '被动挂单'
+    : effective.price_strategy === 'ACTIVE'
+      ? '主动成交'
+      : '下单价格异常'
+  const wait = Number(effective.max_wait_seconds)
+  const parts = [price, `等待 ${Number.isFinite(wait) ? wait : '—'} 秒`]
+  if (effective.chase_enabled === true) {
+    parts.push(`最多追单 ${String(effective.max_chase_count)} 次`)
+  } else {
+    parts.push('不追单')
+  }
+  if (effective.on_missing_book === 'active') parts.push('盘口缺失时按对手价成交')
+  if (effective.on_missing_book === 'market') parts.push('盘口缺失时直接市价成交')
+  return parts.join(' · ')
 }
 
 /**
@@ -182,8 +245,19 @@ export function intentFromParams(params: Record<string, unknown>): Intent | null
  */
 export function describeAlgorithmRef(ref: AlgorithmRef | null | undefined, market: Market): string {
   if (!ref?.method) return '未设置'
-  if (ref.method === 'SINGLE-MAKER' || ref.method === 'TARGET-POS-TASK') {
+  if (ref.method === 'SINGLE-MAKER') {
     const intent = intentFromParams(ref.params ?? {})
+    if (intent) return INTENT_COPY[market][intent].title
+    return `${algoLabel(ref.method)}（自定义）`
+  }
+  // TARGET-POS-TASK 沿用既有宽松摘要，不把本次 SINGLE-MAKER 的精确匹配规则外溢。
+  if (ref.method === 'TARGET-POS-TASK') {
+    const params = ref.params ?? {}
+    const intent = params.price_strategy === 'ACTIVE' && params.chase_enabled === false
+      ? 'fill'
+      : params.price_strategy === 'PASSIVE' && params.chase_enabled === true
+        ? params.max_wait_seconds === 3600 ? 'save' : 'balance'
+        : null
     if (intent) return INTENT_COPY[market][intent].title
   }
   return algoLabel(ref.method)

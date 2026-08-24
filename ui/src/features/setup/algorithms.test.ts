@@ -2,6 +2,9 @@ import { describe, it, expect } from 'bun:test'
 
 import {
   defaultAlgorithm,
+  describeAlgorithmRef,
+  describeSingleMakerParams,
+  effectiveSingleMakerParams,
   emptyAlgorithm,
   intentFromParams,
   resolveAlgorithm,
@@ -33,6 +36,13 @@ describe('validateAlgorithmParams', () => {
   it('未启用追单时不校验追单族', () => {
     expect(validateAlgorithmParams({ chase_enabled: false, max_chase_count: 999 })).toBeNull()
   })
+
+  it('拒绝非法枚举、非整数追单次数和非数字等待时间', () => {
+    expect(validateAlgorithmParams({ price_strategy: 'MARKET' })).toContain('price_strategy')
+    expect(validateAlgorithmParams({ on_missing_book: 'fallback' })).toContain('on_missing_book')
+    expect(validateAlgorithmParams({ max_wait_seconds: '60' })).toContain('必须是数字')
+    expect(validateAlgorithmParams({ chase_enabled: true, max_chase_count: 1.5 })).toContain('整数')
+  })
 })
 
 describe('resolveAlgorithm · 省成本预设', () => {
@@ -53,6 +63,56 @@ describe('intentFromParams · 意图反推（镜像 resolveAlgorithm）', () => 
   it('无法匹配的 params 返回 null', () => {
     expect(intentFromParams({ price_strategy: 'ACTIVE', chase_enabled: true })).toBeNull()
     expect(intentFromParams({})).toBeNull()
+  })
+
+  it('缺省字段按后端默认值解释', () => {
+    expect(
+      intentFromParams({
+        price_strategy: 'ACTIVE',
+        max_wait_seconds: 30,
+        chase_enabled: false,
+      }),
+    ).toBe('fill')
+    expect(effectiveSingleMakerParams({}).on_missing_book).toBe('skip')
+  })
+
+  it('关闭追单时忽略未生效的追单细项', () => {
+    const fill = resolveAlgorithm('fill', 'crypto').params
+    expect(intentFromParams({ ...fill, max_chase_count: 999, chase_interval: 0 })).toBe('fill')
+  })
+
+  it('任一生效参数、盘口策略或未知参数不同都视为自定义', () => {
+    const balance = resolveAlgorithm('balance', 'crypto').params
+    expect(intentFromParams({ ...balance, max_wait_seconds: 90 })).toBeNull()
+    expect(intentFromParams({ ...balance, on_missing_book: 'active' })).toBeNull()
+    expect(intentFromParams({ ...balance, plugin_option: true })).toBeNull()
+  })
+})
+
+describe('describeSingleMakerParams · 当前执行摘要', () => {
+  it('区分追单与不追单', () => {
+    expect(describeSingleMakerParams(resolveAlgorithm('balance', 'crypto').params)).toBe(
+      '被动挂单 · 等待 60 秒 · 最多追单 5 次',
+    )
+    expect(describeSingleMakerParams(resolveAlgorithm('fill', 'crypto').params)).toBe(
+      '主动成交 · 等待 30 秒 · 不追单',
+    )
+  })
+
+  it('非默认盘口兜底追加到摘要，自定义算法引用明确标记', () => {
+    const params = { ...resolveAlgorithm('balance', 'crypto').params, on_missing_book: 'market' }
+    expect(describeSingleMakerParams(params)).toContain('盘口缺失时直接市价成交')
+    expect(describeAlgorithmRef({ method: 'SINGLE-MAKER', params }, 'crypto')).toBe('挂单追单（自定义）')
+  })
+
+  it('精确匹配规则不改变 TARGET-POS-TASK 的既有宽松摘要', () => {
+    const target = resolveAlgorithm('balance', 'ctp')
+    expect(
+      describeAlgorithmRef(
+        { ...target, params: { ...target.params, offset_priority: '昨今' } },
+        'ctp',
+      ),
+    ).toBe('平衡（推荐）')
   })
 })
 

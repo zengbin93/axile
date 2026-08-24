@@ -1,6 +1,9 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { ChevronDown } from 'lucide-react'
+import { ConfirmModal, type ConfirmSpec } from '@/components/ui/ConfirmModal'
 import { Segmented } from '@/components/ui/Segmented'
 import { Select } from '@/components/ui/Select'
+import { Toggle } from '@/features/account/editUi'
 import { getAlgorithms } from '@/lib/api/system'
 import { marketForChannel, type Market } from '@/features/setup/cron'
 import { useChannelDescriptor } from '@/stores/channels'
@@ -8,10 +11,13 @@ import {
   INTENT_COPY,
   algoLabel,
   defaultAlgorithm,
+  describeSingleMakerParams,
+  effectiveSingleMakerParams,
   intentFromParams,
   resolveAlgorithm,
   registerAlgorithmLabels,
   seedParams,
+  validateAlgorithmParams,
   type AlgorithmRef,
   type Intent,
 } from '@/features/setup/algorithms'
@@ -35,6 +41,7 @@ function MethodParamsStage({ method, children }: { method: string; children: Rea
   const [opaque, setOpaque] = useState(true)
   const [height, setHeight] = useState<number | undefined>(undefined)
   const innerRef = useRef<HTMLDivElement>(null)
+  const heightTimerRef = useRef<number | undefined>(undefined)
   const boot = useRef(true)
 
   // 同 method：同步最新 children（改参数）。
@@ -53,10 +60,12 @@ function MethodParamsStage({ method, children }: { method: string; children: Rea
       methodRef.current = method
       setBody(children)
       setOpaque(true)
+      setHeight(undefined)
       boot.current = false
       return
     }
 
+    setHeight(innerRef.current?.offsetHeight)
     setOpaque(false)
     const t = window.setTimeout(() => {
       methodRef.current = method
@@ -68,13 +77,24 @@ function MethodParamsStage({ method, children }: { method: string; children: Rea
 
   useEffect(() => {
     boot.current = false
+    return () => {
+      if (heightTimerRef.current !== undefined) window.clearTimeout(heightTimerRef.current)
+    }
   }, [])
 
+  // 只在 method 替换期间量一次新内容高度；结束后回到 auto，让内部条件展开独立走布局流。
   useLayoutEffect(() => {
     const el = innerRef.current
-    if (!el) return
-    setHeight(el.offsetHeight)
-  }, [body, opaque])
+    if (!el || height === undefined) return
+    const frame = window.requestAnimationFrame(() => {
+      setHeight(el.offsetHeight)
+      if (heightTimerRef.current !== undefined) window.clearTimeout(heightTimerRef.current)
+      heightTimerRef.current = window.setTimeout(() => setHeight(undefined), 150)
+    })
+    return () => window.cancelAnimationFrame(frame)
+    // body 是 method 替换的唯一触发源；height 后续变化不应重新采样自身动画。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [body])
 
   return (
     <div
@@ -130,7 +150,7 @@ function useAlgorithms(): AlgorithmInfo[] | null {
 /** 数字框：藏原生 spinner + 产品 focus，避免系统亮蓝/箭头掉队。 */
 const FIELD =
   'w-28 rounded-[9px] border border-ink-3/30 bg-surface px-3 py-1.5 text-right text-[14px] num outline-none transition-[border-color] duration-200 ease-[cubic-bezier(0.4,0,0.2,1)] focus:border-ink-2 motion-reduce:transition-none [-moz-appearance:textfield] [&::-webkit-inner-spin-button]:m-0 [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:m-0 [&::-webkit-outer-spin-button]:appearance-none'
-const ROW = 'flex items-center justify-between border-t border-line py-3'
+const ROW = 'flex flex-col gap-2 border-t border-line py-3 sm:flex-row sm:items-center sm:justify-between'
 const HINT = 'text-xs text-ink-3'
 
 /** 数字输入行：读写 params 里的某个数值键，超范围时给出琥珀色提示。 */
@@ -176,33 +196,169 @@ function NumRow({
   )
 }
 
-type ParamsEditor = (props: { params: Record<string, unknown>; onChange: (p: Record<string, unknown>) => void; market: Market }) => React.ReactNode
+type ParamsEditor = (props: {
+  params: Record<string, unknown>
+  onChange: (p: Record<string, unknown>) => void
+  market: Market
+  onApplyIntent?: (intent: Intent) => void
+}) => React.ReactNode
 
 /** SINGLE-MAKER 专属：意图三卡（省成本/保成交/平衡），复用向导文案。 */
-const SingleMakerEditor: ParamsEditor = ({ params, onChange, market }) => {
+const SingleMakerEditor: ParamsEditor = ({ params, onChange, market, onApplyIntent }) => {
   const copy = INTENT_COPY[market]
   const active = intentFromParams(params)
+  const effective = effectiveSingleMakerParams(params)
+  const [advanced, setAdvanced] = useState(false)
+  const chaseEnabled = effective.chase_enabled === true
+  const paramError = validateAlgorithmParams(params)
+  const set = (patch: Record<string, unknown>) => onChange({ ...params, ...patch })
+  const numberValue = (key: string): number => {
+    const value = Number(effective[key])
+    return Number.isFinite(value) ? value : Number.NaN
+  }
+
   return (
-    <div className="grid grid-cols-1 gap-3.5 md:grid-cols-3">
-      {(['save', 'fill', 'balance'] as Intent[]).map((k) => {
-        const c = copy[k]
-        const on = active === k
-        return (
-          <button
-            key={k}
-            type="button"
-            className={`flex flex-col gap-0.5 rounded-[14px] border p-4 text-left ${CARD_T} ${
-              on ? 'border-accent bg-accent-soft' : 'border-line bg-surface'
-            }`}
-            onClick={() => onChange(resolveAlgorithm(k, market).params)}
-          >
-            <span className="text-[15px] font-[640]">{c.title}</span>
-            <span className="text-[12.5px] text-ink-2">{c.desc}</span>
-            {/* 质量：warn=注意极（填不满），其余中性说明，不用涨跌绿表「好」 */}
-            <span className={`mt-1 text-xs font-semibold ${c.warn ? 'text-warn' : 'text-ink-3'}`}>{c.note}</span>
-          </button>
-        )
-      })}
+    <div>
+      <div className="grid grid-cols-1 gap-3.5 md:grid-cols-3">
+        {(['save', 'fill', 'balance'] as Intent[]).map((k) => {
+          const c = copy[k]
+          const on = active === k
+          return (
+            <button
+              key={k}
+              type="button"
+              aria-pressed={on}
+              className={`flex flex-col gap-0.5 rounded-[14px] border p-4 text-left ${CARD_T} ${
+                on ? 'border-accent bg-accent-soft' : 'border-line bg-surface'
+              }`}
+              onClick={() => {
+                if (!on) onApplyIntent?.(k)
+              }}
+            >
+              <span className="text-[15px] font-[640]">{c.title}</span>
+              <span className="text-[12.5px] text-ink-2">{c.desc}</span>
+              {/* 质量：warn=注意极（填不满），其余中性说明，不用涨跌绿表「好」 */}
+              <span className={`mt-1 text-xs font-semibold ${c.warn ? 'text-warn' : 'text-ink-3'}`}>{c.note}</span>
+            </button>
+          )
+        })}
+      </div>
+
+      <div className="mt-4 flex flex-wrap items-start justify-between gap-x-5 gap-y-2 border-t border-line pt-3">
+        <div className="min-w-0 text-[13px] leading-relaxed text-ink-2">
+          <span className="mr-2 text-ink-3">当前执行</span>
+          {describeSingleMakerParams(params)}
+          {!active && <span className="ml-2 font-semibold text-ink-2">自定义参数</span>}
+          {paramError && <span className="ml-2 font-semibold text-warn">参数有误</span>}
+        </div>
+        <button
+          type="button"
+          className="flex flex-none items-center gap-1 text-[13px] font-semibold text-ink-3 hover:text-ink-1"
+          aria-expanded={advanced}
+          onClick={() => setAdvanced((value) => !value)}
+        >
+          高级设置
+          <ChevronDown
+            size={15}
+            className={`transition-transform duration-200 motion-reduce:transition-none ${advanced ? 'rotate-180' : ''}`}
+            aria-hidden
+          />
+        </button>
+      </div>
+
+      <div
+        inert={!advanced}
+        className={`grid transition-[grid-template-rows] ${MOTION_LAYOUT} ${
+          advanced ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'
+        }`}
+      >
+        <div className="min-h-0 overflow-hidden">
+          <div className="mt-3 max-w-[620px]">
+            <div className={ROW}>
+              <span className="text-[14px]">下单价格</span>
+              <Segmented
+                value={String(effective.price_strategy)}
+                options={[
+                  { value: 'PASSIVE', label: '被动挂单' },
+                  { value: 'ACTIVE', label: '主动成交' },
+                ]}
+                onChange={(value) => set({ price_strategy: value })}
+              />
+            </div>
+            <NumRow
+              label="单次等待时间"
+              hint="1–3600"
+              value={numberValue('max_wait_seconds')}
+              min={1}
+              max={3600}
+              onChange={(value) => set({ max_wait_seconds: value })}
+              suffix="秒"
+            />
+            <div className={ROW}>
+              <span className="text-[14px]">追单</span>
+              <Toggle
+                on={chaseEnabled}
+                ariaLabel="启用追单"
+                onClick={() => set({ chase_enabled: !chaseEnabled })}
+              />
+            </div>
+            <div
+              inert={!chaseEnabled}
+              className={`grid transition-[grid-template-rows] ${MOTION_LAYOUT} ${
+                chaseEnabled ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'
+              }`}
+            >
+              <div className="min-h-0 overflow-hidden pl-4">
+                <NumRow
+                  label="价格偏离"
+                  hint="1–100"
+                  value={numberValue('chase_ticks')}
+                  min={1}
+                  max={100}
+                  onChange={(value) => set({ chase_ticks: value })}
+                  suffix="档"
+                />
+                <NumRow
+                  label="最大追单次数"
+                  hint="1–50"
+                  value={numberValue('max_chase_count')}
+                  min={1}
+                  max={50}
+                  onChange={(value) => set({ max_chase_count: value })}
+                  suffix="次"
+                />
+                <NumRow
+                  label="追单间隔"
+                  hint="0.1–300"
+                  value={numberValue('chase_interval')}
+                  min={0.1}
+                  max={300}
+                  step={0.1}
+                  onChange={(value) => set({ chase_interval: value })}
+                  suffix="秒"
+                />
+              </div>
+            </div>
+            <div className={`${ROW} gap-5`}>
+              <span className="text-[14px]">盘口缺失时</span>
+              <Select
+                className="min-w-[220px] justify-between px-3 py-1.5 text-[14px]"
+                value={String(effective.on_missing_book)}
+                onChange={(value) => set({ on_missing_book: value })}
+                options={[
+                  { value: 'skip', label: '跳过本轮（推荐）' },
+                  { value: 'active', label: '按对手价成交' },
+                  { value: 'market', label: '直接市价成交' },
+                ]}
+              />
+            </div>
+            {effective.on_missing_book === 'market' && (
+              <div className="-mt-1 pb-3 text-[12px] text-warn">盘口不可用时会直接发市价单，可能放大滑点。</div>
+            )}
+            {paramError && <div className="pb-3 text-[12px] text-warn">{paramError}</div>}
+          </div>
+        </div>
+      </div>
     </div>
   )
 }
@@ -388,6 +544,7 @@ export function AlgorithmEditor({ slot, channel, value, onChange, allowClear }: 
   }, [algos, channel, slot, value?.method])
 
   const [open, setOpen] = useState(false)
+  const [pendingIntent, setPendingIntent] = useState<Intent | null>(null)
 
   // 值未设置（清仓槽）：只露一行「未设置」+ 设置入口。
   if (value === null) {
@@ -415,6 +572,24 @@ export function AlgorithmEditor({ slot, channel, value, onChange, allowClear }: 
   }
 
   const setParams = (params: Record<string, unknown>) => onChange({ method, params })
+  const activeIntent = method === 'SINGLE-MAKER' ? intentFromParams(value.params) : null
+  const applyIntent = (intent: Intent) => {
+    if (activeIntent === null) {
+      setPendingIntent(intent)
+      return
+    }
+    setParams(resolveAlgorithm(intent, market).params)
+  }
+
+  const pendingCopy = pendingIntent ? INTENT_COPY[market][pendingIntent] : null
+  const confirmPreset: ConfirmSpec | null = pendingIntent && pendingCopy
+    ? {
+        title: `应用“${pendingCopy.title.replace('（推荐）', '')}”预设？`,
+        body: '当前自定义参数将被该预设替换。页面保存前不会写入账户。',
+        okText: '应用预设',
+        onConfirm: () => setParams(resolveAlgorithm(pendingIntent, market).params),
+      }
+    : null
 
   return (
     <div>
@@ -470,7 +645,12 @@ export function AlgorithmEditor({ slot, channel, value, onChange, allowClear }: 
       {/* 换 method：仅参数区短交叉淡 + 高度；选择器行不动 */}
       <MethodParamsStage method={method}>
         {Dedicated ? (
-          <Dedicated params={value.params} onChange={setParams} market={market} />
+          <Dedicated
+            params={value.params}
+            onChange={setParams}
+            market={market}
+            onApplyIntent={applyIntent}
+          />
         ) : (
           <GenericEditor info={info} params={value.params} onChange={setParams} />
         )}
@@ -485,6 +665,7 @@ export function AlgorithmEditor({ slot, channel, value, onChange, allowClear }: 
           ▸ 换执行算法
         </button>
       )}
+      <ConfirmModal spec={confirmPreset} onClose={() => setPendingIntent(null)} />
     </div>
   )
 }

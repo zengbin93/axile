@@ -158,7 +158,15 @@ export function NumCell({
 }
 
 /** 开关（中性轨；开=accent，成败不走红绿）。 */
-export function Toggle({ on, onClick }: { on: boolean; onClick: () => void }) {
+export function Toggle({
+  on,
+  onClick,
+  ariaLabel,
+}: {
+  on: boolean
+  onClick: () => void
+  ariaLabel?: string
+}) {
   return (
     <button
       type="button"
@@ -167,6 +175,7 @@ export function Toggle({ on, onClick }: { on: boolean; onClick: () => void }) {
       }`}
       onClick={onClick}
       aria-pressed={on}
+      aria-label={ariaLabel}
     >
       <span
         className={`absolute top-[3px] h-[20px] w-[20px] rounded-full bg-surface shadow transition-all ${
