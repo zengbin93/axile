@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Check } from 'lucide-react'
 import { PythonFunctionEditor } from '@/components/ui/PythonFunctionEditor'
+import { OverflowText } from '@/components/ui/OverflowText'
 import { Select } from '@/components/ui/Select'
 import { validateCustomCalc } from '@/lib/api/portfolios'
 import { useDomainStore } from '@/stores/domain'
@@ -101,7 +102,7 @@ function WeightResult({ target }: { target: Record<string, number> }) {
         <div className="grid gap-2 text-[13px]">
           {entries.map(([symbol, weight]) => (
             <div key={symbol} className="flex items-center gap-3 border-t border-line pt-2 first:border-0 first:pt-0">
-              <span className="min-w-0 flex-1 truncate font-[520]">{symbol}</span>
+              <OverflowText className="min-w-0 flex-1 font-[520]" text={symbol} />
               <span className="num text-ink-2">{weight.toFixed(4)}</span>
             </div>
           ))}

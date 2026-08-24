@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { ThemeToggle } from '@/components/ThemeToggle'
 import { Toast } from '@/components/Toast'
 import { ConfirmModal, type ConfirmSpec } from '@/components/ui/ConfirmModal'
+import { OverflowText } from '@/components/ui/OverflowText'
 import { Segmented } from '@/components/ui/Segmented'
 import { Select } from '@/components/ui/Select'
 import { CalendarSetupStep } from '@/features/init/CalendarSetupStep'
@@ -384,7 +385,9 @@ export function InitWizard({
                     ].map(([k, v]) => (
                       <div key={k} className="flex justify-between gap-4 border-b border-line py-2.5 last:border-0">
                         <dt className="text-ink-3">{k}</dt>
-                        <dd className="truncate text-ink-1">{v}</dd>
+                        <dd className="min-w-0">
+                          <OverflowText className="text-ink-1" text={v} />
+                        </dd>
                       </div>
                     ))}
                   </dl>

@@ -7,6 +7,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { Link } from '@/components/ui/nav'
+import { OverflowText } from '@/components/ui/OverflowText'
 import { Segmented } from '@/components/ui/Segmented'
 import { Select } from '@/components/ui/Select'
 import { MOTION_LAYOUT, usePanelFadeReady } from '@/lib/viewTransition'
@@ -269,9 +270,10 @@ export function TimerEditor({ tradeChannel, market, value, onChange }: TimerEdit
                   { value: 'advanced', label: '高级' },
                 ]}
               />
-              <span className={`min-w-0 truncate text-xs ${summary.warning ? 'text-warn' : 'text-ink-3'}`}>
-                {previewLoading && !schedulePreview ? '交易日历 · 正在判断' : summary.text}
-              </span>
+              <OverflowText
+                className={`min-w-0 text-xs ${summary.warning ? 'text-warn' : 'text-ink-3'}`}
+                text={previewLoading && !schedulePreview ? '交易日历 · 正在判断' : summary.text}
+              />
             </div>
 
             <div key={v.timerTab} className={tabFade.current ? 'panel-fade-in' : undefined}>

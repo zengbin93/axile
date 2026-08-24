@@ -7,6 +7,7 @@ import { DriftBar } from '@/components/viz/DriftBar'
 import { Sparkline } from '@/components/viz/Sparkline'
 import { InkRewrite } from '@/components/ui/InkRewrite'
 import { NumberTicker } from '@/components/ui/NumberTicker'
+import { OverflowText } from '@/components/ui/OverflowText'
 import { Tooltip } from '@/components/ui/Tooltip'
 import { AccountActions } from '@/features/account/AccountActions'
 import { useExecutionRunner } from '@/features/account/useExecutionRunner'
@@ -405,12 +406,14 @@ export function AccountDetail({ accountId, item, onDashboardRefresh }: AccountDe
             type="button"
             className="flex w-full cursor-pointer items-center justify-between gap-3 border-t border-line py-1.5 text-left text-[14px] first:border-t-0"
             onClick={() => setTimerOpen(true)}
-            title={cronExpr || undefined}
           >
             <span className="flex-none text-ink-2">节奏</span>
-            <span className="min-w-0 truncate text-right font-medium text-ink-1">
-              {cronExpr ? (cronHuman ?? '自定义') : '—'}
-              <span className="ml-1.5 text-ink-3" aria-hidden>
+            <span className="flex min-w-0 flex-1 items-center justify-end">
+              <OverflowText
+                className="min-w-0 flex-1 text-right font-medium text-ink-1"
+                text={cronExpr ? (cronHuman ?? '自定义') : '—'}
+              />
+              <span className="ml-1.5 flex-none text-ink-3" aria-hidden>
                 ›
               </span>
             </span>
@@ -476,40 +479,44 @@ export function AccountDetail({ accountId, item, onDashboardRefresh }: AccountDe
                     {row.type === 'fill' && (
                       <>
                         <span className="w-4 flex-none text-center text-ok">✓</span>
-                        <span className="flex-1 min-w-0 truncate">{row.desc}</span>
+                        <OverflowText className="min-w-0 flex-1" text={row.desc} />
                         <span className="num text-[13px] text-ink-2">{row.amount}</span>
                       </>
                     )}
                     {row.type === 'noop' && (
                       <>
                         <span className="w-4 flex-none text-center text-ink-3">–</span>
-                        <span className="flex-1 min-w-0 truncate text-ink-3">
-                          {row.count > 1 ? `${row.count} 次空跑` : '空跑'} · 目标未变
-                        </span>
+                        <OverflowText
+                          className="min-w-0 flex-1 text-ink-3"
+                          text={`${row.count > 1 ? `${row.count} 次空跑` : '空跑'} · 目标未变`}
+                        />
                       </>
                     )}
                     {row.type === 'fail' && (
                       <>
                         <span className="w-4 flex-none text-center text-warn">⚠</span>
-                        <span className="flex-1 min-w-0 truncate text-ink-1">
-                          {row.count > 1 ? `连续 ${row.count}${row.saturated ? '+' : ''} 次执行失败` : '执行失败'}
-                        </span>
+                        <OverflowText
+                          className="min-w-0 flex-1 text-ink-1"
+                          text={row.count > 1 ? `连续 ${row.count}${row.saturated ? '+' : ''} 次执行失败` : '执行失败'}
+                        />
                       </>
                     )}
                     {row.type === 'terminated' && (
                       <>
                         <span className="w-4 flex-none text-center text-ink-3">■</span>
-                        <span className="flex-1 min-w-0 truncate text-ink-2">
-                          {row.count > 1 ? `已终止 · ${row.count} 次` : '已终止'}
-                        </span>
+                        <OverflowText
+                          className="min-w-0 flex-1 text-ink-2"
+                          text={row.count > 1 ? `已终止 · ${row.count} 次` : '已终止'}
+                        />
                       </>
                     )}
                     {row.type === 'skip' && (
                       <>
                         <span className="w-4 flex-none text-center text-ink-3">–</span>
-                        <span className="flex-1 min-w-0 truncate text-ink-2">
-                          {row.count > 1 ? `连续 ${row.count} 次排程因休市跳过` : '排程已跳过 · 当日休市'}
-                        </span>
+                        <OverflowText
+                          className="min-w-0 flex-1 text-ink-2"
+                          text={row.count > 1 ? `连续 ${row.count} 次排程因休市跳过` : '排程已跳过 · 当日休市'}
+                        />
                       </>
                     )}
                   </div>

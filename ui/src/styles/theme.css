@@ -233,6 +233,42 @@
 }
 
 /*
+ * 单行省略文本的悬停播放。静态层负责省略号与占位；播放层延迟出现后仅移动自身，
+ * 不改变槽位 footprint。移出时 animation 被移除，文本立即回到开头。
+ */
+@keyframes overflow-text-hide-static {
+  to {
+    visibility: hidden;
+  }
+}
+
+@keyframes overflow-text-show-motion {
+  to {
+    visibility: visible;
+  }
+}
+
+@keyframes overflow-text-play {
+  to {
+    transform: translateX(calc(-1 * var(--overflow-text-distance)));
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .overflow-text[data-overflow='true']:hover .overflow-text-static {
+    animation: overflow-text-hide-static 0s var(--overflow-text-delay) step-end forwards;
+  }
+
+  .overflow-text[data-overflow='true']:hover .overflow-text-motion {
+    animation: overflow-text-show-motion 0s var(--overflow-text-delay) step-end forwards;
+  }
+
+  .overflow-text[data-overflow='true']:hover .overflow-text-track {
+    animation: overflow-text-play var(--overflow-text-duration) var(--overflow-text-delay) linear forwards;
+  }
+}
+
+/*
  * 下拉菜单入场（Select）。
  *
  * 短促 fade + 从顶部微微落下，配合 transform-origin: top 让菜单像从触发器

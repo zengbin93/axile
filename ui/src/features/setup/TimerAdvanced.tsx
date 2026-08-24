@@ -11,6 +11,7 @@
  */
 
 import { MacTimePicker } from '@/components/ui/MacTimePicker'
+import { OverflowText } from '@/components/ui/OverflowText'
 import { Segmented } from '@/components/ui/Segmented'
 import { MOTION_LAYOUT, usePanelFadeReady } from '@/lib/viewTransition'
 import type { Market } from '@/features/setup/cron'
@@ -353,17 +354,18 @@ export function TimerAdvanced({ market, rules, selectedId, customCronOn, onChang
                   }`}
                 >
                   <button type="button" className="min-w-0 flex-1 px-1 text-left" onClick={() => selectRule(r.id)}>
-                    <div className="flex items-baseline gap-1.5">
+                    <div className="flex min-w-0 items-baseline gap-1.5">
                       <span className="text-[10px] tabular-nums text-ink-3">{i + 1}</span>
-                      <span
-                        className={`truncate text-[13.5px] font-[620] tabular-nums ${
+                      <OverflowText
+                        className={`min-w-0 flex-1 text-[13.5px] font-[620] tabular-nums ${
                           incomplete ? 'text-ink-3' : 'text-ink-1'
                         }`}
-                      >
-                        {title}
-                      </span>
+                        text={title}
+                      />
                     </div>
-                    <div className="mt-0.5 truncate pl-4 text-[11.5px] text-ink-3">{sub}</div>
+                    <div className="mt-0.5 pl-4">
+                      <OverflowText className="text-[11.5px] text-ink-3" text={sub} />
+                    </div>
                   </button>
                   <button
                     type="button"

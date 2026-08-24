@@ -3,6 +3,7 @@ import { Link, useNavigate } from '@/components/ui/nav'
 import { WizardPage, WizardNav } from '@/features/setup/WizardNav'
 import { ConfirmModal, type ConfirmSpec } from '@/components/ui/ConfirmModal'
 import { CustomFunctionEditor } from '@/features/portfolio/CustomFunctionEditor'
+import { OverflowText } from '@/components/ui/OverflowText'
 import { createPortfolio } from '@/lib/api/portfolios'
 import { useWizardStore } from '@/stores/wizard'
 import { useToastStore } from '@/stores/ui'
@@ -47,7 +48,7 @@ function MarketChoiceGroup({
           >
             <span className="min-w-0 flex-1">
               <span className={`block text-[14px] font-[620] ${selected ? 'text-ink-1' : 'text-ink-2'}`}>{option.label}</span>
-              <span className="mt-1 block truncate text-[12px] text-ink-3">{examples}</span>
+              <OverflowText className="mt-1 text-[12px] text-ink-3" text={examples} />
             </span>
             {selected && <span aria-hidden className="absolute inset-y-0 left-0 w-0.5 bg-accent sm:inset-x-0 sm:top-auto sm:bottom-0 sm:h-0.5 sm:w-auto" />}
           </button>

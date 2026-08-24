@@ -3,6 +3,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState, type RefObje
 import { createPortal } from 'react-dom'
 
 import type { ClipboardCandidate } from '@/components/ui/connectionFieldClipboard'
+import { OverflowText } from '@/components/ui/OverflowText'
 
 interface Position {
   left: number
@@ -108,7 +109,7 @@ export function ConnectionFieldCandidates({
       style={{ left: position.left, top: position.top, width: position.width }}
     >
       <div className="flex min-h-8 items-center justify-between gap-2 px-1.5">
-        <span className="truncate text-[12px] text-ink-2">从本次粘贴中识别到 {candidates.length} 项</span>
+        <OverflowText className="min-w-0 text-[12px] text-ink-2" text={`从本次粘贴中识别到 ${candidates.length} 项`} />
         <span className="flex flex-none items-center gap-0.5">
           {onFillMatched && hasMatched && (
             <button type="button" className="cursor-pointer px-1.5 text-[12px] text-accent hover:underline" onMouseDown={(event) => event.preventDefault()} onClick={onFillMatched}>
@@ -137,11 +138,12 @@ export function ConnectionFieldCandidates({
             onClick={() => onCommit(candidate)}
           >
             <span className="min-w-0 flex-1">
-              <span className={`block truncate text-[13px] text-ink-1 ${mono ? 'font-mono' : ''}`}>{candidate.displayValue}</span>
+              <OverflowText className={`text-[13px] text-ink-1 ${mono ? 'font-mono' : ''}`} text={candidate.displayValue} />
               {candidate.sourceLabel && (
-                <span className={`mt-0.5 block truncate text-[11px] ${candidate.role ? 'text-accent' : 'text-ink-3'}`}>
-                  {candidate.sourceLabel}
-                </span>
+                <OverflowText
+                  className={`mt-0.5 text-[11px] ${candidate.role ? 'text-accent' : 'text-ink-3'}`}
+                  text={candidate.sourceLabel}
+                />
               )}
             </span>
             <span className="flex-none text-[12px] text-ink-2">{value ? '替换' : '填入'}</span>

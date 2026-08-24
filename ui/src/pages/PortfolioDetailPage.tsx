@@ -6,6 +6,7 @@ import { Card, SectionLabel, Chip } from '@/components/ui/Card'
 import { Skeleton, SkeletonLines } from '@/components/ui/Skeleton'
 import { ExposureBar } from '@/components/viz/ExposureBar'
 import { ConfirmModal, type ConfirmSpec } from '@/components/ui/ConfirmModal'
+import { OverflowText } from '@/components/ui/OverflowText'
 import { getPortfolio, getLatestWeights } from '@/lib/api/portfolios'
 import { useDomainStore } from '@/stores/domain'
 import { triggerExecute } from '@/lib/api/executions'
@@ -153,7 +154,7 @@ export function PortfolioDetailPage() {
             <div className="mt-2">
               {targetRows.map(([sym, w]) => (
                 <div key={sym} className="flex items-center gap-3 border-t border-line py-2.5 text-[13.5px] first:border-t-0">
-                  <span className="flex-1 min-w-0 truncate">{sym}</span>
+                  <OverflowText className="min-w-0 flex-1" text={sym} />
                   <span className={`num w-16 flex-none text-right font-semibold ${w < 0 ? 'text-bad' : ''}`}>
                     {(w * 100).toFixed(1)}%
                   </span>

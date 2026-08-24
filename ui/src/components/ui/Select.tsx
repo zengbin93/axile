@@ -2,6 +2,8 @@ import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from
 import type { KeyboardEvent as ReactKeyboardEvent, ReactElement } from 'react'
 import { createPortal } from 'react-dom'
 
+import { OverflowText } from '@/components/ui/OverflowText'
+
 /** 下拉的单个选项：description 为标题下说明，hint 为右侧弱化短信息。 */
 export interface SelectOption<T> {
   value: T
@@ -222,9 +224,9 @@ export function Select<T>({
         onKeyDown={onTriggerKey}
       >
         <span className={`min-w-0 text-left ${selected ? '' : 'text-ink-3'}`}>
-          <span className="block truncate">{selected ? selected.label : placeholder}</span>
+          <OverflowText text={selected ? selected.label : placeholder} />
           {selected?.description && (
-            <span className="mt-0.5 block truncate text-[12px] font-normal text-ink-3">{selected.description}</span>
+            <OverflowText text={selected.description} className="mt-0.5 text-[12px] font-normal text-ink-3" />
           )}
         </span>
         <svg
@@ -309,9 +311,9 @@ export function Select<T>({
                       />
                     </svg>
                     <span className="min-w-0 flex-1">
-                      <span className="block truncate">{o.label}</span>
+                      <OverflowText text={o.label} />
                       {o.description && (
-                        <span className="mt-0.5 block truncate text-[12px] font-normal text-ink-3">{o.description}</span>
+                        <OverflowText text={o.description} className="mt-0.5 text-[12px] font-normal text-ink-3" />
                       )}
                     </span>
                     {o.hint && <span className="ml-auto flex-none text-[12px] font-normal text-ink-3">{o.hint}</span>}

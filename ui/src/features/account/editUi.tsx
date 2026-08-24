@@ -8,6 +8,7 @@
 import type { CSSProperties, ReactNode } from 'react'
 import { Link } from '@/components/ui/nav'
 import { Breadcrumb } from '@/components/ui/Breadcrumb'
+import { OverflowText } from '@/components/ui/OverflowText'
 import { Skeleton } from '@/components/ui/Skeleton'
 import { MOTION_LAYOUT } from '@/lib/viewTransition'
 
@@ -207,7 +208,7 @@ function ShellColumns({
         {label}
         {hint && <span className="block text-[11px] text-ink-3">{hint}</span>}
       </div>
-      <div className="min-w-0 flex-1 truncate text-[14px] font-medium text-ink-1">{summary}</div>
+      <OverflowText className="min-w-0 flex-1 text-[14px] font-medium text-ink-1" text={summary} />
       <div className="flex-none">{trailing}</div>
     </div>
   )
@@ -321,7 +322,7 @@ export function EditSaveBar({
           <div className="text-[11px] font-semibold tracking-wide text-ink-3">
             待保存 · {changes.length} 项{blocked && <span className="text-bad"> · 有错误</span>}
           </div>
-          <div className="num truncate text-[13px] text-ink-1">{changes.join('  ·  ')}</div>
+          <OverflowText className="num text-[13px] text-ink-1" text={changes.join('  ·  ')} />
         </div>
         <Link to={cancelTo} className="flex-none text-[13px] text-ink-2 hover:text-ink-1" tabIndex={open ? 0 : -1}>
           取消

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type DragEvent, type KeyboardEvent } from 'react'
 import { Check, ChevronDown, Code2, Download, FileUp, LoaderCircle, Trash2, TriangleAlert } from 'lucide-react'
 import { InkRewrite } from '@/components/ui/InkRewrite'
+import { OverflowText } from '@/components/ui/OverflowText'
 import { PythonFunctionEditor } from '@/components/ui/PythonFunctionEditor'
 import { ApiError } from '@/lib/api/client'
 import {
@@ -149,7 +150,7 @@ export function CalendarSetupStep({ onChange }: { onChange: (value: CalendarSetu
         <div className="mb-4 divide-y divide-line border-y border-line">
           {calendars.map((calendar) => (
             <button key={calendar.calendar_id} type="button" className={`flex w-full items-center gap-3 px-3 py-3 text-left ${calendar.calendar_id === active.calendar_id ? 'bg-accent-soft' : ''}`} onClick={() => setActiveId(calendar.calendar_id)}>
-              <span className="min-w-0 flex-1"><span className="block text-[14px] font-[620]">{calendar.label}</span><span className="block truncate text-[12px] text-ink-3">{calendar.channel_labels.join('、')} 使用</span></span>
+              <span className="min-w-0 flex-1"><span className="block text-[14px] font-[620]">{calendar.label}</span><OverflowText className="text-[12px] text-ink-3" text={`${calendar.channel_labels.join('、')} 使用`} /></span>
               <span className="text-[12px] text-ink-2">{calendar.selectedMethod ? '已配置' : '未配置'}</span>
             </button>
           ))}

@@ -1,4 +1,5 @@
 import { rebalancePlan, type RebalanceRow } from '@/lib/derive'
+import { OverflowText } from '@/components/ui/OverflowText'
 import { displayCurrencyUnit, fmtMoney, signedPct, withCurrency } from '@/lib/format'
 import type { LatestWeights, Position } from '@/types/api'
 
@@ -176,7 +177,7 @@ export function HoldingsView({
             className={`flex items-center gap-4 border-t border-line py-3 ${aligned ? 'opacity-55' : ''}`}
           >
             <div className="w-28 min-w-0 flex-none self-center">
-              <div className="truncate text-[13.5px] font-medium">{r.symbol}</div>
+              <OverflowText className="text-[13.5px] font-medium" text={r.symbol} />
             </div>
             <Ruler row={r} scale={scale} />
             <div className="w-32 flex-none self-center text-right">

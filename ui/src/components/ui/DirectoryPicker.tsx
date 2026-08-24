@@ -2,6 +2,7 @@ import { ChevronLeft, ChevronRight, Folder, HardDrive, X } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
 
 import { directoryBreadcrumbs } from '@/components/ui/directoryPath'
+import { OverflowText } from '@/components/ui/OverflowText'
 import { getDirectories } from '@/lib/api/system'
 import type { DirectoryListing } from '@/types/api'
 
@@ -149,14 +150,14 @@ export function DirectoryPicker({
           {!error && listing?.entries.map((entry) => (
             <button key={entry.path} type="button" className="flex h-11 w-full cursor-pointer items-center gap-3 rounded-[8px] px-3 text-left hover:bg-fill focus-visible:outline-2 focus-visible:outline-accent" onClick={() => void load(entry.path)}>
               {listing.path === null ? <HardDrive size={17} className="text-ink-2" /> : <Folder size={17} className="text-ink-2" />}
-              <span className="min-w-0 flex-1 truncate text-[14px]">{entry.name}</span>
+              <OverflowText className="min-w-0 flex-1 text-[14px]" text={entry.name} />
               <ChevronRight size={15} className="text-ink-3" />
             </button>
           ))}
         </div>
 
         <div className="flex flex-none items-center gap-3 border-t border-line px-4 py-3 sm:px-5">
-          <div className="min-w-0 flex-1 truncate text-[12px] text-ink-3">{listing?.path ?? '请选择文件夹'}</div>
+          <OverflowText className="min-w-0 flex-1 text-[12px] text-ink-3" text={listing?.path ?? '请选择文件夹'} />
           <button type="button" className="h-10 cursor-pointer rounded-[8px] border border-line px-4 text-[13px] text-ink-2" onClick={onClose}>取消</button>
           <button type="button" disabled={!listing?.path} className="h-10 cursor-pointer rounded-[8px] border border-ink-1 bg-ink-1 px-4 text-[13px] font-[550] text-surface disabled:cursor-default disabled:opacity-40" onClick={selectCurrent}>使用此目录</button>
         </div>
