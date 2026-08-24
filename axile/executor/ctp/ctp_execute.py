@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
-from typing import TypeVar, override
+from typing import Any, TypeVar, override
 
 from openctp_ctp import thostmduserapi as md
 from openctp_ctp import thosttraderapi as td
@@ -61,11 +61,26 @@ from axile.executor.models.unified_input import AccountConfig, CTPAccountConfig,
 from axile.executor.models.unified_order import OrderType, UnifiedOrder
 
 _CZCE_FUTURE_ALIAS = re.compile(r"^(?P<product>[A-Za-z]+)(?P<year>\d{2})(?P<month>\d{2})$")
+_MACOS_TRADER_LOGIN_ARITY_ERROR = "CThostFtdcTraderApi_ReqUserLogin expected 5 arguments, got 3"
 _ValueT = TypeVar("_ValueT")
 
 
 class CtpRequestError(RuntimeError):
     pass
+
+
+def _request_trader_login(
+    api: Any,
+    request: Any,
+    request_id: int,
+) -> int:
+    """兼容 OpenCTP 6.7.7.1 不同平台 wheel 的交易登录签名。"""
+    try:
+        return api.ReqUserLogin(request, request_id)
+    except TypeError as exc:
+        if str(exc) != _MACOS_TRADER_LOGIN_ARITY_ERROR:
+            raise
+        return api.ReqUserLogin(request, request_id, 0, "")
 
 
 @dataclass
@@ -204,7 +219,7 @@ class CTPExecutor(AbstractExecutor, UnifiedCallbackClient):
             return
         req = build_trader_login(self._config())
         try:
-            self._check(self._trader_api.ReqUserLogin(req, self._next_id()), "登录")
+            self._check(_request_trader_login(self._trader_api, req, self._next_id()), "登录")
         except Exception as e:
             self._login.error = e
             self._login.done.set()

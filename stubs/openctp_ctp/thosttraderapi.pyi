@@ -1,4 +1,4 @@
-from typing import Any
+from typing import Any, overload
 
 THOST_TERT_QUICK: int
 THOST_FTDC_HF_Speculation: str
@@ -73,10 +73,19 @@ class CThostFtdcTraderApi:
         pReqAuthenticateField: CThostFtdcReqAuthenticateField,
         nRequestID: int,
     ) -> int: ...
+    @overload
     def ReqUserLogin(
         self,
         pReqUserLoginField: CThostFtdcReqUserLoginField,
         nRequestID: int,
+    ) -> int: ...
+    @overload
+    def ReqUserLogin(
+        self,
+        pReqUserLoginField: CThostFtdcReqUserLoginField,
+        nRequestID: int,
+        length: int,
+        systemInfo: str,
     ) -> int: ...
     def SubmitUserSystemInfo(
         self,
