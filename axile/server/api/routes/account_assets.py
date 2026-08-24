@@ -1,0 +1,91 @@
+"""账户资产快照读取与主动刷新路由."""
+
+from __future__ import annotations
+
+from typing import cast
+
+from fastapi import APIRouter, HTTPException, Query, status
+from loguru import logger
+from sqlmodel import desc, func, select
+
+from axile.server.account_assets import query_account_assets
+from axile.server.api.deps import SessionDep
+from axile.server.api.routes.account_support import _get_account_or_404
+from axile.server.db.models import (
+    AccountAssetSnapshot,
+    AccountAssetSnapshotListPublic,
+    AccountAssetSnapshotPublic,
+)
+from axile.server.execution.registry import (
+    clear_account_asset_refresh,
+    try_register_account_asset_refresh,
+)
+
+router = APIRouter()
+
+
+@router.post("/{account_id}/assets/refresh", response_model=AccountAssetSnapshotPublic)
+async def refresh_account_assets(session: SessionDep, account_id: int) -> AccountAssetSnapshotPublic:
+    """从交易渠道查询并持久化账户最新资产快照."""
+    account = await _get_account_or_404(session, account_id)
+    if not try_register_account_asset_refresh(account_id):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="账户正在执行或刷新资产，请稍后再试",
+        )
+
+    try:
+        assets = await query_account_assets(account)
+        snapshot = AccountAssetSnapshot(
+            account_id=account_id,
+            assets=cast("dict[str, object]", assets.model_dump(mode="json")),
+            source="manual",
+        )
+        session.add(snapshot)
+        await session.commit()
+        await session.refresh(snapshot)
+        return AccountAssetSnapshotPublic.model_validate(snapshot)
+    except TimeoutError as exc:
+        await session.rollback()
+        logger.warning(f"账户资产刷新超时: account_id={account_id}, error={exc}")
+        raise HTTPException(
+            status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+            detail="账户权益查询超时，请稍后重试",
+        ) from exc
+    except HTTPException:
+        raise
+    except Exception as exc:
+        await session.rollback()
+        logger.exception(f"账户资产刷新失败: account_id={account_id}, error={exc}")
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="账户权益查询失败，请检查渠道连接",
+        ) from exc
+    finally:
+        clear_account_asset_refresh(account_id)
+
+
+@router.get("/{account_id}/asset_snapshots", response_model=AccountAssetSnapshotListPublic)
+async def list_account_asset_snapshots(
+    session: SessionDep,
+    account_id: int,
+    skip: int = Query(default=0, ge=0),
+    limit: int = Query(default=100, ge=1, le=500),
+) -> AccountAssetSnapshotListPublic:
+    """分页读取账户资产快照（最新在前）."""
+    await _get_account_or_404(session, account_id)
+    count = await session.scalar(
+        select(func.count()).select_from(AccountAssetSnapshot).where(AccountAssetSnapshot.account_id == account_id)
+    )
+    statement = (
+        select(AccountAssetSnapshot)
+        .where(AccountAssetSnapshot.account_id == account_id)
+        .order_by(desc(AccountAssetSnapshot.id))
+        .offset(skip)
+        .limit(limit)
+    )
+    rows = (await session.execute(statement)).scalars().all()
+    return AccountAssetSnapshotListPublic(
+        data=[AccountAssetSnapshotPublic.model_validate(row) for row in rows],
+        count=int(count or 0),
+    )

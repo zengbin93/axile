@@ -19,6 +19,12 @@ from axile.server.db.models.account import (
     PortfolioAccountListPublic,
     PortfolioAccountPublic,
 )
+from axile.server.db.models.account_asset import (
+    AccountAssetSnapshot,
+    AccountAssetSnapshotListPublic,
+    AccountAssetSnapshotPublic,
+    AccountAssetSnapshotSource,
+)
 from axile.server.db.models.account_control import (
     AccountControlAuditExecutionListPublic,
     AccountControlAuditExecutionPublic,
@@ -77,6 +83,7 @@ from axile.server.db.models.trading_calendar import (
 
 Portfolio.model_rebuild()
 Account.model_rebuild()
+AccountAssetSnapshot.model_rebuild()
 PortfolioAccount.model_rebuild()
 ExecuteRecord.model_rebuild()
 
@@ -104,6 +111,10 @@ __all__ = [
     "AccountDashboardItemPublic",
     "AccountDashboardPublic",
     "AccountUpdate",
+    "AccountAssetSnapshot",
+    "AccountAssetSnapshotPublic",
+    "AccountAssetSnapshotListPublic",
+    "AccountAssetSnapshotSource",
     "PortfolioAccountBase",
     "PortfolioAccount",
     "PortfolioAccountPublic",

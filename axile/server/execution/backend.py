@@ -108,7 +108,7 @@ async def _append_output_record(
 async def _run_rebalance_via_worker_process(request: RebalanceBackendRequest) -> ExecuteRecord:
     """通过 worker 进程执行调仓。"""
     try:
-        output = await get_worker_backend_manager().execute_trade(
+        output, normalized_symbol_fields = await get_worker_backend_manager().execute_trade(
             account=request.account,
             standard_input=request.standard_input,
             standard_input_dict=request.standard_input_dict,
@@ -117,9 +117,12 @@ async def _run_rebalance_via_worker_process(request: RebalanceBackendRequest) ->
             trigger_source=request.trigger_source,
             cleanup=request.cleanup,
         )
+        raw_input = dict(request.standard_input_dict)
+        if normalized_symbol_fields is not None:
+            raw_input.update(normalized_symbol_fields)
         record, _ = await _append_output_record(
             account=request.account,
-            raw_input=request.standard_input_dict,
+            raw_input=raw_input,
             output=output,
             execution_id=request.execution_id,
             execution_kind=ExecutionKind.REBALANCE,

@@ -82,7 +82,6 @@ def _append_trade_pre_execute_audit(
     execution_id: str | None,
     algorithm_name: str,
     trigger_source: str,
-    strategy_count: int,
     audit_input: dict[str, object],
     standard_input: UnifiedStandardInput,
     executor: object,
@@ -144,7 +143,6 @@ def _append_trade_pre_execute_audit(
         seq=_event_seq(executor),
         details={
             "debug": {
-                "strategy_count": strategy_count,
                 "symbol_count": len(standard_input.curr_target),
             }
         },

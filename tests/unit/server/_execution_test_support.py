@@ -113,7 +113,7 @@ class FakeExecutor:
         _standard_input: object,
         cleanup: bool = True,  # noqa: FBT002
         retain_runtime: bool = False,  # noqa: FBT001, FBT002
-    ) -> UnifiedStandardOutput:
+    ) -> tuple[UnifiedStandardOutput, dict[str, object] | None]:
         _ = retain_runtime
         self.execute_input = _standard_input
         self.cleanup = cleanup
@@ -200,8 +200,8 @@ class FakeWorkerBackendManager:
             }
         )
         if self._trade_output is not None:
-            return self._trade_output
-        return FakeExecutor().execute(standard_input, cleanup=cleanup, retain_runtime=True)
+            return self._trade_output, None
+        return FakeExecutor().execute(standard_input, cleanup=cleanup, retain_runtime=True), None
 
     async def empty_positions(
         self,

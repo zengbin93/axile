@@ -425,6 +425,46 @@ def get_trading_calendar(calendar_id, start, end):
     assert len(result.entries) == 2
 
 
+def test_calendar_function_accepts_partial_contiguous_range() -> None:
+    code = """
+def get_trading_calendar(calendar_id, start, end):
+    return [
+        {"calendar_id": calendar_id, "cal_date": "2026-01-02", "is_open": True},
+        {"calendar_id": calendar_id, "cal_date": "2026-01-03", "is_open": False},
+    ]
+"""
+    result = asyncio.run(calendar_service.run_calendar_function(code, date(2026, 1, 1), date(2026, 1, 4)))
+
+    assert result.valid is True
+    assert [entry.cal_date for entry in result.entries] == [date(2026, 1, 2), date(2026, 1, 3)]
+
+
+@pytest.mark.parametrize(
+    ("rows", "message"),
+    [
+        ([], "交易日历不能为空"),
+        (
+            [
+                {"calendar_id": "china", "cal_date": "2026-01-01", "is_open": True},
+                {"calendar_id": "china", "cal_date": "2026-01-03", "is_open": True},
+            ],
+            "交易日历区间缺少 1 个自然日",
+        ),
+        (
+            [{"calendar_id": "china", "cal_date": "2026-01-05", "is_open": True}],
+            "交易日历日期必须位于 2026-01-01 至 2026-01-04 内",
+        ),
+    ],
+)
+def test_calendar_function_rejects_invalid_partial_range(rows: list[dict[str, object]], message: str) -> None:
+    code = f"def get_trading_calendar(calendar_id, start, end): return {rows!r}"
+
+    result = asyncio.run(calendar_service.run_calendar_function(code, date(2026, 1, 1), date(2026, 1, 4)))
+
+    assert result.valid is False
+    assert result.error == message
+
+
 class _CalendarHost(AbstractExecutorExecutionRuntimeHostMixin):
     """只承载日历辅助方法的轻量测试宿主。"""
 

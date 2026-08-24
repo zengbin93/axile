@@ -13,9 +13,11 @@ from typing import cast
 from loguru import logger
 
 from axile.executor.models.unified_account_assets import UnifiedAccountAssets
+from axile.executor.models.unified_input import UnifiedStandardInput
 from axile.executor.models.unified_output import UnifiedStandardOutput
 from axile.executor.termination import ExecutionTerminated
 from axile.server.db.models import Account
+from axile.server.execution.execution_records_output import sanitize_standard_input_for_audit
 from axile.server.execution.worker_backend.protocol import (
     WorkerBackendErrorPayload,
     WorkerBackendRequest,
@@ -43,6 +45,15 @@ from axile.server.execution.worker_backend.worker_state import (
     _resolve_executor,
     _resolve_prepared_executor,
     _WorkerBackendState,
+)
+
+_SYMBOL_FIELDS = (
+    "curr_target",
+    "last_target",
+    "symbol_algorithms",
+    "trade_rules",
+    "forbidden_symbols",
+    "risk_symbols",
 )
 
 
@@ -94,6 +105,34 @@ def _capture_before_account_snapshot(executor: object) -> dict[str, object] | No
     return cast("dict[str, object]", assets.model_dump(mode="json"))
 
 
+def _handle_get_account_assets(
+    request: WorkerBackendRequest,
+    state: _WorkerBackendState,
+) -> WorkerBackendResponse:
+    """查询并返回账户当前资产，不进入交易执行生命周期."""
+    account = Account.model_validate(request.account_payload)
+    try:
+        executor = _resolve_executor(state, account)
+        assets = cast(UnifiedAccountAssets, executor.get_account_assets())
+        return WorkerBackendResponse(
+            request_id=request.request_id,
+            kind="result",
+            output_payload=cast("dict[str, object]", assets.model_dump(mode="json")),
+            channel_type=account.trade_channel,
+        )
+    except Exception as exc:  # noqa: BLE001 - IPC 边界统一返回结构化错误
+        return WorkerBackendResponse(
+            request_id=request.request_id,
+            kind="error",
+            channel_type=account.trade_channel,
+            error=WorkerBackendErrorPayload(
+                type=exc.__class__.__name__,
+                message=str(exc) or exc.__class__.__name__,
+                retryable=isinstance(exc, TimeoutError),
+            ),
+        )
+
+
 def _handle_execute_trade(
     request: WorkerBackendRequest,
     state: _WorkerBackendState,
@@ -114,6 +153,7 @@ def _handle_execute_trade(
     """
     context = _parse_execute_trade_request(request)
     executor = None
+    normalized_symbol_fields: dict[str, object] | None = None
     try:
         # worker 入口只保留命令级主线，具体的状态准备和审计细节都下沉到专用模块。
         executor = _resolve_prepared_executor(
@@ -122,15 +162,20 @@ def _handle_execute_trade(
             execution_id=request.execution_id,
             audit_context=context.audit_context,
         )
+        normalize = getattr(executor, "_normalize_standard_input", lambda value: value)
+        normalize_connected = getattr(executor, "_normalize_connected_standard_input", lambda value: value)
+        standard_input = cast(UnifiedStandardInput, normalize(context.standard_input))
+        standard_input = cast(UnifiedStandardInput, normalize_connected(standard_input))
+        normalized_symbol_fields = {field: getattr(standard_input, field) for field in _SYMBOL_FIELDS}
+        audit_input = sanitize_standard_input_for_audit(standard_input)
         before_account_assets = _capture_before_account_snapshot(executor)
         _append_trade_pre_execute_audit(
             account=context.account,
             execution_id=request.execution_id,
             algorithm_name=context.algorithm_name,
             trigger_source=context.trigger_source,
-            strategy_count=context.strategy_count,
-            audit_input=context.audit_input,
-            standard_input=context.standard_input,
+            audit_input=audit_input,
+            standard_input=standard_input,
             executor=executor,
             before_account_assets=before_account_assets,
         )
@@ -138,7 +183,7 @@ def _handle_execute_trade(
         output = cast(
             UnifiedStandardOutput,
             execute(
-                context.standard_input,
+                standard_input,
                 cleanup=False,
                 retain_runtime=True,
             ),
@@ -154,7 +199,11 @@ def _handle_execute_trade(
             include_trade_rule_snapshots=True,
             before_account_assets=before_account_assets,
         )
-        return _build_result_response(request_id=request.request_id, result=result)
+        return _build_result_response(
+            request_id=request.request_id,
+            result=result,
+            normalized_symbol_fields=normalized_symbol_fields,
+        )
     except ExecutionTerminated as exc:
         return _build_terminated_response(
             request_id=request.request_id,
@@ -171,6 +220,7 @@ def _handle_execute_trade(
             exc=exc,
             log_message="worker backend execute_trade 失败",
             append_failed_audit=_append_failed_audit,
+            normalized_symbol_fields=normalized_symbol_fields,
         )
     finally:
         _finalize_executor(executor)
@@ -302,6 +352,8 @@ def _handle_worker_request(
     """
     if request.command == "prepare":
         return _handle_prepare(request, state)
+    if request.command == "get_account_assets":
+        return _handle_get_account_assets(request, state)
     if request.command == "execute_trade":
         return _handle_execute_trade(request, state)
     if request.command == "empty_positions":
@@ -321,6 +373,7 @@ def run_worker_backend_loop(connection: Connection, account_id: int) -> None:
     """
     state = _WorkerBackendState(account_id=account_id)
     logger.info("[WORKER-BACKEND] worker 启动 | account_id={}", account_id)
+    current_request: WorkerBackendRequest | None = None
     try:
         while True:
             try:
@@ -331,13 +384,52 @@ def run_worker_backend_loop(connection: Connection, account_id: int) -> None:
             if raw_request is None:
                 break
 
-            request = cast(WorkerBackendRequest, raw_request)
-            response = _handle_worker_request(request, state)
+            current_request = cast(WorkerBackendRequest, raw_request)
+            response = _handle_worker_request(current_request, state)
             # 先回响应，再按 shutdown 命令退出循环，保证主进程一定能收到确认消息。
             connection.send(response)
-            if request.command == "shutdown":
+            if current_request.command == "shutdown":
                 break
+            current_request = None
+    except BaseException as exc:  # noqa: BLE001 - IPC 最外层必须保留所有进程退出原因
+        request_id = current_request.request_id if current_request is not None else "unknown"
+        logger.opt(exception=exc).critical(
+            "[WORKER-BACKEND] 未捕获异常 | account_id={} request_id={} command={}",
+            account_id,
+            request_id,
+            current_request.command if current_request is not None else "unknown",
+        )
+        try:
+            connection.send(
+                WorkerBackendResponse(
+                    request_id=request_id,
+                    kind="error",
+                    error=WorkerBackendErrorPayload(
+                        type=exc.__class__.__name__,
+                        message=str(exc) or repr(exc),
+                        retryable=False,
+                    ),
+                )
+            )
+        except Exception as send_exc:  # noqa: BLE001 - 管道可能已经断开
+            logger.opt(exception=send_exc).error(
+                "[WORKER-BACKEND] 未捕获异常响应发送失败 | account_id={} request_id={}",
+                account_id,
+                request_id,
+            )
     finally:
-        _close_executor(state.executor)
-        connection.close()
+        try:
+            _close_executor(state.executor)
+        except BaseException as close_exc:  # noqa: BLE001 - 清理异常也必须可见
+            logger.opt(exception=close_exc).error(
+                "[WORKER-BACKEND] 执行器清理失败 | account_id={}",
+                account_id,
+            )
+        try:
+            connection.close()
+        except OSError as close_exc:
+            logger.opt(exception=close_exc).error(
+                "[WORKER-BACKEND] 管道关闭失败 | account_id={}",
+                account_id,
+            )
         logger.info("[WORKER-BACKEND] worker 退出 | account_id={}", account_id)

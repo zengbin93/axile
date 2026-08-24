@@ -44,6 +44,11 @@ def test_channels_reports_all_available_when_deps_present(client: TestClient, mo
         assert "market_label" in item["portfolio"]
         assert "example_symbols" in item["portfolio"]
 
+    gm = next(item for item in payload if item["channel"] == TradeChannel.GM.value)
+    connection_mode = next(field for field in gm["account_form"]["fields"] if field["name"] == "connection_mode")
+    assert connection_mode["presentation"] == "conditional_reveal"
+    assert connection_mode["options"][1]["label"] == "终端 RPC 地址"
+
 
 def test_channels_reports_missing_dependency_with_install_extra(
     client: TestClient, monkeypatch: pytest.MonkeyPatch

@@ -54,6 +54,9 @@ _DEFAULT_SHUTDOWN_RECV_TIMEOUT_SECONDS = 5.0
 _DEFAULT_PREPARE_RECV_TIMEOUT_SECONDS = 60.0
 """账户通道登录与准备的默认等待时限（秒）。."""
 
+_ACCOUNT_ASSET_RECV_TIMEOUT_SECONDS = 30.0
+"""人工账户资产查询的最大等待时限（秒）."""
+
 _worker_backend_manager: "WorkerBackendManager | None" = None
 
 
@@ -313,10 +316,19 @@ class WorkerBackendManager:
         # 兜底清理必须在释放 request_lock 之后进行：_force_drop_worker /
         # _terminate_process 都不再获取该锁，避免与当前线程二次死锁。
         if failure is not None:
-            self._force_drop_worker(account_id, handle)
             if isinstance(failure, WorkerBackendTimeoutError):
+                self._force_drop_worker(account_id, handle)
                 raise failure
-            raise WorkerBackendExecutionError(f"worker backend 通信失败: {failure}") from failure
+            # EOFError 的字符串为空；先等待极短时间收割已退出子进程，尽量把退出码带回诊断。
+            handle.process.join(timeout=0.1)
+            exitcode = handle.process.exitcode
+            self._force_drop_worker(account_id, handle)
+            failure_detail = str(failure) or repr(failure)
+            raise WorkerBackendExecutionError(
+                "worker backend 通信失败: "
+                f"{failure.__class__.__name__}: {failure_detail}; "
+                f"request_id={request.request_id}; worker_exitcode={exitcode}"
+            ) from failure
 
         if not isinstance(response, WorkerBackendResponse):
             raise WorkerBackendExecutionError("worker backend 返回了未知响应类型")
@@ -406,6 +418,26 @@ class WorkerBackendManager:
         """关闭并移除指定账户的常驻 Worker。"""
         await asyncio.to_thread(self._drop_account_blocking, account_id)
 
+    async def get_account_assets(self, account: Account) -> UnifiedAccountAssets:
+        """通过账户常驻 worker 查询最新资产快照."""
+        request = WorkerBackendRequest(
+            request_id=uuid4().hex,
+            command="get_account_assets",
+            account_payload=account.model_dump(mode="json"),
+            execution_id=None,
+            payload={},
+        )
+        response = await asyncio.to_thread(
+            self._request_blocking,
+            _require_account_id(account),
+            request,
+            _ACCOUNT_ASSET_RECV_TIMEOUT_SECONDS,
+        )
+        if response.kind != "result" or response.output_payload is None:
+            message = response.error.message if response.error is not None else "账户资产查询失败"
+            raise WorkerBackendExecutionError(message)
+        return UnifiedAccountAssets.model_validate(response.output_payload)
+
     async def execute_trade(
         self,
         *,
@@ -416,7 +448,7 @@ class WorkerBackendManager:
         execution_id: str | None,
         trigger_source: str,
         cleanup: bool,
-    ) -> UnifiedStandardOutput:
+    ) -> tuple[UnifiedStandardOutput, dict[str, object] | None]:
         """
         通过多进程 worker 执行调仓请求.
 
@@ -439,8 +471,8 @@ class WorkerBackendManager:
 
         Returns
         -------
-        UnifiedStandardOutput
-            多进程 worker 返回并经统一封装后的执行结果。
+        tuple[UnifiedStandardOutput, dict[str, object] | None]
+            多进程 worker 返回的执行结果及归一化 symbol 字段。
         """
         await self.prepare_account(account)
         request = WorkerBackendRequest(
@@ -464,7 +496,7 @@ class WorkerBackendManager:
                 fallback=self._execute_recv_timeout,
             ),
         )
-        return self._handle_response(response)
+        return self._handle_response(response), response.normalized_symbol_fields
 
     async def empty_positions(
         self,

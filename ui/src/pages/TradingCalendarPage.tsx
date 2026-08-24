@@ -59,6 +59,8 @@ export function TradingCalendarPage() {
   const [code, setCode] = useState(TEMPLATE)
   const [functionResult, setFunctionResult] = useState<CalendarFunctionResult | null>(null)
   const [running, setRunning] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [saveError, setSaveError] = useState<string | null>(null)
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
   const [preview, setPreview] = useState<CalendarPreview | null>(null)
   const [uploading, setUploading] = useState(false)
@@ -95,7 +97,10 @@ export function TradingCalendarPage() {
     })
   }, [])
   useEffect(() => { void refresh() }, [refresh])
-  useEffect(() => { setFunctionResult(null) }, [code])
+  useEffect(() => {
+    setFunctionResult(null)
+    setSaveError(null)
+  }, [code])
 
   const loadRange = useCallback(async () => {
     try {
@@ -170,15 +175,26 @@ export function TradingCalendarPage() {
     }
   }
 
-  const saveFunction = () => replaceWithConfirmation('Python', async () => {
-    try {
-      await saveCalendarFunction(calendarId, code)
-      toast('Python 日历已刷新并保存')
-      await afterReplacement()
-    } catch (error) {
-      toast(`保存失败：${error instanceof Error ? error.message : String(error)}`)
-    }
-  })
+  const canSaveFunction = Boolean(code.trim() && functionResult?.valid && !running && !saving)
+
+  const saveFunction = () => {
+    if (!canSaveFunction) return
+    replaceWithConfirmation('自定义函数', async () => {
+      setSaving(true)
+      setSaveError(null)
+      try {
+        await saveCalendarFunction(calendarId, code)
+        toast('自定义函数日历已刷新并保存')
+        await afterReplacement()
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        setSaveError(message)
+        toast(`保存失败：${message}`)
+      } finally {
+        setSaving(false)
+      }
+    })
+  }
 
   const saveEdits = async () => {
     const entries = Object.entries(edits).map(([calDate, isOpen]) => ({ calDate, isOpen }))
@@ -236,7 +252,7 @@ export function TradingCalendarPage() {
 
         <section className="mt-6 grid grid-cols-2 gap-px overflow-hidden rounded-[8px] border border-line bg-line text-[13px] sm:grid-cols-4">
           {[
-            ['刷新方式', status?.refreshKind === 'python' ? 'Python' : status?.refreshKind === 'csv' ? 'CSV' : '未配置'],
+            ['刷新方式', status?.refreshKind === 'python' ? '自定义函数' : status?.refreshKind === 'csv' ? 'CSV' : '未配置'],
             ['有效覆盖', status?.coverageStart ? `${status.coverageStart} 至 ${status.coverageEnd}` : '暂无'],
             ['同步状态', status?.lastSyncAt ? status.lastSyncAt.replace('T', ' ') : '尚未同步'],
             ['人工调整', `${status?.overrideCount ?? 0} 条`],
@@ -252,7 +268,7 @@ export function TradingCalendarPage() {
             <Segmented
               size="sm"
               value={mode}
-              options={[{ value: 'csv', label: 'CSV' }, { value: 'python', label: 'Python' }]}
+              options={[{ value: 'csv', label: 'CSV' }, { value: 'python', label: '自定义函数' }]}
               onChange={(value) => setMode(value as CalendarRefreshKind)}
             />
           </div>
@@ -293,13 +309,17 @@ export function TradingCalendarPage() {
                       </>
                     ) : (
                       <>
-                        <PythonFunctionEditor code={code} onChange={setCode} running={running} result={functionResult} onRun={() => void runFunction()} resultContent={functionResult?.valid ? <p className="mt-3 text-[13px] text-ink-2">返回 {functionResult.entries.length} 个连续自然日。</p> : null} />
+                        <PythonFunctionEditor code={code} onChange={setCode} running={running} result={functionResult} onRun={() => void runFunction()} disabled={saving} resultContent={functionResult?.valid ? <p className="mt-3 text-[13px] text-ink-2">返回 {functionResult.entries.length} 个连续自然日。</p> : null} />
                         <div className="mt-3 flex flex-wrap gap-2">
-                          <button className="inline-flex items-center gap-1.5 rounded-[8px] bg-ink-1 px-4 py-2 text-[13px] text-surface disabled:opacity-45" disabled={!code.trim()} onClick={saveFunction}><Save size={14} /> 保存并刷新</button>
+                          <button className="inline-flex items-center gap-1.5 rounded-[8px] bg-ink-1 px-4 py-2 text-[13px] text-surface disabled:cursor-default disabled:opacity-45" disabled={!canSaveFunction} onClick={saveFunction}>
+                            {saving ? <LoaderCircle size={14} className="animate-spin motion-reduce:animate-none" /> : <Save size={14} />}
+                            {saving ? '正在生成并保存…' : '保存并刷新'}
+                          </button>
                           {status?.refreshKind === 'python' && (
                             <button className="inline-flex items-center gap-1.5 rounded-[8px] border border-line px-4 py-2 text-[13px] text-ink-2" onClick={async () => { const result = await refreshCalendar(calendarId); toast(result.message); await refresh() }}><RefreshCw size={14} /> 立即刷新</button>
                           )}
                         </div>
+                        {saveError && <p className="mt-2 text-[12.5px] text-warn" role="alert">保存失败：{saveError}</p>}
                       </>
                     )}
                   </div>

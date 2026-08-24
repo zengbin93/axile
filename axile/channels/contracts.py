@@ -144,6 +144,7 @@ class ChannelAccountOption(_FrozenDescriptorModel):
 
     value: str
     label: str
+    description: str = ""
 
 
 class ChannelAccountFieldCondition(_FrozenDescriptorModel):
@@ -228,6 +229,7 @@ class ChannelAccountField(_FrozenDescriptorModel):
     help: str | None = None
     default: object | None = None
     options: tuple[ChannelAccountOption, ...] = ()
+    presentation: Literal["segmented", "conditional_reveal"] = "segmented"
     visible_when: ChannelAccountFieldCondition | None = None
     constraints: ChannelAccountFieldConstraints | None = None
     clipboard: ChannelAccountFieldClipboard | None = None
@@ -235,6 +237,8 @@ class ChannelAccountField(_FrozenDescriptorModel):
     @model_validator(mode="after")
     def validate_constraints_match_kind(self) -> "ChannelAccountField":
         """确保约束类型与字段语义一致."""
+        if self.presentation != "segmented" and self.kind != "select":
+            raise ValueError("非默认展示模式只能用于 select 字段")
         if self.clipboard is not None and self.kind != "endpoint":
             raise ValueError("clipboard 元数据只能用于 endpoint 字段")
         if self.constraints is None:

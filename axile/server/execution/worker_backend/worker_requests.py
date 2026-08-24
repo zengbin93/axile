@@ -29,7 +29,6 @@ class _ExecuteTradeRequestContext:
     trigger_source: str
     standard_input: UnifiedStandardInput
     audit_context: dict[str, object]
-    strategy_count: int
     audit_input: dict[str, object]
     cleanup: bool
 
@@ -80,7 +79,6 @@ def _parse_execute_trade_request(request: WorkerBackendRequest) -> _ExecuteTrade
         trigger_source=cast(str, request.payload["trigger_source"]),
         standard_input=standard_input,
         audit_context=audit_context,
-        strategy_count=cast(int, request.payload["strategy_count"]),
         audit_input=cast(dict[str, object], request.payload["audit_input"]),
         cleanup=bool(request.payload["cleanup"]),
     )

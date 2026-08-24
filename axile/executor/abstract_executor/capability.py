@@ -122,6 +122,10 @@ class AbstractExecutorCapabilityMixin:
         """返回当前渠道在 planning 前使用的标准输入."""
         return standard_input
 
+    def _normalize_connected_standard_input(self, standard_input: UnifiedStandardInput) -> UnifiedStandardInput:
+        """在渠道连接及其运行时目录就绪后规范化标准输入."""
+        return standard_input
+
     def _validate_input(self, standard_input: UnifiedStandardInput) -> None:
         """
         执行通用输入验证.

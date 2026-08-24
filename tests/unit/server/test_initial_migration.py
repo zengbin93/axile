@@ -30,13 +30,70 @@ def test_migration_history_is_linear() -> None:
     assert [path.name for path in migration_paths] == [
         "0001_initial.py",
         "0002_trading_calendar.py",
+        "0003_binance_network.py",
+        "0004_account_asset_snapshot.py",
     ]
     initial = _load_migration(migration_paths[0])
     calendar = _load_migration(migration_paths[1])
+    binance_network = _load_migration(migration_paths[2])
+    account_asset_snapshot = _load_migration(migration_paths[3])
     assert initial.revision == "0001"
     assert initial.down_revision is None
     assert calendar.revision == "0002"
     assert calendar.down_revision == "0001"
+    assert binance_network.revision == "0003"
+    assert binance_network.down_revision == "0002"
+    assert account_asset_snapshot.revision == "0004"
+    assert account_asset_snapshot.down_revision == "0003"
+
+
+def test_account_asset_snapshot_migration_backfills_execution_assets() -> None:
+    migration = _load_migration(_MIGRATIONS_DIR / "0004_account_asset_snapshot.py")
+    engine = sa.create_engine("sqlite://")
+
+    metadata = sa.MetaData()
+    sa.Table(
+        "account",
+        metadata,
+        sa.Column("id", sa.Integer(), primary_key=True),
+    )
+    records = sa.Table(
+        "executerecord",
+        metadata,
+        sa.Column("account_id", sa.Integer(), nullable=False),
+        sa.Column("execution_id", sa.Text(), nullable=True),
+        sa.Column("raw_result", sa.JSON(), nullable=False),
+        sa.Column("created_at", sa.Text(), nullable=False),
+    )
+
+    with engine.begin() as connection:
+        metadata.create_all(connection)
+        connection.execute(sa.text("INSERT INTO account (id) VALUES (1)"))
+        connection.execute(
+            records.insert(),
+            [
+                {
+                    "account_id": 1,
+                    "execution_id": "exec-1",
+                    "raw_result": {"account_assets": {"total_asset": 123.0, "positions": []}},
+                    "created_at": "2026-08-24T09:30:00",
+                },
+                {
+                    "account_id": 1,
+                    "execution_id": "exec-2",
+                    "raw_result": {"error": "before snapshot"},
+                    "created_at": "2026-08-24T09:31:00",
+                },
+            ],
+        )
+        migration.op = Operations(MigrationContext.configure(connection))
+        migration.upgrade()
+
+        rows = connection.execute(sa.text("SELECT * FROM account_asset_snapshot")).mappings().all()
+        assert len(rows) == 1
+        assert rows[0]["account_id"] == 1
+        assert rows[0]["execution_id"] == "exec-1"
+        assert rows[0]["source"] == "execution"
 
 
 def test_initial_baseline_creates_the_current_schema() -> None:
@@ -150,3 +207,69 @@ def test_trading_calendar_migration_adds_calendar_table() -> None:
             "last_sync_at",
             "updated_at",
         }
+
+
+def test_binance_network_migration_rewrites_account_config_and_downgrades() -> None:
+    initial = _load_migration(_MIGRATIONS_DIR / "0001_initial.py")
+    migration = _load_migration(_MIGRATIONS_DIR / "0003_binance_network.py")
+    engine = sa.create_engine("sqlite://")
+    account = sa.table(
+        "account",
+        sa.column("id", sa.Integer()),
+        sa.column("name", sa.Text()),
+        sa.column("market", sa.Text()),
+        sa.column("trade_channel", sa.Text()),
+        sa.column("account_control_preset", sa.Text()),
+        sa.column("account_config", sa.JSON()),
+        sa.column("is_started", sa.Boolean()),
+        sa.column("cron_expr", sa.Text()),
+        sa.column("brokerage", sa.Text()),
+        sa.column("weight_precision", sa.Float()),
+        sa.column("updated_at", sa.Text()),
+        sa.column("created_at", sa.Text()),
+    )
+
+    with engine.begin() as connection:
+        operations = Operations(MigrationContext.configure(connection))
+        initial.op = operations
+        initial.upgrade()
+        common = {
+            "name": "account",
+            "market": "crypto",
+            "account_control_preset": "default",
+            "is_started": False,
+            "cron_expr": "",
+            "brokerage": "",
+            "weight_precision": 0.001,
+            "updated_at": "now",
+            "created_at": "now",
+        }
+        connection.execute(
+            sa.insert(account),
+            [
+                {**common, "id": 1, "trade_channel": "binance", "account_config": {"is_testnet": True}},
+                {**common, "id": 2, "trade_channel": "binance", "account_config": {"is_testnet": False}},
+                {
+                    **common,
+                    "id": 3,
+                    "trade_channel": "binance",
+                    "account_config": {"is_testnet": True, "network": "mainnet"},
+                },
+                {**common, "id": 4, "trade_channel": "gm", "account_config": {"is_testnet": True}},
+            ],
+        )
+
+        migration.op = operations
+        migration.upgrade()
+        upgraded = dict(connection.execute(sa.select(account.c.id, account.c.account_config)).all())
+        assert upgraded[1] == {"network": "testnet"}
+        assert upgraded[2] == {"network": "mainnet"}
+        assert upgraded[3] == {"network": "mainnet"}
+        assert upgraded[4] == {"is_testnet": True}
+
+        migration.downgrade()
+        downgraded = dict(connection.execute(sa.select(account.c.id, account.c.account_config)).all())
+        assert downgraded[1] == {"is_testnet": True}
+        assert downgraded[2] == {"is_testnet": False}
+        assert downgraded[3] == {"is_testnet": False}
+        assert downgraded[4] == {"is_testnet": True}

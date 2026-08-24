@@ -128,6 +128,7 @@ def test_builtin_channels_have_stable_order_and_descriptor_shape() -> None:
     assert plugins[1].descriptor.portfolio.market_label == "A股"
     assert plugins[1].descriptor.portfolio.example_symbols == ("600000.SH", "000001.SZ")
     assert plugins[2].descriptor.portfolio == plugins[0].descriptor.portfolio
+    assert [plugin.max_parallel_symbols for plugin in plugins] == [10, 10, 10]
     assert plugins[2].descriptor.account_form.fields[0].default is None
 
 
@@ -178,6 +179,14 @@ def test_account_field_constraints_match_semantic_kind() -> None:
             width="full",
             clipboard=ChannelAccountFieldClipboard(role="rpc"),
         )
+    with pytest.raises(ValidationError, match="展示模式"):
+        ChannelAccountField(
+            name="token",
+            label="Token",
+            kind="secret",
+            width="full",
+            presentation="conditional_reveal",
+        )
 
 
 def test_builtin_account_contracts_expose_validation_constraints() -> None:
@@ -194,7 +203,11 @@ def test_builtin_account_contracts_expose_validation_constraints() -> None:
     assert ctp_fields["td_front"].constraints.endpoint.allowed_schemes == ("tcp",)
     assert ctp_fields["md_front"].constraints.endpoint.port == "required"
     assert gm_fields["serv_addr"].constraints.endpoint.scheme == "forbidden"
+    assert gm_fields["connection_mode"].presentation == "conditional_reveal"
+    assert gm_fields["connection_mode"].options[1].description.startswith("Axile 连接")
     assert tq_fields["initial_balance"].constraints.number.gt == 0
+    assert tq_fields["account_mode"].presentation == "conditional_reveal"
+    assert tq_fields["account_mode"].default is None
 
 
 def test_duplicate_channel_registration_fails_clearly() -> None:

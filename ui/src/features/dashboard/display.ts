@@ -57,6 +57,35 @@ export const CHANNEL_TAG: Record<TradeChannel, string> = {
   gm: '掘金',
 }
 
+export interface AccountAssetTerms {
+  /** 账户金额的完整标题。 */
+  fullLabel: string
+  /** 行内、证据与说明文案使用的短名称。 */
+  shortLabel: string
+  /** 历史数据点名称。 */
+  pointLabel: string
+  /** 比例分母文案。 */
+  ratioLabel: string
+}
+
+/** 按渠道返回面向用户的账户资金术语；未知插件渠道按账户权益处理。 */
+export function accountAssetTerms(channel: TradeChannel | null | undefined): AccountAssetTerms {
+  if (channel === 'gm') {
+    return {
+      fullLabel: '总资产',
+      shortLabel: '资产',
+      pointLabel: '资产点',
+      ratioLabel: '占总资产',
+    }
+  }
+  return {
+    fullLabel: '账户权益',
+    shortLabel: '权益',
+    pointLabel: '权益点',
+    ratioLabel: '占权益',
+  }
+}
+
 /** 渠道 + 市场的完整描述（hero 胶囊用）。 */
 export function channelLabel(channel: TradeChannel, market: string): string {
   const base = getChannelDescriptor(channel)?.label ?? CHANNEL_TAG[channel] ?? channel

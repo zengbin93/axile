@@ -34,6 +34,7 @@ export function PythonFunctionEditor({
   minHeight,
   maxHeight,
   runLabel = '试跑',
+  disabled = false,
 }: {
   code: string
   onChange: (code: string) => void
@@ -47,6 +48,7 @@ export function PythonFunctionEditor({
   minHeight?: string
   maxHeight?: string
   runLabel?: string
+  disabled?: boolean
 }) {
   const cmRef = useRef<ReactCodeMirrorRef>(null)
   const hasCode = code.trim().length > 0
@@ -85,7 +87,7 @@ export function PythonFunctionEditor({
     <div className="max-w-[820px]">
       <div className="mb-2 flex items-center justify-end gap-4">
         {hasCode && (
-          <button className="inline-flex cursor-pointer items-center gap-1.5 text-[13px] text-accent" onClick={() => void paste()}>
+          <button className="inline-flex cursor-pointer items-center gap-1.5 text-[13px] text-accent disabled:cursor-default disabled:opacity-45" onClick={() => void paste()} disabled={disabled}>
             <Clipboard size={14} /> 粘贴
           </button>
         )}
@@ -101,7 +103,7 @@ export function PythonFunctionEditor({
             minHeight={minHeight}
             maxHeight={maxHeight}
             theme="none"
-            extensions={[oneDark, editorTheme, python(), lintGutter(), EditorView.lineWrapping]}
+            extensions={[oneDark, editorTheme, python(), lintGutter(), EditorView.lineWrapping, EditorView.editable.of(!disabled)]}
             basicSetup={{ foldGutter: false, highlightActiveLine: false, highlightActiveLineGutter: false, autocompletion: false }}
           />
           {!hasCode && (
@@ -121,7 +123,7 @@ export function PythonFunctionEditor({
               {style.body}
             </span>
             {controls}
-            <button className="inline-flex cursor-pointer items-center gap-1.5 rounded-[8px] border-0 bg-ink-1 px-4 py-1.5 text-[13.5px] font-[550] text-surface disabled:opacity-45" onClick={onRun} disabled={running}>
+            <button className="inline-flex cursor-pointer items-center gap-1.5 rounded-[8px] border-0 bg-ink-1 px-4 py-1.5 text-[13.5px] font-[550] text-surface disabled:cursor-default disabled:opacity-45" onClick={onRun} disabled={running || disabled}>
               <Play size={14} /> {runLabel}
             </button>
           </div>

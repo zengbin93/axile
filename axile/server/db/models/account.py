@@ -16,6 +16,7 @@ from axile.executor.models.unified_input import DEFAULT_EXECUTION_TIMEOUT_SECOND
 from axile.server.db.models.base import PydanticJSONType, now_str
 
 if TYPE_CHECKING:
+    from axile.server.db.models.account_asset import AccountAssetSnapshot
     from axile.server.db.models.execution import ExecuteRecord
     from axile.server.db.models.portfolio import Portfolio
 
@@ -280,6 +281,13 @@ class Account(AccountBase, AsyncAttrs, table=True):
             cascade="all, delete-orphan",
         )
     )
+    asset_snapshots: list["AccountAssetSnapshot"] = Relationship(
+        sa_relationship=relationship(
+            "AccountAssetSnapshot",
+            back_populates="account",
+            cascade="all, delete-orphan",
+        )
+    )
     portfolio_records: list["PortfolioAccount"] = Relationship(
         sa_relationship=relationship(
             "PortfolioAccount",
@@ -337,7 +345,7 @@ class AccountDashboardItemPublic(SQLModel):
     """仪表盘聚合中的单账户项.
 
     一次性把舰队卡所需数据拼齐，避免前端对每个账户分别请求下次执行、执行记录等。
-    权益与持仓取自该账户最近一条执行记录的 ``raw_result.account_assets`` 快照。
+    权益与持仓取自该账户最近一次持久化的资产快照。
 
     Attributes
     ----------
@@ -367,6 +375,8 @@ class AccountDashboardItemPublic(SQLModel):
         最近一次快照各持仓的市值（降序，最多 12 项），用于持仓分布条。
     equity_series : List[float]
         近端权益序列（按时间升序），用于迷你走势图。
+    asset_observed_at : Optional[str]
+        最近一次账户资产观测时间；无快照时为 ``None``。
     last_is_success : Optional[int]
         最近一次执行是否成功（1/0）；无记录时为 ``None``。
     last_exec_at : Optional[str]
@@ -398,6 +408,7 @@ class AccountDashboardItemPublic(SQLModel):
     holdings_count: int
     position_weights: List[float]
     equity_series: List[float]
+    asset_observed_at: Optional[str] = None
     last_is_success: Optional[int] = None
     last_exec_at: Optional[str] = None
     running_execution_id: Optional[str] = None

@@ -4,7 +4,7 @@
  * 后端不下发「到位/背离」verdict，也无手续费汇总（见方案已知缺口）；这里用
  * 现有字段做诚实的粗粒度派生：能确定的说确定，不能确定的不编。
  */
-import type { AccountDashboardItem, ExecuteRecord, LatestWeights, Position } from '@/types/api'
+import type { AccountAssets, AccountDashboardItem, ExecuteRecord, LatestWeights, Position } from '@/types/api'
 
 /**
  * 规整后端返回的账户计价货币.
@@ -170,6 +170,11 @@ export function positionsOf(records: ExecuteRecord[]): Position[] {
     if (Array.isArray(positions)) return positions
   }
   return []
+}
+
+/** 从独立账户资产快照读取持仓；载荷不完整时返回空列表。 */
+export function positionsOfAssets(assets: AccountAssets | null | undefined): Position[] {
+  return Array.isArray(assets?.positions) ? assets.positions : []
 }
 
 /** 调仓阈值：|当前−目标| 小于此百分点视为「到位」。 */

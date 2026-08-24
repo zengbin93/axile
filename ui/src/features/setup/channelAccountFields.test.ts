@@ -2,6 +2,8 @@ import { expect, test } from 'bun:test'
 import type { ChannelAccountField } from '@/types/api'
 import {
   channelAccountFieldVisible,
+  conditionalRevealFields,
+  isConditionalRevealField,
   updateChannelAccountConfig,
   visibleChannelAccountConfig,
 } from './channelAccountFields'
@@ -61,4 +63,47 @@ test('任意布尔条件都用 visible_when 清理隐藏字段', () => {
 
   expect(channelAccountFieldVisible(binanceFields[1], config)).toBe(false)
   expect(updateChannelAccountConfig(binanceFields, config, 'is_testnet', false)).toEqual({ is_testnet: false })
+})
+
+test('条件展开选择器归集自己的字段且不影响普通条件字段', () => {
+  const revealFields: ChannelAccountField[] = [
+    {
+      name: 'connection_mode',
+      label: '连接方式',
+      kind: 'select',
+      width: 'full',
+      required: true,
+      presentation: 'conditional_reveal',
+    },
+    {
+      name: 'terminal_path',
+      label: '本机终端目录',
+      kind: 'directory',
+      width: 'full',
+      required: true,
+      visible_when: { field: 'connection_mode', equals: 'terminal' },
+    },
+    {
+      name: 'serv_addr',
+      label: '终端 RPC 地址',
+      kind: 'endpoint',
+      width: 'full',
+      required: true,
+      visible_when: { field: 'connection_mode', equals: 'service' },
+    },
+    {
+      name: 'initial_balance',
+      label: '初始资金',
+      kind: 'money',
+      width: 'full',
+      required: true,
+      visible_when: { field: 'account_mode', equals: 'sim' },
+    },
+  ]
+
+  expect(conditionalRevealFields(revealFields, 'connection_mode', 'terminal').map((field) => field.name)).toEqual([
+    'terminal_path',
+  ])
+  expect(isConditionalRevealField(revealFields, revealFields[1])).toBe(true)
+  expect(isConditionalRevealField(revealFields, revealFields[3])).toBe(false)
 })

@@ -17,6 +17,7 @@ from axile.server.api.routes.account_support import _get_account_or_404
 from axile.server.cron import parse_cron_expr
 from axile.server.db.models import (
     Account,
+    AccountAssetSnapshot,
     AccountCreate,
     AccountDashboardItemPublic,
     AccountDashboardPublic,
@@ -39,11 +40,10 @@ from axile.server.execution.registry import get_execution_task_state, get_runnin
 from axile.server.execution.scheduler import create_job, delete_job
 from axile.server.repositories import (
     add_record_portfolio_account,
-    get_earliest_execute_records_since,
-    get_earliest_execute_records_since_for_accounts,
-    get_execute_records_before,
-    get_execute_records_before_for_accounts,
+    get_account_asset_snapshots_before_for_accounts,
+    get_earliest_account_asset_snapshots_since_for_accounts,
     get_portfolios_every_account,
+    get_recent_account_asset_snapshots_for_accounts,
     get_recent_execute_records_for_accounts,
 )
 
@@ -227,13 +227,11 @@ async def list_accounts(session: SessionDep) -> AccountListPublic:
     return AccountListPublic(data=[AccountPublic.model_validate(account) for account in accounts])
 
 
-# 权益迷你线的取数窗口与降采样目标。窗口取近端 N 条执行（本账户 ≈ 全历史，活跃账户 ≈ 近数日），
+# 权益迷你线的取数窗口与降采样目标。窗口取近端 N 条资产快照（本账户 ≈ 全历史，活跃账户 ≈ 近数日），
 # 让 Hero/舰队卡的迷你线与「回看·绩效」大图（``limit=500`` 全量、点序均匀）同一形状，而非仅
 # 最近 20 条那截平尾；再等距降采样到定长，控制 payload 与绘制点数。
 _EQUITY_WINDOW = 200
 _EQUITY_POINTS = 60
-# 持仓/最近态只需近端少量记录，从取数窗口切片扫描，避免在全窗上重复建表。
-_RECENT_SCAN = 20
 
 
 def _downsample_series(values: list[float], target: int) -> list[float]:
@@ -275,15 +273,6 @@ def _downsample_series(values: list[float], target: int) -> list[float]:
     return out
 
 
-def _account_assets_from_record(record: ExecuteRecord | None) -> dict[str, Any]:
-    """从执行记录的 ``raw_result`` 中容错取出账户资产快照子字典."""
-    if record is None:
-        return {}
-    raw = record.raw_result if isinstance(record.raw_result, dict) else {}
-    assets = raw.get("account_assets")
-    return assets if isinstance(assets, dict) else {}
-
-
 def _safe_total_asset(assets: dict[str, Any]) -> float:
     """从资产快照中容错读取总权益, 非法值回退为 0.0."""
     try:
@@ -292,58 +281,19 @@ def _safe_total_asset(assets: dict[str, Any]) -> float:
         return 0.0
 
 
-def _first_valid_total_asset(records: list[ExecuteRecord]) -> float | None:
-    """返回记录序列中第一条含有效（>0）权益快照的总权益；均无则 ``None``。"""
-    for record in records:
-        total = _safe_total_asset(_account_assets_from_record(record))
+def _first_valid_total_asset(snapshots: list[AccountAssetSnapshot]) -> float | None:
+    """返回快照序列中第一条有效（>0）的总权益；均无则 ``None``。"""
+    for snapshot in snapshots:
+        total = _safe_total_asset(snapshot.assets)
         if total > 0:
             return total
     return None
 
 
-async def _today_pct(session: SessionDep, account_id: int, current_total: float) -> float | None:
-    """
-    计算账户「今日」权益涨跌百分比（按自然日锚定，服务端一处算准）.
-
-    基准优先取今天 00:00 之前最后一条有效快照（昨收）；无跨日数据时退回今天最早一条
-    有效快照（今开）。刻意不由前端取序列末两点相减——那既非自然日、又会随采样抖动。
-
-    Parameters
-    ----------
-    session : SessionDep
-        当前数据库会话。
-    account_id : int
-        账户 ID。
-    current_total : float
-        当前权益（取自最近一条有效快照）。
-
-    Returns
-    -------
-    float | None
-        今日涨跌百分比；当前权益或基准不可用（≤0）时返回 ``None``。
-
-    Notes
-    -----
-    单账户版本，供账户详情等单账户路径使用。仪表盘走
-    :func:`_today_pct_from_baselines` 的批量版本，避免账户循环内逐账户查询。
-    """
-    if current_total <= 0:
-        return None
-    day_start = f"{now_str()[:10]}T00:00:00"
-    baseline = _first_valid_total_asset(await get_execute_records_before(session, account_id, day_start, limit=5))
-    if baseline is None:
-        baseline = _first_valid_total_asset(
-            await get_earliest_execute_records_since(session, account_id, day_start, limit=5)
-        )
-    if baseline is None or baseline <= 0:
-        return None
-    return (current_total - baseline) / baseline * 100.0
-
-
 def _today_pct_from_baselines(
     current_total: float,
-    before_records: list[ExecuteRecord],
-    since_records: list[ExecuteRecord],
+    before_records: list[AccountAssetSnapshot],
+    since_records: list[AccountAssetSnapshot],
 ) -> float | None:
     """
     由已批量取回的基准记录计算「今日」权益涨跌百分比.
@@ -408,22 +358,23 @@ async def account_dashboard(session: SessionDep, sched: SchedDep) -> AccountDash
 
     account_ids = [cast("int", account.id) for account in accounts]
     day_start = f"{now_str()[:10]}T00:00:00"
-    recent_by_account = await get_recent_execute_records_for_accounts(session, account_ids, limit=_EQUITY_WINDOW)
-    before_by_account = await get_execute_records_before_for_accounts(session, account_ids, day_start, limit=5)
-    since_by_account = await get_earliest_execute_records_since_for_accounts(session, account_ids, day_start, limit=5)
+    recent_records_by_account = await get_recent_execute_records_for_accounts(session, account_ids, limit=1)
+    recent_by_account = await get_recent_account_asset_snapshots_for_accounts(
+        session, account_ids, limit=_EQUITY_WINDOW
+    )
+    before_by_account = await get_account_asset_snapshots_before_for_accounts(session, account_ids, day_start, limit=5)
+    since_by_account = await get_earliest_account_asset_snapshots_since_for_accounts(
+        session, account_ids, day_start, limit=5
+    )
 
     items: list[AccountDashboardItemPublic] = []
     for account in accounts:
         account_id = cast("int", account.id)
         recent = recent_by_account.get(account_id, [])
-        latest = recent[0] if recent else None
-
-        # 权益/持仓取「最近一条有非空账户快照」的记录，而非无脑取 recent[0]：一次在读到
-        # 账户资产之前就失败的执行（如交易所地域封锁致预热失败）不含快照，不应把权益/持仓
-        # 显示清成 0——回退到最后一次已知的账户状态（无论该条执行成败）。状态字段（成败/
-        # 时间）仍取真正最近一条，如实反映最近一次执行结果。只需近端，切片扫描即可。
-        assets_by_record = [(record, _account_assets_from_record(record)) for record in recent[:_RECENT_SCAN]]
-        assets = next((a for _, a in assets_by_record if a), {})
+        latest_snapshot = recent[0] if recent else None
+        latest_records = recent_records_by_account.get(account_id, [])
+        latest = latest_records[0] if latest_records else None
+        assets = latest_snapshot.assets if latest_snapshot is not None else {}
         raw_positions = assets.get("positions")
         positions: list[Any] = raw_positions if isinstance(raw_positions, list) else []
         holdings_count = len(positions)
@@ -433,7 +384,7 @@ async def account_dashboard(session: SessionDep, sched: SchedDep) -> AccountDash
         )[:12]
         # 走势跨整个取数窗口、只取有快照的点（避免失败记录插入假的 0），再降采样到定长——
         # 与「回看·绩效」大图同形，而非仅最近 20 条那截平尾。
-        equity_full = [_safe_total_asset(a) for a in (_account_assets_from_record(r) for r in reversed(recent)) if a]
+        equity_full = [_safe_total_asset(snapshot.assets) for snapshot in reversed(recent)]
         equity_series = _downsample_series(equity_full, _EQUITY_POINTS)
 
         # 「今日」涨跌按自然日锚定（昨收/今开为基准），服务端一处算准，避免前端末两点相减乱跳。
@@ -478,6 +429,7 @@ async def account_dashboard(session: SessionDep, sched: SchedDep) -> AccountDash
                 holdings_count=holdings_count,
                 position_weights=position_weights,
                 equity_series=equity_series,
+                asset_observed_at=latest_snapshot.created_at if latest_snapshot is not None else None,
                 last_is_success=latest.is_success if latest is not None else None,
                 last_exec_at=latest.created_at if latest is not None else None,
                 running_execution_id=running_execution_id,
@@ -667,7 +619,16 @@ async def delete_execute_records(session: SessionDep, account_id: int) -> Messag
     """删除账户的执行记录."""
     await _get_account_or_404(session, account_id)
 
-    # 这里只清理 execute_record 表，不联动 execution event / artifact 审计流。
+    # 执行来源快照属于执行历史的一部分，随记录清理；人工刷新快照保持独立观测语义。
+    await session.execute(
+        delete(AccountAssetSnapshot).where(
+            and_(
+                AccountAssetSnapshot.account_id == account_id,
+                AccountAssetSnapshot.source == "execution",
+            )
+        )
+    )
+    # execution event / artifact 审计流仍不联动。
     stmt = delete(ExecuteRecord).where(and_(ExecuteRecord.account_id == account_id))
     await session.execute(stmt)
     await session.commit()

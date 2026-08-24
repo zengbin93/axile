@@ -7,6 +7,7 @@ from typing import cast
 
 import pytest
 
+from axile.common.gm_symbols import normalize_gm_standard_input
 from axile.common.trade_channel import TradeChannel
 from axile.executor.models.execution_result import AlgorithmResult
 from axile.executor.models.unified_account_assets import UnifiedAccountAssets
@@ -15,7 +16,7 @@ from axile.executor.models.unified_output import ExecutionStatus, UnifiedStandar
 from axile.server.db.models import Account
 from axile.server.execution.worker_backend import worker as worker_backend_entry
 from axile.server.execution.worker_backend import worker_responses, worker_state
-from axile.server.execution.worker_backend.protocol import WorkerBackendRequest
+from axile.server.execution.worker_backend.protocol import WorkerBackendRequest, WorkerBackendResponse
 from tests.unit.server._execution_test_support import build_account
 
 
@@ -28,6 +29,15 @@ class _FakeWorkerExecutor:
     def next_audit_seq(self) -> int:
         self.audit_seq += 1
         return self.audit_seq
+
+    def _normalize_standard_input(self, standard_input: UnifiedStandardInput) -> UnifiedStandardInput:
+        if standard_input.channel_type == TradeChannel.GM:
+            return normalize_gm_standard_input(standard_input)
+        return standard_input
+
+    @staticmethod
+    def _normalize_connected_standard_input(standard_input: UnifiedStandardInput) -> UnifiedStandardInput:
+        return standard_input
 
     def execute(
         self,
@@ -169,7 +179,6 @@ def test_handle_execute_trade_returns_result_payload(
         payload={
             "standard_input": standard_input.to_dict(),
             "audit_input": {"curr_target": {"SHSE.600000": 0.12}},
-            "strategy_count": 1,
             "trigger_source": "manual",
             "cleanup": True,
         },
@@ -182,8 +191,12 @@ def test_handle_execute_trade_returns_result_payload(
     assert "inputs" not in response.output_payload
     assert UnifiedStandardOutput.model_validate(response.output_payload).inputs is None
     assert fake_executor.execute_input is not None
-    assert fake_executor.execute_input.curr_target == {"SHSE.600000": 0.12}
-    assert cast(dict[str, object], captured["pre_execute"])["strategy_count"] == 1
+    assert fake_executor.execute_input.curr_target == {"600000.SH": 0.12}
+    assert response.normalized_symbol_fields is not None
+    assert response.normalized_symbol_fields["curr_target"] == {"600000.SH": 0.12}
+    pre_execute = cast(dict[str, object], captured["pre_execute"])
+    assert cast(UnifiedStandardInput, pre_execute["standard_input"]).curr_target == {"600000.SH": 0.12}
+    assert cast(dict[str, object], pre_execute["audit_input"])["curr_target"] == {"600000.SH": 0.12}
     assert cast(dict[str, object], captured["success"])["algorithm_name"] == "SINGLE-MAKER"
 
 
@@ -359,7 +372,6 @@ def test_handle_execute_trade_uses_account_channel_for_standard_input(
                 "extra": {"audit": {"execution_id": "exec-worker-ctp-1"}},
             },
             "audit_input": {"curr_target": {"rb2610": 0.1}},
-            "strategy_count": 1,
             "trigger_source": "manual",
             "cleanup": True,
         },
@@ -444,7 +456,6 @@ def test_handle_execute_trade_exception_returns_structured_error_payload(
         payload={
             "standard_input": standard_input.to_dict(),
             "audit_input": {"curr_target": {"SHSE.600000": 0.12}},
-            "strategy_count": 1,
             "trigger_source": "manual",
             "cleanup": True,
         },
@@ -463,3 +474,97 @@ def test_handle_execute_trade_exception_returns_structured_error_payload(
     error_payload = cast(object, captured["error"])
     assert getattr(error_payload, "type") == "runtime_error"
     assert getattr(error_payload, "message") == "boom"
+
+
+def test_handle_execute_trade_preserves_original_error_when_failed_audit_raises(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """失败审计二次异常不得覆盖原始交易异常。"""
+    account = _build_gm_account()
+
+    class _BoomExecutor(_FakeWorkerExecutor):
+        def execute(
+            self,
+            standard_input: UnifiedStandardInput,
+            *,
+            cleanup: bool = True,  # noqa: FBT001, FBT002
+            retain_runtime: bool = False,  # noqa: FBT001, FBT002
+        ) -> UnifiedStandardOutput:
+            _ = standard_input, cleanup, retain_runtime
+            raise RuntimeError("original boom")
+
+    monkeypatch.setattr(worker_backend_entry, "_resolve_prepared_executor", lambda **_kwargs: _BoomExecutor())
+    monkeypatch.setattr(worker_backend_entry, "_finalize_executor", lambda _executor: None)
+    monkeypatch.setattr(worker_backend_entry, "_append_trade_pre_execute_audit", lambda **_kwargs: None)
+    monkeypatch.setattr(worker_responses.logger, "exception", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(worker_responses.logger, "opt", lambda **_kwargs: worker_responses.logger)
+
+    def raise_audit_error(**_kwargs: object) -> None:
+        raise OSError("audit boom")
+
+    monkeypatch.setattr(worker_backend_entry, "_append_failed_audit", raise_audit_error)
+    standard_input = UnifiedStandardInput.from_dict(
+        {
+            "channel_type": TradeChannel.GM.value,
+            "account_config": account.account_config,
+            "curr_target": {},
+            "last_target": {},
+            "algorithm": {"method": "SINGLE-MAKER", "params": {}},
+            "trade_rules": account.trade_rules,
+        }
+    )
+    request = WorkerBackendRequest(
+        request_id="req-original-error",
+        command="execute_trade",
+        account_payload=account.model_dump(mode="json"),
+        execution_id="exec-original-error",
+        payload={
+            "standard_input": standard_input.to_dict(),
+            "audit_input": {},
+            "trigger_source": "manual",
+            "cleanup": True,
+        },
+    )
+
+    response = worker_backend_entry._handle_execute_trade(request, worker_backend_entry._WorkerBackendState())
+
+    assert response.error is not None
+    assert response.error.message == "original boom"
+
+
+def test_worker_loop_returns_structured_error_for_uncaught_base_exception(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """worker 最外层应回传未被命令处理器捕获的 BaseException。"""
+    request = WorkerBackendRequest.shutdown("req-interrupted", reason="test")
+
+    class _Connection:
+        def __init__(self) -> None:
+            self.sent: list[WorkerBackendResponse] = []
+            self.closed = False
+
+        def recv(self) -> WorkerBackendRequest:
+            return request
+
+        def send(self, response: WorkerBackendResponse) -> None:
+            self.sent.append(response)
+
+        def close(self) -> None:
+            self.closed = True
+
+    connection = _Connection()
+    monkeypatch.setattr(
+        worker_backend_entry,
+        "_handle_worker_request",
+        lambda _request, _state: (_ for _ in ()).throw(KeyboardInterrupt()),
+    )
+    monkeypatch.setattr(worker_backend_entry, "_close_executor", lambda _executor: None)
+
+    worker_backend_entry.run_worker_backend_loop(connection, account_id=2)  # type: ignore[arg-type]
+
+    assert connection.closed is True
+    assert len(connection.sent) == 1
+    assert connection.sent[0].request_id == "req-interrupted"
+    assert connection.sent[0].error is not None
+    assert connection.sent[0].error.type == "KeyboardInterrupt"
+    assert connection.sent[0].error.message == "KeyboardInterrupt()"

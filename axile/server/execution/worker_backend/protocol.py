@@ -13,7 +13,7 @@ from typing import Literal
 from axile.common.trade_channel import TradeChannel
 from axile.executor.termination import TERMINATION_TRIGGER_OPERATOR
 
-WorkerBackendCommand = Literal["prepare", "execute_trade", "empty_positions", "shutdown"]
+WorkerBackendCommand = Literal["prepare", "get_account_assets", "execute_trade", "empty_positions", "shutdown"]
 WorkerBackendResponseKind = Literal["result", "error", "terminated"]
 
 
@@ -124,6 +124,8 @@ class WorkerBackendResponse:
         与 ``mode`` 正交。``ExecutionTerminated`` 侧同样恒有取值，故这里不用可空。
     cancel_failed_order_ids : list[str]
         终止时撤单失败的订单标识。
+    normalized_symbol_fields : dict[str, object] | None
+        worker 按渠道目录归一化后的 symbol 字段；不包含账户凭据。
     """
 
     request_id: str
@@ -136,3 +138,4 @@ class WorkerBackendResponse:
     acked_at: str | None = None
     trigger: str = TERMINATION_TRIGGER_OPERATOR
     cancel_failed_order_ids: list[str] = field(default_factory=list)
+    normalized_symbol_fields: dict[str, object] | None = None

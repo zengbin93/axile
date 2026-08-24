@@ -18,6 +18,7 @@ import {
 import { buildSymbolActionStream, type ActionLine } from '@/features/account/actionStream'
 import { BLAME_LABEL, type FailureReason } from '@/features/account/failureReason'
 import { PhaseBar } from '@/features/dashboard/PhaseBar'
+import { accountAssetTerms } from '@/features/dashboard/display'
 import { useDomainStore } from '@/stores/domain'
 import { useChannelDescriptor } from '@/stores/channels'
 import { useRunning } from '@/stores/liveExec'
@@ -146,7 +147,7 @@ function verdict(m: ExecutionDetailModel): { icon: string; cls: string; text: st
 }
 
 /** 头条：整条链坍缩成的结论 + 诚实来源条。 */
-function Header({ m, currency }: { m: ExecutionDetailModel; currency: string }) {
+function Header({ m, currency, assetLabel }: { m: ExecutionDetailModel; currency: string; assetLabel: string }) {
   const v = verdict(m)
   const h = m.header
   const meta = [TRIGGER_LABEL[h.trigger] ?? h.trigger, KIND_LABEL[h.kind] ?? h.kind].filter(Boolean).join(' ')
@@ -158,7 +159,7 @@ function Header({ m, currency }: { m: ExecutionDetailModel; currency: string }) 
       <div className="num mt-2 text-[13px] text-ink-2">
         {meta && <span className="text-ink-3">{meta} · </span>}
         {h.durationSec != null && <span className="text-ink-3">{fmtDuration(h.durationSec)} · </span>}
-        权益 {fmtEquity(h.equityBefore)} → {h.equityAfter == null ? '—' : <NumberTicker value={h.equityAfter} format={{ minimumFractionDigits: 2, maximumFractionDigits: 2 }} />}
+        {assetLabel} {fmtEquity(h.equityBefore)} → {h.equityAfter == null ? '—' : <NumberTicker value={h.equityAfter} format={{ minimumFractionDigits: 2, maximumFractionDigits: 2 }} />}
         {h.equityBefore != null && h.equityAfter != null && (
           <span className={`font-semibold ${h.equityAfter >= h.equityBefore ? 'text-up' : 'text-down'}`}>
             {' '}
@@ -171,7 +172,7 @@ function Header({ m, currency }: { m: ExecutionDetailModel; currency: string }) 
           </span>
         )}
       </div>
-      <SnapshotNote h={h} />
+      <SnapshotNote h={h} assetLabel={assetLabel} />
       {m.failure && <FailureNote f={m.failure} />}
     </div>
   )
@@ -184,15 +185,15 @@ function Header({ m, currency }: { m: ExecutionDetailModel; currency: string }) 
  * 出强提示；仅执行前基线缺失时，只有权益族退化、到位度仍可信，出「只警告该退化的量」的准提示。
  * 琥珀只点在真正偏离的量上，不再把可信的到位度也刷成「仅供参考」。
  */
-function SnapshotNote({ h }: { h: ExecutionDetailModel['header'] }) {
+function SnapshotNote({ h, assetLabel }: { h: ExecutionDetailModel['header']; assetLabel: string }) {
   const posBad = h.sourcePosition !== 'real'
   const eqBad = h.sourceEquity !== 'real'
   if (!posBad && !eqBad) return null
   const label = (s: string) => SOURCE_DEGRADED_LABEL[s] ?? s
   // sourceEquity 恒不优于 sourcePosition：posBad ⇒ 执行后快照退化 ⇒ 两族皆污染。
   const note = posBad
-    ? `执行后账户快照为「${label(h.sourcePosition)}」——到位度与权益均基于非真实快照，仅供参考。`
-    : `执行前基线为「${label(h.sourceEquity)}」——权益变动与敞口对比不可得；到位度基于执行后真实快照，仍然可信。`
+    ? `执行后账户快照为「${label(h.sourcePosition)}」——到位度与${assetLabel}均基于非真实快照，仅供参考。`
+    : `执行前基线为「${label(h.sourceEquity)}」——${assetLabel}变动与敞口对比不可得；到位度基于执行后真实快照，仍然可信。`
   return <div className="mt-2 rounded bg-warn-soft px-2.5 py-1.5 text-[12.5px] text-warn">{note}</div>
 }
 
@@ -480,7 +481,7 @@ function BookendRow({
 }
 
 /** ⑤ 证据：账户前后的结构化事实 + 一键复制原始附件（不再内联裸 JSON）。 */
-function Evidence({ m, currency }: { m: ExecutionDetailModel; currency: string }) {
+function Evidence({ m, currency, assetLabel }: { m: ExecutionDetailModel; currency: string; assetLabel: string }) {
   const b = m.bookends
   const [copied, setCopied] = useState(false)
   const copy = () => {
@@ -503,7 +504,7 @@ function Evidence({ m, currency }: { m: ExecutionDetailModel; currency: string }
       {hasAccount && (
         <div className="num text-[12.5px] text-ink-2">
           <BookendRow label="现金" before={b.cashBefore} after={b.cashAfter} currency={currency} />
-          <BookendRow label="权益" before={b.equityBefore} after={b.equityAfter} currency={currency} pnl />
+          <BookendRow label={assetLabel} before={b.equityBefore} after={b.equityAfter} currency={currency} pnl />
           <BookendRow label="市值" before={b.mvBefore} after={b.mvAfter} currency={currency} />
         </div>
       )}
@@ -528,6 +529,7 @@ export function ExecutionDetailPage() {
   const currency = currencyOf(item?.currency)
   const descriptor = useChannelDescriptor(item?.trade_channel)
   const units = descriptor?.units ?? DEFAULT_UNITS
+  const assetTerms = accountAssetTerms(item?.trade_channel)
 
   const eventsFetcher = useCallback(
     (signal: AbortSignal): Promise<{ data: ExecutionEvent[] }> =>
@@ -561,7 +563,7 @@ export function ExecutionDetailPage() {
         ]}
       />
       <div className="num mt-3 text-[15px] font-mono text-ink-2">{executionId}</div>
-      {model && <Header m={model} currency={currency} />}
+      {model && <Header m={model} currency={currency} assetLabel={assetTerms.shortLabel} />}
 
       {/* 运行中：顶部给一条确定态阶段条作一瞥总览；逐事件细节仍在下方脊柱。 */}
       {isLive && running && (
@@ -600,7 +602,7 @@ export function ExecutionDetailPage() {
               <p className="text-[13px] text-ink-3">本次执行无逐只对账（可能为空跑或早期终止）。</p>
             )}
             <Spine m={model} />
-            <Evidence m={model} currency={currency} />
+            <Evidence m={model} currency={currency} assetLabel={assetTerms.shortLabel} />
           </>
         )}
       </Card>

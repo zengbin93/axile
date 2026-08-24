@@ -10,6 +10,7 @@
  * 归并抑制，避免每次追价都甩一行「撤销」噪声。
  */
 import { eventError } from '@/features/account/executionRows'
+import { executionReasonText } from '@/features/account/executionReason'
 import type { ExecutionEvent } from '@/types/api'
 
 /** 动作流的一行：一条事件渲染成的动词句。 */
@@ -184,7 +185,7 @@ function lineOf(e: ExecutionEvent, units: ActionDisplayUnits): { text: string; b
     case 'symbol_decision_made':
       return { text: decisionText(e, units), broken: e.status === 'ERROR' }
     case 'symbol_skipped':
-      return { text: `跳过 · ${err || e.reason_code || '无变动'}`, broken: true }
+      return { text: `跳过 · ${err || executionReasonText(e.reason_code, '未执行')}`, broken: true }
     case 'order_submitted':
       return isChase(e) ? { text: chaseText(e, units), broken: false } : { text: submitText(e, units), broken: false }
     case 'order_acknowledged':
@@ -196,7 +197,7 @@ function lineOf(e: ExecutionEvent, units: ActionDisplayUnits): { text: string; b
       return { text: `对账 · ${COMPLETION_LABEL[st] ?? '完成'}`, broken: false, good: st === 'SUCCEEDED' }
     }
     case 'execution_failed':
-      return { text: `执行失败 · ${err || e.reason_code}`, broken: true }
+      return { text: err || executionReasonText(e.reason_code, '执行失败'), broken: true }
     case 'execution_terminated':
       return { text: '已终止', broken: true }
     case 'execution_termination_requested':
@@ -204,7 +205,7 @@ function lineOf(e: ExecutionEvent, units: ActionDisplayUnits): { text: string; b
     case 'execution_termination_acked':
       return { text: '确认终止', broken: false }
     default:
-      return { text: err || e.reason_code || e.event_type, broken: e.status === 'ERROR' }
+      return { text: err || executionReasonText(e.reason_code, '执行事件'), broken: e.status === 'ERROR' }
   }
 }
 

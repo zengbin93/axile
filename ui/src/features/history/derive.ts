@@ -15,7 +15,7 @@
  */
 import type { EquityPoint } from '@/components/viz/EquityChart'
 import type { ScheduleSkipActivity } from '@/lib/api/accounts'
-import type { ExecuteRecord, PortfolioAccountRecord } from '@/types/api'
+import type { AccountAssetSnapshot, ExecuteRecord, PortfolioAccountRecord } from '@/types/api'
 
 export type RangeKey = '30' | '90' | 'all'
 
@@ -24,9 +24,9 @@ const TRANSFER_JUMP_RATIO = 0.25
 /** 孤立点相对左右两邻居偏离超过该比例且同向即判为退化快照，剔除。 */
 const OUTLIER_DEV_RATIO = 0.4
 
-/** 从记录取总权益（容错）。 */
-function totalAsset(r: ExecuteRecord): number | null {
-  const v = r.raw_result?.account_assets?.total_asset
+/** 从账户资产快照取总权益（容错）。 */
+function totalAsset(snapshot: AccountAssetSnapshot): number | null {
+  const v = snapshot.assets?.total_asset
   return typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : null
 }
 
@@ -52,13 +52,24 @@ function isNoop(r: ExecuteRecord): boolean {
 }
 
 /** 记录按时间升序，并按区间过滤（相对最后一条记录日期回溯 N 天）。 */
-export function filterRecords(records: ExecuteRecord[], range: RangeKey): ExecuteRecord[] {
-  const asc = [...records].sort((a, b) => a.created_at.localeCompare(b.created_at))
+function filterCreatedAtRange<T extends { created_at: string }>(items: T[], range: RangeKey): T[] {
+  const asc = [...items].sort((a, b) => a.created_at.localeCompare(b.created_at))
   if (range === 'all' || asc.length === 0) return asc
   const days = Number(range)
   const last = new Date(asc[asc.length - 1].created_at).getTime()
   const cutoff = last - days * 864e5
   return asc.filter((r) => new Date(r.created_at).getTime() >= cutoff)
+}
+
+export function filterRecords(records: ExecuteRecord[], range: RangeKey): ExecuteRecord[] {
+  return filterCreatedAtRange(records, range)
+}
+
+export function filterAssetSnapshots(
+  snapshots: AccountAssetSnapshot[],
+  range: RangeKey,
+): AccountAssetSnapshot[] {
+  return filterCreatedAtRange(snapshots, range)
 }
 
 /**
@@ -77,13 +88,17 @@ function isOutlier(eqs: number[], i: number): boolean {
   return pit || spike
 }
 
-/** 成功记录 → 权益曲线点（含原始 ISO 时间戳），并剔除孤立退化快照。 */
-export function buildEquityPoints(records: ExecuteRecord[]): EquityPoint[] {
+/** 账户资产观测 → 权益曲线点（含原始 ISO 时间戳），并剔除孤立退化快照。 */
+export function buildEquityPoints(snapshots: AccountAssetSnapshot[]): EquityPoint[] {
   const raw: EquityPoint[] = []
-  for (const r of records) {
-    const eq = totalAsset(r)
+  for (const snapshot of snapshots) {
+    const eq = totalAsset(snapshot)
     if (eq == null) continue
-    raw.push({ date: r.created_at.replace('T', ' ').slice(5, 16), iso: r.created_at, eq })
+    raw.push({
+      date: snapshot.created_at.replace('T', ' ').slice(5, 16),
+      iso: snapshot.created_at,
+      eq,
+    })
   }
   const eqs = raw.map((p) => p.eq)
   return raw.filter((_, i) => !isOutlier(eqs, i))
@@ -129,7 +144,11 @@ export interface HistoryStats {
 }
 
 /** 汇总区间内的执行统计与盈亏。 */
-export function aggregateStats(records: ExecuteRecord[]): HistoryStats {
+export function aggregateStats(
+  records: ExecuteRecord[],
+  points: EquityPoint[],
+  snapshotCurrency = '',
+): HistoryStats {
   let fills = 0
   let noops = 0
   let fails = 0
@@ -151,9 +170,8 @@ export function aggregateStats(records: ExecuteRecord[]): HistoryStats {
     const c = r.raw_result?.account_assets?.currency
     if (typeof c === 'string' && c) currency = c
   }
-  const pts = buildEquityPoints(records)
-  const eqFirst = pts.length ? pts[0].eq : null
-  const eqLast = pts.length ? pts[pts.length - 1].eq : null
+  const eqFirst = points.length ? points[0].eq : null
+  const eqLast = points.length ? points[points.length - 1].eq : null
   const pnl = eqFirst != null && eqLast != null ? eqLast - eqFirst : null
   return {
     fills,
@@ -161,11 +179,11 @@ export function aggregateStats(records: ExecuteRecord[]): HistoryStats {
     fails,
     terminated,
     fee,
-    currency: currency || '',
+    currency: currency || snapshotCurrency,
     pnl,
     eqFirst,
     eqLast,
-    transfers: detectTransfers(pts),
+    transfers: detectTransfers(points),
   }
 }
 

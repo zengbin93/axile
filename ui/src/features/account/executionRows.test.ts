@@ -37,9 +37,17 @@ describe('symbolRows', () => {
     expect(rows[0]?.reason).toContain('max_wait_seconds')
   })
 
-  it('跳过事件在无 error 时回退到 reason_code', () => {
+  it('普通跳过不把内部 reason_code 暴露为原因', () => {
     const rows = symbolRows([ev({ event_type: 'symbol_skipped', symbol: 'au2612', reason_code: 'COMMON.SYMBOL_SKIPPED' })])
-    expect(rows[0]?.reason).toBe('COMMON.SYMBOL_SKIPPED')
+    expect(rows[0]?.reason).toBe('')
+  })
+
+  it('具体跳过原因显示中文，未知代码使用中性兜底', () => {
+    const rows = symbolRows([
+      ev({ event_type: 'symbol_skipped', symbol: 'au2612', reason_code: 'COMMON.SUB_MIN_QTY' }),
+      ev({ event_type: 'symbol_skipped', symbol: 'rb2610', reason_code: 'PLUGIN.UNKNOWN_REASON' }),
+    ])
+    expect(rows.map((row) => row.reason)).toEqual(['数量取整后不足最小下单量', '未执行'])
   })
 })
 

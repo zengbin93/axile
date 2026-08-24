@@ -43,7 +43,8 @@ export interface ChannelAccountField {
   placeholder?: string
   help?: string
   default?: unknown
-  options?: Array<{ value: string; label: string }>
+  options?: Array<{ value: string; label: string; description?: string }>
+  presentation?: 'segmented' | 'conditional_reveal'
   visible_when?: { field: string; equals: unknown }
   constraints?: ChannelAccountFieldConstraints | null
   clipboard?: ChannelAccountFieldClipboard | null
@@ -258,6 +259,8 @@ export interface AccountDashboardItem {
   position_weights: number[]
   /** 最近若干次执行的权益快照（时间正序），用于 sparkline。 */
   equity_series: number[]
+  /** 最近一次账户资产观测时间；无快照为 null。 */
+  asset_observed_at?: string | null
   /** 最近一次执行是否成功（1/0）；无记录为 null。 */
   last_is_success: number | null
   last_exec_at: string | null
@@ -349,6 +352,20 @@ export interface AccountAssets {
   currency?: string
   positions?: Position[]
   [k: string]: unknown
+}
+
+export interface AccountAssetSnapshot {
+  id: number | null
+  account_id: number
+  assets: AccountAssets
+  source: 'execution' | 'manual'
+  execution_id: string | null
+  created_at: string
+}
+
+export interface AccountAssetSnapshotList {
+  data: AccountAssetSnapshot[]
+  count: number
 }
 
 /** 单个持仓（字段随渠道而异，容错处理）。 */

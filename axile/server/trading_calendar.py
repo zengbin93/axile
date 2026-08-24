@@ -403,6 +403,16 @@ def validate_calendar_entries(
         raise ValueError(f"交易日历区间缺少 {expected - len(entries)} 个自然日")
 
 
+def _validate_calendar_function_entries(
+    entries: list[CalendarInputEntry], *, calendar_id: str, start: date, end: date
+) -> None:
+    """校验自定义函数返回请求范围内的一段连续交易日历。"""
+    validate_calendar_entries(entries, calendar_id=calendar_id)
+    dates = [entry.cal_date for entry in entries]
+    if min(dates) < start or max(dates) > end:
+        raise ValueError(f"交易日历日期必须位于 {start.isoformat()} 至 {end.isoformat()} 内")
+
+
 async def build_import_preview(session: AsyncSession, entries: list[CalendarInputEntry]) -> CalendarImportPreview:
     """比较候选基础日历与当前数据。"""
     validate_calendar_entries(entries)
@@ -537,7 +547,7 @@ async def run_calendar_function(
         return _calendar_script_error(result.error or ScriptExecutionError("自定义交易日历函数执行失败"))
     try:
         entries = _ENTRY_LIST_ADAPTER.validate_python(result.value)
-        validate_calendar_entries(entries, calendar_id=calendar_id, start=start, end=end)
+        _validate_calendar_function_entries(entries, calendar_id=calendar_id, start=start, end=end)
     except (ValidationError, ValueError) as exc:
         return CalendarFunctionResult(valid=False, error=str(exc), errorMessage=str(exc), errorType=type(exc).__name__)
     return CalendarFunctionResult(valid=True, entries=entries)

@@ -270,7 +270,7 @@ describe('buildExecutionDetail · 逐只子链', () => {
     const au = buildExecutionDetail(events, artifacts).symbols.find((s) => s.symbol === 'au2612')!
     expect(au.action).toBe('skipped')
     expect(au.broken).toBe(true)
-    expect(au.reason).toBe('RISK.FORBIDDEN')
+    expect(au.reason).toBe('受账户交易限制')
   })
 })
 

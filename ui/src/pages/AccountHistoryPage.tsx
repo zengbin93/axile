@@ -7,10 +7,16 @@ import { Skeleton } from '@/components/ui/Skeleton'
 import { EquityChart, type ChartMarker } from '@/components/viz/EquityChart'
 import { DailyBars } from '@/components/viz/DailyBars'
 import { Segmented } from '@/components/ui/Segmented'
-import { getAccount, getAccountActivity, getCachedExecuteRecords, getPortfolioRecords } from '@/lib/api/accounts'
+import {
+  getAccount,
+  getAccountActivity,
+  getAccountAssetSnapshots,
+  getCachedExecuteRecords,
+  getPortfolioRecords,
+} from '@/lib/api/accounts'
 import { usePolling } from '@/lib/hooks/usePolling'
 import { withViewTransition } from '@/lib/viewTransition'
-import { channelLabel } from '@/features/dashboard/display'
+import { accountAssetTerms, channelLabel } from '@/features/dashboard/display'
 import { formatMoney } from '@/lib/derive'
 import {
   aggregateStats,
@@ -18,6 +24,7 @@ import {
   buildEquityPoints,
   buildEvents,
   buildSegments,
+  filterAssetSnapshots,
   filterRecords,
   filterScheduleSkips,
   type RangeKey,
@@ -67,12 +74,17 @@ export function AccountHistoryPage() {
   const amountVt = useViewTransitionState(`/accounts/${accountId}/history`)
 
   const account = usePolling(useCallback((s: AbortSignal) => getAccount(accountId, s), [accountId]), 0)
+  const assetTerms = accountAssetTerms(account.data?.trade_channel)
   const activity = usePolling(
     useCallback((s: AbortSignal) => getAccountActivity(accountId, { limit: 500 }, s), [accountId]),
     0,
   )
   const bindings = usePolling(
     useCallback((s: AbortSignal) => getPortfolioRecords(accountId, s), [accountId]),
+    0,
+  )
+  const snapshots = usePolling(
+    useCallback((s: AbortSignal) => getAccountAssetSnapshots(accountId, { limit: 500 }, s), [accountId]),
     0,
   )
   // 首帧优先用 hover 预取缓存：有缓存即直接出图，落地不闪骨架，金额 FLIP 有真实落点。
@@ -83,9 +95,12 @@ export function AccountHistoryPage() {
   const recordsData = activity.data ?? cached ?? null
   const allSkips = activity.data?.data.flatMap((item) => item.kind === 'schedule_skip' ? [item] : []) ?? []
   const ranged = filterRecords(allRecords, range)
+  const allSnapshots = snapshots.data?.data ?? []
+  const rangedSnapshots = filterAssetSnapshots(allSnapshots, range)
   const rangedSkips = filterScheduleSkips(allSkips, allRecords, range)
-  const points = buildEquityPoints(ranged)
-  const stats = aggregateStats(ranged)
+  const points = buildEquityPoints(rangedSnapshots)
+  const snapshotCurrency = [...rangedSnapshots].reverse().find((s) => s.assets.currency)?.assets.currency ?? ''
+  const stats = aggregateStats(ranged, points, snapshotCurrency)
   const segments = buildSegments(bindings.data?.data ?? [], points)
   const events = buildEvents(bindings.data?.data ?? [], ranged, rangedSkips)
 
@@ -144,7 +159,7 @@ export function AccountHistoryPage() {
         <Segmented size="sm" value={range} options={RANGES} onChange={switchRange} />
       </div>
 
-      {!recordsData && activity.loading && (
+      {(!recordsData || !snapshots.data) && (activity.loading || snapshots.loading) && (
         <>
           {/* 骨架与成品同尺寸：hero + 曲线 + 概览四卡，避免整屏塌成一行（L1 消闪）。 */}
           <Card className="p-6">
@@ -165,9 +180,13 @@ export function AccountHistoryPage() {
           </div>
         </>
       )}
-      {!recordsData && activity.error && <p className="text-[14px] text-bad">加载失败：{activity.error.message}</p>}
+      {(!recordsData || !snapshots.data) && (activity.error || snapshots.error) && (
+        <p className="text-[14px] text-bad">
+          加载失败：{activity.error?.message ?? snapshots.error?.message}
+        </p>
+      )}
 
-      {recordsData && (
+      {recordsData && snapshots.data && (
         <>
           {/* Hero + 曲线 */}
           <Card className="p-6">
@@ -200,7 +219,7 @@ export function AccountHistoryPage() {
                   </span>
                 </>
               ) : stats.pnl == null ? (
-                '区间内权益点不足'
+                `区间内${assetTerms.pointLabel}不足`
               ) : hasTransfer ? (
                 // 有疑似资金进出：这是「估值变化」而非盈亏，走中性；免责升为琥珀提示。
                 <>
@@ -254,7 +273,7 @@ export function AccountHistoryPage() {
             <StatCard
               k="累计手续费"
               v={stats.fee > 0 ? stats.fee.toFixed(4) : '0'}
-              sub={feeDrag != null ? `占权益 ${feeDrag.toFixed(2)}%` : stats.currency}
+              sub={feeDrag != null ? `${assetTerms.ratioLabel} ${feeDrag.toFixed(2)}%` : stats.currency}
               subWarn={feeDrag != null && feeDrag > 0}
             />
             <StatCard
@@ -274,7 +293,7 @@ export function AccountHistoryPage() {
           </div>
 
           {/* 分段收益 */}
-          <SectionLabel>绑定分段收益 · 权益跨多段绑定，分开算才诚实</SectionLabel>
+          <SectionLabel>绑定分段收益 · {assetTerms.shortLabel}跨多段绑定，分开算才诚实</SectionLabel>
           <Card className="px-6 py-4">
             {segments.length === 0 ? (
               <p className="text-[13px] text-ink-3">本区间无可用的分段数据。</p>

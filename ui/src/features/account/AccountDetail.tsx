@@ -1,29 +1,33 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useViewTransitionState } from 'react-router'
+import { RefreshCw } from 'lucide-react'
 import { Link, useNavigate } from '@/components/ui/nav'
 import { Card, SectionLabel, Chip } from '@/components/ui/Card'
 import { DriftBar } from '@/components/viz/DriftBar'
 import { Sparkline } from '@/components/viz/Sparkline'
 import { InkRewrite } from '@/components/ui/InkRewrite'
 import { NumberTicker } from '@/components/ui/NumberTicker'
+import { Tooltip } from '@/components/ui/Tooltip'
 import { AccountActions } from '@/features/account/AccountActions'
 import { useExecutionRunner } from '@/features/account/useExecutionRunner'
 import { useTerminateAction } from '@/features/account/useTerminateAction'
 import { buildRecentActivity } from '@/features/account/recent'
-import { INTEGRITY_ICON, INTEGRITY_TEXT_CLASS, STATUS_ICON, STATUS_TEXT_CLASS, channelLabel } from '@/features/dashboard/display'
+import { accountAssetTerms, INTEGRITY_ICON, INTEGRITY_TEXT_CLASS, STATUS_ICON, STATUS_TEXT_CLASS, channelLabel } from '@/features/dashboard/display'
 import { phaseLabel, runVerb } from '@/features/dashboard/execProgress'
 import { useRunning } from '@/stores/liveExec'
 import {
   getAccount,
+  getAccountAssetSnapshots,
   getAccountActivity,
   getAccountTargetWeights,
   getNextRun,
   prefetchExecuteRecords,
+  refreshAccountAssets,
   updateAccount,
   deleteAccount,
 } from '@/lib/api/accounts'
 import { usePolling } from '@/lib/hooks/usePolling'
-import { stateVerdict, gateOf, rebalancePlan, positionsOf, type StatusLevel } from '@/lib/derive'
+import { stateVerdict, gateOf, rebalancePlan, positionsOf, positionsOfAssets, type StatusLevel } from '@/lib/derive'
 import { marketForChannel, describeCron, nextFires, fmtFire } from '@/features/setup/cron'
 import { TimerQuickModal } from '@/features/setup/TimerQuickModal'
 import { useToastStore } from '@/stores/ui'
@@ -41,6 +45,7 @@ export function AccountDetail({ accountId, item, onDashboardRefresh }: AccountDe
   const navigate = useNavigate()
   const toast = useToastStore((s) => s.toast)
   const [timerOpen, setTimerOpen] = useState(false)
+  const [refreshingAssets, setRefreshingAssets] = useState(false)
   // 启停乐观态：确认后立刻翻转，驱动按钮/状态句日记式换字；与 item 对齐后清除。
   const [startedOverride, setStartedOverride] = useState<boolean | null>(null)
   // 共享元素 FLIP 门控：
@@ -51,6 +56,7 @@ export function AccountDetail({ accountId, item, onDashboardRefresh }: AccountDe
   const tHistory = useViewTransitionState(`/accounts/${accountId}/history`)
   const nameVt = tDetail || tEdit
   const amountVt = tHistory
+  const assetTerms = accountAssetTerms(item.trade_channel)
 
   const isStarted = startedOverride ?? item.is_started
   useEffect(() => {
@@ -66,6 +72,10 @@ export function AccountDetail({ accountId, item, onDashboardRefresh }: AccountDe
     10000,
   )
   const nextRun = usePolling(useCallback((s: AbortSignal) => getNextRun(accountId, s), [accountId]), 30000)
+  const assetSnapshots = usePolling(
+    useCallback((s: AbortSignal) => getAccountAssetSnapshots(accountId, { limit: 1 }, s), [accountId]),
+    10000,
+  )
 
   const portfolioId = account.data?.portfolio_id ?? null
   // 目标改取账户级「执行器口径」权重（后端已叠加杠杆与精度），与含杠杆的真实持仓同尺。
@@ -85,7 +95,9 @@ export function AccountDetail({ accountId, item, onDashboardRefresh }: AccountDe
   const runningExecId = live?.executionId ?? runner.executionId
 
   const recordList = activity.data?.data.flatMap((item) => item.kind === 'execution' ? [item.record] : []) ?? []
-  const positions = positionsOf(recordList)
+  const latestAssets = assetSnapshots.data?.data[0]?.assets
+  const snapshotPositions = positionsOfAssets(latestAssets)
+  const positions = latestAssets ? snapshotPositions : positionsOf(recordList)
   const target = weights.data ?? {}
   // 背离摘要：与明细抽屉同口径（均出自 rebalancePlan）。文案讲「几只要动 · 卖几买几」，
   // 条画各品种的要成交幅度；到位/空仓退成静态一句。
@@ -156,6 +168,19 @@ export function AccountDetail({ accountId, item, onDashboardRefresh }: AccountDe
       navigate('/')
     } catch (e) {
       toast(`删除失败：${e instanceof Error ? e.message : String(e)}`)
+    }
+  }
+  const onRefreshAssets = async () => {
+    if (refreshingAssets || isRunning) return
+    setRefreshingAssets(true)
+    try {
+      await refreshAccountAssets(accountId)
+      await Promise.all([assetSnapshots.refresh(), onDashboardRefresh?.()])
+      toast('账户权益已刷新')
+    } catch (e) {
+      toast(`刷新失败：${e instanceof Error ? e.message : String(e)}`)
+    } finally {
+      setRefreshingAssets(false)
     }
   }
 
@@ -267,7 +292,26 @@ export function AccountDetail({ accountId, item, onDashboardRefresh }: AccountDe
         </div>
 
         <div className="mt-6 border-t border-line pt-4">
-          <div className="text-[13px] text-ink-2">总权益</div>
+          <div className="flex items-center gap-1.5 text-[13px] text-ink-2">
+            <span>{assetTerms.fullLabel}</span>
+            <Tooltip content={isRunning ? '执行中，结束后可刷新账户权益' : '从交易渠道刷新账户权益'}>
+              <span className="inline-flex">
+                <button
+                  type="button"
+                  onClick={onRefreshAssets}
+                  disabled={isRunning || refreshingAssets}
+                  aria-label={refreshingAssets ? '正在刷新账户权益' : '刷新账户权益'}
+                  title={isRunning ? '执行中，无法刷新账户权益' : undefined}
+                  className="grid h-6 w-6 cursor-pointer place-items-center rounded-md text-ink-3 hover:bg-fill hover:text-ink-1 disabled:cursor-default disabled:opacity-40 disabled:hover:bg-transparent"
+                >
+                  <RefreshCw
+                    size={14}
+                    className={refreshingAssets ? 'animate-spin motion-reduce:animate-none' : undefined}
+                  />
+                </button>
+              </span>
+            </Tooltip>
+          </div>
           <div className="flex items-end justify-between gap-4">
             <div>
               {/* 金额 → 绩效 hero：共享元素 FLIP（平移 + 微缩）；曲线不参与。 */}

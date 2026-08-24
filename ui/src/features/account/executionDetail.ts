@@ -6,6 +6,7 @@
  * 在此，组件只做渲染。
  */
 import { eventError } from '@/features/account/executionRows'
+import { executionReasonText, symbolSkipSummaryReason } from '@/features/account/executionReason'
 import { describeFailure, type FailureReason } from '@/features/account/failureReason'
 import type {
   AccountSnapshotSource,
@@ -282,7 +283,8 @@ function skipsBySymbol(events: ExecutionEvent[]): Map<string, string> {
   const out = new Map<string, string>()
   for (const e of events) {
     if (e.event_type !== 'symbol_skipped' || !e.symbol) continue
-    out.set(e.symbol, eventError(e) || e.reason_code || '跳过')
+    const reason = eventError(e) || symbolSkipSummaryReason(e.reason_code)
+    if (reason) out.set(e.symbol, reason)
   }
   return out
 }
@@ -555,7 +557,7 @@ function buildSpine(
     nodes.push({
       key: 'failed',
       label: '执行失败',
-      detail: failure?.human || eventError(failed) || failed.reason_code,
+      detail: failure?.human || eventError(failed) || executionReasonText(failed.reason_code, '执行失败'),
       time: hhmmss(failed.ts_local_created),
       status: 'ERROR',
       broken: true,

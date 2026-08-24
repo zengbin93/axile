@@ -14,7 +14,7 @@ import loguru
 from axile.domain.execution import ExecutionKind, ExecutionTaskStatus, ExecutionTerminateMode
 from axile.executor.termination import TERMINATION_TRIGGER_OPERATOR
 from axile.server.core.db import SessionLocal
-from axile.server.db.models import Account, ExecuteRecord
+from axile.server.db.models import Account, AccountAssetSnapshot, ExecuteRecord
 
 
 class _WriteSessionProtocol(Protocol):
@@ -65,6 +65,17 @@ async def _persist_execute_record(
             is_success=is_success,
         )
         session.add(record)
+        assets = raw_result.get("account_assets")
+        if isinstance(assets, dict) and assets:
+            session.add(
+                AccountAssetSnapshot(
+                    account_id=account_id,
+                    assets=assets,
+                    source="execution",
+                    execution_id=execution_id,
+                    created_at=record.created_at,
+                )
+            )
         await session.commit()
         await session.refresh(record)
         return record

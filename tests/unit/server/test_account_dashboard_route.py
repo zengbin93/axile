@@ -81,6 +81,17 @@ def _record(
     )
 
 
+def _snapshot(
+    total_asset: float,
+    positions: list[dict[str, object]],
+    created_at: str,
+) -> SimpleNamespace:
+    return SimpleNamespace(
+        assets={"total_asset": total_asset, "positions": positions},
+        created_at=created_at,
+    )
+
+
 def test_dashboard_aggregates_account(monkeypatch: pytest.MonkeyPatch) -> None:
     """聚合最新权益/持仓/权益序列/绑定/下次执行/上次成败。"""
     account = build_account(id=1, name="acc", is_started=True)
@@ -97,6 +108,17 @@ def test_dashboard_aggregates_account(monkeypatch: pytest.MonkeyPatch) -> None:
         ),
         _record(100.0, [{"symbol": "rb2610", "market_value": 50000}], "CNY", 1, "2026-07-02 09:00:00"),
     ]
+    snapshots = [
+        _snapshot(
+            102.0,
+            [
+                {"symbol": "rb2610", "market_value": 60000},
+                {"symbol": "ag2612", "market_value": 40000},
+            ],
+            "2026-07-02T09:03:00",
+        ),
+        _snapshot(100.0, [{"symbol": "rb2610", "market_value": 50000}], "2026-07-02T09:00:00"),
+    ]
 
     async def _bindings(_session: object) -> dict[int, int]:
         return {1: 7}
@@ -104,15 +126,19 @@ def test_dashboard_aggregates_account(monkeypatch: pytest.MonkeyPatch) -> None:
     async def _recent(_session: object, _account_ids: object, limit: int = 20) -> dict[int, list[object]]:
         return {1: list(recent)}
 
+    async def _snapshots(_session: object, _account_ids: object, limit: int = 20) -> dict[int, list[object]]:
+        return {1: list(snapshots)}
+
     async def _no_baseline_records(*_args: object, **_kwargs: object) -> dict[int, list[object]]:
         return {}
 
     monkeypatch.setattr(account_crud, "get_portfolios_every_account", _bindings)
     monkeypatch.setattr(account_crud, "get_recent_execute_records_for_accounts", _recent)
+    monkeypatch.setattr(account_crud, "get_recent_account_asset_snapshots_for_accounts", _snapshots)
     # 「今日涨跌」的基准查询走独立数据访问函数；假 session 对任意查询都返回账户对象，
     # 故在数据访问层桩掉基准记录（本用例不校验 today_pct）。
-    monkeypatch.setattr(account_crud, "get_execute_records_before_for_accounts", _no_baseline_records)
-    monkeypatch.setattr(account_crud, "get_earliest_execute_records_since_for_accounts", _no_baseline_records)
+    monkeypatch.setattr(account_crud, "get_account_asset_snapshots_before_for_accounts", _no_baseline_records)
+    monkeypatch.setattr(account_crud, "get_earliest_account_asset_snapshots_since_for_accounts", _no_baseline_records)
 
     app = _build_app(_Session([account]), _Scheduler(_Job(None)))
     response = TestClient(app).get("/account/dashboard")
@@ -128,6 +154,7 @@ def test_dashboard_aggregates_account(monkeypatch: pytest.MonkeyPatch) -> None:
     assert item["holdings_count"] == 2
     assert item["position_weights"] == [60000.0, 40000.0]  # 降序
     assert item["equity_series"] == [100.0, 102.0]  # 升序:旧→新
+    assert item["asset_observed_at"] == "2026-07-02T09:03:00"
     assert item["last_is_success"] == 1
     assert item["is_scheduled"] is True
     assert item["next_run_time"] is None
@@ -148,8 +175,9 @@ def test_dashboard_handles_account_without_records(monkeypatch: pytest.MonkeyPat
 
     monkeypatch.setattr(account_crud, "get_portfolios_every_account", _bindings)
     monkeypatch.setattr(account_crud, "get_recent_execute_records_for_accounts", _recent)
-    monkeypatch.setattr(account_crud, "get_execute_records_before_for_accounts", _no_baseline_records)
-    monkeypatch.setattr(account_crud, "get_earliest_execute_records_since_for_accounts", _no_baseline_records)
+    monkeypatch.setattr(account_crud, "get_recent_account_asset_snapshots_for_accounts", _recent)
+    monkeypatch.setattr(account_crud, "get_account_asset_snapshots_before_for_accounts", _no_baseline_records)
+    monkeypatch.setattr(account_crud, "get_earliest_account_asset_snapshots_since_for_accounts", _no_baseline_records)
 
     app = _build_app(_Session([account]), _Scheduler(job=None))
     response = TestClient(app).get("/account/dashboard")
@@ -161,5 +189,6 @@ def test_dashboard_handles_account_without_records(monkeypatch: pytest.MonkeyPat
     assert item["holdings_count"] == 0
     assert item["position_weights"] == []
     assert item["equity_series"] == []
+    assert item["asset_observed_at"] is None
     assert item["last_is_success"] is None
     assert item["is_scheduled"] is False

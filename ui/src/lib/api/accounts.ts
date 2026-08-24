@@ -5,6 +5,8 @@ import type {
   AccountDashboard,
   AccountNextRun,
   AccountControlPolicyEditorModel,
+  AccountAssetSnapshot,
+  AccountAssetSnapshotList,
   ExecuteRecordList,
   LatestWeights,
   Message,
@@ -62,6 +64,24 @@ export interface AccountActivityList {
 /** 仪表盘聚合：一次拿到所有账户的舰队卡数据。 */
 export function getDashboard(signal?: AbortSignal): Promise<AccountDashboard> {
   return apiGet<AccountDashboard>('/account/dashboard', signal)
+}
+
+/** 从交易渠道主动查询并保存最新账户资产。 */
+export function refreshAccountAssets(id: number): Promise<AccountAssetSnapshot> {
+  return apiSend<AccountAssetSnapshot>('POST', `/account/${id}/assets/refresh`)
+}
+
+/** 账户资产观测历史（最新在前）。 */
+export function getAccountAssetSnapshots(
+  id: number,
+  params: { skip?: number; limit?: number } = {},
+  signal?: AbortSignal,
+): Promise<AccountAssetSnapshotList> {
+  const q = new URLSearchParams()
+  if (params.skip != null) q.set('skip', String(params.skip))
+  if (params.limit != null) q.set('limit', String(params.limit))
+  const qs = q.toString()
+  return apiGet<AccountAssetSnapshotList>(`/account/${id}/asset_snapshots${qs ? `?${qs}` : ''}`, signal)
 }
 
 /** 账户详情。 */

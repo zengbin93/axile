@@ -7,6 +7,7 @@ import { LeverageInput } from '@/features/account/LeverageInput'
 import { leverageError } from '@/features/account/leverage'
 import { WizardPage, WizardNav } from '@/features/setup/WizardNav'
 import { Segmented } from '@/components/ui/Segmented'
+import { ConditionalReveal } from '@/components/ui/ConditionalReveal'
 import { ConnectionField } from '@/components/ui/ConnectionField'
 import { DirectoryPicker } from '@/components/ui/DirectoryPicker'
 import type { ClipboardCandidate } from '@/components/ui/connectionFieldClipboard'
@@ -31,6 +32,8 @@ import { defaultAlgorithm, algoLabel, intentFromParams, validateAlgorithmParams 
 import { AlgorithmEditor } from '@/features/setup/AlgorithmEditor'
 import {
   channelAccountFieldVisible,
+  conditionalRevealFields,
+  isConditionalRevealField,
   updateChannelAccountConfig,
   visibleChannelAccountConfig,
 } from '@/features/setup/channelAccountFields'
@@ -308,6 +311,62 @@ export function AcctConnect() {
     navigate('/setup/acct/portfolio')
   }
 
+  const renderFieldControl = (field: ChannelAccountField) => {
+    const value = acct.config[field.name] ?? field.default ?? ''
+    if (field.kind === 'boolean') {
+      return (
+        <>
+          <div className="mb-2 text-[13px] text-ink-2">{field.label}</div>
+          <Segmented
+            value={value === true || value === 'true' ? 'true' : 'false'}
+            options={[
+              { value: 'false', label: '关闭' },
+              { value: 'true', label: '启用' },
+            ]}
+            onChange={(next) => setField(field.name, next === 'true')}
+          />
+          {field.help && <div className="mt-1 text-[12px] text-ink-3">{field.help}</div>}
+          {errors[field.name] && <div className="mt-1 text-[12px] text-warn">{errors[field.name]}</div>}
+        </>
+      )
+    }
+    if (field.kind === 'select') {
+      return (
+        <>
+          <div className="mb-2 text-[13px] text-ink-2">{field.label}</div>
+          <Segmented<string>
+            value={String(value)}
+            onChange={(next) => setField(field.name, next)}
+            options={field.options ?? []}
+          />
+          {field.help && <div className="mt-1 text-[12px] text-ink-3">{field.help}</div>}
+          {errors[field.name] && <div className="mt-1 text-[12px] text-warn">{errors[field.name]}</div>}
+        </>
+      )
+    }
+    return (
+      <ConnectionField
+        ref={(node) => { fieldRefs.current[field.name] = node }}
+        label={field.label}
+        kind={field.kind}
+        clipboard={field.clipboard}
+        constraints={field.constraints}
+        onPasteBatchMatch={field.clipboard?.group
+          ? (candidates) => fillMatchedEndpoints(field, candidates)
+          : undefined}
+        value={String(value)}
+        required={field.required}
+        placeholder={field.placeholder}
+        help={field.help}
+        error={errors[field.name]}
+        onChange={(next) => setField(field.name, next === '' ? undefined : next)}
+        onBlur={(fieldValue) => validateDynamicField(field, fieldValue)}
+        onNavigate={(direction) => moveFieldFocus(field.name, direction)}
+        onBrowse={field.kind === 'directory' ? () => setDirectoryPickerField(field.name) : undefined}
+      />
+    )
+  }
+
   return (
     <div className="flex h-full flex-col">
       <div className="flex-1 overflow-y-auto">
@@ -352,6 +411,7 @@ export function AcctConnect() {
                 />
               </div>
               {fields.map((field) => {
+              if (isConditionalRevealField(fields, field)) return null
               const value = acct.config[field.name] ?? field.default ?? ''
               const visible = channelAccountFieldVisible(field, acct.config)
               return (
@@ -363,52 +423,19 @@ export function AcctConnect() {
                   }`}
                 >
                   <div className="min-h-0 overflow-hidden">
-                    {field.kind === 'boolean' ? (
-                      <>
-                        <div className="mb-2 text-[13px] text-ink-2">{field.label}</div>
-                        <Segmented
-                          value={value === true || value === 'true' ? 'true' : 'false'}
-                          options={[
-                            { value: 'false', label: '关闭' },
-                            { value: 'true', label: '启用' },
-                          ]}
-                          onChange={(next) => setField(field.name, next === 'true')}
-                        />
-                        {field.help && <div className="mt-1 text-[12px] text-ink-3">{field.help}</div>}
-                        {errors[field.name] && <div className="mt-1 text-[12px] text-warn">{errors[field.name]}</div>}
-                      </>
-                    ) : field.kind === 'select' ? (
-                      <>
-                        <div className="mb-2 text-[13px] text-ink-2">{field.label}</div>
-                        <Segmented<string>
-                          value={String(value)}
-                          onChange={(next) => setField(field.name, next)}
-                          options={field.options ?? []}
-                        />
-                        {field.help && <div className="mt-1 text-[12px] text-ink-3">{field.help}</div>}
-                        {errors[field.name] && <div className="mt-1 text-[12px] text-warn">{errors[field.name]}</div>}
-                      </>
-                    ) : (
-                      <ConnectionField
-                        ref={(node) => { fieldRefs.current[field.name] = node }}
+                    {field.kind === 'select' && field.presentation === 'conditional_reveal' ? (
+                      <ConditionalReveal
                         label={field.label}
-                        kind={field.kind}
-                        clipboard={field.clipboard}
-                        constraints={field.constraints}
-                        onPasteBatchMatch={field.clipboard?.group
-                          ? (candidates) => fillMatchedEndpoints(field, candidates)
-                          : undefined}
-                        value={String(value)}
-                        required={field.required}
-                        placeholder={field.placeholder}
                         help={field.help}
+                        value={String(value)}
+                        options={field.options ?? []}
                         error={errors[field.name]}
-                        onChange={(next) => setField(field.name, next === '' ? undefined : next)}
-                        onBlur={(fieldValue) => validateDynamicField(field, fieldValue)}
-                        onNavigate={(direction) => moveFieldFocus(field.name, direction)}
-                        onBrowse={field.kind === 'directory' ? () => setDirectoryPickerField(field.name) : undefined}
+                        onChange={(next) => setField(field.name, next)}
+                        renderPanel={(optionValue) => conditionalRevealFields(fields, field.name, optionValue).map(
+                          (dependentField) => <div key={dependentField.name}>{renderFieldControl(dependentField)}</div>,
+                        )}
                       />
-                    )}
+                    ) : renderFieldControl(field)}
                   </div>
                 </div>
               )

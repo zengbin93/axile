@@ -1,5 +1,6 @@
 /** 执行事件流 → 逐只结果行的纯函数（与抽屉组件解耦，便于测试与 fast-refresh）。 */
 import type { ExecutionEvent } from '@/types/api'
+import { symbolSkipSummaryReason } from '@/features/account/executionReason'
 
 /** 逐只结果行。 */
 export interface SymbolRow {
@@ -48,7 +49,7 @@ export function symbolRows(events: ExecutionEvent[]): SymbolRow[] {
     if (e.event_type !== 'symbol_decision_made' && e.event_type !== 'symbol_skipped') continue
     if (!e.symbol) continue
     const err = eventError(e)
-    const reason = err || (e.event_type === 'symbol_skipped' ? e.reason_code || '跳过' : '')
+    const reason = err || (e.event_type === 'symbol_skipped' ? symbolSkipSummaryReason(e.reason_code) : '')
     rows.push({ symbol: e.symbol, status: e.status, reason })
   }
   return rows

@@ -117,6 +117,7 @@ export function HoldingsView({
   target,
   equity,
   currency = '',
+  assetLabel,
 }: {
   positions: Position[]
   target: LatestWeights
@@ -124,6 +125,8 @@ export function HoldingsView({
   equity: number
   /** 计价货币代码，在头部权益处「说一次」立单位锚；拿不到时不显示。 */
   currency?: string
+  /** 按账户渠道确定的行内资金名称。 */
+  assetLabel: string
 }) {
   const plan = rebalancePlan(positions, target, equity)
   // 标尺同尺：以「当前/目标」绝对值的全表最大为满量程（不再用 |Δ|）。
@@ -145,7 +148,7 @@ export function HoldingsView({
         <span className="text-ink-2">当前 {heldCount === 0 ? '空仓' : `持有 ${heldCount} 只`}</span>
         {equity > 0 && (
           <>
-            {' · '}权益 {fmtMoney(equity)}
+            {' · '}{assetLabel} {fmtMoney(equity)}
             {currency && <span className="text-ink-2"> {currency}</span>}
           </>
         )}

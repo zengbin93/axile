@@ -2,10 +2,19 @@
 
 from __future__ import annotations
 
+import re
+from collections.abc import Mapping
 from dataclasses import dataclass
+from datetime import datetime
+from typing import TypeVar
+
+from axile.executor.models.unified_input import UnifiedStandardInput
 
 _TRADE_CLASSES = frozenset({"FUTURE", "OPTION", "COMBINE"})
 _TRADE_EXCHANGES = frozenset({"CFFEX", "SHFE", "DCE", "CZCE", "INE", "GFEX"})
+_CZCE_FUTURE_ALIAS = re.compile(r"^(?P<product>[A-Za-z]+)(?P<year>\d{2})(?P<month>\d{2})$")
+
+_ValueT = TypeVar("_ValueT")
 
 
 @dataclass(frozen=True, slots=True)
@@ -27,23 +36,41 @@ class TQInstrument:
 class TQSymbolResolver:
     """解析 CTP InstrumentID，并对未知和重名代码显式失败."""
 
-    def __init__(self, instruments: list[TQInstrument]) -> None:
-        self._by_full = {item.symbol: item for item in instruments}
+    def __init__(self, instruments: list[TQInstrument], *, reference_year: int | None = None) -> None:
+        self._by_full: dict[str, TQInstrument] = {item.symbol: item for item in instruments}
         by_local: dict[str, list[TQInstrument]] = {}
         for item in instruments:
             by_local.setdefault(item.instrument_id, []).append(item)
-        self._by_local = by_local
+        self._by_local: dict[str, list[TQInstrument]] = by_local
+        self._reference_year: int = reference_year or datetime.now().year
 
-    def to_tq(self, symbol: str, *, for_trade: bool = False) -> str:
-        """将通用 symbol 转换为 TqSdk 完整代码."""
+    def _czce_alias_candidates(self, symbol: str) -> list[TQInstrument]:
+        exchange_id: str | None = None
+        local_symbol = symbol
         if "." in symbol:
-            item = self._by_full.get(symbol)
-            if for_trade and item is None:
-                raise ValueError(f"品种 {symbol} 不属于当前 TqSdk 账户可交易的国内衍生品")
-            if for_trade and not item.tradable:
-                raise ValueError(f"品种 {item.symbol} 仅支持行情查询，不能下单")
-            return symbol
-        candidates = self._by_local.get(symbol, [])
+            exchange_id, local_symbol = symbol.split(".", 1)
+            if exchange_id != "CZCE":
+                return []
+        match = _CZCE_FUTURE_ALIAS.fullmatch(local_symbol)
+        if match is None:
+            return []
+        requested_year = 2000 + int(match.group("year"))
+        native_year_digit = requested_year % 10
+        nearest_year = min(
+            (year for year in range(2000, 2100) if year % 10 == native_year_digit),
+            key=lambda year: abs(year - self._reference_year),
+        )
+        if requested_year != nearest_year:
+            return []
+        native_symbol = f"{match.group('product')}{match.group('year')[-1]}{match.group('month')}"
+        return [
+            item
+            for item in self._by_local.get(native_symbol, [])
+            if item.exchange_id == "CZCE" and item.ins_class == "FUTURE"
+        ]
+
+    @staticmethod
+    def _select(symbol: str, candidates: list[TQInstrument]) -> TQInstrument:
         if not candidates:
             raise ValueError(f"天勤合约目录中不存在品种: {symbol}")
         live = [item for item in candidates if not item.expired]
@@ -51,7 +78,24 @@ class TQSymbolResolver:
         if len(selected) != 1:
             names = ", ".join(sorted(item.symbol for item in selected))
             raise ValueError(f"品种 {symbol} 对应多个天勤代码，无法自动选择: {names}")
-        item = selected[0]
+        return selected[0]
+
+    def to_tq(self, symbol: str, *, for_trade: bool = False) -> str:
+        """将通用 symbol 转换为 TqSdk 完整代码."""
+        if "." in symbol:
+            item = self._by_full.get(symbol)
+            if item is None:
+                aliases = self._czce_alias_candidates(symbol)
+                item = self._select(symbol, aliases) if aliases else None
+            if item is None:
+                if for_trade:
+                    raise ValueError(f"品种 {symbol} 不属于当前 TqSdk 账户可交易的国内衍生品")
+                return symbol
+            if for_trade and not item.tradable:
+                raise ValueError(f"品种 {item.symbol} 仅支持行情查询，不能下单")
+            return item.symbol
+        candidates = self._by_local.get(symbol, []) or self._czce_alias_candidates(symbol)
+        item = self._select(symbol, candidates)
         if for_trade and not item.tradable:
             raise ValueError(f"品种 {item.symbol} 仅支持行情查询，不能下单")
         return item.symbol
@@ -66,9 +110,40 @@ class TQSymbolResolver:
     def instrument(self, symbol: str) -> TQInstrument | None:
         """返回通用或完整代码对应的目录记录."""
         try:
-            return self._by_full.get(self.to_tq(symbol))
+            tq_symbol = self.to_tq(symbol)
+            return self._by_full.get(tq_symbol)
         except ValueError:
             return None
+
+    def normalize_input(self, standard_input: UnifiedStandardInput) -> UnifiedStandardInput:
+        """复制并规范化标准输入中的全部 symbol 字段."""
+        return standard_input.model_copy(
+            update={
+                "curr_target": self._normalize_mapping("curr_target", standard_input.curr_target),
+                "last_target": self._normalize_mapping("last_target", standard_input.last_target),
+                "symbol_algorithms": self._normalize_mapping("symbol_algorithms", standard_input.symbol_algorithms),
+                "trade_rules": self._normalize_mapping("trade_rules", standard_input.trade_rules),
+                "forbidden_symbols": self._normalize_list(standard_input.forbidden_symbols),
+                "risk_symbols": self._normalize_list(standard_input.risk_symbols),
+            }
+        )
+
+    def _normalize_mapping(self, field: str, values: Mapping[str, _ValueT]) -> dict[str, _ValueT]:
+        normalized: dict[str, _ValueT] = {}
+        sources: dict[str, str] = {}
+        for raw_symbol, value in values.items():
+            symbol = self.to_axile(self.to_tq(raw_symbol))
+            if symbol in normalized and normalized[symbol] != value:
+                raise ValueError(
+                    f"TQ 输入字段 {field} 中的代码 {sources[symbol]} 与 {raw_symbol} 都对应 {symbol}，但配置不一致"
+                )
+            normalized[symbol] = value
+            if symbol not in sources:
+                sources[symbol] = raw_symbol
+        return normalized
+
+    def _normalize_list(self, values: list[str]) -> list[str]:
+        return list(dict.fromkeys(self.to_axile(self.to_tq(symbol)) for symbol in values))
 
 
 __all__ = ["TQInstrument", "TQSymbolResolver"]

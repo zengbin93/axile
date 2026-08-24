@@ -148,6 +148,7 @@ def _ctp_plugin() -> ChannelPlugin:
         execution_backend="process",
         required_modules=("openctp_ctp",),
         install_extra="ctp",
+        max_parallel_symbols=10,
     )
 
 
@@ -194,9 +195,19 @@ def _gm_plugin() -> ChannelPlugin:
                         kind="select",
                         width="full",
                         default="terminal",
+                        presentation="conditional_reveal",
+                        help="只需配置其中一种。",
                         options=(
-                            ChannelAccountOption(value="terminal", label="本机终端"),
-                            ChannelAccountOption(value="service", label="终端 RPC"),
+                            ChannelAccountOption(
+                                value="terminal",
+                                label="本机终端",
+                                description="Axile 与掘金终端同机，填写安装目录并由 Axile 检查或启动。",
+                            ),
+                            ChannelAccountOption(
+                                value="service",
+                                label="终端 RPC 地址",
+                                description="Axile 连接已经运行的终端，支持同机或异机部署。",
+                            ),
                         ),
                     ),
                     ChannelAccountField(
@@ -214,7 +225,11 @@ def _gm_plugin() -> ChannelPlugin:
                         kind="endpoint",
                         width="full",
                         placeholder="192.168.1.20:7001",
-                        help="填写已运行终端的主机和 RPC 端口。",
+                        help=(
+                            r"先启动掘金终端。地址取自安装目录下 resources\app\gmserv.json 的 "
+                            "default.hostAddr 和 default.rpcPort；异机连接需填写 Axile 可访问的 IP，"
+                            "不能使用 127.0.0.1。"
+                        ),
                         visible_when=ChannelAccountFieldCondition(field="connection_mode", equals="service"),
                         constraints=ChannelAccountFieldConstraints(
                             endpoint=ChannelEndpointConstraints(scheme="forbidden", port="required")
@@ -231,6 +246,7 @@ def _gm_plugin() -> ChannelPlugin:
         execution_backend="process",
         required_modules=("gm",),
         install_extra="gm",
+        max_parallel_symbols=10,
     )
 
 
@@ -268,10 +284,24 @@ def _tq_plugin() -> ChannelPlugin:
                         label="账户模式",
                         kind="select",
                         width="full",
+                        presentation="conditional_reveal",
+                        help="选择账户运行方式；天勤账号与密码由三种模式共用。",
                         options=(
-                            ChannelAccountOption(value="live", label="实盘账户"),
-                            ChannelAccountOption(value="kq", label="快期模拟"),
-                            ChannelAccountOption(value="sim", label="本地模拟"),
+                            ChannelAccountOption(
+                                value="live",
+                                label="实盘账户",
+                                description="连接期货公司实盘账户，需填写交易账户凭据。",
+                            ),
+                            ChannelAccountOption(
+                                value="kq",
+                                label="快期模拟",
+                                description="使用快期模拟账户，无需额外交易账户凭据。",
+                            ),
+                            ChannelAccountOption(
+                                value="sim",
+                                label="本地模拟",
+                                description="由 Axile 在当前 Worker 中维护模拟资金与持仓。",
+                            ),
                         ),
                     ),
                     ChannelAccountField(name="tq_username", label="天勤账号", kind="identifier", width="half"),
@@ -314,7 +344,7 @@ def _tq_plugin() -> ChannelPlugin:
         execution_backend="process",
         required_modules=("tqsdk",),
         install_extra="tqsdk",
-        max_parallel_symbols=1,
+        max_parallel_symbols=10,
     )
 
 

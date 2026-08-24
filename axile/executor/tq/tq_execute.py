@@ -73,6 +73,11 @@ class TQExecutor(AbstractExecutor):
         return self._is_china_futures_session_open()
 
     @override
+    def _normalize_connected_standard_input(self, standard_input: UnifiedStandardInput) -> UnifiedStandardInput:
+        """使用 TqSdk 合约目录将输入代码统一为 Axile 合约代码."""
+        return self._require_runtime().resolver.normalize_input(standard_input)
+
+    @override
     def _validate_input(self, standard_input: UnifiedStandardInput) -> None:
         super()._validate_input(standard_input)
         resolver = self._require_runtime().resolver

@@ -94,8 +94,21 @@ describe('buildSymbolActionStream', () => {
       ev({ event_type: 'symbol_decision_made', symbol: 'rb2610', seq: 2, details: { decision: { target_volume: 0.5 } } }),
     ]
     const ag = buildSymbolActionStream(events, 'ag2612')
-    expect(ag.map((l) => [l.text, l.broken])).toEqual([['跳过 · COMMON.SYMBOL_SKIPPED', true]])
+    expect(ag.map((l) => [l.text, l.broken])).toEqual([['跳过 · 无需下单', true]])
     expect(buildSymbolActionStream(events, 'rb2610').length).toBe(1)
+  })
+
+  it('已知和未知原因码都不暴露内部枚举', () => {
+    const known = buildSymbolActionStream(
+      [ev({ event_type: 'symbol_skipped', symbol: 'ag2612', reason_code: 'COMMON.SUB_MIN_NOTIONAL' })],
+      'ag2612',
+    )
+    const unknown = buildSymbolActionStream(
+      [ev({ event_type: 'symbol_skipped', symbol: 'ag2612', reason_code: 'PLUGIN.UNKNOWN_REASON' })],
+      'ag2612',
+    )
+    expect(known[0]?.text).toBe('跳过 · 未达到最小下单金额')
+    expect(unknown[0]?.text).toBe('跳过 · 未执行')
   })
 
   it('无该品种事件 → 空流', () => {

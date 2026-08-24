@@ -57,6 +57,7 @@ class AccountExecutionAlreadyRunningError(RuntimeError):
 
 
 _running_account_executions: dict[int, str] = {}
+_running_account_asset_refreshes: set[int] = set()
 _running_account_executions_lock = Lock()
 _execution_tasks: dict[str, ExecutionTaskState] = {}
 _execution_tasks_lock = Lock()
@@ -91,7 +92,7 @@ def try_register_running_execution(account_id: int, execution_id: str) -> bool:
         登记成功返回 ``True``；若账户已有运行任务则返回 ``False``。
     """
     with _running_account_executions_lock:
-        if account_id in _running_account_executions:
+        if account_id in _running_account_executions or account_id in _running_account_asset_refreshes:
             return False
         _running_account_executions[account_id] = execution_id
         return True
@@ -122,6 +123,21 @@ def clear_running_execution(account_id: int, execution_id: str) -> None:
         current_execution_id = _running_account_executions.get(account_id)
         if current_execution_id == execution_id:
             del _running_account_executions[account_id]
+
+
+def try_register_account_asset_refresh(account_id: int) -> bool:
+    """尝试占用账户的资产刷新槽位，并与交易执行互斥."""
+    with _running_account_executions_lock:
+        if account_id in _running_account_executions or account_id in _running_account_asset_refreshes:
+            return False
+        _running_account_asset_refreshes.add(account_id)
+        return True
+
+
+def clear_account_asset_refresh(account_id: int) -> None:
+    """释放账户的资产刷新槽位."""
+    with _running_account_executions_lock:
+        _running_account_asset_refreshes.discard(account_id)
 
 
 def set_execution_task_state(execution_id: str, state: ExecutionTaskState) -> None:

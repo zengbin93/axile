@@ -83,6 +83,7 @@ class AbstractExecutorExecutionLifecycleMixin(AbstractExecutorExecutionRuntimeFa
 
             executor.logger.debug(f"[{executor.channel_type.value}] 开始执行交易")
             executor._ensure_connection()
+            standard_input = executor._normalize_connected_standard_input(standard_input)
             # 总超时的计时零点：连接已就绪、planning 尚未开始，因此执行器构造与登录耗时
             # 不计入额度（要覆盖登录挂死需要另一个 pre-flight 超时）。
             executor._reset_execution_state(standard_input)

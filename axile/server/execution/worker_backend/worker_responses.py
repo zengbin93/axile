@@ -106,7 +106,12 @@ def _dump_output_payload(output: UnifiedStandardOutput) -> dict[str, object]:
     return cast("dict[str, object]", output.model_dump(mode="json", exclude={"inputs"}))
 
 
-def _build_result_response(*, request_id: str, result: dict[str, object]) -> WorkerBackendResponse:
+def _build_result_response(
+    *,
+    request_id: str,
+    result: dict[str, object],
+    normalized_symbol_fields: dict[str, object] | None = None,
+) -> WorkerBackendResponse:
     """
     构造 worker 成功结果响应。
 
@@ -127,6 +132,7 @@ def _build_result_response(*, request_id: str, result: dict[str, object]) -> Wor
         request_id=request_id,
         kind="result",
         output_payload=result,
+        normalized_symbol_fields=normalized_symbol_fields,
     )
 
 
@@ -140,6 +146,7 @@ def _handle_worker_command_failure(
     exc: Exception,
     log_message: str,
     append_failed_audit: Callable[..., None],
+    normalized_symbol_fields: dict[str, object] | None = None,
 ) -> WorkerBackendResponse:
     """
     补写失败审计并返回统一错误响应。
@@ -170,18 +177,25 @@ def _handle_worker_command_failure(
     """
     # 先补失败审计再回错误响应，这样即使主进程马上抛错，审计流里也已经有失败事件。
     error_payload = _build_error_payload(exc)
-    append_failed_audit(
-        account=account,
-        execution_id=request.execution_id,
-        algorithm_name=algorithm_name,
-        executor=executor,
-        error=error_payload,
-        trigger_source=trigger_source,
-    )
+    try:
+        append_failed_audit(
+            account=account,
+            execution_id=request.execution_id,
+            algorithm_name=algorithm_name,
+            executor=executor,
+            error=error_payload,
+            trigger_source=trigger_source,
+        )
+    except Exception as audit_exc:  # noqa: BLE001 - 审计失败不得覆盖原始业务异常
+        logger.opt(exception=audit_exc).error(
+            "worker backend 失败审计写入异常，保留原始错误响应: request_id={}",
+            request.request_id,
+        )
     logger.exception("{}: {}", log_message, exc)
     return WorkerBackendResponse(
         request_id=request.request_id,
         kind="error",
         error=error_payload,
         channel_type=account.trade_channel,
+        normalized_symbol_fields=normalized_symbol_fields,
     )

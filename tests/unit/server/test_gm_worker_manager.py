@@ -10,6 +10,7 @@ import pytest
 from axile.common.trade_channel import TradeChannel
 from axile.executor.models.execution_result import ExecutionStatus
 from axile.server.execution.worker_backend.manager import (
+    WorkerBackendExecutionError,
     WorkerBackendManager,
     WorkerBackendTimeoutError,
 )
@@ -22,9 +23,10 @@ from tests.unit.server._execution_test_support import build_account
 
 
 class _FakeProcess:
-    def __init__(self, *, is_alive: bool = True, join_stops: bool = True) -> None:
+    def __init__(self, *, is_alive: bool = True, join_stops: bool = True, exitcode: int | None = None) -> None:
         self._is_alive = is_alive
         self._join_stops = join_stops
+        self.exitcode = exitcode
         self.join_calls: list[float] = []
         self.terminate_called = False
         self.kill_called = False
@@ -169,6 +171,27 @@ def test_request_blocking_timeout_force_kills_and_releases_lock() -> None:
     handle.request_lock.release()
 
 
+def test_request_blocking_eof_reports_exception_type_request_and_exitcode() -> None:
+    """空消息 EOFError 也应带回可定位的 worker 退出信息。"""
+    manager = WorkerBackendManager()
+    handle = _FakeHandle(is_alive=True, join_stops=False)
+    handle.process.exitcode = 7
+    manager._workers[2] = handle
+
+    def raise_eof() -> WorkerBackendResponse:
+        raise EOFError
+
+    handle.connection.recv = raise_eof  # type: ignore[method-assign]
+
+    with pytest.raises(
+        WorkerBackendExecutionError,
+        match=r"EOFError.*request_id=req-exec.*worker_exitcode=7",
+    ):
+        manager._request_blocking(2, _execute_request(), timeout=1.0)
+
+    assert manager._workers == {}
+
+
 def test_execute_trade_worker_timeout_follows_standard_input(monkeypatch: pytest.MonkeyPatch) -> None:
     """调仓 worker 外层等待应使用账户执行超时并追加 IPC 余量。"""
     manager = WorkerBackendManager()
@@ -199,7 +222,7 @@ def test_execute_trade_worker_timeout_follows_standard_input(monkeypatch: pytest
         )
     )
 
-    assert result is expected
+    assert result == (expected, None)
     assert captured_timeouts == [60.0, 240.0]
 
 
