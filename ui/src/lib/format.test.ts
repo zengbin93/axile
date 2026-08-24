@@ -5,7 +5,7 @@ import { displayCurrencyUnit, withCurrency } from './format'
 test('人民币币种代码显示为元', () => {
   expect(displayCurrencyUnit('CNY')).toBe('元')
   expect(displayCurrencyUnit(' cny ')).toBe('元')
-  expect(displayCurrencyUnit('USDT')).toBe('USDT')
+  expect(displayCurrencyUnit('USDQ')).toBe('USDQ')
   expect(displayCurrencyUnit(null)).toBe('')
 })
 

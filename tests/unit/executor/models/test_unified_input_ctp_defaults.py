@@ -16,6 +16,7 @@ from axile.channels import (
     ChannelLeverage,
     ChannelPlugin,
     ChannelPortfolioPreset,
+    ChannelSchedule,
     list_channels,
     register_channel,
     registry,
@@ -191,6 +192,7 @@ def test_external_plugin_controls_unknown_channel_config_validation(monkeypatch:
                 description="测试外部渠道",
                 icon="plug",
                 market="demo",
+                schedule=ChannelSchedule(kind="continuous"),
                 currency="USD",
                 defaults=ChannelDefaults(
                     long_leverage=1,

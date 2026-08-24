@@ -22,6 +22,7 @@ from axile.channels import (
     ChannelLeverage,
     ChannelPlugin,
     ChannelPortfolioPreset,
+    ChannelSchedule,
     ChannelUi,
     ChannelUnits,
     DuplicateChannelError,
@@ -65,6 +66,7 @@ def _plugin(
             description="用于验证开放渠道边界",
             icon="plug",
             market="demo",
+            schedule=ChannelSchedule(kind="continuous"),
             currency="USD",
             units=ChannelUnits(
                 quantity_kind="base_asset",
@@ -117,6 +119,7 @@ def test_builtin_channels_have_stable_order_and_descriptor_shape() -> None:
     plugins = list_channels()
 
     assert [plugin.descriptor.channel for plugin in plugins] == ["ctp", "gm", "tq"]
+    assert [plugin.descriptor.schedule.kind for plugin in plugins] == ["cn_futures", "cn_stock", "cn_futures"]
     assert plugins[0].descriptor.account_form.fields
     assert plugins[0].descriptor.defaults.trade_algorithm.method == "TARGET-POS-TASK"
     assert plugins[0].descriptor.portfolio.market_label == "期货"
@@ -130,6 +133,15 @@ def test_builtin_channels_have_stable_order_and_descriptor_shape() -> None:
     assert plugins[2].descriptor.portfolio == plugins[0].descriptor.portfolio
     assert [plugin.max_parallel_symbols for plugin in plugins] == [10, 10, 10]
     assert plugins[2].descriptor.account_form.fields[0].default is None
+
+
+def test_channel_descriptor_requires_schedule_kind() -> None:
+    """插件必须显式声明调度类型，禁止未知渠道静默套用默认规则。"""
+    payload = _plugin().descriptor.model_dump()
+    payload.pop("schedule")
+
+    with pytest.raises(ValidationError, match="schedule"):
+        ChannelDescriptor.model_validate(payload)
 
 
 def test_account_field_rejects_legacy_input_contract() -> None:

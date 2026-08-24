@@ -20,15 +20,11 @@ import { getLatestWeights } from '@/lib/api/portfolios'
 import { createAccount } from '@/lib/api/accounts'
 import { useDomainStore } from '@/stores/domain'
 import { useChannelCatalogStore, useChannelDescriptor } from '@/stores/channels'
-import { useWizardStore } from '@/stores/wizard'
+import { initialTimerForSchedule, useWizardStore } from '@/stores/wizard'
 import { useToastStore } from '@/stores/ui'
-import {
-  marketForChannel,
-  resolveCronList,
-  cronToExpr,
-} from '@/features/setup/cron'
+import { resolveCronList, cronToExpr } from '@/features/setup/cron'
 import { TimerEditor, type TimerEditorState } from '@/features/setup/TimerEditor'
-import { defaultAlgorithm, algoLabel, intentFromParams, validateAlgorithmParams } from '@/features/setup/algorithms'
+import { algoLabel, intentFromParams, validateAlgorithmParams } from '@/features/setup/algorithms'
 import { AlgorithmEditor } from '@/features/setup/AlgorithmEditor'
 import {
   channelAccountFieldVisible,
@@ -81,6 +77,7 @@ function channelDraft(channel: ChannelCapability) {
     longLeverage: String(channel.defaults.long_leverage),
     shortLeverage: String(channel.defaults.short_leverage),
     executionTimeout: String(channel.defaults.execution_timeout),
+    ...initialTimerForSchedule(channel.schedule.kind),
   }
 }
 
@@ -506,23 +503,12 @@ export function AcctPortfolio() {
 export function AcctTrade() {
   const { acct, setAcct } = useWizardStore()
   const descriptor = useChannelDescriptor(acct.channel)
-  const market = marketForChannel(acct.channel)
   const leverageLimits = descriptor?.leverage
-  const showShortLeverage = descriptor?.ui.show_short_leverage ?? market !== 'ashare'
+  const showShortLeverage = descriptor?.ui.show_short_leverage ?? true
   const timeoutErr = executionTimeoutError(acct.executionTimeout)
   const longLeverageErr = leverageError(acct.longLeverage, leverageLimits)
   const shortLeverageErr = showShortLeverage ? leverageError(acct.shortLeverage, leverageLimits) : null
   const leverageErr = longLeverageErr ?? shortLeverageErr
-
-  // 切渠道（市场变化）时，把主交易算法重置为该市场的默认，避免带着上个市场的算法过界。
-  const prevMarket = useRef(market)
-  useEffect(() => {
-    if (prevMarket.current !== market) {
-      prevMarket.current = market
-      setAcct({ algorithm: descriptor?.defaults.trade_algorithm ?? defaultAlgorithm(market, 'trade') })
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [market])
 
   return (
     <div className="flex h-full flex-col">
@@ -533,7 +519,7 @@ export function AcctTrade() {
             slot="trade"
             channel={acct.channel}
             value={acct.algorithm}
-            onChange={(v) => setAcct({ algorithm: v ?? descriptor?.defaults.trade_algorithm ?? defaultAlgorithm(market, 'trade') })}
+            onChange={(v) => setAcct({ algorithm: v ?? descriptor?.defaults.trade_algorithm ?? acct.algorithm })}
           />
 
           <div className="mt-6 max-w-[560px]">
@@ -619,7 +605,8 @@ export function AcctTrade() {
 /* -------- 5 定时 -------- */
 export function AcctTimer() {
   const { acct, setAcct } = useWizardStore()
-  const market = marketForChannel(acct.channel)
+  const descriptor = useChannelDescriptor(acct.channel)
+  const scheduleKind = descriptor?.schedule.kind
 
   const timerValue: TimerEditorState = {
     autoOn: acct.autoOn,
@@ -637,28 +624,30 @@ export function AcctTimer() {
     <div className="flex h-full flex-col">
       <div className="flex-1 overflow-y-auto">
         <WizardPage kicker="账户设置 · 5 / 6" title="什么时候自动执行？" lead="开启后 axile 按下面的节奏自动调仓。时间均为北京时间。">
-          <TimerEditor
-            tradeChannel={acct.channel}
-            market={market}
-            value={timerValue}
-            onChange={(next) => {
-              const v = typeof next === 'function' ? next(timerValue) : next
-              setAcct({
-                autoOn: v.autoOn,
-                presetIds: v.presetIds,
-                supN: v.supN,
-                supM: v.supM,
-                rawCron: v.rawCron,
-                timerTab: v.timerTab,
-                scheduleRules: v.scheduleRules,
-                selectedRuleId: v.selectedRuleId,
-                customCronOn: v.customCronOn,
-              })
-            }}
-          />
+          {scheduleKind ? (
+            <TimerEditor
+              tradeChannel={acct.channel}
+              scheduleKind={scheduleKind}
+              value={timerValue}
+              onChange={(next) => {
+                const v = typeof next === 'function' ? next(timerValue) : next
+                setAcct({
+                  autoOn: v.autoOn,
+                  presetIds: v.presetIds,
+                  supN: v.supN,
+                  supM: v.supM,
+                  rawCron: v.rawCron,
+                  timerTab: v.timerTab,
+                  scheduleRules: v.scheduleRules,
+                  selectedRuleId: v.selectedRuleId,
+                  customCronOn: v.customCronOn,
+                })
+              }}
+            />
+          ) : <p className="text-[14px] text-ink-2">渠道能力加载中…</p>}
         </WizardPage>
       </div>
-      <WizardNav prevTo="/setup/acct/trade" nextTo="/setup/acct/confirm" />
+      <WizardNav prevTo="/setup/acct/trade" nextTo="/setup/acct/confirm" nextDisabled={!scheduleKind} />
     </div>
   )
 }
@@ -669,12 +658,12 @@ export function AcctConfirm() {
   const toast = useToastStore((s) => s.toast)
   const refreshAccounts = useDomainStore((s) => s.refreshAccounts)
   const descriptor = useChannelDescriptor(acct.channel)
-  const market = marketForChannel(acct.channel)
-  const showShortLeverage = descriptor?.ui.show_short_leverage ?? market !== 'ashare'
+  const scheduleKind = descriptor?.schedule.kind
+  const showShortLeverage = descriptor?.ui.show_short_leverage ?? true
   const [rows, setRows] = useState<[string, number][] | null>(null)
 
-  const cronList = resolveCronList(market, acct)
-  const cronExpr = cronToExpr(cronList) || '0 8 * * *'
+  const cronList = scheduleKind ? resolveCronList(scheduleKind, acct) : []
+  const cronExpr = cronToExpr(cronList)
 
   const intentText = algorithmSummary(acct.algorithm)
   const levText = showShortLeverage
@@ -699,6 +688,10 @@ export function AcctConfirm() {
     try {
       if (!descriptor) {
         toast('渠道描述尚未加载，请稍后重试')
+        return
+      }
+      if (!cronExpr) {
+        toast('定时规则尚未就绪，请返回上一步检查')
         return
       }
       const algo = acct.algorithm

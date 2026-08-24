@@ -12,7 +12,6 @@ import { Segmented } from '@/components/ui/Segmented'
 import { Select } from '@/components/ui/Select'
 import { MOTION_LAYOUT, usePanelFadeReady } from '@/lib/viewTransition'
 import {
-  marketForChannel,
   DEFAULT_PRESET,
   PRESETS,
   cronError,
@@ -20,7 +19,7 @@ import {
   defaultScheduleRule,
   resolveCronList,
   ruleFromPreset,
-  type Market,
+  type ScheduleKind,
   type TimerEditorState,
 } from '@/features/setup/cron'
 import { TimerAdvanced, TimerCustomCron } from '@/features/setup/TimerAdvanced'
@@ -85,7 +84,7 @@ function SupRow({
 
 export interface TimerEditorProps {
   tradeChannel: TradeChannel
-  market: Market
+  scheduleKind: ScheduleKind
   value: TimerEditorState
   onChange: (next: TimerEditorState | ((prev: TimerEditorState) => TimerEditorState)) => void
 }
@@ -95,8 +94,8 @@ export interface TimerEditorProps {
  *
  * Parameters
  * ----------
- * market : Market
- *     账户市场（决定预设与高级默认）。
+ * scheduleKind : ScheduleKind
+ *     渠道调度类型（决定预设与高级默认）。
  * value : TimerEditorState
  *     当前意图状态。
  * onChange : fn
@@ -135,7 +134,7 @@ function calendarSummary(preview: SchedulePreview | null): { text: string; warni
   }
 }
 
-export function TimerEditor({ tradeChannel, market, value, onChange }: TimerEditorProps) {
+export function TimerEditor({ tradeChannel, scheduleKind, value, onChange }: TimerEditorProps) {
   const tabFade = usePanelFadeReady()
   const bodyFade = usePanelFadeReady()
   const v = value
@@ -150,15 +149,15 @@ export function TimerEditor({ tradeChannel, market, value, onChange }: TimerEdit
   }
 
   // 市场切换时若当前预设不合法，重置到该市场默认（编辑页市场不可改，向导切渠道会触发）。
-  const prevMarket = useRef(market)
+  const previousScheduleKind = useRef(scheduleKind)
   useEffect(() => {
-    const valid = PRESETS[market].some((p) => v.presetIds.includes(p.id))
-    if (prevMarket.current !== market || !valid) {
-      prevMarket.current = market
-      const rule = defaultScheduleRule(market)
+    const valid = PRESETS[scheduleKind].some((p) => v.presetIds.includes(p.id))
+    if (previousScheduleKind.current !== scheduleKind || !valid) {
+      previousScheduleKind.current = scheduleKind
+      const rule = defaultScheduleRule(scheduleKind)
       onChange({
         ...v,
-        presetIds: [DEFAULT_PRESET[market]],
+        presetIds: [DEFAULT_PRESET[scheduleKind]],
         rawCron: '',
         customCronOn: false,
         scheduleRules: [rule],
@@ -166,12 +165,12 @@ export function TimerEditor({ tradeChannel, market, value, onChange }: TimerEdit
         timerTab: 'quick',
       })
     }
-    // 仅响应 market；preset 合法性随 market 校验
+    // 仅响应调度类型；preset 合法性随调度类型校验
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [market])
+  }, [scheduleKind])
 
   const rawErr = v.customCronOn && v.rawCron.trim() ? cronError(v.rawCron) : null
-  const cronList = v.autoOn ? resolveCronList(market, v) : []
+  const cronList = v.autoOn ? resolveCronList(scheduleKind, v) : []
   const cronExpr = rawErr ? '' : cronToExpr(cronList)
 
   useEffect(() => {
@@ -224,7 +223,7 @@ export function TimerEditor({ tradeChannel, market, value, onChange }: TimerEdit
         })
         return
       }
-      const rule = ruleFromPreset(market, v.presetIds[0] ?? DEFAULT_PRESET[market])
+      const rule = ruleFromPreset(scheduleKind, v.presetIds[0] ?? DEFAULT_PRESET[scheduleKind])
       patch({ timerTab: 'advanced', scheduleRules: [rule], selectedRuleId: rule.id })
       return
     }
@@ -236,7 +235,7 @@ export function TimerEditor({ tradeChannel, market, value, onChange }: TimerEdit
       patch({ presetIds: [id] })
       return
     }
-    const rule = ruleFromPreset(market, id)
+    const rule = ruleFromPreset(scheduleKind, id)
     patch({ presetIds: [id], scheduleRules: [rule], selectedRuleId: rule.id })
   }
 
@@ -283,7 +282,7 @@ export function TimerEditor({ tradeChannel, market, value, onChange }: TimerEdit
                     <label className="text-sm font-[640]">节奏</label>
                   </div>
                   <div className="flex flex-wrap gap-2">
-                    {PRESETS[market].map((p) => {
+                    {PRESETS[scheduleKind].map((p) => {
                       const on = v.presetIds.includes(p.id)
                       return (
                         <button
@@ -302,7 +301,7 @@ export function TimerEditor({ tradeChannel, market, value, onChange }: TimerEdit
                       )
                     })}
                   </div>
-                  {market === 'ctp' && (
+                  {scheduleKind === 'cn_futures' && (
                     <div className="mt-2 text-xs text-ink-3">
                       夜盘及品种时段差异大，请用「高级」或自定义表达式。
                     </div>
@@ -310,7 +309,7 @@ export function TimerEditor({ tradeChannel, market, value, onChange }: TimerEdit
                 </div>
               ) : (
                 <TimerAdvanced
-                  market={market}
+                  market={scheduleKind}
                   rules={v.scheduleRules}
                   selectedId={v.selectedRuleId}
                   customCronOn={v.customCronOn}
@@ -384,11 +383,6 @@ export function TimerEditor({ tradeChannel, market, value, onChange }: TimerEdit
       </div>
     </div>
   )
-}
-
-/** 由 trade_channel 解析市场（编辑页便捷 re-export）。 */
-export function marketFromChannel(channel: string): Market {
-  return marketForChannel(channel)
 }
 
 /** 自定义模式开启时的表达式错误；无则 null。 */

@@ -14,7 +14,6 @@ import { useDomainStore } from '@/stores/domain'
 import { useToastStore } from '@/stores/ui'
 import { channelLabel } from '@/features/dashboard/display'
 import {
-  marketForChannel,
   cronExprEqual,
   describeCron,
   parseTimerIntent,
@@ -22,6 +21,7 @@ import {
   type TimerEditorState,
 } from '@/features/setup/cron'
 import { TimerEditor, timerEditorError } from '@/features/setup/TimerEditor'
+import { useChannelDescriptor } from '@/stores/channels'
 import {
   EditBreadcrumb,
   EditError,
@@ -39,26 +39,26 @@ export function AccountEditTimerPage() {
   const refreshAccounts = useDomainStore((s) => s.refreshAccounts)
   const account = usePolling(useCallback((s: AbortSignal) => getAccount(accountId, s), [accountId]), 0)
   const acc = account.data
+  const descriptor = useChannelDescriptor(acc?.trade_channel)
 
   const [ready, setReady] = useState(false)
   const [timer, setTimer] = useState<TimerEditorState | null>(null)
   const [saving, setSaving] = useState(false)
 
   useEffect(() => {
-    if (!acc || ready) return
-    const market = marketForChannel(acc.trade_channel)
-    setTimer(parseTimerIntent(market, acc.cron_expr ?? ''))
+    if (!acc || !descriptor || ready) return
+    setTimer(parseTimerIntent(descriptor.schedule.kind, acc.cron_expr ?? ''))
     setReady(true)
-  }, [acc, ready])
+  }, [acc, descriptor, ready])
 
   if (account.error && !acc)
     return <EditError id={accountId} message={account.error.message} />
 
-  if (account.loading || !ready || !acc || !timer)
+  if (account.loading || !ready || !acc || !timer || !descriptor)
     return <EditLoading id={accountId} leaf="定时" />
 
-  const market = marketForChannel(acc.trade_channel)
-  const cronNext = timerStateToCronExpr(market, timer)
+  const scheduleKind = descriptor.schedule.kind
+  const cronNext = timerStateToCronExpr(scheduleKind, timer)
   const cronPrev = acc.cron_expr ?? ''
   const dirty = !cronExprEqual(cronNext, cronPrev)
   const err = timerEditorError(timer)
@@ -67,7 +67,7 @@ export function AccountEditTimerPage() {
   // 与总览入口同构摘要（随草稿变）。
   const timerSummary = !cronNext.trim()
     ? '已关 · 仅手动'
-    : (describeCron(market, cronNext) ?? '自定义节奏')
+    : (describeCron(scheduleKind, cronNext) ?? '自定义节奏')
 
   const save = async () => {
     if (err) return toast(`定时表达式有误：${err}`)
@@ -101,7 +101,7 @@ export function AccountEditTimerPage() {
       <div className="mt-6">
         <TimerEditor
           tradeChannel={acc.trade_channel}
-          market={market}
+          scheduleKind={scheduleKind}
           value={timer}
           onChange={(next) =>
             setTimer((prev) => (typeof next === 'function' ? next(prev as TimerEditorState) : next))

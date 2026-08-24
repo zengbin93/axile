@@ -21,6 +21,7 @@ from axile.channels.contracts import (
     ChannelNumberConstraints,
     ChannelPlugin,
     ChannelPortfolioPreset,
+    ChannelSchedule,
     ChannelUi,
     ChannelUnits,
 )
@@ -88,6 +89,7 @@ def _ctp_plugin() -> ChannelPlugin:
             description="通过期货公司柜台连接国内期货市场",
             icon="chart-candlestick",
             market="ctp",
+            schedule=ChannelSchedule(kind="cn_futures"),
             currency="CNY",
             units=ChannelUnits(
                 quantity_kind="contract",
@@ -161,6 +163,7 @@ def _gm_plugin() -> ChannelPlugin:
             description="通过本机终端或 RPC 服务连接掘金量化",
             icon="landmark",
             market="ashare",
+            schedule=ChannelSchedule(kind="cn_stock"),
             currency="CNY",
             units=ChannelUnits(
                 quantity_kind="share",
@@ -261,6 +264,7 @@ def _tq_plugin() -> ChannelPlugin:
             description="通过天勤连接国内期货、期权与组合市场",
             icon="radio-tower",
             market="ctp",
+            schedule=ChannelSchedule(kind="cn_futures"),
             currency="CNY",
             units=ChannelUnits(
                 quantity_kind="contract",

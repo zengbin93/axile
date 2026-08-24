@@ -17,6 +17,7 @@ from axile.channels import (
     ChannelLeverage,
     ChannelPlugin,
     ChannelPortfolioPreset,
+    ChannelSchedule,
     list_channels,
     register_channel,
     registry,
@@ -47,6 +48,7 @@ def _plugin() -> ChannelPlugin:
             description="测试执行器工厂",
             icon="plug",
             market="demo",
+            schedule=ChannelSchedule(kind="continuous"),
             currency="USD",
             defaults=ChannelDefaults(
                 long_leverage=1,

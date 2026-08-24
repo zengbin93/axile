@@ -10,7 +10,6 @@ import { Link } from '@/components/ui/nav'
 import { Select } from '@/components/ui/Select'
 import { MOTION_LAYOUT, usePanelFadeReady } from '@/lib/viewTransition'
 import {
-  marketForChannel,
   DEFAULT_PRESET,
   PRESETS,
   cronExprEqual,
@@ -21,11 +20,12 @@ import {
   resolveCronList,
   ruleFromPreset,
   timerStateToCronExpr,
-  type Market,
+  type ScheduleKind,
   type TimerEditorState,
 } from '@/features/setup/cron'
 import { updateAccount } from '@/lib/api/accounts'
 import { useToastStore } from '@/stores/ui'
+import { useChannelDescriptor } from '@/stores/channels'
 
 function Switch({ on, onClick }: { on: boolean; onClick: () => void }) {
   return (
@@ -50,7 +50,7 @@ function Switch({ on, onClick }: { on: boolean; onClick: () => void }) {
 /**
  * 打开弹层时的草稿：能落在快捷则原样；高级/自定义则降级为快捷默认，并标 ``fromComplex``。
  */
-function draftFromCron(market: Market, cronExpr: string): { state: TimerEditorState; fromComplex: boolean } {
+function draftFromCron(market: ScheduleKind, cronExpr: string): { state: TimerEditorState; fromComplex: boolean } {
   const parsed = parseTimerIntent(market, cronExpr)
   const quick = parsed.timerTab === 'quick' && !parsed.customCronOn
   if (quick) return { state: { ...parsed, timerTab: 'quick', customCronOn: false, rawCron: '' }, fromComplex: false }
@@ -70,7 +70,7 @@ function draftFromCron(market: Market, cronExpr: string): { state: TimerEditorSt
 }
 
 /** 编译时强制快捷意图（弹层不允许 custom / advanced 编译路径）。 */
-function asQuickIntent(market: Market, s: TimerEditorState): TimerEditorState {
+function asQuickIntent(market: ScheduleKind, s: TimerEditorState): TimerEditorState {
   const id = s.presetIds[0] ?? DEFAULT_PRESET[market]
   const rule = ruleFromPreset(market, id)
   return {
@@ -99,17 +99,17 @@ export interface TimerQuickModalProps {
 /**
  * 轻量定时弹层。
  */
-export function TimerQuickModal({
+function TimerQuickModalReady({
   open,
   accountId,
   accountName,
-  tradeChannel,
+  scheduleKind,
   cronExpr,
   onClose,
   onSaved,
-}: TimerQuickModalProps) {
+}: TimerQuickModalProps & { scheduleKind: ScheduleKind }) {
   const toast = useToastStore((s) => s.toast)
-  const market = marketForChannel(tradeChannel)
+  const market = scheduleKind
   const bodyFade = usePanelFadeReady()
 
   const [state, setState] = useState<TimerEditorState>(() => draftFromCron(market, cronExpr).state)
@@ -331,4 +331,10 @@ export function TimerQuickModal({
       </div>
     </>
   )
+}
+
+/** 渠道能力未加载时不猜测调度类型，也不挂载可编辑弹层。 */
+export function TimerQuickModal(props: TimerQuickModalProps) {
+  const scheduleKind = useChannelDescriptor(props.tradeChannel)?.schedule.kind
+  return scheduleKind ? <TimerQuickModalReady {...props} scheduleKind={scheduleKind} /> : null
 }

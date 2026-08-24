@@ -11,7 +11,7 @@ CODE = "def calculate_portfolio(context):\n    return {'rb2610': 1.0}\n"
 
 def test_create_requires_non_empty_custom_function() -> None:
     with pytest.raises(ValidationError):
-        PortfolioCreate(name="demo", market="crypto", custom_calc_py_code="   ")
+        PortfolioCreate(name="demo", market="demo-market", custom_calc_py_code="   ")
 
 
 def test_create_rejects_removed_strategy_fields() -> None:
@@ -19,7 +19,7 @@ def test_create_rejects_removed_strategy_fields() -> None:
         PortfolioCreate.model_validate(
             {
                 "name": "demo",
-                "market": "crypto",
+                "market": "demo-market",
                 "custom_calc_py_code": CODE,
                 "strategy_config": [],
             }

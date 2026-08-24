@@ -14,7 +14,7 @@ import { MacTimePicker } from '@/components/ui/MacTimePicker'
 import { OverflowText } from '@/components/ui/OverflowText'
 import { Segmented } from '@/components/ui/Segmented'
 import { MOTION_LAYOUT, usePanelFadeReady } from '@/lib/viewTransition'
-import type { Market } from '@/features/setup/cron'
+import type { ScheduleKind } from '@/features/setup/cron'
 import {
   isRuleComplete,
   isValidTime,
@@ -67,7 +67,7 @@ function Switch({ on, onClick }: { on: boolean; onClick: () => void }) {
 }
 
 export interface TimerAdvancedProps {
-  market: Market
+  market: ScheduleKind
   rules: ScheduleRule[]
   selectedId: string
   customCronOn: boolean
@@ -93,11 +93,11 @@ function patchRule(rule: ScheduleRule, patch: Partial<ScheduleRule>): ScheduleRu
   return next
 }
 
-function defaultDaysHint(market: Market): string {
-  return market === 'crypto' ? '每天' : '工作日'
+function defaultDaysHint(market: ScheduleKind): string {
+  return market === 'continuous' ? '每天' : '工作日'
 }
 
-function daysSub(days: number[], market: Market): string {
+function daysSub(days: number[], market: ScheduleKind): string {
   if (!days.length) return defaultDaysHint(market)
   if (days.length === 7) return '每天'
   const work = [1, 2, 3, 4, 5]
@@ -108,7 +108,7 @@ function daysSub(days: number[], market: Market): string {
     .join('')}`
 }
 
-function ruleLines(rule: ScheduleRule, market: Market): { title: string; sub: string } {
+function ruleLines(rule: ScheduleRule, market: ScheduleKind): { title: string; sub: string } {
   if (rule.draft && rule.freq === 'd1' && !isValidTime(rule.time)) {
     return { title: '新时间', sub: '未设置' }
   }
@@ -127,7 +127,7 @@ function DayStrip({
   onToggle,
   onReset,
 }: {
-  market: Market
+  market: ScheduleKind
   days: number[]
   onToggle: (d: number) => void
   onReset: () => void
@@ -177,7 +177,7 @@ export function TimerAdvanced({ market, rules, selectedId, customCronOn, onChang
   const selected = rules.find((r) => r.id === selectedId) ?? rules[0]
   const showTime = selected?.freq === 'd1'
   const showAnchor =
-    market !== 'crypto' &&
+    market !== 'continuous' &&
     selected != null &&
     (selected.freq === 'd1' || selected.freq === 'm240') &&
     !isValidTime(selected.time)
@@ -197,7 +197,7 @@ export function TimerAdvanced({ market, rules, selectedId, customCronOn, onChang
     if (v === 'd1') {
       const time = isValidTime(selected.time)
         ? selected.time
-        : market === 'crypto'
+        : market === 'continuous'
           ? '08:00'
           : selected.time || '09:30'
       replaceSelected({ freq: v, time, draft: !isValidTime(time) })
@@ -239,7 +239,7 @@ export function TimerAdvanced({ market, rules, selectedId, customCronOn, onChang
   const toggleDay = (d: number) => {
     if (!selected) return
     if (selected.days.length === 0) {
-      const seed = market === 'crypto' ? [0, 1, 2, 3, 4, 5, 6] : [1, 2, 3, 4, 5]
+      const seed = market === 'continuous' ? [0, 1, 2, 3, 4, 5, 6] : [1, 2, 3, 4, 5]
       const days = seed.includes(d) ? seed.filter((x) => x !== d) : [...seed, d]
       replaceSelected({ days: days.sort((a, b) => a - b) })
       return

@@ -235,7 +235,7 @@ def test_binance_network_migration_rewrites_account_config_and_downgrades() -> N
         initial.upgrade()
         common = {
             "name": "account",
-            "market": "crypto",
+            "market": "demo-market",
             "account_control_preset": "default",
             "is_started": False,
             "cron_expr": "",

@@ -16,6 +16,7 @@ if TYPE_CHECKING:
 
 type ChannelId = str
 type ExecutionBackend = Literal["thread", "process"]
+type ScheduleKind = Literal["continuous", "cn_stock", "cn_futures"]
 type ExecutorFactory = Callable[[BaseAccountConfig], "AbstractExecutor"]
 type TargetTransform = Callable[[dict[str, float], pd.DataFrame], pd.DataFrame]
 
@@ -271,6 +272,12 @@ class ChannelCalendar(_FrozenDescriptorModel):
     label: str = Field(min_length=1)
 
 
+class ChannelSchedule(_FrozenDescriptorModel):
+    """描述渠道采用的公共定时规则类型。"""
+
+    kind: ScheduleKind
+
+
 class ChannelPortfolioPreset(_FrozenDescriptorModel):
     """描述组合向导中某市场的名称与示例标的."""
 
@@ -308,6 +315,8 @@ class ChannelDescriptor(_FrozenDescriptorModel):
         账户连接表单定义。
     calendar : ChannelCalendar | None
         渠道使用的交易日历；为空表示渠道不需要日期限制。
+    schedule : ChannelSchedule
+        渠道在公共前端采用的定时规则类型。
     portfolio : ChannelPortfolioPreset
         组合向导使用的市场名称与示例标的。
     """
@@ -324,6 +333,7 @@ class ChannelDescriptor(_FrozenDescriptorModel):
     leverage: ChannelLeverage
     account_form: ChannelAccountForm
     calendar: ChannelCalendar | None = None
+    schedule: ChannelSchedule
     portfolio: ChannelPortfolioPreset
 
 

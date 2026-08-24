@@ -79,6 +79,9 @@ export interface ChannelCapability {
     example_symbols: string[]
   }
   market: string
+  schedule: {
+    kind: 'continuous' | 'cn_stock' | 'cn_futures'
+  }
   currency: string
   units: {
     quantity_kind: 'share' | 'contract' | 'base_asset' | 'custom'

@@ -45,19 +45,16 @@ export function useChannelDescriptor(channel: TradeChannel | null | undefined): 
   return useChannelCatalogStore((state) => state.channels?.find((item) => item.channel === channel))
 }
 
-const MARKET_ALIASES: Record<string, string> = {
-  '加密货币': 'crypto',
-  'A股': 'ashare',
-  '期货': 'ctp',
-}
-
 /** 返回指定市场首个可用渠道；无兼容渠道时返回 ``undefined``。 */
 export function getChannelForMarket(market: string | null | undefined): TradeChannel | undefined {
   if (!market) return undefined
-  const target = MARKET_ALIASES[market] ?? market
   return useChannelCatalogStore
     .getState()
-    .channels?.find((channel) => channel.available && channel.market === target)?.channel
+    .channels?.find(
+      (channel) =>
+        channel.available &&
+        (channel.market === market || channel.portfolio.market_label === market),
+    )?.channel
 }
 
 /** 在应用根加载一次渠道目录，并使目录更新触发页面重渲染。 */

@@ -21,7 +21,7 @@ import { useDomainStore } from '@/stores/domain'
 import { useChannelDescriptor } from '@/stores/channels'
 import { useToastStore } from '@/stores/ui'
 import { channelLabel } from '@/features/dashboard/display'
-import { describeCron, marketForChannel } from '@/features/setup/cron'
+import { describeCron } from '@/features/setup/cron'
 import { describeAlgorithmRef, type AlgorithmRef } from '@/features/setup/algorithms'
 import {
   AREA,
@@ -277,10 +277,10 @@ export function AccountEditPage() {
       </section>
     )
 
-  const showShortLeverage = channelDescriptor?.ui.show_short_leverage ?? acc.market !== 'ashare'
+  const showShortLeverage = channelDescriptor?.ui.show_short_leverage ?? true
   const d = draft
   const set = (patch: Partial<Draft>) => setDraft((prev) => (prev ? { ...prev, ...patch } : prev))
-  const market = marketForChannel(acc.trade_channel)
+  const scheduleKind = channelDescriptor?.schedule.kind
 
   // 飞书 key 容忍粘贴整条 webhook 链接：测试与保存都用规整后的裸 key
   // （后端 /init/test-feishu 无状态，测的就是请求体里这串，故可存盘前先测）。
@@ -297,13 +297,10 @@ export function AccountEditPage() {
   const cronExpr = acc.cron_expr ?? ''
   const timerSummary = !cronExpr.trim()
     ? '已关 · 仅手动'
-    : (describeCron(market, cronExpr) ?? '自定义节奏')
+    : (scheduleKind ? describeCron(scheduleKind, cronExpr) : null) ?? '自定义节奏'
 
-  const tradeSum = describeAlgorithmRef(refOf(acc.algorithm as Record<string, unknown> | null), market)
-  const emptySum = describeAlgorithmRef(
-    refOf(acc.empty_positions_algorithm as Record<string, unknown> | null),
-    market,
-  )
+  const tradeSum = describeAlgorithmRef(refOf(acc.algorithm as Record<string, unknown> | null))
+  const emptySum = describeAlgorithmRef(refOf(acc.empty_positions_algorithm as Record<string, unknown> | null))
   const algoSummary = emptySum === '未设置' ? tradeSum : `${tradeSum} · 清仓 ${emptySum}`
 
   const jsonEntries: string[] = [d.tradeRules, d.newConfig]

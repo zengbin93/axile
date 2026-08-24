@@ -5,7 +5,6 @@ import { Segmented } from '@/components/ui/Segmented'
 import { Select } from '@/components/ui/Select'
 import { Toggle } from '@/features/account/editUi'
 import { getAlgorithms } from '@/lib/api/system'
-import { marketForChannel, type Market } from '@/features/setup/cron'
 import { useChannelDescriptor } from '@/stores/channels'
 import {
   INTENT_COPY,
@@ -200,13 +199,12 @@ function NumRow({
 type ParamsEditor = (props: {
   params: Record<string, unknown>
   onChange: (p: Record<string, unknown>) => void
-  market: Market
   onApplyIntent?: (intent: Intent) => void
 }) => React.ReactNode
 
 /** SINGLE-MAKER 专属：意图三卡（省成本/保成交/平衡），复用向导文案。 */
-const SingleMakerEditor: ParamsEditor = ({ params, onChange, market, onApplyIntent }) => {
-  const copy = INTENT_COPY[market]
+const SingleMakerEditor: ParamsEditor = ({ params, onChange, onApplyIntent }) => {
+  const copy = INTENT_COPY
   const active = intentFromParams(params)
   const effective = effectiveSingleMakerParams(params)
   const [advanced, setAdvanced] = useState(false)
@@ -579,10 +577,9 @@ export interface AlgorithmEditorProps {
 export function AlgorithmEditor({ slot, channel, value, onChange, allowClear }: AlgorithmEditorProps) {
   const algos = useAlgorithms()
   const channelDescriptor = useChannelDescriptor(channel)
-  const market = marketForChannel(channel)
   const fallback = slot === 'trade'
-    ? (channelDescriptor?.defaults.trade_algorithm ?? defaultAlgorithm(market, slot))
-    : (channelDescriptor?.defaults.empty_positions_algorithm ?? defaultAlgorithm(market, slot))
+    ? (channelDescriptor?.defaults.trade_algorithm ?? value ?? defaultAlgorithm('SINGLE-MAKER', slot))
+    : (channelDescriptor?.defaults.empty_positions_algorithm ?? value ?? defaultAlgorithm('SINGLE-MAKER', slot))
   const defaultMethod = fallback.method
 
   const candidates = useMemo(() => {
@@ -633,7 +630,7 @@ export function AlgorithmEditor({ slot, channel, value, onChange, allowClear }: 
   const pick = (next: string) => {
     if (next === method) return
     const nextInfo = candidates.find((candidate) => candidate.name === next)
-    onChange({ method: next, params: nextInfo?.default_params ?? seedParams(next, market) })
+    onChange({ method: next, params: nextInfo?.default_params ?? seedParams(next) })
   }
 
   const setParams = (params: Record<string, unknown>) => onChange({ method, params })
@@ -643,16 +640,16 @@ export function AlgorithmEditor({ slot, channel, value, onChange, allowClear }: 
       setPendingIntent(intent)
       return
     }
-    setParams(resolveAlgorithm(intent, market).params)
+    setParams(resolveAlgorithm(intent, method).params)
   }
 
-  const pendingCopy = pendingIntent ? INTENT_COPY[market][pendingIntent] : null
+  const pendingCopy = pendingIntent ? INTENT_COPY[pendingIntent] : null
   const confirmPreset: ConfirmSpec | null = pendingIntent && pendingCopy
     ? {
         title: `应用“${pendingCopy.title.replace('（推荐）', '')}”预设？`,
         body: '当前自定义参数将被该预设替换。页面保存前不会写入账户。',
         okText: '应用预设',
-        onConfirm: () => setParams(resolveAlgorithm(pendingIntent, market).params),
+        onConfirm: () => setParams(resolveAlgorithm(pendingIntent, method).params),
       }
     : null
 
@@ -713,7 +710,6 @@ export function AlgorithmEditor({ slot, channel, value, onChange, allowClear }: 
           <Dedicated
             params={value.params}
             onChange={setParams}
-            market={market}
             onApplyIntent={applyIntent}
           />
         ) : (

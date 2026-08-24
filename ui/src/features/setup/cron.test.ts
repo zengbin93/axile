@@ -41,19 +41,19 @@ function rule(patch: Partial<ScheduleRule> = {}): ScheduleRule {
   }
 }
 
-describe('compileCustom · crypto', () => {
+describe('compileCustom · continuous', () => {
   it('日线锚定 08:00（无补发）', () => {
-    expect(compileCustom('crypto', 'd1', 'open', 0, 0)).toEqual(['0 8 * * *'])
+    expect(compileCustom('continuous', 'd1', 'open', 0, 0)).toEqual(['0 8 * * *'])
   })
 
   it('m60 走每小时、m120 走 */2、m240 走 */4', () => {
-    expect(compileCustom('crypto', 'm60', 'open', 0, 0)).toEqual(['0 * * * *'])
-    expect(compileCustom('crypto', 'm120', 'open', 0, 0)).toEqual(['0 */2 * * *'])
-    expect(compileCustom('crypto', 'm240', 'open', 0, 0)).toEqual(['0 */4 * * *'])
+    expect(compileCustom('continuous', 'm60', 'open', 0, 0)).toEqual(['0 * * * *'])
+    expect(compileCustom('continuous', 'm120', 'open', 0, 0)).toEqual(['0 */2 * * *'])
+    expect(compileCustom('continuous', 'm240', 'open', 0, 0)).toEqual(['0 */4 * * *'])
   })
 
   it('m15 叠加补发（补 2 次每隔 1 分）铺满每 15 分的 0/1/2 偏移', () => {
-    expect(compileCustom('crypto', 'm15', 'open', 2, 1)).toEqual([
+    expect(compileCustom('continuous', 'm15', 'open', 2, 1)).toEqual([
       '0,1,2,15,16,17,30,31,32,45,46,47 * * * *',
     ])
   })
@@ -61,20 +61,20 @@ describe('compileCustom · crypto', () => {
 
 describe('compileCustom · 时段市场按锚点落点', () => {
   it('A股日线 open=09:30 / close=14:50', () => {
-    expect(compileCustom('ashare', 'd1', 'open', 0, 0)).toEqual(['30 9 * * 1-5'])
-    expect(compileCustom('ashare', 'd1', 'close', 0, 0)).toEqual(['50 14 * * 1-5'])
+    expect(compileCustom('cn_stock', 'd1', 'open', 0, 0)).toEqual(['30 9 * * 1-5'])
+    expect(compileCustom('cn_stock', 'd1', 'close', 0, 0)).toEqual(['50 14 * * 1-5'])
   })
 
   it('CTP 日线 close=15:00', () => {
-    expect(compileCustom('ctp', 'd1', 'close', 0, 0)).toEqual(['0 15 * * 1-5'])
+    expect(compileCustom('cn_futures', 'd1', 'close', 0, 0)).toEqual(['0 15 * * 1-5'])
   })
 
   it('m240 与日线同锚点', () => {
-    expect(compileCustom('ashare', 'm240', 'close', 0, 0)).toEqual(['50 14 * * 1-5'])
+    expect(compileCustom('cn_stock', 'm240', 'close', 0, 0)).toEqual(['50 14 * * 1-5'])
   })
 
   it('A股 m120 用时段表 11:30/15:00（含 m120，验证 SESS 已补齐）', () => {
-    expect(compileCustom('ashare', 'm120', 'open', 0, 0)).toEqual([
+    expect(compileCustom('cn_stock', 'm120', 'open', 0, 0)).toEqual([
       '0 15 * * 1-5',
       '30 11 * * 1-5',
     ])
@@ -82,18 +82,18 @@ describe('compileCustom · 时段市场按锚点落点', () => {
 })
 
 describe('compileScheduleRule · 可调时刻与周几', () => {
-  it('crypto 每天 09:30', () => {
-    expect(compileScheduleRule('crypto', rule({ time: '09:30' }), 0, 0)).toEqual(['30 9 * * *'])
+  it('连续交易每天 09:30', () => {
+    expect(compileScheduleRule('continuous', rule({ time: '09:30' }), 0, 0)).toEqual(['30 9 * * *'])
   })
 
-  it('crypto 工作日 08:00', () => {
-    expect(compileScheduleRule('crypto', rule({ time: '08:00', days: [1, 2, 3, 4, 5] }), 0, 0)).toEqual([
+  it('连续交易工作日 08:00', () => {
+    expect(compileScheduleRule('continuous', rule({ time: '08:00', days: [1, 2, 3, 4, 5] }), 0, 0)).toEqual([
       '0 8 * * 1,2,3,4,5',
     ])
   })
 
   it('空槽不编译', () => {
-    expect(compileScheduleRule('crypto', rule({ draft: true, time: '' }), 0, 0)).toEqual([])
+    expect(compileScheduleRule('continuous', rule({ draft: true, time: '' }), 0, 0)).toEqual([])
   })
 
   it('多条规则拼接（忽略空槽）', () => {
@@ -101,7 +101,7 @@ describe('compileScheduleRule · 可调时刻与周几', () => {
       timerTab: 'advanced',
       scheduleRules: [rule({ time: '08:00' }), rule({ id: 'r2', time: '20:00' }), makeEmptySlot(rule())],
     })
-    expect(resolveCronList('crypto', t)).toEqual(['0 8 * * *', '0 20 * * *'])
+    expect(resolveCronList('continuous', t)).toEqual(['0 8 * * *', '0 20 * * *'])
   })
 })
 
@@ -114,38 +114,38 @@ describe('resolveCronList · 优先级', () => {
       scheduleRules: [rule()],
       presetIds: ['d1'],
     })
-    expect(resolveCronList('crypto', t)).toEqual(['5 9 * * 1-5', '50 14 * * 1-5'])
+    expect(resolveCronList('continuous', t)).toEqual(['5 9 * * 1-5', '50 14 * * 1-5'])
   })
 
   it('兼容旧 customOn → compileCustom', () => {
     const t = intent({ customOn: true, customFreq: 'd1', customAnchor: 'open' })
-    expect(resolveCronList('crypto', t)).toEqual(['0 8 * * *'])
+    expect(resolveCronList('continuous', t)).toEqual(['0 8 * * *'])
   })
 
   it('快捷 tab → 预设编译', () => {
     const t = intent({ presetIds: ['d1'], timerTab: 'quick' })
-    expect(resolveCronList('crypto', t)).toEqual(['0 8 * * *'])
+    expect(resolveCronList('continuous', t)).toEqual(['0 8 * * *'])
   })
 
   it('空意图返回空数组', () => {
-    expect(resolveCronList('crypto', intent())).toEqual([])
+    expect(resolveCronList('continuous', intent())).toEqual([])
   })
 
   it('仅 rawCron 无 tab（编辑页）仍走表达式', () => {
     const t = intent({ rawCron: '0 9 * * *', timerTab: undefined })
-    expect(resolveCronList('crypto', t)).toEqual(['0 9 * * *'])
+    expect(resolveCronList('continuous', t)).toEqual(['0 9 * * *'])
   })
 })
 
 describe('buildCronList · 补发放大偏移', () => {
-  it('crypto 每 15 分 + 补 2 次每隔 1 分', () => {
-    expect(buildCronList('crypto', ['m15'], 2, 1)).toEqual([
+  it('连续交易每 15 分 + 补 2 次每隔 1 分', () => {
+    expect(buildCronList('continuous', ['m15'], 2, 1)).toEqual([
       '0,1,2,15,16,17,30,31,32,45,46,47 * * * *',
     ])
   })
 
   it('A股多选预设拼接多条规则（开盘+临收）', () => {
-    expect(buildCronList('ashare', ['open', 'close'], 0, 0)).toEqual(['30 9 * * 1-5', '50 14 * * 1-5'])
+    expect(buildCronList('cn_stock', ['open', 'close'], 0, 0)).toEqual(['30 9 * * 1-5', '50 14 * * 1-5'])
   })
 })
 
@@ -161,58 +161,58 @@ describe('describeRule', () => {
 
 describe('describeCron · cron 反解人话', () => {
   it('每 15 分钟 + 补发 2 次（与图示同款展开）', () => {
-    expect(describeCron('crypto', '0,1,2,15,16,17,30,31,32,45,46,47 * * * *')).toBe('每 15 分钟 · 补发 2 次')
+    expect(describeCron('continuous', '0,1,2,15,16,17,30,31,32,45,46,47 * * * *')).toBe('每 15 分钟 · 补发 2 次')
   })
 
   it('每天带时间、无补发不加后缀', () => {
-    expect(describeCron('crypto', buildCronList('crypto', ['d1'], 0, 0).join(' | '))).toBe('每天 08:00')
+    expect(describeCron('continuous', buildCronList('continuous', ['d1'], 0, 0).join(' | '))).toBe('每天 08:00')
   })
 
   it('每小时 / 每 4 小时不误拼机器味 sub', () => {
-    expect(describeCron('crypto', '0 * * * *')).toBe('每小时')
-    expect(describeCron('crypto', '0 */4 * * *')).toBe('每 4 小时')
+    expect(describeCron('continuous', '0 * * * *')).toBe('每小时')
+    expect(describeCron('continuous', '0 */4 * * *')).toBe('每 4 小时')
   })
 
   it('分钟乱序 / 重复仍能归一识别', () => {
-    expect(describeCron('crypto', '45,0,30,15,15 * * * *')).toBe('每 15 分钟')
+    expect(describeCron('continuous', '45,0,30,15,15 * * * *')).toBe('每 15 分钟')
   })
 
   it('时段市场预设带交易日时间', () => {
-    expect(describeCron('ashare', buildCronList('ashare', ['open'], 0, 0).join(' | '))).toBe('每交易日 · 开盘 09:30')
+    expect(describeCron('cn_stock', buildCronList('cn_stock', ['open'], 0, 0).join(' | '))).toBe('每交易日 · 开盘 09:30')
   })
 
   it('多选 / 裸 cron 等非单预设组合返回 null', () => {
-    expect(describeCron('crypto', '7 3 * * *')).toBeNull()
-    expect(describeCron('ashare', buildCronList('ashare', ['open', 'close'], 0, 0).join(' | '))).toBeNull()
+    expect(describeCron('continuous', '7 3 * * *')).toBeNull()
+    expect(describeCron('cn_stock', buildCronList('cn_stock', ['open', 'close'], 0, 0).join(' | '))).toBeNull()
   })
 
   it('空表达式返回 null', () => {
-    expect(describeCron('crypto', '')).toBeNull()
+    expect(describeCron('continuous', '')).toBeNull()
   })
 })
 
 describe('parseTimerIntent · 编辑页回填', () => {
   it('空 cron → 关自动 + 默认快捷', () => {
-    const s = parseTimerIntent('crypto', '')
+    const s = parseTimerIntent('continuous', '')
     expect(s.autoOn).toBe(false)
     expect(s.timerTab).toBe('quick')
     expect(s.presetIds).toEqual(['d1'])
-    expect(timerStateToCronExpr('crypto', s)).toBe('')
+    expect(timerStateToCronExpr('continuous', s)).toBe('')
   })
 
   it('每 15 分 + 补 2 次 → 快捷预设（编辑页裸 cron 同款）', () => {
-    const s = parseTimerIntent('crypto', '0,1,2,15,16,17,30,31,32,45,46,47 * * * *')
+    const s = parseTimerIntent('continuous', '0,1,2,15,16,17,30,31,32,45,46,47 * * * *')
     expect(s.autoOn).toBe(true)
     expect(s.timerTab).toBe('quick')
     expect(s.presetIds).toEqual(['m15'])
     expect(s.supN).toBe(2)
     expect(s.supM).toBe(1)
     expect(s.customCronOn).toBe(false)
-    expect(timerStateToCronExpr('crypto', s)).toBe('0,1,2,15,16,17,30,31,32,45,46,47 * * * *')
+    expect(timerStateToCronExpr('continuous', s)).toBe('0,1,2,15,16,17,30,31,32,45,46,47 * * * *')
   })
 
   it('单一非预设日频 → 高级 d1 规则', () => {
-    const s = parseTimerIntent('crypto', '0 21 * * *')
+    const s = parseTimerIntent('continuous', '0 21 * * *')
     expect(s.autoOn).toBe(true)
     expect(s.timerTab).toBe('advanced')
     expect(s.customCronOn).toBe(false)
@@ -222,7 +222,7 @@ describe('parseTimerIntent · 编辑页回填', () => {
   })
 
   it('多条日频 → 高级多规则', () => {
-    const s = parseTimerIntent('crypto', '0 8 * * * | 0 20 * * *')
+    const s = parseTimerIntent('continuous', '0 8 * * * | 0 20 * * *')
     expect(s.timerTab).toBe('advanced')
     expect(s.customCronOn).toBe(false)
     expect(s.scheduleRules).toHaveLength(2)
@@ -230,7 +230,7 @@ describe('parseTimerIntent · 编辑页回填', () => {
   })
 
   it('无法结构化 → 高级自定义模式', () => {
-    const s = parseTimerIntent('crypto', '7 3 * * * | */5 * * * *')
+    const s = parseTimerIntent('continuous', '7 3 * * * | */5 * * * *')
     expect(s.timerTab).toBe('advanced')
     expect(s.customCronOn).toBe(true)
     expect(s.rawCron).toContain('7 3 * * *')

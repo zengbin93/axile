@@ -1,5 +1,3 @@
-import { getChannelDescriptor } from '@/stores/channels'
-
 /**
  * 定时节奏 → crontab 编译（从原型移植为纯函数）。
  *
@@ -8,7 +6,7 @@ import { getChannelDescriptor } from '@/stores/channels'
  * 多条规则用 ``|`` 拼接（后端 `parse_cron_expr` 支持）。
  */
 
-export type Market = 'crypto' | 'ashare' | 'ctp'
+export type ScheduleKind = 'continuous' | 'cn_stock' | 'cn_futures'
 
 /** 自定义节奏可选频率。 */
 export type CustomFreq = 'm15' | 'm60' | 'm120' | 'm240' | 'd1'
@@ -16,35 +14,22 @@ export type CustomFreq = 'm15' | 'm60' | 'm120' | 'm240' | 'd1'
 /** 自定义节奏锚点（日线/4 小时线取开盘或临收）。 */
 export type Anchor = 'open' | 'close'
 
-/** 渠道 → 市场。 */
-export const CHANNEL_MARKET: Record<string, Market> = {
-  ctp: 'ctp',
-  gm: 'ashare',
+export const SCHEDULE_NAME: Record<ScheduleKind, string> = {
+  continuous: '全天候',
+  cn_stock: 'A股',
+  cn_futures: '期货',
 }
 
-/** 从运行时渠道目录解析市场；目录未就绪时兼容公开内置渠道。 */
-export function marketForChannel(channel: string): Market {
-  const market = getChannelDescriptor(channel)?.market ?? CHANNEL_MARKET[channel]
-  if (market === 'ashare' || market === 'ctp' || market === 'crypto') return market
-  return 'crypto'
-}
-
-export const MARKET_NAME: Record<Market, string> = {
-  crypto: '加密（24/7）',
-  ashare: 'A股',
-  ctp: '期货（CTP）',
-}
-
-/** 各市场默认预设 id。 */
-export const DEFAULT_PRESET: Record<Market, string> = {
-  crypto: 'd1',
-  ctp: 'close',
-  ashare: 'open',
+/** 各调度类型默认预设 id。 */
+export const DEFAULT_PRESET: Record<ScheduleKind, string> = {
+  continuous: 'd1',
+  cn_futures: 'close',
+  cn_stock: 'open',
 }
 
 /** 市场交易时段内的 bar 收盘时刻。 */
 const SESS = {
-  ashare: {
+  cn_stock: {
     open: '09:30',
     close: '14:50',
     dayClose: '15:00',
@@ -53,7 +38,7 @@ const SESS = {
     m60: ['10:30', '11:30', '14:00', '15:00'],
     m120: ['11:30', '15:00'],
   },
-  ctp: {
+  cn_futures: {
     open: '09:00',
     close: '15:00',
     dayClose: '15:00',
@@ -69,8 +54,8 @@ function supOffsets(supN: number, supM: number): number[] {
   return [0, ...Array.from({ length: supN }, (_, k) => (k + 1) * supM)]
 }
 
-/** 加密：分钟基点 + 偏移 → 同小时内分钟列表。 */
-function cyMins(base: number[], offs: number[]): string {
+/** 连续交易：分钟基点 + 偏移 → 同小时内分钟列表。 */
+function continuousMinutes(base: number[], offs: number[]): string {
   return [...new Set(base.flatMap((b) => offs.map((o) => (b + o) % 60)))].sort((a, b) => a - b).join(',')
 }
 
@@ -101,29 +86,29 @@ export interface Preset {
 }
 
 /** 市场感知的快捷预设。 */
-export const PRESETS: Record<Market, Preset[]> = {
-  crypto: [
-    { id: 'm15', label: '每 15 分钟', sub: '每 15 分', build: (o) => [`${cyMins([0, 15, 30, 45], o)} * * * *`] },
-    { id: 'h1', label: '每小时', sub: ':00 起', build: (o) => [`${cyMins([0], o)} * * * *`] },
-    { id: 'h4', label: '每 4 小时', sub: '*/4 时', build: (o) => [`${cyMins([0], o)} */4 * * *`] },
-    { id: 'd1', label: '每天', sub: '08:00', build: (o) => [`${cyMins([0], o)} 8 * * *`] },
+export const PRESETS: Record<ScheduleKind, Preset[]> = {
+  continuous: [
+    { id: 'm15', label: '每 15 分钟', sub: '每 15 分', build: (o) => [`${continuousMinutes([0, 15, 30, 45], o)} * * * *`] },
+    { id: 'h1', label: '每小时', sub: ':00 起', build: (o) => [`${continuousMinutes([0], o)} * * * *`] },
+    { id: 'h4', label: '每 4 小时', sub: '*/4 时', build: (o) => [`${continuousMinutes([0], o)} */4 * * *`] },
+    { id: 'd1', label: '每天', sub: '08:00', build: (o) => [`${continuousMinutes([0], o)} 8 * * *`] },
   ],
-  ashare: [
-    { id: 'open', label: '每交易日 · 开盘', sub: '09:30', build: (o) => timesToCron([SESS.ashare.open], '1-5', o) },
-    { id: 'close', label: '每交易日 · 临收', sub: '14:50', build: (o) => timesToCron([SESS.ashare.close], '1-5', o) },
-    { id: 'm15', label: '盘中每 15 分', build: (o) => timesToCron(SESS.ashare.m15, '1-5', o) },
-    { id: 'm60', label: '盘中每 60 分', build: (o) => timesToCron(SESS.ashare.m60, '1-5', o) },
+  cn_stock: [
+    { id: 'open', label: '每交易日 · 开盘', sub: '09:30', build: (o) => timesToCron([SESS.cn_stock.open], '1-5', o) },
+    { id: 'close', label: '每交易日 · 临收', sub: '14:50', build: (o) => timesToCron([SESS.cn_stock.close], '1-5', o) },
+    { id: 'm15', label: '盘中每 15 分', build: (o) => timesToCron(SESS.cn_stock.m15, '1-5', o) },
+    { id: 'm60', label: '盘中每 60 分', build: (o) => timesToCron(SESS.cn_stock.m60, '1-5', o) },
   ],
-  ctp: [
-    { id: 'close', label: '日盘收盘', sub: '15:00', build: (o) => timesToCron([SESS.ctp.dayClose], '1-5', o) },
-    { id: 'm15', label: '日盘每 15 分', build: (o) => timesToCron(SESS.ctp.m15, '1-5', o) },
-    { id: 'm60', label: '日盘每 60 分', build: (o) => timesToCron(SESS.ctp.m60, '1-5', o) },
+  cn_futures: [
+    { id: 'close', label: '日盘收盘', sub: '15:00', build: (o) => timesToCron([SESS.cn_futures.dayClose], '1-5', o) },
+    { id: 'm15', label: '日盘每 15 分', build: (o) => timesToCron(SESS.cn_futures.m15, '1-5', o) },
+    { id: 'm60', label: '日盘每 60 分', build: (o) => timesToCron(SESS.cn_futures.m60, '1-5', o) },
   ],
 }
 
 /** 由所选预设 + 补发参数编译出 cron 列表。 */
 export function buildCronList(
-  market: Market,
+  market: ScheduleKind,
   presetIds: string[],
   supN: number,
   supM: number,
@@ -142,8 +127,8 @@ export function buildCronList(
 
  * Parameters
  * ----------
- * market : Market
- *     目标市场；``crypto`` 走纯分钟/小时表达式，其余按交易时段编译。
+ * market : ScheduleKind
+ *     调度类型；``continuous`` 走纯分钟/小时表达式，其余按交易时段编译。
  * freq : CustomFreq
  *     频率档位。
  * anchor : Anchor
@@ -157,7 +142,7 @@ export function buildCronList(
  *     一条或多条 crontab 规则。
  */
 export function compileCustom(
-  market: Market,
+  market: ScheduleKind,
   freq: CustomFreq,
   anchor: Anchor,
   supN: number,
@@ -168,7 +153,7 @@ export function compileCustom(
     {
       id: '_',
       freq,
-      time: freq === 'd1' ? (market === 'crypto' ? '08:00' : anchor === 'close' ? (market === 'ashare' ? '14:50' : '15:00') : market === 'ashare' ? '09:30' : '09:00') : '00:00',
+      time: freq === 'd1' ? (market === 'continuous' ? '08:00' : anchor === 'close' ? (market === 'cn_stock' ? '14:50' : '15:00') : market === 'cn_stock' ? '09:30' : '09:00') : '00:00',
       days: [],
       anchor,
       draft: false,
@@ -193,7 +178,7 @@ export interface ScheduleRule {
   freq: CustomFreq
   /** HH:MM；日频必填，周期类可忽略。 */
   time: string
-  /** 周几掩码：0=日 … 6=六；空数组 = 市场默认（crypto 每天 / 时段市场工作日）。 */
+  /** 周几掩码：0=日 … 6=六；空数组 = 调度默认（连续交易每天 / 时段市场工作日）。 */
   days: number[]
   /** 时段市场日频/4h 锚点（有合法 time 时优先用 time）。 */
   anchor: Anchor
@@ -231,34 +216,34 @@ export function isRuleComplete(rule: ScheduleRule): boolean {
 }
 
 /** 周几 → cron 第 5 段；空 = 市场默认。 */
-export function daysToCronField(days: number[], market: Market): string {
-  if (!days.length) return market === 'crypto' ? '*' : '1-5'
+export function daysToCronField(days: number[], market: ScheduleKind): string {
+  if (!days.length) return market === 'continuous' ? '*' : '1-5'
   const sorted = [...new Set(days)].sort((a, b) => a - b)
   if (sorted.length === 7) return '*'
   return sorted.join(',')
 }
 
 /** 市场默认一条完整规则（进高级 / 重置用）。 */
-export function defaultScheduleRule(market: Market): ScheduleRule {
-  if (market === 'crypto') {
+export function defaultScheduleRule(market: ScheduleKind): ScheduleRule {
+  if (market === 'continuous') {
     return { id: newRuleId(), freq: 'd1', time: '08:00', days: [], anchor: 'open', draft: false }
   }
-  if (market === 'ashare') {
+  if (market === 'cn_stock') {
     return { id: newRuleId(), freq: 'd1', time: '09:30', days: [1, 2, 3, 4, 5], anchor: 'open', draft: false }
   }
   return { id: newRuleId(), freq: 'd1', time: '15:00', days: [1, 2, 3, 4, 5], anchor: 'close', draft: false }
 }
 
 /** 由快捷预设 id 展开为一条高级规则。 */
-export function ruleFromPreset(market: Market, presetId: string): ScheduleRule {
+export function ruleFromPreset(market: ScheduleKind, presetId: string): ScheduleRule {
   const base = defaultScheduleRule(market)
-  if (market === 'crypto') {
+  if (market === 'continuous') {
     if (presetId === 'm15') return { ...base, id: newRuleId(), freq: 'm15', time: '00:00' }
     if (presetId === 'h1') return { ...base, id: newRuleId(), freq: 'm60', time: '00:00' }
     if (presetId === 'h4') return { ...base, id: newRuleId(), freq: 'm240', time: '00:00' }
     return { ...base, id: newRuleId(), freq: 'd1', time: '08:00' }
   }
-  if (market === 'ashare') {
+  if (market === 'cn_stock') {
     if (presetId === 'm15') return { ...base, id: newRuleId(), freq: 'm15', time: '00:00' }
     if (presetId === 'm60') return { ...base, id: newRuleId(), freq: 'm60', time: '00:00' }
     if (presetId === 'close') return { ...base, id: newRuleId(), freq: 'd1', time: '14:50', anchor: 'close' }
@@ -305,10 +290,10 @@ export function describeRule(rule: ScheduleRule): string {
 /**
  * 将一条结构化规则编译为 crontab。
  *
- * 日频用 ``time``；周期类按市场 bar 表或 crypto 整点表达式；``days`` 写入周字段。
+ * 日频用 ``time``；周期类按市场 bar 表或连续交易整点表达式；``days`` 写入周字段。
  */
 export function compileScheduleRule(
-  market: Market,
+  market: ScheduleKind,
   rule: ScheduleRule,
   supN: number,
   supM: number,
@@ -317,7 +302,7 @@ export function compileScheduleRule(
   const offs = supOffsets(supN, supM)
   const dow = daysToCronField(rule.days, market)
 
-  if (market === 'crypto') {
+  if (market === 'continuous') {
     if (rule.freq === 'd1') {
       return timesToCron([rule.time.trim()], dow, offs)
     }
@@ -334,10 +319,10 @@ export function compileScheduleRule(
       m240: '*/4',
     }
     const f = rule.freq as Exclude<CustomFreq, 'd1'>
-    return [`${cyMins(base[f], offs)} ${hr[f]} * * ${dow}`]
+    return [`${continuousMinutes(base[f], offs)} ${hr[f]} * * ${dow}`]
   }
 
-  const S = market === 'ashare' ? SESS.ashare : SESS.ctp
+  const S = market === 'cn_stock' ? SESS.cn_stock : SESS.cn_futures
   // 时段市场：日频若有合法时刻则按钟点；否则回退锚点开盘/临收。
   if (rule.freq === 'd1' || rule.freq === 'm240') {
     if (rule.freq === 'd1' && isValidTime(rule.time)) {
@@ -353,7 +338,7 @@ export function compileScheduleRule(
 
 /** 编译高级规则列表（跳过空槽）。 */
 export function compileScheduleRules(
-  market: Market,
+  market: ScheduleKind,
   rules: ScheduleRule[],
   supN: number,
   supM: number,
@@ -396,7 +381,7 @@ export interface TimerIntent {
 
  * Parameters
  * ----------
- * market : Market
+ * market : ScheduleKind
  *     目标市场。
  * t : TimerIntent
  *     定时意图。
@@ -406,7 +391,7 @@ export interface TimerIntent {
  * string[]
  *     crontab 规则列表；均为空时返回空数组。
  */
-export function resolveCronList(market: Market, t: TimerIntent): string[] {
+export function resolveCronList(market: ScheduleKind, t: TimerIntent): string[] {
   const raw = t.rawCron.trim()
   // 自定义模式开，或以「无 tab / 无高级规则」的裸表达式路径（账户编辑页）。
   if (raw && (t.customCronOn || (t.timerTab == null && !t.scheduleRules?.length && !t.customOn))) {
@@ -552,7 +537,7 @@ const SUP_M = [1, 2, 3, 5]
  * @param cronExpr 存储的 crontab（多条以 `|` 或换行分隔）。
  * @returns 人话短语；无法归类时为 ``null``。
  */
-export function describeCron(market: Market, cronExpr: string): string | null {
+export function describeCron(market: ScheduleKind, cronExpr: string): string | null {
   const target = normCronSet(cronExpr)
   if (!target) return null
   for (const p of PRESETS[market]) {
@@ -584,7 +569,7 @@ export interface TimerEditorState extends TimerIntent {
 }
 
 /** 构造一份「关自动 + 市场默认节奏」草稿（打开开关后可立刻用）。 */
-export function defaultTimerEditorState(market: Market): TimerEditorState {
+export function defaultTimerEditorState(market: ScheduleKind): TimerEditorState {
   const rule = defaultScheduleRule(market)
   return {
     autoOn: false,
@@ -600,10 +585,10 @@ export function defaultTimerEditorState(market: Market): TimerEditorState {
 }
 
 /** 解析 cron 第 5 段（周）为 days 掩码；无法识别返回 null。 */
-function parseDowField(dow: string, market: Market): number[] | null {
+function parseDowField(dow: string, market: ScheduleKind): number[] | null {
   if (dow === '*') return []
-  // 时段市场默认工作日 → 空数组（UI 显示市场默认）；crypto 则显式 1-5。
-  if (dow === '1-5') return market === 'crypto' ? [1, 2, 3, 4, 5] : []
+  // 时段市场默认工作日 → 空数组（UI 显示市场默认）；连续交易则显式 1-5。
+  if (dow === '1-5') return market === 'continuous' ? [1, 2, 3, 4, 5] : []
   if (!/^\d+(,\d+)*$/.test(dow)) return null
   const days = [...new Set(dow.split(',').map(Number))].filter((d) => d >= 0 && d <= 6).sort((a, b) => a - b)
   return days.length ? days : null
@@ -614,7 +599,7 @@ function parseDowField(dow: string, market: Market): number[] | null {
  *
  * 仅支持 ``M H * * DOW``（分/时为单个数字）；列表分钟、步长、DOM/MON 非 ``*`` 时放弃。
  */
-function tryParseDailyRules(market: Market, cronExpr: string): ScheduleRule[] | null {
+function tryParseDailyRules(market: ScheduleKind, cronExpr: string): ScheduleRule[] | null {
   const lines = cronExpr
     .split(/[|\n]/)
     .map((s) => s.trim())
@@ -649,7 +634,7 @@ function tryParseDailyRules(market: Market, cronExpr: string): ScheduleRule[] | 
  * 穷举单预设 × 补发档位，命中则返回快捷 tab 意图。
  */
 function tryMatchPreset(
-  market: Market,
+  market: ScheduleKind,
   target: string,
 ): Pick<TimerEditorState, 'presetIds' | 'supN' | 'supM'> | null {
   for (const p of PRESETS[market]) {
@@ -671,7 +656,7 @@ function tryMatchPreset(
  *
  * Parameters
  * ----------
- * market : Market
+ * market : ScheduleKind
  *     账户市场，决定预设集与默认规则。
  * cronExpr : str
  *     后端存的 crontab（``|`` 或换行分隔）。
@@ -681,7 +666,7 @@ function tryMatchPreset(
  * TimerEditorState
  *     可直接喂给 :component:`TimerEditor` 的完整状态。
  */
-export function parseTimerIntent(market: Market, cronExpr: string): TimerEditorState {
+export function parseTimerIntent(market: ScheduleKind, cronExpr: string): TimerEditorState {
   const trimmed = (cronExpr ?? '').trim()
   if (!trimmed) return defaultTimerEditorState(market)
 
@@ -738,7 +723,7 @@ export function parseTimerIntent(market: Market, cronExpr: string): TimerEditorS
 /**
  * 将编辑器状态编译为后端 ``cron_expr``；关自动返回空串。
  */
-export function timerStateToCronExpr(market: Market, state: TimerEditorState): string {
+export function timerStateToCronExpr(market: ScheduleKind, state: TimerEditorState): string {
   if (!state.autoOn) return ''
   return cronToExpr(resolveCronList(market, state))
 }

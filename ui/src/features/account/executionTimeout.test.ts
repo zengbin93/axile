@@ -1,14 +1,15 @@
 import { describe, expect, it } from 'bun:test'
 
 import { defaultExecutionTimeoutForChannel, executionTimeoutError, stepExecutionTimeout } from './executionTimeout'
-import { useChannelCatalogStore } from '@/stores/channels'
+import { getChannelForMarket, useChannelCatalogStore } from '@/stores/channels'
 
 describe('defaultExecutionTimeoutForChannel', () => {
   it('优先使用运行时渠道目录，未知渠道使用中性兜底', () => {
     useChannelCatalogStore.setState({
       channels: [{
         channel: 'paper', label: '纸面交易', description: '', icon: 'P', available: true,
-        missing_packages: [], install_extra: '', market: 'crypto', currency: 'CNY',
+        missing_packages: [], install_extra: '', market: 'demo-market', currency: 'CNY',
+        schedule: { kind: 'continuous' },
         units: {
           quantity_kind: 'custom', quantity_label: '', quantity_max_decimals: 6,
           price_label: '', notional_label: '',
@@ -27,6 +28,8 @@ describe('defaultExecutionTimeoutForChannel', () => {
       }],
     })
     expect(defaultExecutionTimeoutForChannel('paper')).toBe('420')
+    expect(getChannelForMarket('demo-market')).toBe('paper')
+    expect(getChannelForMarket('测试市场')).toBe('paper')
     expect(defaultExecutionTimeoutForChannel('unknown')).toBe('300')
     useChannelCatalogStore.setState({ channels: null })
   })

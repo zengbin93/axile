@@ -22,6 +22,7 @@ function channel(
     missing_packages: available ? [] : ['vendor-sdk'],
     install_extra: null,
     market,
+    schedule: { kind: 'continuous' },
     currency: 'CNY',
     units: {
       quantity_kind: 'custom',
@@ -71,11 +72,11 @@ describe('portfolio market presets', () => {
       'ctp',
       'ashare',
     ])
-    const external = channel('crypto', '加密货币', ['PLUGIN-SYMBOL'])
+    const external = channel('external-market', '外部市场', ['PLUGIN-SYMBOL'])
     expect(portfolioMarketOptions([futuresChannel, stocksChannel, external]).map((option) => option.value)).toEqual([
       'ctp',
       'ashare',
-      'crypto',
+      'external-market',
     ])
   })
 

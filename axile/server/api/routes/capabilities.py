@@ -9,6 +9,7 @@ from axile.channels import (
     ChannelDefaults,
     ChannelLeverage,
     ChannelPortfolioPreset,
+    ChannelSchedule,
     ChannelUi,
     ChannelUnits,
     list_channels,
@@ -46,6 +47,7 @@ class ChannelCapabilityPublic(BaseModel):
     leverage: ChannelLeverage
     account_form: ChannelAccountForm
     calendar: ChannelCalendar | None
+    schedule: ChannelSchedule
     portfolio: ChannelPortfolioPreset
     available: bool
     missing_packages: list[str]

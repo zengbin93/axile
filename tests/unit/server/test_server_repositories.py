@@ -31,7 +31,7 @@ async def _session_scope() -> AsyncIterator[AsyncSession]:
 def _account(name: str) -> Account:
     return Account(
         name=name,
-        market="crypto",
+        market="demo-market",
         trade_channel="ctp",
         account_control_preset="default",
         account_config={},
@@ -46,7 +46,7 @@ def _account(name: str) -> Account:
 def test_latest_portfolio_bindings_are_returned() -> None:
     async def scenario() -> None:
         async with _session_scope() as session:
-            portfolio = Portfolio(name="p", market="crypto", custom_calc_py_code=CODE)
+            portfolio = Portfolio(name="p", market="demo-market", custom_calc_py_code=CODE)
             first = _account("first")
             second = _account("second")
             session.add_all([portfolio, first, second])

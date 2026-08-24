@@ -5,7 +5,6 @@
  * 引用。意图三档是 SINGLE-MAKER 的「结果导向」诠释；其余内置算法有各自专属编辑器，
  * 切换算法时用 `seedParams` 播下合法默认参数。
  */
-import type { Market } from '@/features/setup/cron'
 import type { AlgorithmInfo, AlgorithmRef, AlgorithmSlot } from '@/types/api'
 
 export type { AlgorithmRef } from '@/types/api'
@@ -44,28 +43,16 @@ export function effectiveTargetPosParams(params: Record<string, unknown>): Recor
   return { ...TARGET_POS_DEFAULT_PARAMS, ...params }
 }
 
-/** 意图文案随市场变（挂单在不同市场省的东西不同）。 */
-export const INTENT_COPY: Record<Market, Record<Intent, { title: string; desc: string; note: string; warn?: boolean }>> = {
-  crypto: {
-    save: { title: '省成本', desc: '只挂单 + 追单，走 maker 低费率、不吃点差', note: '成本最低，但可能填不满', warn: true },
-    fill: { title: '保成交', desc: '立即吃单', note: '付点差 + taker 费率，单次必成交' },
-    balance: { title: '平衡（推荐）', desc: '挂单为主，超时兜底吃单', note: '多数走低成本档，最终必成交' },
-  },
-  ctp: {
-    save: { title: '省成本', desc: '只挂单 + 追单，省点差/冲击', note: '手续费固定不省，可能填不满', warn: true },
-    fill: { title: '保成交', desc: '立即吃单', note: '付点差，单次必成交' },
-    balance: { title: '平衡（推荐）', desc: '挂单为主，超时兜底吃单', note: '多数省点差，最终必成交' },
-  },
-  ashare: {
-    save: { title: '省成本', desc: '只挂限价单 + 追单，省点差/冲击', note: '费率与挂单无关，可能填不满', warn: true },
-    fill: { title: '保成交', desc: '立即市价成交', note: '付点差/冲击，单次必成交' },
-    balance: { title: '平衡（推荐）', desc: '限价为主，超时兜底市价', note: '多数省点差，最终必成交' },
-  },
+/** 市场无关的交易意图文案。 */
+export const INTENT_COPY: Record<Intent, { title: string; desc: string; note: string; warn?: boolean }> = {
+  save: { title: '省成本', desc: '被动挂单并追单，尽量降低点差和冲击', note: '成本较低，但可能填不满', warn: true },
+  fill: { title: '保成交', desc: '立即主动成交', note: '承担点差和冲击，优先完成交易' },
+  balance: { title: '平衡（推荐）', desc: '挂单为主，超时后主动成交', note: '兼顾成交成本和完成度' },
 }
 
-/** 由意图 + 市场解析出下单算法引用。 */
-export function resolveAlgorithm(intent: Intent, market: Market): AlgorithmRef {
-  const method = market === 'ctp' ? 'TARGET-POS-TASK' : 'SINGLE-MAKER'
+/** 由意图 + 算法类型解析出下单算法引用。 */
+export function resolveAlgorithm(intent: Intent, method = 'SINGLE-MAKER'): AlgorithmRef {
+  const targetPosition = method === 'TARGET-POS-TASK'
   const base: Record<string, unknown> = {
     price_strategy: 'PASSIVE',
     max_wait_seconds: 60,
@@ -73,7 +60,7 @@ export function resolveAlgorithm(intent: Intent, market: Market): AlgorithmRef {
     chase_ticks: 1,
     max_chase_count: 5,
     chase_interval: 5,
-    ...(market === 'ctp' ? { offset_priority: '昨今' } : {}),
+    ...(targetPosition ? { offset_priority: '昨今' } : {}),
   }
   if (intent === 'save') {
     // 省成本：尽量挂单、多次追单、不主动吃单。取后端合法上限——最长等待 3600s、
@@ -166,8 +153,8 @@ export function validateAlgorithmParams(params: Record<string, unknown>): string
 }
 
 /** 清仓算法（目标清空时用）。 */
-export function emptyAlgorithm(market: Market): AlgorithmRef {
-  if (market === 'ctp') {
+export function emptyAlgorithm(method = 'SINGLE-MAKER'): AlgorithmRef {
+  if (method === 'TARGET-POS-TASK') {
     return { method: 'TARGET-POS-TASK', params: { ...TARGET_POS_DEFAULT_PARAMS, price_strategy: 'ACTIVE' } }
   }
   return { method: 'SINGLE-MAKER', params: { price_strategy: 'ACTIVE' } }
@@ -194,9 +181,9 @@ export function algoLabel(method: string): string {
   return runtimeAlgorithmLabels[method] || ALGO_LABEL[method] || method
 }
 
-/** 槽位 + 市场的默认算法引用（含默认参数）。 */
-export function defaultAlgorithm(market: Market, slot: AlgorithmSlot): AlgorithmRef {
-  return slot === 'empty' ? emptyAlgorithm(market) : resolveAlgorithm('balance', market)
+/** 槽位 + 算法类型的默认引用（含默认参数）。 */
+export function defaultAlgorithm(method: string, slot: AlgorithmSlot): AlgorithmRef {
+  return slot === 'empty' ? emptyAlgorithm(method) : resolveAlgorithm('balance', method)
 }
 
 /**
@@ -204,10 +191,10 @@ export function defaultAlgorithm(market: Market, slot: AlgorithmSlot): Algorithm
  *
  * 只包含各算法参数模型里真实存在的字段，避免生成会被后端拒绝或忽略的键。
  */
-export function seedParams(method: string, market: Market): Record<string, unknown> {
+export function seedParams(method: string): Record<string, unknown> {
   switch (method) {
     case 'SINGLE-MAKER':
-      return resolveAlgorithm('balance', market).params
+      return resolveAlgorithm('balance', method).params
     case 'TWAP':
       return { total_duration: 300, slices: 10, price_strategy: 'PASSIVE' }
     case 'POV':
@@ -230,7 +217,7 @@ export function intentFromParams(params: Record<string, unknown>): Intent | null
 
   const actual = effectiveSingleMakerParams(params)
   for (const intent of ['save', 'fill', 'balance'] as const) {
-    const expected = effectiveSingleMakerParams(resolveAlgorithm(intent, 'crypto').params)
+    const expected = effectiveSingleMakerParams(resolveAlgorithm(intent).params)
     const keys = actual.chase_enabled === false
       ? ['price_strategy', 'max_wait_seconds', 'chase_enabled', 'on_missing_book']
       : [...SINGLE_MAKER_PARAM_KEYS]
@@ -274,11 +261,11 @@ export function describeTargetPosParams(params: Record<string, unknown>): string
  *
  * SINGLE-MAKER / TARGET-POS-TASK 能反推意图时用意图标题；否则用算法展示名。
  */
-export function describeAlgorithmRef(ref: AlgorithmRef | null | undefined, market: Market): string {
+export function describeAlgorithmRef(ref: AlgorithmRef | null | undefined): string {
   if (!ref?.method) return '未设置'
   if (ref.method === 'SINGLE-MAKER') {
     const intent = intentFromParams(ref.params ?? {})
-    if (intent) return INTENT_COPY[market][intent].title
+    if (intent) return INTENT_COPY[intent].title
     return `${algoLabel(ref.method)}（自定义）`
   }
   if (ref.method === 'TARGET-POS-TASK') {

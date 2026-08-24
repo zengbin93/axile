@@ -7,7 +7,7 @@ function item(over: Partial<AccountDashboardItem>): AccountDashboardItem {
   return {
     account_id: 1,
     name: 'testnet',
-    market: 'crypto',
+    market: 'demo-market',
     trade_channel: 'paper',
     is_started: true,
     portfolio_id: null,

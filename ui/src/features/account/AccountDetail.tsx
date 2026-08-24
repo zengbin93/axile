@@ -30,9 +30,10 @@ import {
 import { usePolling } from '@/lib/hooks/usePolling'
 import { stateVerdict, gateOf, rebalancePlan, positionsOf, positionsOfAssets, type StatusLevel } from '@/lib/derive'
 import { displayCurrencyUnit } from '@/lib/format'
-import { marketForChannel, describeCron, nextFires, fmtFire } from '@/features/setup/cron'
+import { describeCron, nextFires, fmtFire } from '@/features/setup/cron'
 import { TimerQuickModal } from '@/features/setup/TimerQuickModal'
 import { useToastStore } from '@/stores/ui'
+import { useChannelDescriptor } from '@/stores/channels'
 import type { AccountDashboardItem, LatestWeights } from '@/types/api'
 
 interface AccountDetailProps {
@@ -59,6 +60,7 @@ export function AccountDetail({ accountId, item, onDashboardRefresh }: AccountDe
   const nameVt = tDetail || tEdit
   const amountVt = tHistory
   const assetTerms = accountAssetTerms(item.trade_channel)
+  const scheduleKind = useChannelDescriptor(item.trade_channel)?.schedule.kind
 
   const isStarted = startedOverride ?? item.is_started
   useEffect(() => {
@@ -137,7 +139,7 @@ export function AccountDetail({ accountId, item, onDashboardRefresh }: AccountDe
   // 定时节奏：把存储的 crontab 反解成设置向导同款人话（命中预设时如「每 15 分钟 · 补发 2 次」）；
   // 命不中则退为「自定义」并给出下次触发预览，原始表达式收进 tooltip。
   const cronExpr = account.data?.cron_expr ?? ''
-  const cronHuman = cronExpr ? describeCron(marketForChannel(item.trade_channel), cronExpr) : null
+  const cronHuman = cronExpr && scheduleKind ? describeCron(scheduleKind, cronExpr) : null
   const cronFires =
     cronExpr && !cronHuman
       ? nextFires(

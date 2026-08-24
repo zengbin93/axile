@@ -13,10 +13,8 @@ import { usePolling } from '@/lib/hooks/usePolling'
 import { useDomainStore } from '@/stores/domain'
 import { useToastStore } from '@/stores/ui'
 import { channelLabel } from '@/features/dashboard/display'
-import { marketForChannel } from '@/features/setup/cron'
-import { getChannelDescriptor } from '@/stores/channels'
+import { useChannelDescriptor } from '@/stores/channels'
 import {
-  defaultAlgorithm,
   describeAlgorithmRef,
   validateAlgorithmParams,
   type AlgorithmRef,
@@ -58,6 +56,7 @@ export function AccountEditAlgorithmPage() {
   const refreshAccounts = useDomainStore((s) => s.refreshAccounts)
   const account = usePolling(useCallback((s: AbortSignal) => getAccount(accountId, s), [accountId]), 0)
   const acc = account.data
+  const descriptor = useChannelDescriptor(acc?.trade_channel)
 
   const [ready, setReady] = useState(false)
   const [trade, setTrade] = useState<AlgorithmRef | null>(null)
@@ -65,21 +64,19 @@ export function AccountEditAlgorithmPage() {
   const [saving, setSaving] = useState(false)
 
   useEffect(() => {
-    if (!acc || ready) return
-    const market = marketForChannel(acc.trade_channel)
-    setTrade(refFromAccount(acc.algorithm) ?? getChannelDescriptor(acc.trade_channel)?.defaults.trade_algorithm ?? defaultAlgorithm(market, 'trade'))
+    if (!acc || !descriptor || ready) return
+    setTrade(refFromAccount(acc.algorithm) ?? descriptor.defaults.trade_algorithm)
     setEmpty(refFromAccount(acc.empty_positions_algorithm))
     setReady(true)
-  }, [acc, ready])
+  }, [acc, descriptor, ready])
 
   if (account.error && !acc)
     return <EditError id={accountId} message={account.error.message} />
 
-  if (account.loading || !ready || !acc || !trade)
+  if (account.loading || !ready || !acc || !trade || !descriptor)
     return <EditLoading id={accountId} leaf="执行算法" />
 
-  const market = marketForChannel(acc.trade_channel)
-  const origTrade = refFromAccount(acc.algorithm) ?? getChannelDescriptor(acc.trade_channel)?.defaults.trade_algorithm ?? defaultAlgorithm(market, 'trade')
+  const origTrade = refFromAccount(acc.algorithm) ?? descriptor.defaults.trade_algorithm
   const origEmpty = refFromAccount(acc.empty_positions_algorithm)
 
   const tradeChanged = norm(trade) !== norm(origTrade)
@@ -92,8 +89,8 @@ export function AccountEditAlgorithmPage() {
   if (emptyChanged) changes.push(empty ? '清仓算法已改' : '清仓算法已清除')
 
   // 与总览入口同构摘要（随草稿变，FLIP 中列语义连续）。
-  const tradeSum = describeAlgorithmRef(trade, market)
-  const emptySum = describeAlgorithmRef(empty, market)
+  const tradeSum = describeAlgorithmRef(trade)
+  const emptySum = describeAlgorithmRef(empty)
   const algoSummary = emptySum === '未设置' ? tradeSum : `${tradeSum} · 清仓 ${emptySum}`
 
   const save = async () => {
@@ -130,7 +127,7 @@ export function AccountEditAlgorithmPage() {
       <AlgorithmEditor
         slot={slot}
         channel={acc.trade_channel}
-        value={slot === 'trade' ? (value ?? defaultAlgorithm(market, 'trade')) : value}
+        value={slot === 'trade' ? (value ?? descriptor.defaults.trade_algorithm) : value}
         allowClear={slot === 'empty'}
         onChange={onChange}
       />
@@ -150,7 +147,7 @@ export function AccountEditAlgorithmPage() {
       />
 
       <Section label="主交易">
-        {slotRow('trade', '下单算法', trade, (v) => setTrade(v ?? defaultAlgorithm(market, 'trade')))}
+        {slotRow('trade', '下单算法', trade, (v) => setTrade(v ?? descriptor.defaults.trade_algorithm))}
       </Section>
       <Section label="清仓">
         {slotRow('empty', '清仓算法', empty, setEmpty)}

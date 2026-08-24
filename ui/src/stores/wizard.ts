@@ -1,10 +1,12 @@
 import { create } from 'zustand'
 import { defaultExecutionTimeoutForChannel } from '@/features/account/executionTimeout'
-import { defaultAlgorithm, type AlgorithmRef } from '@/features/setup/algorithms'
+import type { AlgorithmRef } from '@/features/setup/algorithms'
 import { getChannelDescriptor } from '@/stores/channels'
 import type { TradeChannel } from '@/types/api'
 import {
   defaultScheduleRule,
+  DEFAULT_PRESET,
+  type ScheduleKind,
   type ScheduleRule,
   type TimerTab,
 } from '@/features/setup/cron'
@@ -70,17 +72,18 @@ export function defaultLeveragesForChannel(channel: TradeChannel) {
 
 const initialPf: PortfolioDraft = {
   name: '我的趋势组合',
-  market: 'crypto',
+  market: '',
   customCode: '',
   templateMarket: null,
   verified: null,
   savedId: null,
 }
 
-function initialTimerForCrypto() {
-  const rule = defaultScheduleRule('crypto')
+export function initialTimerForSchedule(schedule: ScheduleKind) {
+  const rule = defaultScheduleRule(schedule)
   return {
-    presetIds: ['d1'] as string[],
+    autoOn: true,
+    presetIds: [DEFAULT_PRESET[schedule]] as string[],
     supN: 2,
     supM: 1,
     rawCron: '',
@@ -96,11 +99,18 @@ const initialAcct: AccountDraft = {
   channel: '',
   config: {},
   portfolioId: null,
-  algorithm: defaultAlgorithm('crypto', 'trade'),
+  algorithm: { method: '', params: {} },
   ...defaultLeveragesForChannel(''),
   executionTimeout: defaultExecutionTimeoutForChannel(''),
   autoOn: true,
-  ...initialTimerForCrypto(),
+  presetIds: [],
+  supN: 2,
+  supM: 1,
+  rawCron: '',
+  timerTab: 'quick',
+  scheduleRules: [],
+  selectedRuleId: '',
+  customCronOn: false,
 }
 
 /** 建号/建组合向导的跨步骤草稿。 */
@@ -110,5 +120,5 @@ export const useWizardStore = create<WizardState>((set) => ({
   setPf: (patch) => set((s) => ({ pf: { ...s.pf, ...patch } })),
   setAcct: (patch) => set((s) => ({ acct: { ...s.acct, ...patch } })),
   resetPf: () => set({ pf: { ...initialPf } }),
-  resetAcct: () => set({ acct: { ...initialAcct, ...initialTimerForCrypto() } }),
+  resetAcct: () => set({ acct: { ...initialAcct } }),
 }))
