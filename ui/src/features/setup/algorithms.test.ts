@@ -4,6 +4,8 @@ import {
   defaultAlgorithm,
   describeAlgorithmRef,
   describeSingleMakerParams,
+  describeTargetPosParams,
+  effectiveTargetPosParams,
   effectiveSingleMakerParams,
   emptyAlgorithm,
   intentFromParams,
@@ -39,6 +41,7 @@ describe('validateAlgorithmParams', () => {
 
   it('拒绝非法枚举、非整数追单次数和非数字等待时间', () => {
     expect(validateAlgorithmParams({ price_strategy: 'MARKET' })).toContain('price_strategy')
+    expect(validateAlgorithmParams({ offset_priority: '开平' })).toContain('offset_priority')
     expect(validateAlgorithmParams({ on_missing_book: 'fallback' })).toContain('on_missing_book')
     expect(validateAlgorithmParams({ max_wait_seconds: '60' })).toContain('必须是数字')
     expect(validateAlgorithmParams({ chase_enabled: true, max_chase_count: 1.5 })).toContain('整数')
@@ -53,7 +56,7 @@ describe('resolveAlgorithm · 省成本预设', () => {
 
 describe('intentFromParams · 意图反推（镜像 resolveAlgorithm）', () => {
   it('三档 params 都能反推回原意图', () => {
-    for (const market of ['crypto', 'ctp', 'ashare'] as const) {
+    for (const market of ['crypto', 'ashare'] as const) {
       for (const intent of ['save', 'fill', 'balance'] as const) {
         expect(intentFromParams(resolveAlgorithm(intent, market).params)).toBe(intent)
       }
@@ -105,14 +108,28 @@ describe('describeSingleMakerParams · 当前执行摘要', () => {
     expect(describeAlgorithmRef({ method: 'SINGLE-MAKER', params }, 'crypto')).toBe('挂单追单（自定义）')
   })
 
-  it('精确匹配规则不改变 TARGET-POS-TASK 的既有宽松摘要', () => {
-    const target = resolveAlgorithm('balance', 'ctp')
-    expect(
-      describeAlgorithmRef(
-        { ...target, params: { ...target.params, offset_priority: '昨今' } },
-        'ctp',
-      ),
-    ).toBe('平衡（推荐）')
+  it('TARGET-POS-TASK 摘要显示有效等待与追单参数', () => {
+    expect(describeTargetPosParams({})).toBe('被动挂单 · 等待 60 秒 · 不追单')
+    expect(describeAlgorithmRef(resolveAlgorithm('balance', 'ctp'), 'ctp')).toBe(
+      '被动挂单 · 等待 60 秒 · 最多追单 5 次',
+    )
+  })
+})
+
+describe('effectiveTargetPosParams · 目标持仓默认参数', () => {
+  it('为空参数补齐后端的七个默认字段，并允许局部覆盖', () => {
+    const effective = effectiveTargetPosParams({ chase_enabled: true, plugin_option: 'keep' })
+
+    expect(effective).toEqual({
+      price_strategy: 'PASSIVE',
+      offset_priority: '昨今',
+      max_wait_seconds: 60,
+      chase_enabled: true,
+      chase_ticks: 1,
+      max_chase_count: 5,
+      chase_interval: 5,
+      plugin_option: 'keep',
+    })
   })
 })
 
@@ -133,6 +150,18 @@ describe('emptyAlgorithm · 不再发送废弃键', () => {
   it('crypto 清仓只保留通用主动价格策略', () => {
     expect(emptyAlgorithm('crypto').params).toEqual({ price_strategy: 'ACTIVE' })
   })
+
+  it('ctp 清仓保存完整参数并默认主动吃单', () => {
+    expect(emptyAlgorithm('ctp').params).toEqual({
+      price_strategy: 'ACTIVE',
+      offset_priority: '昨今',
+      max_wait_seconds: 60,
+      chase_enabled: false,
+      chase_ticks: 1,
+      max_chase_count: 5,
+      chase_interval: 5,
+    })
+  })
 })
 
 describe('seedParams · 切换算法的合法种子参数', () => {
@@ -149,5 +178,12 @@ describe('seedParams · 切换算法的合法种子参数', () => {
 
   it('SINGLE-MAKER 种子通过后端约束校验', () => {
     expect(validateAlgorithmParams(seedParams('SINGLE-MAKER', 'crypto'))).toBeNull()
+  })
+
+  it('TARGET-POS-TASK 种子包含完整且合法的参数', () => {
+    const params = seedParams('TARGET-POS-TASK', 'ctp')
+
+    expect(params).toEqual(effectiveTargetPosParams({}))
+    expect(validateAlgorithmParams(params)).toBeNull()
   })
 })

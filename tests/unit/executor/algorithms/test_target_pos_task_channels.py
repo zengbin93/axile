@@ -9,6 +9,7 @@ from axile.common.trade_channel import TradeChannel
 from axile.executor.algorithms.core.base import AlgorithmInput, ExecutorProtocol
 from axile.executor.algorithms.defaults.ctp_target_pos_task.impl import (
     CTPTargetPosTaskParams,
+    _calculate_order_price,
     ctp_target_pos_task_algorithm,
 )
 from axile.executor.constants.order_status import OrderStatus
@@ -161,3 +162,83 @@ def test_target_pos_task_uses_same_close_then_open_flow(channel: TradeChannel) -
     assert executor.short_yesterday == executor.short_today == 0
     assert executor.long_today == 1
     assert executor.order_callbacks == []
+
+
+def test_target_pos_task_params_expose_execution_defaults() -> None:
+    params = CTPTargetPosTaskParams()
+
+    assert params.model_dump() == {
+        "chase_enabled": False,
+        "chase_ticks": 1,
+        "max_chase_count": 5,
+        "chase_interval": 5.0,
+        "max_wait_seconds": 60,
+        "price_strategy": "PASSIVE",
+        "offset_priority": "昨今",
+    }
+
+
+@pytest.mark.parametrize(
+    ("price_strategy", "direction", "expected"),
+    [
+        ("PASSIVE", OrderDirection.BUY, 3199),
+        ("PASSIVE", OrderDirection.SELL, 3201),
+        ("ACTIVE", OrderDirection.BUY, 3201),
+        ("ACTIVE", OrderDirection.SELL, 3199),
+    ],
+)
+def test_target_pos_task_price_strategy_uses_expected_book_side(
+    price_strategy: str,
+    direction: OrderDirection,
+    expected: float,
+) -> None:
+    market_data = _FuturesExecutor(TradeChannel.CTP).get_market_data()
+
+    assert _calculate_order_price(market_data, price_strategy, direction) == expected
+
+
+def test_target_pos_task_active_price_falls_back_to_last_price() -> None:
+    market_data = _FuturesExecutor(TradeChannel.CTP).get_market_data().model_copy(update={"ask_price": 0})
+
+    assert _calculate_order_price(market_data, "ACTIVE", OrderDirection.BUY) == 3200
+
+
+@pytest.mark.parametrize("channel", [TradeChannel.CTP, TradeChannel.TQ])
+def test_target_pos_task_uses_params_when_trade_rule_has_no_override(channel: TradeChannel) -> None:
+    executor = _FuturesExecutor(channel)
+    algorithm_input = AlgorithmInput(
+        symbol="rb2610",
+        target_volume=1,
+        trade_rule={},
+        params=CTPTargetPosTaskParams(
+            max_wait_seconds=1,
+            price_strategy="ACTIVE",
+            offset_priority="今昨",
+        ),
+    )
+
+    result = ctp_target_pos_task_algorithm(cast("ExecutorProtocol", executor), algorithm_input)
+
+    assert result.status == ExecutionStatus.SUCCEEDED
+    assert [order.extra["offset_flag"] for order in executor.orders] == ["3", "4", "0"]
+    assert [order.price for order in executor.orders] == [3201, 3201, 3201]
+
+
+def test_target_pos_task_trade_rule_overrides_algorithm_params() -> None:
+    executor = _FuturesExecutor(TradeChannel.CTP)
+    algorithm_input = AlgorithmInput(
+        symbol="rb2610",
+        target_volume=1,
+        trade_rule={"price": "PASSIVE", "offset_priority": "昨今"},
+        params=CTPTargetPosTaskParams(
+            max_wait_seconds=1,
+            price_strategy="ACTIVE",
+            offset_priority="今昨",
+        ),
+    )
+
+    result = ctp_target_pos_task_algorithm(cast("ExecutorProtocol", executor), algorithm_input)
+
+    assert result.status == ExecutionStatus.SUCCEEDED
+    assert [order.extra["offset_flag"] for order in executor.orders] == ["4", "3", "0"]
+    assert [order.price for order in executor.orders] == [3199, 3199, 3199]

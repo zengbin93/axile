@@ -12,7 +12,7 @@ Notes
 当昨仓 / 今仓精确腿不足时，才退回通用平仓标记作为最后补偿。
 """
 
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Literal, Tuple
 
 from axile.common.trade_channel import TradeChannel
 from axile.executor.algorithms.common.params import BaseAlgorithmParams, ChaseParamsMixin
@@ -33,6 +33,9 @@ from axile.executor.models.unified_price import clone_price_data
 
 class CTPTargetPosTaskParams(BaseAlgorithmParams, ChaseParamsMixin):
     """TARGET-POS-TASK 算法参数."""
+
+    price_strategy: Literal["PASSIVE", "ACTIVE"] = "PASSIVE"
+    offset_priority: Literal["昨今", "今昨"] = "昨今"
 
     def __str__(self) -> str:
         """便于记录日志的字符串表示."""
@@ -243,14 +246,13 @@ def _calculate_order_price(
 
     price_data = market_data
 
-    # PASSIVE 使用本方最优价，尽量先挂单；ACTIVE 则直接参考最新价，更偏向快速成交。
+    # PASSIVE 使用本方最优价等待成交；ACTIVE 使用对手方最优价主动成交。
     if price_type.upper() == "PASSIVE":
-        if direction == OrderDirection.BUY:
-            return getattr(price_data, "bid_price", 0.0)
-        else:  # SELL
-            return getattr(price_data, "ask_price", 0.0)
-
-    return getattr(price_data, "last_price", 0.0)
+        quote_name = "bid_price" if direction == OrderDirection.BUY else "ask_price"
+    else:
+        quote_name = "ask_price" if direction == OrderDirection.BUY else "bid_price"
+    quote = float(getattr(price_data, quote_name, 0.0) or 0.0)
+    return quote if quote > 0 else float(getattr(price_data, "last_price", 0.0) or 0.0)
 
 
 def _get_close_position_availability(
@@ -639,8 +641,8 @@ def ctp_target_pos_task_algorithm(executor: ExecutorProtocol, algorithm_input: A
         executor.logger.info(f"🎯 目标持仓数量: {{'{symbol}': {target_volume}}}")
 
         trade_rule = algorithm_input.trade_rule
-        price_type = str(trade_rule.get("price", "PASSIVE"))
-        offset_priority = str(trade_rule.get("offset_priority", "昨今"))
+        price_type = str(trade_rule.get("price", params.price_strategy))
+        offset_priority = str(trade_rule.get("offset_priority", params.offset_priority))
 
         executor.logger.info(f"📈 {symbol}: 目标={target_volume}, 价格策略={price_type}, 平仓优先级={offset_priority}")
 

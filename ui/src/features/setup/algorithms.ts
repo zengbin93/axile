@@ -22,11 +22,26 @@ export const SINGLE_MAKER_DEFAULT_PARAMS: Readonly<Record<string, unknown>> = {
   on_missing_book: 'skip',
 }
 
+export const TARGET_POS_DEFAULT_PARAMS: Readonly<Record<string, unknown>> = {
+  price_strategy: 'PASSIVE',
+  offset_priority: '昨今',
+  max_wait_seconds: 60,
+  chase_enabled: false,
+  chase_ticks: 1,
+  max_chase_count: 5,
+  chase_interval: 5,
+}
+
 const SINGLE_MAKER_PARAM_KEYS = new Set(Object.keys(SINGLE_MAKER_DEFAULT_PARAMS))
 
 /** 用服务端默认值补齐 SINGLE-MAKER 参数，仅供展示与语义比较。 */
 export function effectiveSingleMakerParams(params: Record<string, unknown>): Record<string, unknown> {
   return { ...SINGLE_MAKER_DEFAULT_PARAMS, ...params }
+}
+
+/** 用服务端默认值补齐 TARGET-POS-TASK 参数。 */
+export function effectiveTargetPosParams(params: Record<string, unknown>): Record<string, unknown> {
+  return { ...TARGET_POS_DEFAULT_PARAMS, ...params }
 }
 
 /** 意图文案随市场变（挂单在不同市场省的东西不同）。 */
@@ -58,6 +73,7 @@ export function resolveAlgorithm(intent: Intent, market: Market): AlgorithmRef {
     chase_ticks: 1,
     max_chase_count: 5,
     chase_interval: 5,
+    ...(market === 'ctp' ? { offset_priority: '昨今' } : {}),
   }
   if (intent === 'save') {
     // 省成本：尽量挂单、多次追单、不主动吃单。取后端合法上限——最长等待 3600s、
@@ -83,6 +99,9 @@ export function validateAlgorithmParams(params: Record<string, unknown>): string
 
   if (has('price_strategy') && params.price_strategy !== 'PASSIVE' && params.price_strategy !== 'ACTIVE') {
     return `下单价格（price_strategy）必须是 PASSIVE 或 ACTIVE`
+  }
+  if (has('offset_priority') && params.offset_priority !== '昨今' && params.offset_priority !== '今昨') {
+    return `平仓优先（offset_priority）必须是 昨今 或 今昨`
   }
   if (has('on_missing_book') && !['skip', 'active', 'market'].includes(String(params.on_missing_book))) {
     return `盘口缺失策略（on_missing_book）必须是 skip、active 或 market`
@@ -148,7 +167,9 @@ export function validateAlgorithmParams(params: Record<string, unknown>): string
 
 /** 清仓算法（目标清空时用）。 */
 export function emptyAlgorithm(market: Market): AlgorithmRef {
-  if (market === 'ctp') return { method: 'TARGET-POS-TASK', params: { price_strategy: 'ACTIVE', offset_priority: '昨今' } }
+  if (market === 'ctp') {
+    return { method: 'TARGET-POS-TASK', params: { ...TARGET_POS_DEFAULT_PARAMS, price_strategy: 'ACTIVE' } }
+  }
   return { method: 'SINGLE-MAKER', params: { price_strategy: 'ACTIVE' } }
 }
 
@@ -192,7 +213,7 @@ export function seedParams(method: string, market: Market): Record<string, unkno
     case 'POV':
       return { participation_rate: 0.1, interval_seconds: 5, max_duration: 600, complete_on_timeout: true, price_strategy: 'PASSIVE' }
     case 'TARGET-POS-TASK':
-      return { price_strategy: 'PASSIVE', offset_priority: '昨今' }
+      return { ...TARGET_POS_DEFAULT_PARAMS }
     default:
       return {}
   }
@@ -238,6 +259,16 @@ export function describeSingleMakerParams(params: Record<string, unknown>): stri
   return parts.join(' · ')
 }
 
+/** TARGET-POS-TASK 当前有效参数的一句话摘要。 */
+export function describeTargetPosParams(params: Record<string, unknown>): string {
+  const effective = effectiveTargetPosParams(params)
+  const price = effective.price_strategy === 'ACTIVE' ? '主动吃单' : '被动挂单'
+  const wait = Number(effective.max_wait_seconds)
+  const parts = [price, `等待 ${Number.isFinite(wait) ? wait : '—'} 秒`]
+  parts.push(effective.chase_enabled === true ? `最多追单 ${String(effective.max_chase_count)} 次` : '不追单')
+  return parts.join(' · ')
+}
+
 /**
  * 算法引用人话摘要（编辑总览 / 详情入口用）。
  *
@@ -250,15 +281,8 @@ export function describeAlgorithmRef(ref: AlgorithmRef | null | undefined, marke
     if (intent) return INTENT_COPY[market][intent].title
     return `${algoLabel(ref.method)}（自定义）`
   }
-  // TARGET-POS-TASK 沿用既有宽松摘要，不把本次 SINGLE-MAKER 的精确匹配规则外溢。
   if (ref.method === 'TARGET-POS-TASK') {
-    const params = ref.params ?? {}
-    const intent = params.price_strategy === 'ACTIVE' && params.chase_enabled === false
-      ? 'fill'
-      : params.price_strategy === 'PASSIVE' && params.chase_enabled === true
-        ? params.max_wait_seconds === 3600 ? 'save' : 'balance'
-        : null
-    if (intent) return INTENT_COPY[market][intent].title
+    return describeTargetPosParams(ref.params ?? {})
   }
   return algoLabel(ref.method)
 }

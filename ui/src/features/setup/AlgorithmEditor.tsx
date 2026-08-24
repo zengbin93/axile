@@ -13,6 +13,7 @@ import {
   defaultAlgorithm,
   describeSingleMakerParams,
   effectiveSingleMakerParams,
+  effectiveTargetPosParams,
   intentFromParams,
   resolveAlgorithm,
   registerAlgorithmLabels,
@@ -408,11 +409,18 @@ const PovEditor: ParamsEditor = ({ params, onChange }) => {
 }
 
 const TargetPosEditor: ParamsEditor = ({ params, onChange }) => {
-  const set = (patch: Record<string, unknown>) => onChange({ ...params, ...patch })
-  const ps = params.price_strategy === 'ACTIVE' ? 'ACTIVE' : 'PASSIVE'
-  const offset = params.offset_priority === '今昨' ? '今昨' : '昨今'
+  const effective = effectiveTargetPosParams(params)
+  const set = (patch: Record<string, unknown>) => onChange({ ...effective, ...params, ...patch })
+  const ps = effective.price_strategy === 'ACTIVE' ? 'ACTIVE' : 'PASSIVE'
+  const offset = effective.offset_priority === '今昨' ? '今昨' : '昨今'
+  const chaseEnabled = effective.chase_enabled === true
+  const paramError = validateAlgorithmParams(effective)
+  const numberValue = (key: string): number => {
+    const value = Number(effective[key])
+    return Number.isFinite(value) ? value : Number.NaN
+  }
   return (
-    <div className="max-w-[560px]">
+    <div className="max-w-[620px]">
       <div className={`${ROW} text-[14px]`}>
         <span>
           价格策略 <span className={HINT}>被动挂单 / 主动吃单</span>
@@ -439,6 +447,63 @@ const TargetPosEditor: ParamsEditor = ({ params, onChange }) => {
           onChange={(v) => set({ offset_priority: v })}
         />
       </div>
+      <NumRow
+        label="单次等待时间"
+        hint="每个合约等待成交（1–3600）"
+        value={numberValue('max_wait_seconds')}
+        min={1}
+        max={3600}
+        onChange={(value) => set({ max_wait_seconds: value })}
+        suffix="秒"
+      />
+      <div className={ROW}>
+        <span className="text-[14px]">
+          追单 <span className={HINT}>行情偏离后撤单重挂</span>
+        </span>
+        <Toggle
+          on={chaseEnabled}
+          ariaLabel="启用目标持仓追单"
+          onClick={() => set({ chase_enabled: !chaseEnabled })}
+        />
+      </div>
+      <div
+        inert={!chaseEnabled}
+        className={`grid transition-[grid-template-rows] ${MOTION_LAYOUT} ${
+          chaseEnabled ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'
+        }`}
+      >
+        <div className="min-h-0 overflow-hidden pl-4">
+          <NumRow
+            label="价格偏离"
+            hint="触发重挂的最小偏离（1–100）"
+            value={numberValue('chase_ticks')}
+            min={1}
+            max={100}
+            onChange={(value) => set({ chase_ticks: value })}
+            suffix="档"
+          />
+          <NumRow
+            label="最大追单次数"
+            hint="1–50"
+            value={numberValue('max_chase_count')}
+            min={1}
+            max={50}
+            onChange={(value) => set({ max_chase_count: value })}
+            suffix="次"
+          />
+          <NumRow
+            label="追单间隔"
+            hint="0.1–300"
+            value={numberValue('chase_interval')}
+            min={0.1}
+            max={300}
+            step={0.1}
+            onChange={(value) => set({ chase_interval: value })}
+            suffix="秒"
+          />
+        </div>
+      </div>
+      {paramError && <div className="pb-3 text-[12px] text-warn">{paramError}</div>}
     </div>
   )
 }
