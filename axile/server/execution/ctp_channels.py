@@ -10,6 +10,7 @@ from loguru import logger
 from sqlmodel import col, select
 
 from axile.common.trade_channel import TradeChannel
+from axile.executor.china_futures_session import is_regular_night_session_transition
 from axile.server.core.db import SessionLocal
 from axile.server.core.scheduler import Scheduler
 from axile.server.db.models import Account
@@ -51,7 +52,14 @@ async def _expected_trading_day(mode: Literal["startup", "day", "night"], curren
         logger.warning("缺少 china {} 之后的交易日历，继续执行夜盘通道准备", current)
         return True, None
     target = rows[0]
-    return (target is not None, target.cal_date.strftime("%Y%m%d") if target else None)
+    if not is_regular_night_session_transition(current, target.cal_date):
+        logger.info(
+            "跳过国内夜盘通道准备：{} 至下一交易日 {} 之间为休市窗口",
+            current,
+            target.cal_date,
+        )
+        return False, None
+    return True, target.cal_date.strftime("%Y%m%d")
 
 
 async def _started_china_channel_accounts() -> list[Account]:

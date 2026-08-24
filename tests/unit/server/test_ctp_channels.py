@@ -27,6 +27,31 @@ def test_register_china_channel_jobs_uses_fixed_session_windows() -> None:
     assert all(call.kwargs["max_instances"] == 1 for call in calls)
 
 
+@pytest.mark.parametrize(
+    ("current", "next_open", "expected"),
+    [
+        (date(2026, 8, 20), date(2026, 8, 21), (True, "20260821")),
+        (date(2026, 8, 21), date(2026, 8, 24), (True, "20260824")),
+        (date(2026, 9, 30), date(2026, 10, 9), (False, None)),
+        (date(2026, 10, 9), date(2026, 10, 13), (False, None)),
+    ],
+)
+def test_expected_night_trading_day_only_accepts_regular_transitions(
+    monkeypatch: pytest.MonkeyPatch,
+    current: date,
+    next_open: date,
+    expected: tuple[bool, str | None],
+) -> None:
+    async def entries(*_args: object, **kwargs: object) -> list[object]:
+        if kwargs.get("only_open"):
+            return [SimpleNamespace(cal_date=next_open, is_open=True)]
+        return [SimpleNamespace(cal_date=current, is_open=True)]
+
+    monkeypatch.setattr(ctp_channels, "list_calendar_entries", entries)
+
+    assert asyncio.run(ctp_channels._expected_trading_day("night", current)) == expected
+
+
 def test_prepare_china_accounts_isolates_account_failures(monkeypatch: pytest.MonkeyPatch) -> None:
     accounts = [build_account(id=1), build_account(id=2)]
     prepared: list[tuple[int | None, str | None]] = []
