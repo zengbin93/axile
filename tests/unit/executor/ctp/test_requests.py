@@ -142,7 +142,7 @@ def test_trader_login_uses_openctp_677_signature(config: CTPAccountConfig) -> No
     executor._authenticated(None, None)
 
     args = executor._trader_api.ReqUserLogin.call_args.args
-    assert args[1:] == (1, 0, "")
+    assert args[1:] == (1,)
 
 
 def test_query_response_copies_reused_swig_frame() -> None:

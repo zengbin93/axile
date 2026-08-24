@@ -199,7 +199,7 @@ class CTPExecutor(AbstractExecutor, UnifiedCallbackClient):
             return
         req = build_trader_login(self._config())
         try:
-            self._check(self._trader_api.ReqUserLogin(req, self._next_id(), 0, ""), "登录")
+            self._check(self._trader_api.ReqUserLogin(req, self._next_id()), "登录")
         except Exception as e:
             self._login.error = e
             self._login.done.set()
