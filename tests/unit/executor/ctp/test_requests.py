@@ -15,7 +15,7 @@ from axile.executor.ctp.requests import (
     resolve_offset,
 )
 from axile.executor.models.unified_account_assets import UnifiedAccountAssets
-from axile.executor.models.unified_input import CTPAccountConfig
+from axile.executor.models.unified_input import CTPAccountConfig, UnifiedStandardInput
 from axile.executor.models.unified_order import OrderDirection, OrderType
 
 
@@ -157,6 +157,70 @@ def test_query_response_copies_reused_swig_frame() -> None:
     executor._query_response(row, None, 7, True)
 
     assert [item.InstrumentID for item in pending.rows] == ["rb2610", "ag2612"]
+
+
+def test_normalizes_czce_four_digit_year_alias_in_all_input_fields(config: CTPAccountConfig) -> None:
+    executor = CTPExecutor.__new__(CTPExecutor)
+    executor._trading_day = "20260824"
+    executor._instruments = {
+        "CF701": SimpleNamespace(ExchangeID="CZCE", ProductClass=td.THOST_FTDC_PC_Futures),
+        "rb2610": SimpleNamespace(ExchangeID="SHFE", ProductClass=td.THOST_FTDC_PC_Futures),
+    }
+    standard_input = UnifiedStandardInput(
+        channel_type="ctp",
+        account_config=config,
+        curr_target={"CF2701": 0.2, "rb2610": 0.1},
+        last_target={"CF2701": 0.1},
+        symbol_algorithms={"CF2701": {"method": "SINGLE-MAKER", "params": {}}},
+        trade_rules={"CF2701": {"min_notional": 100}},
+        forbidden_symbols=["CF2701", "CF701"],
+        risk_symbols=["CF2701"],
+    )
+
+    normalized = executor._normalize_connected_standard_input(standard_input)
+
+    assert normalized.curr_target == {"CF701": 0.2, "rb2610": 0.1}
+    assert normalized.last_target == {"CF701": 0.1}
+    assert list(normalized.symbol_algorithms) == ["CF701"]
+    assert normalized.trade_rules == {"CF701": {"min_notional": 100}}
+    assert normalized.forbidden_symbols == ["CF701"]
+    assert normalized.risk_symbols == ["CF701"]
+    assert standard_input.curr_target == {"CF2701": 0.2, "rb2610": 0.1}
+
+
+@pytest.mark.parametrize(
+    ("symbol", "instrument", "expected"),
+    [
+        ("CF2701", None, "CF2701"),
+        ("CF2701", SimpleNamespace(ExchangeID="DCE", ProductClass=td.THOST_FTDC_PC_Futures), "CF2701"),
+        ("CF2701", SimpleNamespace(ExchangeID="CZCE", ProductClass=td.THOST_FTDC_PC_Options), "CF2701"),
+        (
+            "CF3701",
+            SimpleNamespace(ExchangeID="CZCE", ProductClass=td.THOST_FTDC_PC_Futures),
+            "CF3701",
+        ),
+    ],
+)
+def test_does_not_misnormalize_unknown_or_non_czce_future(symbol: str, instrument: object, expected: str) -> None:
+    executor = CTPExecutor.__new__(CTPExecutor)
+    executor._trading_day = "20260824"
+    executor._instruments = {} if instrument is None else {"CF701": instrument}
+
+    assert executor._normalize_ctp_symbol(symbol) == expected
+
+
+def test_rejects_conflicting_czce_alias_values(config: CTPAccountConfig) -> None:
+    executor = CTPExecutor.__new__(CTPExecutor)
+    executor._trading_day = "20260824"
+    executor._instruments = {"CF701": SimpleNamespace(ExchangeID="CZCE", ProductClass=td.THOST_FTDC_PC_Futures)}
+    standard_input = UnifiedStandardInput(
+        channel_type="ctp",
+        account_config=config,
+        curr_target={"CF2701": 0.1, "CF701": 0.2},
+    )
+
+    with pytest.raises(ValueError, match="配置不一致"):
+        executor._normalize_connected_standard_input(standard_input)
 
 
 def test_market_subscription_encodes_instrument_ids() -> None:

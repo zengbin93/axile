@@ -3,14 +3,16 @@
 from __future__ import annotations
 
 import math
+import re
 import shutil
 import tempfile
 import threading
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
-from typing import override
+from typing import TypeVar, override
 
 from openctp_ctp import thostmduserapi as md
 from openctp_ctp import thosttraderapi as td
@@ -55,8 +57,11 @@ from axile.executor.models.unified_account_assets import UnifiedAccountAssets
 from axile.executor.models.unified_callback import (
     UnifiedCallbackClient,
 )
-from axile.executor.models.unified_input import AccountConfig, CTPAccountConfig
+from axile.executor.models.unified_input import AccountConfig, CTPAccountConfig, UnifiedStandardInput
 from axile.executor.models.unified_order import OrderType, UnifiedOrder
+
+_CZCE_FUTURE_ALIAS = re.compile(r"^(?P<product>[A-Za-z]+)(?P<year>\d{2})(?P<month>\d{2})$")
+_ValueT = TypeVar("_ValueT")
 
 
 class CtpRequestError(RuntimeError):
@@ -293,6 +298,64 @@ class CTPExecutor(AbstractExecutor, UnifiedCallbackClient):
     @override
     def _check_trading_time(self):
         return self._is_china_futures_session_open()
+
+    @override
+    def _normalize_connected_standard_input(self, standard_input: UnifiedStandardInput) -> UnifiedStandardInput:
+        """使用 CTP 合约目录规范化郑商所四位年份代码。"""
+        return standard_input.model_copy(
+            update={
+                "curr_target": self._normalize_symbol_mapping("curr_target", standard_input.curr_target),
+                "last_target": self._normalize_symbol_mapping("last_target", standard_input.last_target),
+                "symbol_algorithms": self._normalize_symbol_mapping(
+                    "symbol_algorithms", standard_input.symbol_algorithms
+                ),
+                "trade_rules": self._normalize_symbol_mapping("trade_rules", standard_input.trade_rules),
+                "forbidden_symbols": self._normalize_symbol_list(standard_input.forbidden_symbols),
+                "risk_symbols": self._normalize_symbol_list(standard_input.risk_symbols),
+            }
+        )
+
+    def _normalize_symbol_mapping(self, field: str, values: Mapping[str, _ValueT]) -> dict[str, _ValueT]:
+        normalized: dict[str, _ValueT] = {}
+        sources: dict[str, str] = {}
+        for raw_symbol, value in values.items():
+            symbol = self._normalize_ctp_symbol(raw_symbol)
+            if symbol in normalized and normalized[symbol] != value:
+                raise ValueError(
+                    f"CTP 输入字段 {field} 中的代码 {sources[symbol]} 与 {raw_symbol} 都对应 {symbol}，但配置不一致"
+                )
+            normalized[symbol] = value
+            sources.setdefault(symbol, raw_symbol)
+        return normalized
+
+    def _normalize_symbol_list(self, values: list[str]) -> list[str]:
+        return list(dict.fromkeys(self._normalize_ctp_symbol(symbol) for symbol in values))
+
+    def _normalize_ctp_symbol(self, symbol: str) -> str:
+        if symbol in self._instruments:
+            return symbol
+        match = _CZCE_FUTURE_ALIAS.fullmatch(symbol)
+        if match is None:
+            return symbol
+        requested_year = 2000 + int(match.group("year"))
+        trading_day = str(getattr(self, "_trading_day", ""))
+        reference_year = (
+            int(trading_day[:4]) if len(trading_day) >= 4 and trading_day[:4].isdigit() else datetime.now().year
+        )
+        native_year_digit = requested_year % 10
+        nearest_year = min(
+            (year for year in range(2000, 2100) if year % 10 == native_year_digit),
+            key=lambda year: abs(year - reference_year),
+        )
+        if requested_year != nearest_year:
+            return symbol
+        native_symbol = f"{match.group('product')}{match.group('year')[-1]}{match.group('month')}"
+        instrument = self._instruments.get(native_symbol)
+        if instrument is None or str(getattr(instrument, "ExchangeID", "")) != "CZCE":
+            return symbol
+        if getattr(instrument, "ProductClass", None) != td.THOST_FTDC_PC_Futures:
+            return symbol
+        return native_symbol
 
     @override
     def get_account_assets(self):
