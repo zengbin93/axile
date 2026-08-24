@@ -56,7 +56,7 @@ def test_policy_route_previews_ctp_without_mutating_account(monkeypatch: pytest.
 
 def test_policy_route_rejects_incompatible_preset(monkeypatch: pytest.MonkeyPatch) -> None:
     async def fake_get_account(_session: object, _account_id: int) -> SimpleNamespace:
-        return _account(channel=TradeChannel("binance"))
+        return _account(channel=TradeChannel("plugin-channel"))
 
     monkeypatch.setattr(account_control_policy_routes, "_get_account_or_404", fake_get_account)
 

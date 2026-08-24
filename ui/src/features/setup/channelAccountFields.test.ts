@@ -48,7 +48,7 @@ test('切换模式时立即移除隐藏字段，提交也只保留可见值', ()
 })
 
 test('任意布尔条件都用 visible_when 清理隐藏字段', () => {
-  const binanceFields: ChannelAccountField[] = [
+  const networkFields: ChannelAccountField[] = [
     { name: 'is_testnet', label: '测试网', kind: 'boolean', width: 'half', required: true },
     {
       name: 'assumed_equity',
@@ -61,8 +61,8 @@ test('任意布尔条件都用 visible_when 清理隐藏字段', () => {
   ]
   const config = { is_testnet: false, assumed_equity: '-1' }
 
-  expect(channelAccountFieldVisible(binanceFields[1], config)).toBe(false)
-  expect(updateChannelAccountConfig(binanceFields, config, 'is_testnet', false)).toEqual({ is_testnet: false })
+  expect(channelAccountFieldVisible(networkFields[1], config)).toBe(false)
+  expect(updateChannelAccountConfig(networkFields, config, 'is_testnet', false)).toEqual({ is_testnet: false })
 })
 
 test('条件展开选择器归集自己的字段且不影响普通条件字段', () => {

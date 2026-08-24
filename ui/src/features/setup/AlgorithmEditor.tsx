@@ -7,7 +7,15 @@ import { Toggle } from '@/features/account/editUi'
 import { getAlgorithms } from '@/lib/api/system'
 import { useChannelDescriptor } from '@/stores/channels'
 import {
+  algorithmSchemaDefaults,
+  algorithmSchemaFields,
+  validateAlgorithmSchemaParams,
+  type AlgorithmSchemaField,
+} from '@/features/setup/algorithmSchema'
+import {
   INTENT_COPY,
+  POV_DEFAULT_PARAMS,
+  TWAP_DEFAULT_PARAMS,
   algoLabel,
   defaultAlgorithm,
   describeSingleMakerParams,
@@ -150,6 +158,8 @@ function useAlgorithms(): AlgorithmInfo[] | null {
 /** 数字框：藏原生 spinner + 产品 focus，避免系统亮蓝/箭头掉队。 */
 const FIELD =
   'w-28 rounded-[9px] border border-ink-3/30 bg-surface px-3 py-1.5 text-right text-[14px] num outline-none transition-[border-color] duration-200 ease-[cubic-bezier(0.4,0,0.2,1)] focus:border-ink-2 motion-reduce:transition-none [-moz-appearance:textfield] [&::-webkit-inner-spin-button]:m-0 [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:m-0 [&::-webkit-outer-spin-button]:appearance-none'
+const VALUE_FIELD =
+  'w-full max-w-72 rounded-[9px] border border-ink-3/30 bg-surface px-3 py-1.5 text-[14px] outline-none transition-[border-color] duration-200 ease-[cubic-bezier(0.4,0,0.2,1)] focus:border-ink-2 motion-reduce:transition-none'
 const ROW = 'flex flex-col gap-2 border-t border-line py-3 sm:flex-row sm:items-center sm:justify-between'
 const HINT = 'text-xs text-ink-3'
 
@@ -163,17 +173,20 @@ function NumRow({
   max,
   step,
   suffix,
+  exclusiveMin,
 }: {
   label: string
   hint?: string
   value: number
   onChange: (v: number) => void
-  min: number
+  min?: number
   max?: number
   step?: number
   suffix?: string
+  exclusiveMin?: boolean
 }) {
-  const bad = value < min || (max !== undefined && value > max) || !Number.isFinite(value)
+  const bad = (min !== undefined && (exclusiveMin ? value <= min : value < min)) ||
+    (max !== undefined && value > max) || !Number.isFinite(value)
   return (
     <div className={ROW}>
       <span className="text-[14px]">
@@ -196,17 +209,106 @@ function NumRow({
   )
 }
 
+/** 参数组的高级设置：常驻 DOM，折叠时不可聚焦。 */
+function AdvancedSettings({ children }: { children: ReactNode }) {
+  const [open, setOpen] = useState(false)
+  return (
+    <div className="border-t border-line">
+      <button
+        type="button"
+        className="flex w-full items-center justify-between py-3 text-[13px] font-semibold text-ink-3 hover:text-ink-1"
+        aria-expanded={open}
+        onClick={() => setOpen((value) => !value)}
+      >
+        <span>高级设置</span>
+        <ChevronDown
+          size={15}
+          className={`transition-transform duration-200 motion-reduce:transition-none ${open ? 'rotate-180' : ''}`}
+          aria-hidden
+        />
+      </button>
+      <div
+        inert={!open}
+        className={`grid transition-[grid-template-rows] ${MOTION_LAYOUT} ${
+          open ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'
+        }`}
+      >
+        <div className="min-h-0 overflow-hidden">{children}</div>
+      </div>
+    </div>
+  )
+}
+
+function PriceStrategyRow({
+  value,
+  onChange,
+  activeLabel = '主动成交',
+}: {
+  value: unknown
+  onChange: (value: string) => void
+  activeLabel?: string
+}) {
+  return (
+    <div className={`${ROW} text-[14px]`}>
+      <span>价格策略 <span className={HINT}>单次下单的挂价方式</span></span>
+      <Segmented
+        value={value === 'PASSIVE' ? 'PASSIVE' : 'ACTIVE'}
+        options={[
+          { value: 'PASSIVE', label: '被动挂单' },
+          { value: 'ACTIVE', label: activeLabel },
+        ]}
+        onChange={onChange}
+      />
+    </div>
+  )
+}
+
+function ChaseSettings({
+  effective,
+  set,
+}: {
+  effective: Record<string, unknown>
+  set: (patch: Record<string, unknown>) => void
+}) {
+  const enabled = effective.chase_enabled === true
+  const numberValue = (key: string): number => {
+    const value = Number(effective[key])
+    return Number.isFinite(value) ? value : Number.NaN
+  }
+  return (
+    <>
+      <div className={ROW}>
+        <span className="text-[14px]">追单 <span className={HINT}>行情偏离后撤单重挂</span></span>
+        <Toggle on={enabled} ariaLabel="启用追单" onClick={() => set({ chase_enabled: !enabled })} />
+      </div>
+      <div
+        inert={!enabled}
+        className={`grid transition-[grid-template-rows] ${MOTION_LAYOUT} ${
+          enabled ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'
+        }`}
+      >
+        <div className="min-h-0 overflow-hidden pl-4">
+          <NumRow label="价格偏离" hint="1–100" value={numberValue('chase_ticks')} min={1} max={100} onChange={(value) => set({ chase_ticks: value })} suffix="档" />
+          <NumRow label="最大追单次数" hint="1–50" value={numberValue('max_chase_count')} min={1} max={50} onChange={(value) => set({ max_chase_count: value })} suffix="次" />
+          <NumRow label="追单间隔" hint="0.1–300" value={numberValue('chase_interval')} min={0.1} max={300} step={0.1} onChange={(value) => set({ chase_interval: value })} suffix="秒" />
+        </div>
+      </div>
+    </>
+  )
+}
+
 type ParamsEditor = (props: {
   params: Record<string, unknown>
+  defaults?: Record<string, unknown>
   onChange: (p: Record<string, unknown>) => void
   onApplyIntent?: (intent: Intent) => void
 }) => React.ReactNode
 
 /** SINGLE-MAKER 专属：意图三卡（省成本/保成交/平衡），复用向导文案。 */
-const SingleMakerEditor: ParamsEditor = ({ params, onChange, onApplyIntent }) => {
+const SingleMakerEditor: ParamsEditor = ({ params, defaults, onChange, onApplyIntent }) => {
   const copy = INTENT_COPY
   const active = intentFromParams(params)
-  const effective = effectiveSingleMakerParams(params)
+  const effective = effectiveSingleMakerParams({ ...defaults, ...params })
   const [advanced, setAdvanced] = useState(false)
   const chaseEnabled = effective.chase_enabled === true
   const paramError = validateAlgorithmParams(params)
@@ -362,33 +464,45 @@ const SingleMakerEditor: ParamsEditor = ({ params, onChange, onApplyIntent }) =>
   )
 }
 
-const TwapEditor: ParamsEditor = ({ params, onChange }) => {
+const TwapEditor: ParamsEditor = ({ params, defaults, onChange }) => {
   const set = (patch: Record<string, unknown>) => onChange({ ...params, ...patch })
-  const total = Number(params.total_duration ?? 300)
-  const slices = Number(params.slices ?? 10)
+  const effective = { ...TWAP_DEFAULT_PARAMS, ...defaults, ...params }
+  const total = Number(effective.total_duration)
+  const slices = Number(effective.slices)
+  const wait = Number(effective.max_wait_seconds)
+  const paramError = validateAlgorithmParams(params, 'TWAP')
   return (
     <div className="max-w-[560px]">
       <NumRow label="总执行时长" hint="秒（1–86400）" value={total} min={1} max={86400} step={30} onChange={(v) => set({ total_duration: v })} suffix="s" />
       <NumRow label="切片数量" hint="均匀切成几片（1–1000）" value={slices} min={1} max={1000} onChange={(v) => set({ slices: v })} suffix="片" />
+      <PriceStrategyRow value={effective.price_strategy} onChange={(value) => set({ price_strategy: value })} />
       <div className={`${ROW} text-[14px]`}>
         <span>单片间隔</span>
         <span className="num text-ink-2">{slices > 0 ? (total / slices).toFixed(1) : '—'} s</span>
       </div>
+      <AdvancedSettings>
+        <NumRow label="单片最大等待" hint="等待成交（1–3600）" value={wait} min={1} max={3600} onChange={(value) => set({ max_wait_seconds: value })} suffix="秒" />
+      </AdvancedSettings>
+      {paramError && <div className="pb-3 text-[12px] text-warn">{paramError}</div>}
     </div>
   )
 }
 
-const PovEditor: ParamsEditor = ({ params, onChange }) => {
+const PovEditor: ParamsEditor = ({ params, defaults, onChange }) => {
   const set = (patch: Record<string, unknown>) => onChange({ ...params, ...patch })
-  const ratePct = Number(params.participation_rate ?? 0.1) * 100
-  const interval = Number(params.interval_seconds ?? 5)
-  const maxDur = Number(params.max_duration ?? 600)
-  const onTimeout = params.complete_on_timeout !== false
+  const effective = { ...POV_DEFAULT_PARAMS, ...defaults, ...params }
+  const ratePct = Number(effective.participation_rate) * 100
+  const interval = Number(effective.interval_seconds)
+  const maxDur = Number(effective.max_duration)
+  const wait = Number(effective.max_wait_seconds)
+  const onTimeout = effective.complete_on_timeout !== false
+  const paramError = validateAlgorithmParams(params, 'POV')
   return (
     <div className="max-w-[560px]">
-      <NumRow label="参与率" hint="占市场成交量 %（0–100）" value={ratePct} min={0.01} max={100} step={1} onChange={(v) => set({ participation_rate: v / 100 })} suffix="%" />
+      <NumRow label="参与率" hint="占市场成交量 %（>0–100）" value={ratePct} min={0} exclusiveMin max={100} step={0.01} onChange={(v) => set({ participation_rate: v / 100 })} suffix="%" />
       <NumRow label="下单节奏" hint="秒（≥0.1）" value={interval} min={0.1} step={0.5} onChange={(v) => set({ interval_seconds: v })} suffix="s" />
       <NumRow label="硬时间上限" hint="秒（1–86400）" value={maxDur} min={1} max={86400} step={60} onChange={(v) => set({ max_duration: v })} suffix="s" />
+      <PriceStrategyRow value={effective.price_strategy} onChange={(value) => set({ price_strategy: value })} />
       <div className={`${ROW} text-[14px]`}>
         <span>
           超时兜底 <span className={HINT}>到点未成交时按市价补足</span>
@@ -402,21 +516,20 @@ const PovEditor: ParamsEditor = ({ params, onChange }) => {
           onChange={(v) => set({ complete_on_timeout: v === 'on' })}
         />
       </div>
+      <AdvancedSettings>
+        <NumRow label="单次最大等待" hint="每轮订单等待（1–3600）" value={wait} min={1} max={3600} onChange={(value) => set({ max_wait_seconds: value })} suffix="秒" />
+      </AdvancedSettings>
+      {paramError && <div className="pb-3 text-[12px] text-warn">{paramError}</div>}
     </div>
   )
 }
 
-const TargetPosEditor: ParamsEditor = ({ params, onChange }) => {
-  const effective = effectiveTargetPosParams(params)
-  const set = (patch: Record<string, unknown>) => onChange({ ...effective, ...params, ...patch })
+const TargetPosEditor: ParamsEditor = ({ params, defaults, onChange }) => {
+  const effective = effectiveTargetPosParams({ ...defaults, ...params })
+  const set = (patch: Record<string, unknown>) => onChange({ ...params, ...patch })
   const ps = effective.price_strategy === 'ACTIVE' ? 'ACTIVE' : 'PASSIVE'
   const offset = effective.offset_priority === '今昨' ? '今昨' : '昨今'
-  const chaseEnabled = effective.chase_enabled === true
-  const paramError = validateAlgorithmParams(effective)
-  const numberValue = (key: string): number => {
-    const value = Number(effective[key])
-    return Number.isFinite(value) ? value : Number.NaN
-  }
+  const paramError = validateAlgorithmParams(params, 'TARGET-POS-TASK')
   return (
     <div className="max-w-[620px]">
       <div className={`${ROW} text-[14px]`}>
@@ -445,62 +558,18 @@ const TargetPosEditor: ParamsEditor = ({ params, onChange }) => {
           onChange={(v) => set({ offset_priority: v })}
         />
       </div>
-      <NumRow
-        label="单次等待时间"
-        hint="每个合约等待成交（1–3600）"
-        value={numberValue('max_wait_seconds')}
-        min={1}
-        max={3600}
-        onChange={(value) => set({ max_wait_seconds: value })}
-        suffix="秒"
-      />
-      <div className={ROW}>
-        <span className="text-[14px]">
-          追单 <span className={HINT}>行情偏离后撤单重挂</span>
-        </span>
-        <Toggle
-          on={chaseEnabled}
-          ariaLabel="启用目标持仓追单"
-          onClick={() => set({ chase_enabled: !chaseEnabled })}
+      <AdvancedSettings>
+        <NumRow
+          label="单次等待时间"
+          hint="每个合约等待成交（1–3600）"
+          value={Number(effective.max_wait_seconds)}
+          min={1}
+          max={3600}
+          onChange={(value) => set({ max_wait_seconds: value })}
+          suffix="秒"
         />
-      </div>
-      <div
-        inert={!chaseEnabled}
-        className={`grid transition-[grid-template-rows] ${MOTION_LAYOUT} ${
-          chaseEnabled ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'
-        }`}
-      >
-        <div className="min-h-0 overflow-hidden pl-4">
-          <NumRow
-            label="价格偏离"
-            hint="触发重挂的最小偏离（1–100）"
-            value={numberValue('chase_ticks')}
-            min={1}
-            max={100}
-            onChange={(value) => set({ chase_ticks: value })}
-            suffix="档"
-          />
-          <NumRow
-            label="最大追单次数"
-            hint="1–50"
-            value={numberValue('max_chase_count')}
-            min={1}
-            max={50}
-            onChange={(value) => set({ max_chase_count: value })}
-            suffix="次"
-          />
-          <NumRow
-            label="追单间隔"
-            hint="0.1–300"
-            value={numberValue('chase_interval')}
-            min={0.1}
-            max={300}
-            step={0.1}
-            onChange={(value) => set({ chase_interval: value })}
-            suffix="秒"
-          />
-        </div>
-      </div>
+        <ChaseSettings effective={effective} set={set} />
+      </AdvancedSettings>
       {paramError && <div className="pb-3 text-[12px] text-warn">{paramError}</div>}
     </div>
   )
@@ -550,6 +619,118 @@ function GenericEditor({
         }}
       />
       {err && <div className="mt-1 text-[12px] text-warn">JSON 有误：{err}</div>}
+    </div>
+  )
+}
+
+const SHARED_ADVANCED_PARAM_KEYS = new Set([
+  'max_wait_seconds',
+  'chase_enabled',
+  'chase_ticks',
+  'max_chase_count',
+  'chase_interval',
+])
+const CHASE_PARAM_KEYS = ['chase_enabled', 'chase_ticks', 'max_chase_count', 'chase_interval'] as const
+
+function SchemaFieldRow({
+  field,
+  value,
+  onChange,
+}: {
+  field: AlgorithmSchemaField
+  value: unknown
+  onChange: (value: unknown) => void
+}) {
+  const spec = field.schema
+  const label = spec.title || field.name
+  const hint = spec.description
+  if (spec.enum) {
+    const options = spec.enum.map((item) => ({ value: String(item), label: String(item) }))
+    return (
+      <div className={ROW}>
+        <span className="text-[14px]">{label} {hint && <span className={HINT}>{hint}</span>}</span>
+        <Select
+          className="min-w-[220px] justify-between px-3 py-1.5 text-[14px]"
+          value={String(value ?? '')}
+          options={options}
+          onChange={(next) => onChange(spec.enum?.find((item) => String(item) === next) ?? next)}
+        />
+      </div>
+    )
+  }
+  if (spec.type === 'boolean') {
+    return (
+      <div className={ROW}>
+        <span className="text-[14px]">{label} {hint && <span className={HINT}>{hint}</span>}</span>
+        <Toggle on={value === true} ariaLabel={label} onClick={() => onChange(value !== true)} />
+      </div>
+    )
+  }
+  if (spec.type === 'integer' || spec.type === 'number') {
+    const minimum = spec.exclusiveMinimum ?? spec.minimum
+    return (
+      <NumRow
+        label={label}
+        hint={hint}
+        value={typeof value === 'number' ? value : Number.NaN}
+        min={minimum}
+        max={spec.exclusiveMaximum ?? spec.maximum}
+        exclusiveMin={spec.exclusiveMinimum !== undefined}
+        step={spec.multipleOf ?? (spec.type === 'integer' ? 1 : 0.1)}
+        onChange={onChange}
+      />
+    )
+  }
+  return (
+    <div className={ROW}>
+      <span className="text-[14px]">{label} {hint && <span className={HINT}>{hint}</span>}</span>
+      <input
+        className={VALUE_FIELD}
+        value={typeof value === 'string' ? value : ''}
+        onChange={(event) => onChange(event.target.value)}
+      />
+    </div>
+  )
+}
+
+/** 用后端参数 schema 结构化编辑外部算法；不支持的 schema 完整回退 JSON。 */
+function SchemaEditor({
+  info,
+  params,
+  onChange,
+}: {
+  info: AlgorithmInfo | null
+  params: Record<string, unknown>
+  onChange: (p: Record<string, unknown>) => void
+}) {
+  const fields = info ? algorithmSchemaFields(info.params_schema) : null
+  if (!info || !fields) return <GenericEditor info={info} params={params} onChange={onChange} />
+
+  const effective = { ...algorithmSchemaDefaults(fields), ...info.default_params, ...params }
+  const set = (name: string, value: unknown) => onChange({ ...params, [name]: value })
+  const coreFields = fields.filter((field) => !SHARED_ADVANCED_PARAM_KEYS.has(field.name))
+  const advancedFields = fields.filter((field) => SHARED_ADVANCED_PARAM_KEYS.has(field.name))
+  const hasCompleteChaseGroup = CHASE_PARAM_KEYS.every((name) => fields.some((field) => field.name === name))
+  const standaloneAdvanced = advancedFields.filter(
+    (field) => !hasCompleteChaseGroup || !CHASE_PARAM_KEYS.includes(field.name as typeof CHASE_PARAM_KEYS[number]),
+  )
+  const error = validateAlgorithmParams(params) ?? validateAlgorithmSchemaParams(params, info.params_schema)
+
+  return (
+    <div className="max-w-[620px]">
+      {info.description && <div className="mb-1.5 text-[13px] text-ink-2">{info.description}</div>}
+      {coreFields.map((field) => (
+        <SchemaFieldRow key={field.name} field={field} value={effective[field.name]} onChange={(value) => set(field.name, value)} />
+      ))}
+      {advancedFields.length > 0 && (
+        <AdvancedSettings>
+          {standaloneAdvanced.map((field) => (
+            <SchemaFieldRow key={field.name} field={field} value={effective[field.name]} onChange={(value) => set(field.name, value)} />
+          ))}
+          {hasCompleteChaseGroup && <ChaseSettings effective={effective} set={(patch) => onChange({ ...params, ...patch })} />}
+        </AdvancedSettings>
+      )}
+      {error && <div className="pb-3 text-[12px] text-warn">{error}</div>}
     </div>
   )
 }
@@ -670,8 +851,8 @@ export function AlgorithmEditor({ slot, channel, value, onChange, allowClear }: 
               onChange={pick}
               options={candidates.map((a) => ({
                 value: a.name,
-                label: a.label || algoLabel(a.name),
-                hint: a.builtin ? undefined : '自定义',
+                label: algoLabel(a.name),
+                hint: a.builtin || DEDICATED[a.name] ? undefined : '自定义',
               }))}
             />
             {!isDefault && (
@@ -709,11 +890,12 @@ export function AlgorithmEditor({ slot, channel, value, onChange, allowClear }: 
         {Dedicated ? (
           <Dedicated
             params={value.params}
+            defaults={info?.default_params}
             onChange={setParams}
             onApplyIntent={applyIntent}
           />
         ) : (
-          <GenericEditor info={info} params={value.params} onChange={setParams} />
+          <SchemaEditor info={info} params={value.params} onChange={setParams} />
         )}
       </MethodParamsStage>
 

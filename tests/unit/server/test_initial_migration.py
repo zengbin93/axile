@@ -30,19 +30,19 @@ def test_migration_history_is_linear() -> None:
     assert [path.name for path in migration_paths] == [
         "0001_initial.py",
         "0002_trading_calendar.py",
-        "0003_binance_network.py",
+        "0003_plugin_network.py",
         "0004_account_asset_snapshot.py",
     ]
     initial = _load_migration(migration_paths[0])
     calendar = _load_migration(migration_paths[1])
-    binance_network = _load_migration(migration_paths[2])
+    plugin_network = _load_migration(migration_paths[2])
     account_asset_snapshot = _load_migration(migration_paths[3])
     assert initial.revision == "0001"
     assert initial.down_revision is None
     assert calendar.revision == "0002"
     assert calendar.down_revision == "0001"
-    assert binance_network.revision == "0003"
-    assert binance_network.down_revision == "0002"
+    assert plugin_network.revision == "0003"
+    assert plugin_network.down_revision == "0002"
     assert account_asset_snapshot.revision == "0004"
     assert account_asset_snapshot.down_revision == "0003"
 
@@ -209,9 +209,9 @@ def test_trading_calendar_migration_adds_calendar_table() -> None:
         }
 
 
-def test_binance_network_migration_rewrites_account_config_and_downgrades() -> None:
+def test_plugin_network_migration_rewrites_account_config_and_downgrades() -> None:
     initial = _load_migration(_MIGRATIONS_DIR / "0001_initial.py")
-    migration = _load_migration(_MIGRATIONS_DIR / "0003_binance_network.py")
+    migration = _load_migration(_MIGRATIONS_DIR / "0003_plugin_network.py")
     engine = sa.create_engine("sqlite://")
     account = sa.table(
         "account",
@@ -247,12 +247,12 @@ def test_binance_network_migration_rewrites_account_config_and_downgrades() -> N
         connection.execute(
             sa.insert(account),
             [
-                {**common, "id": 1, "trade_channel": "binance", "account_config": {"is_testnet": True}},
-                {**common, "id": 2, "trade_channel": "binance", "account_config": {"is_testnet": False}},
+                {**common, "id": 1, "trade_channel": "plugin-channel", "account_config": {"is_testnet": True}},
+                {**common, "id": 2, "trade_channel": "plugin-channel", "account_config": {"is_testnet": False}},
                 {
                     **common,
                     "id": 3,
-                    "trade_channel": "binance",
+                    "trade_channel": "plugin-channel",
                     "account_config": {"is_testnet": True, "network": "mainnet"},
                 },
                 {**common, "id": 4, "trade_channel": "gm", "account_config": {"is_testnet": True}},

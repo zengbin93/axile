@@ -16,7 +16,7 @@ import { channelLabel } from '@/features/dashboard/display'
 import { useChannelDescriptor } from '@/stores/channels'
 import {
   describeAlgorithmRef,
-  validateAlgorithmParams,
+  validateAlgorithmRef,
   type AlgorithmRef,
 } from '@/features/setup/algorithms'
 import { AlgorithmEditor } from '@/features/setup/AlgorithmEditor'
@@ -45,7 +45,7 @@ function norm(v: unknown): string {
 
 function algoParamError(algo: AlgorithmRef | null): string | null {
   if (!algo) return null
-  return validateAlgorithmParams(algo.params)
+  return validateAlgorithmRef(algo)
 }
 
 export function AccountEditAlgorithmPage() {

@@ -23,6 +23,7 @@ class BaseAlgorithmParams(BaseModel):
         default=60,
         ge=1,
         le=3600,
+        title="单次最大等待",
         description="最大等待时间（秒），范围：1-3600",
     )
 
@@ -67,21 +68,25 @@ class ChaseParamsMixin(BaseModel):
 
     chase_enabled: bool = Field(
         default=False,
+        title="追单",
         description="是否启用追单",
     )
     chase_ticks: int = Field(
         default=1,
         ge=0,
+        title="价格偏离",
         description="价格偏离多少跳后追单",
     )
     max_chase_count: int = Field(
         default=5,
         ge=0,
+        title="最大追单次数",
         description="单个订单最大追单次数",
     )
     chase_interval: float = Field(
         default=5.0,
         ge=0.0,
+        title="追单间隔",
         description="追单间隔（秒）",
     )
 

@@ -24,7 +24,7 @@ import { initialTimerForSchedule, useWizardStore } from '@/stores/wizard'
 import { useToastStore } from '@/stores/ui'
 import { resolveCronList, cronToExpr } from '@/features/setup/cron'
 import { TimerEditor, type TimerEditorState } from '@/features/setup/TimerEditor'
-import { algoLabel, intentFromParams, validateAlgorithmParams } from '@/features/setup/algorithms'
+import { algoLabel, intentFromParams, validateAlgorithmRef } from '@/features/setup/algorithms'
 import { AlgorithmEditor } from '@/features/setup/AlgorithmEditor'
 import {
   channelAccountFieldVisible,
@@ -695,7 +695,7 @@ export function AcctConfirm() {
         return
       }
       const algo = acct.algorithm
-      const paramErr = validateAlgorithmParams(algo.params)
+      const paramErr = validateAlgorithmRef(algo)
       if (paramErr) {
         toast(`算法参数非法：${paramErr}`)
         return

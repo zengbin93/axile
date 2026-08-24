@@ -12,7 +12,7 @@ describe('accountAssetTerms', () => {
     })
   })
 
-  it.each(['ctp', 'tq', 'binance', 'plugin-channel', undefined])(
+  it.each(['ctp', 'tq', 'plugin-channel', 'another-plugin', undefined])(
     'uses equity terminology for %s',
     (channel) => {
       expect(accountAssetTerms(channel)).toEqual({

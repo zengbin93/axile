@@ -70,7 +70,7 @@ describe('connectionValueError', () => {
     expect(connectionValueError(context({ ...base, value: '999.1.1.1:7001' }))).toBe('主机地址格式不正确')
   })
 
-  it('Binance 代理允许受支持协议的默认端口或裸主机端口', () => {
+  it('代理字段允许受支持协议的默认端口或裸主机端口', () => {
     const base = { kind: 'endpoint' as const, label: '代理', placeholder: 'http://127.0.0.1:7890', constraints: proxyEndpoint }
     expect(connectionValueError(context({ ...base, value: 'https://proxy.example.com' }))).toBeNull()
     expect(connectionValueError(context({ ...base, value: 'proxy.example.com:7890' }))).toBeNull()

@@ -6,6 +6,7 @@
  * 切换算法时用 `seedParams` 播下合法默认参数。
  */
 import type { AlgorithmInfo, AlgorithmRef, AlgorithmSlot } from '@/types/api'
+import { validateAlgorithmSchemaParams } from '@/features/setup/algorithmSchema'
 
 export type { AlgorithmRef } from '@/types/api'
 
@@ -29,6 +30,29 @@ export const TARGET_POS_DEFAULT_PARAMS: Readonly<Record<string, unknown>> = {
   chase_ticks: 1,
   max_chase_count: 5,
   chase_interval: 5,
+}
+
+export const TWAP_DEFAULT_PARAMS: Readonly<Record<string, unknown>> = {
+  max_wait_seconds: 60,
+  total_duration: 300,
+  slices: 10,
+  price_strategy: 'ACTIVE',
+}
+
+export const POV_DEFAULT_PARAMS: Readonly<Record<string, unknown>> = {
+  max_wait_seconds: 60,
+  participation_rate: 0.1,
+  interval_seconds: 5,
+  max_duration: 600,
+  price_strategy: 'ACTIVE',
+  complete_on_timeout: true,
+}
+
+const DEFAULT_PARAMS_BY_METHOD: Readonly<Record<string, Readonly<Record<string, unknown>>>> = {
+  'SINGLE-MAKER': SINGLE_MAKER_DEFAULT_PARAMS,
+  TWAP: TWAP_DEFAULT_PARAMS,
+  POV: POV_DEFAULT_PARAMS,
+  'TARGET-POS-TASK': TARGET_POS_DEFAULT_PARAMS,
 }
 
 const SINGLE_MAKER_PARAM_KEYS = new Set(Object.keys(SINGLE_MAKER_DEFAULT_PARAMS))
@@ -80,9 +104,12 @@ export function resolveAlgorithm(intent: Intent, method = 'SINGLE-MAKER'): Algor
  * 返回 `null`。用于在提交前拦下非法 params，避免重蹈「参数被后端吞成 dict、执行
  * 到算法内部才炸」的覆辙。
  */
-export function validateAlgorithmParams(params: Record<string, unknown>): string | null {
+export function validateAlgorithmParams(params: Record<string, unknown>, method?: string): string | null {
   const num = (k: string): number | undefined => (typeof params[k] === 'number' ? (params[k] as number) : undefined)
   const has = (k: string): boolean => Object.prototype.hasOwnProperty.call(params, k)
+  const effective = { ...(method ? DEFAULT_PARAMS_BY_METHOD[method] : undefined), ...params }
+  const effectiveNum = (k: string): number | undefined =>
+    typeof effective[k] === 'number' ? (effective[k] as number) : undefined
 
   if (has('price_strategy') && params.price_strategy !== 'PASSIVE' && params.price_strategy !== 'ACTIVE') {
     return `下单价格（price_strategy）必须是 PASSIVE 或 ACTIVE`
@@ -106,24 +133,46 @@ export function validateAlgorithmParams(params: Record<string, unknown>): string
   // 切片类算法的数值参数：镜像各自 params 模型与编辑器 NumRow 的边界，
   // 与服务端校验同口径，避免「超范围」标红却仍能保存。
   const totalDuration = num('total_duration')
+  if (has('total_duration') && totalDuration === undefined) return `total_duration 必须是数字`
   if (totalDuration !== undefined && (!Number.isInteger(totalDuration) || totalDuration < 1 || totalDuration > 86400)) {
     return `total_duration 需为 1–86400 的整数，当前 ${totalDuration}`
   }
   const slices = num('slices')
+  if (has('slices') && slices === undefined) return `slices 必须是数字`
   if (slices !== undefined && (!Number.isInteger(slices) || slices < 1 || slices > 1000)) {
     return `slices 需为 1–1000 的整数，当前 ${slices}`
   }
   const participation = num('participation_rate')
-  if (participation !== undefined && (participation < 0.0001 || participation > 1)) {
-    return `participation_rate 需在 0.0001–1，当前 ${participation}`
+  if (has('participation_rate') && participation === undefined) return `participation_rate 必须是数字`
+  if (participation !== undefined && (participation <= 0 || participation > 1)) {
+    return `participation_rate 需在 (0, 1]，当前 ${participation}`
   }
   const intervalSeconds = num('interval_seconds')
+  if (has('interval_seconds') && intervalSeconds === undefined) return `interval_seconds 必须是数字`
   if (intervalSeconds !== undefined && intervalSeconds < 0.1) {
     return `interval_seconds 需 ≥ 0.1s，当前 ${intervalSeconds}`
   }
   const maxDuration = num('max_duration')
+  if (has('max_duration') && maxDuration === undefined) return `max_duration 必须是数字`
   if (maxDuration !== undefined && (!Number.isInteger(maxDuration) || maxDuration < 1 || maxDuration > 86400)) {
     return `max_duration 需为 1–86400 的整数，当前 ${maxDuration}`
+  }
+  if (has('complete_on_timeout') && typeof params.complete_on_timeout !== 'boolean') {
+    return `complete_on_timeout 必须是布尔值`
+  }
+  if (method === 'TWAP') {
+    const duration = effectiveNum('total_duration')
+    const sliceCount = effectiveNum('slices')
+    if (duration !== undefined && sliceCount !== undefined && duration / sliceCount < 0.1) {
+      return `单片间隔（total_duration / slices）需 ≥ 0.1s，当前 ${(duration / sliceCount).toFixed(4)}s`
+    }
+  }
+  if (method === 'POV') {
+    const duration = effectiveNum('max_duration')
+    const interval = effectiveNum('interval_seconds')
+    if (duration !== undefined && interval !== undefined && duration < interval) {
+      return `max_duration（${duration}s）不应小于 interval_seconds（${interval}s）`
+    }
   }
 
   if (params.chase_enabled === true) {
@@ -152,6 +201,12 @@ export function validateAlgorithmParams(params: Record<string, unknown>): string
   return null
 }
 
+/** 按算法类型校验完整算法引用，包括算法特有的多字段约束。 */
+export function validateAlgorithmRef(ref: AlgorithmRef): string | null {
+  return validateAlgorithmParams(ref.params, ref.method) ??
+    validateAlgorithmSchemaParams(ref.params, runtimeAlgorithmSchemas[ref.method] ?? {})
+}
+
 /** 清仓算法（目标清空时用）。 */
 export function emptyAlgorithm(method = 'SINGLE-MAKER'): AlgorithmRef {
   if (method === 'TARGET-POS-TASK') {
@@ -170,15 +225,18 @@ export const ALGO_LABEL: Record<string, string> = {
 }
 
 let runtimeAlgorithmLabels: Record<string, string> = {}
+let runtimeAlgorithmSchemas: Record<string, Record<string, unknown>> = {}
 
 /** 更新后端算法目录中的运行时展示名。 */
 export function registerAlgorithmLabels(algorithms: AlgorithmInfo[]): void {
   runtimeAlgorithmLabels = Object.fromEntries(algorithms.map((algorithm) => [algorithm.name, algorithm.label]))
+  runtimeAlgorithmSchemas = Object.fromEntries(algorithms.map((algorithm) => [algorithm.name, algorithm.params_schema]))
 }
 
 /** 返回某算法的展示标签；未知算法回退为其 method 原名。 */
 export function algoLabel(method: string): string {
-  return runtimeAlgorithmLabels[method] || ALGO_LABEL[method] || method
+  const runtimeLabel = runtimeAlgorithmLabels[method]
+  return (runtimeLabel && runtimeLabel !== method ? runtimeLabel : undefined) || ALGO_LABEL[method] || method
 }
 
 /** 槽位 + 算法类型的默认引用（含默认参数）。 */
@@ -196,9 +254,9 @@ export function seedParams(method: string): Record<string, unknown> {
     case 'SINGLE-MAKER':
       return resolveAlgorithm('balance', method).params
     case 'TWAP':
-      return { total_duration: 300, slices: 10, price_strategy: 'PASSIVE' }
+      return { ...TWAP_DEFAULT_PARAMS }
     case 'POV':
-      return { participation_rate: 0.1, interval_seconds: 5, max_duration: 600, complete_on_timeout: true, price_strategy: 'PASSIVE' }
+      return { ...POV_DEFAULT_PARAMS }
     case 'TARGET-POS-TASK':
       return { ...TARGET_POS_DEFAULT_PARAMS }
     default:

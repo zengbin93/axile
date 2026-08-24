@@ -1,4 +1,4 @@
-"""将 Binance 测试网标记迁移为连接网络。
+"""将外部插件账户的旧测试网标记迁移为连接网络.
 
 Revision ID: 0003
 Revises: 0002
@@ -14,6 +14,7 @@ down_revision: str | None = "0002"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
+_BUILTIN_CHANNELS = frozenset({"ctp", "gm", "tq"})
 _account = sa.table(
     "account",
     sa.column("id", sa.Integer()),
@@ -23,13 +24,11 @@ _account = sa.table(
 
 
 def _rewrite_config(*, upgrade: bool) -> None:
-    """逐行改写 Binance 账户 JSON，保持数据库方言无关。"""
+    """逐行改写外部插件账户 JSON，保持数据库方言无关."""
     connection = op.get_bind()
-    rows = connection.execute(
-        sa.select(_account.c.id, _account.c.account_config).where(_account.c.trade_channel == "binance")
-    )
-    for account_id, raw_config in rows:
-        if not isinstance(raw_config, dict):
+    rows = connection.execute(sa.select(_account.c.id, _account.c.trade_channel, _account.c.account_config))
+    for account_id, trade_channel, raw_config in rows:
+        if trade_channel in _BUILTIN_CHANNELS or not isinstance(raw_config, dict):
             continue
         config = dict(raw_config)
         if upgrade:
@@ -46,10 +45,10 @@ def _rewrite_config(*, upgrade: bool) -> None:
 
 
 def upgrade() -> None:
-    """把 ``is_testnet`` 转换为 ``network``。"""
+    """把外部插件账户的 ``is_testnet`` 转换为 ``network``."""
     _rewrite_config(upgrade=True)
 
 
 def downgrade() -> None:
-    """把 ``network`` 还原为 ``is_testnet``。"""
+    """把外部插件账户的 ``network`` 还原为 ``is_testnet``."""
     _rewrite_config(upgrade=False)

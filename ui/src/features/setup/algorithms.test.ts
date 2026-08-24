@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'bun:test'
 
 import {
+  POV_DEFAULT_PARAMS,
+  TWAP_DEFAULT_PARAMS,
   defaultAlgorithm,
   describeAlgorithmRef,
   describeSingleMakerParams,
@@ -11,6 +13,7 @@ import {
   intentFromParams,
   resolveAlgorithm,
   seedParams,
+  validateAlgorithmRef,
   validateAlgorithmParams,
 } from './algorithms'
 
@@ -45,6 +48,16 @@ describe('validateAlgorithmParams', () => {
     expect(validateAlgorithmParams({ on_missing_book: 'fallback' })).toContain('on_missing_book')
     expect(validateAlgorithmParams({ max_wait_seconds: '60' })).toContain('必须是数字')
     expect(validateAlgorithmParams({ chase_enabled: true, max_chase_count: 1.5 })).toContain('整数')
+  })
+
+  it('按算法拒绝 TWAP 过密切片和 POV 无法完成一次轮询', () => {
+    expect(validateAlgorithmRef({ method: 'TWAP', params: { total_duration: 1, slices: 1000 } })).toContain('0.1s')
+    expect(validateAlgorithmRef({ method: 'POV', params: { interval_seconds: 10, max_duration: 1 } })).toContain('max_duration')
+  })
+
+  it('校验 POV 参与率与布尔参数', () => {
+    expect(validateAlgorithmRef({ method: 'POV', params: { participation_rate: 0 } })).toContain('(0, 1]')
+    expect(validateAlgorithmRef({ method: 'POV', params: { complete_on_timeout: 'yes' } })).toContain('布尔')
   })
 })
 
@@ -163,15 +176,16 @@ describe('emptyAlgorithm · 不再发送废弃键', () => {
 })
 
 describe('seedParams · 切换算法的合法种子参数', () => {
-  it('TWAP 种子含 total_duration / slices', () => {
+  it('TWAP 种子覆盖全部后端参数', () => {
     const p = seedParams('TWAP')
-    expect(p.total_duration).toBe(300)
-    expect(p.slices).toBe(10)
+    expect(p).toEqual(TWAP_DEFAULT_PARAMS)
+    expect(validateAlgorithmRef({ method: 'TWAP', params: p })).toBeNull()
   })
 
-  it('POV 种子参与率落在 (0,1]', () => {
+  it('POV 种子覆盖全部后端参数', () => {
     const p = seedParams('POV')
-    expect((p.participation_rate as number) > 0 && (p.participation_rate as number) <= 1).toBe(true)
+    expect(p).toEqual(POV_DEFAULT_PARAMS)
+    expect(validateAlgorithmRef({ method: 'POV', params: p })).toBeNull()
   })
 
   it('SINGLE-MAKER 种子通过后端约束校验', () => {
@@ -184,4 +198,5 @@ describe('seedParams · 切换算法的合法种子参数', () => {
     expect(params).toEqual(effectiveTargetPosParams({}))
     expect(validateAlgorithmParams(params)).toBeNull()
   })
+
 })
