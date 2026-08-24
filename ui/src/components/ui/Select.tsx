@@ -2,10 +2,11 @@ import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from
 import type { KeyboardEvent as ReactKeyboardEvent, ReactElement } from 'react'
 import { createPortal } from 'react-dom'
 
-/** 下拉的单个选项：值与显示文案分离；hint 为右侧弱化补充说明。 */
+/** 下拉的单个选项：description 为标题下说明，hint 为右侧弱化短信息。 */
 export interface SelectOption<T> {
   value: T
   label: string
+  description?: string
   hint?: string
 }
 
@@ -79,7 +80,10 @@ export function Select<T>({
 
   const filtered =
     searchable && query
-      ? options.filter((o) => o.label.toLowerCase().includes(query.toLowerCase()))
+      ? options.filter((o) => {
+          const needle = query.toLowerCase()
+          return [o.label, o.description, o.hint].some((text) => text?.toLowerCase().includes(needle))
+        })
       : options
 
   const selected = options.find((o) => o.value === value)
@@ -217,8 +221,11 @@ export function Select<T>({
         onClick={() => (open ? close(false) : openMenu())}
         onKeyDown={onTriggerKey}
       >
-        <span className={`truncate ${selected ? '' : 'text-ink-3'}`}>
-          {selected ? selected.label : placeholder}
+        <span className={`min-w-0 text-left ${selected ? '' : 'text-ink-3'}`}>
+          <span className="block truncate">{selected ? selected.label : placeholder}</span>
+          {selected?.description && (
+            <span className="mt-0.5 block truncate text-[12px] font-normal text-ink-3">{selected.description}</span>
+          )}
         </span>
         <svg
           viewBox="0 0 12 12"
@@ -283,7 +290,7 @@ export function Select<T>({
                     aria-selected={isSelected}
                     onMouseEnter={() => setHighlight(i)}
                     onClick={() => choose(o)}
-                    className={`flex cursor-pointer items-center gap-2 rounded-[7px] px-2.5 py-1.5 text-[13px] ${
+                    className={`flex cursor-pointer items-start gap-2 rounded-[7px] px-2.5 py-2 text-[13px] ${
                       isActive ? 'bg-bg-subtle' : ''
                     } ${isSelected ? 'font-[550] text-ink-1' : 'text-ink-2'}`}
                   >
@@ -301,8 +308,13 @@ export function Select<T>({
                         strokeLinejoin="round"
                       />
                     </svg>
-                    <span className="truncate">{o.label}</span>
-                    {o.hint && <span className="ml-auto text-[12px] text-ink-3">{o.hint}</span>}
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate">{o.label}</span>
+                      {o.description && (
+                        <span className="mt-0.5 block truncate text-[12px] font-normal text-ink-3">{o.description}</span>
+                      )}
+                    </span>
+                    {o.hint && <span className="ml-auto flex-none text-[12px] font-normal text-ink-3">{o.hint}</span>}
                   </li>
                 )
               })}

@@ -508,8 +508,13 @@ export function AccountEditPage() {
             value={d.portfolioId ?? null}
             onChange={(v) => set({ portfolioId: v })}
             options={[
-              { value: null, label: '不绑定组合' },
-              ...(portfolios ?? []).map((p) => ({ value: p.id ?? null, label: p.name })),
+              { value: null, label: '不绑定组合', description: '账户不跟随任何目标持仓' },
+              ...(portfolios ?? []).map((p) => ({
+                value: p.id ?? null,
+                label: p.name,
+                description: [p.market, p.description].filter(Boolean).join(' · '),
+                hint: p.id == null ? undefined : `#${p.id}`,
+              })),
             ]}
           />
         </Row>
