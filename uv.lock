@@ -265,7 +265,7 @@ dependencies = [
 
 [package.optional-dependencies]
 all = [
-    { name = "gm" },
+    { name = "gm", marker = "sys_platform != 'darwin'" },
     { name = "openctp-ctp" },
     { name = "tqsdk" },
 ]
@@ -273,7 +273,7 @@ ctp = [
     { name = "openctp-ctp" },
 ]
 gm = [
-    { name = "gm" },
+    { name = "gm", marker = "sys_platform != 'darwin'" },
 ]
 tqsdk = [
     { name = "tqsdk" },
@@ -306,7 +306,7 @@ requires-dist = [
     { name = "axile", extras = ["tqsdk"], marker = "extra == 'all'" },
     { name = "croniter", specifier = ">=5.0.0" },
     { name = "fastapi", extras = ["standard"], specifier = ">=0.115.12" },
-    { name = "gm", marker = "extra == 'gm'", specifier = ">=3.0.183" },
+    { name = "gm", marker = "sys_platform != 'darwin' and extra == 'gm'", specifier = ">=3.0.183" },
     { name = "greenlet", specifier = ">=3.3.0" },
     { name = "loguru", specifier = ">=0.7.3" },
     { name = "numpy", specifier = "==2.3.2" },
