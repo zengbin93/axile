@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date, datetime, time, timedelta
 from typing import TYPE_CHECKING, cast
+from zoneinfo import ZoneInfo
 
 from loguru import logger
 
 from axile.common.trade_channel import TradeChannel
 from axile.executor.algorithms.utils import clock_now
+from axile.executor.china_futures_session import is_regular_night_session_transition
 from axile.executor.execution_query_runtime import ExecutionQueryRuntime, ExecutionQueryRuntimeBridge
 from axile.executor.execution_runtime import ExecutionRuntime, ExecutionRuntimeBindings
 from axile.executor.models.unified_input import AccountConfig, UnifiedStandardInput
@@ -88,6 +90,44 @@ class AbstractExecutorExecutionRuntimeHostMixin:
         else:
             executor.logger.warning("未绑定本地交易日历，{} {} 继续放行", calendar_id, current)
         return True
+
+    def _is_china_futures_session_open(self, now: datetime | None = None) -> bool:
+        """按上海自然时间和现有交易日历判断中国期货日夜盘。
+
+        00:00 至 02:30 仍属于前一自然日开始的夜盘。夜盘仅允许普通相邻
+        交易日，或周五至下周一的标准周末转换；节假日前不放行。这里只修正
+        日历归属，具体品种更窄的收盘时间仍由交易渠道校验。
+        """
+        current = now or datetime.now(ZoneInfo("Asia/Shanghai"))
+        current_time = current.timetz().replace(tzinfo=None)
+        if current_time >= time(21):
+            session_start_day = current.date()
+        elif current_time <= time(2, 30):
+            session_start_day = current.date() - timedelta(days=1)
+        else:
+            return self._is_channel_calendar_open(current.date())
+
+        executor = _executor(self)
+        calendar_id = cast("str | None", getattr(executor, "_channel_calendar_id", None))
+        calendar = cast("TradingCalendar | None", getattr(executor, "_trading_calendar", None))
+        if calendar_id is None or calendar is None:
+            return self._is_channel_calendar_open(session_start_day)
+
+        try:
+            if calendar.is_open(calendar_id, session_start_day) is not True:
+                return False
+            for offset in range(1, 15):
+                candidate = session_start_day + timedelta(days=offset)
+                state = calendar.is_open(calendar_id, candidate)
+                if state is None:
+                    executor.logger.warning("{} {} 缺少有效交易日历，继续放行", calendar_id, candidate)
+                    return True
+                if state:
+                    return is_regular_night_session_transition(session_start_day, candidate)
+        except Exception as exc:  # noqa: BLE001 - 日历故障沿用现有兼容口径
+            executor.logger.warning("读取中国期货夜盘日历失败，继续放行: {}", exc)
+            return True
+        return False
 
     def _reset_execution_state(self, standard_input: UnifiedStandardInput) -> None:
         """

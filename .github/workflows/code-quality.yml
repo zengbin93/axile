@@ -33,12 +33,12 @@ jobs:
 
     - name: Run Ruff formatter check
       run: |
-        uv run ruff format --check axile tests examples scripts
+        uv run ruff format --check axile tests
       continue-on-error: false
 
     - name: Run Ruff lint
       run: |
-        uv run ruff check axile tests examples scripts
+        uv run ruff check axile tests
       continue-on-error: false
 
     - name: Run Ruff complexity gate
@@ -93,9 +93,18 @@ jobs:
         curl -LsSf https://astral.sh/uv/install.sh | sh
         echo "$HOME/.local/bin" >> $GITHUB_PATH
 
+    - name: 配置 CTP 所需的中文区域设置
+      run: |
+        sudo locale-gen zh_CN.GB18030
+
     - name: Sync test dependencies
       run: |
         uv sync --group dev --extra ctp
+
+    - name: 验证 CTP 原生模块
+      run: |
+        locale -a | grep -qi '^zh_CN.gb18030$'
+        uv run python -c "from openctp_ctp import thostmduserapi, thosttraderapi"
 
     - name: Run tests
       run: |

@@ -70,7 +70,7 @@ class TQExecutor(AbstractExecutor):
 
     @override
     def _check_trading_time(self) -> bool:
-        return self._is_channel_calendar_open()
+        return self._is_china_futures_session_open()
 
     @override
     def _validate_input(self, standard_input: UnifiedStandardInput) -> None:

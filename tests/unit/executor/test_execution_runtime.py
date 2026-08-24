@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import threading
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any
 
 from axile.common.trade_channel import TradeChannel
@@ -194,6 +194,34 @@ class _RuntimeExecutor(AbstractExecutor):
 
     def is_monitoring(self) -> bool:
         return False
+
+
+class _Calendar:
+    def __init__(self, open_days: set[date]) -> None:
+        self.open_days = open_days
+
+    def is_open(self, _calendar_id: str, day: date) -> bool:
+        return day in self.open_days
+
+
+def test_china_futures_session_keeps_friday_night_open_after_midnight() -> None:
+    executor = _RuntimeExecutor()
+    executor.set_channel_calendar("china")
+    executor.set_trading_calendar(_Calendar({date(2026, 8, 21), date(2026, 8, 24)}))
+
+    assert executor._is_china_futures_session_open(datetime(2026, 8, 22, 1, 30)) is True
+    assert executor._is_china_futures_session_open(datetime(2026, 8, 22, 3, 0)) is False
+
+
+def test_china_futures_session_rejects_sunday_night_and_holiday_eve() -> None:
+    executor = _RuntimeExecutor()
+    executor.set_channel_calendar("china")
+    executor.set_trading_calendar(
+        _Calendar({date(2026, 8, 21), date(2026, 8, 24), date(2026, 9, 30), date(2026, 10, 9)})
+    )
+
+    assert executor._is_china_futures_session_open(datetime(2026, 8, 23, 21, 30)) is False
+    assert executor._is_china_futures_session_open(datetime(2026, 9, 30, 21, 30)) is False
 
 
 def test_prepare_execution_runtime_reuses_active_runtime_and_preserves_audit_seq() -> None:
