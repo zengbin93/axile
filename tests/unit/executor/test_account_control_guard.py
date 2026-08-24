@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
+from threading import Barrier, BrokenBarrierError
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -108,6 +110,69 @@ def test_guard_uses_loaded_baseline_plus_in_memory_deltas() -> None:
         AccountControlScopeType.ACCOUNT,
         AccountControlScopeType.SYMBOL,
     }
+
+
+def test_guard_atomically_checks_and_reserves_concurrent_account_quota(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """并发请求不能在写入内存增量前同时穿透同一份账户额度。"""
+    guard = AccountControlGuard(
+        account_id=11,
+        execution_id="exec-concurrent-quota",
+        channel=TradeChannel("external"),
+        policy=resolve_account_control_policy(
+            "default",
+            AccountControlOverride.model_validate(
+                _override_payload(
+                    {
+                        "query_account": {
+                            "account": {
+                                "per_day": {"limit": 1, "on_trigger": "block"},
+                            }
+                        }
+                    }
+                )
+            ),
+        ),
+        baseline=AccountControlCounterSnapshot(),
+        clock=_clock,
+    )
+    original_resolve = guard._resolve_operation_attempt
+    concurrent_resolutions = Barrier(2)
+
+    def resolve_with_old_race_window(*, operation: str, symbol: str | None):
+        resolved = original_resolve(operation=operation, symbol=symbol)
+        if resolved.decision.kind == "allow":
+            try:
+                concurrent_resolutions.wait(timeout=0.1)
+            except BrokenBarrierError:
+                pass
+        return resolved
+
+    monkeypatch.setattr(guard, "_resolve_operation_attempt", resolve_with_old_race_window)
+
+    def begin() -> str:
+        try:
+            attempt = guard.begin_operation("query_account")
+        except AccountControlBlockedError:
+            return "blocked"
+        attempt.record_outcome("fetched")
+        return "allowed"
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        outcomes = [future.result() for future in [pool.submit(begin), pool.submit(begin)]]
+
+    counter_deltas, events = guard.flush_records()
+
+    assert sorted(outcomes) == ["allowed", "blocked"]
+    assert {delta.bucket_type for delta in counter_deltas} == {
+        AccountControlBucketType.DAY,
+        AccountControlBucketType.MINUTE,
+    }
+    assert all(delta.delta_count == 1 for delta in counter_deltas)
+    assert [event.decision for event in events].count(AccountControlDecision.ALLOWED) == 1
+    assert [event.decision for event in events].count(AccountControlDecision.BLOCKED) == 1
+    assert len({event.event_uid for event in events}) == 2
 
 
 def test_guard_records_account_execution_channel_symbol_and_operation() -> None:

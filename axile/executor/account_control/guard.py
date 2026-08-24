@@ -12,6 +12,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from threading import RLock
 from typing import Callable
 from zoneinfo import ZoneInfo
 
@@ -295,7 +296,7 @@ class AccountControlGuard:
     阅读主线建议：
 
     1. 从 `begin_operation()` 进入一次额度检查。
-    2. 再看 `_resolve_operation_attempt()` 如何在 allow / wait / block 之间决策。
+    2. 再看 `_resolve_operation_attempt()` 如何在单轮评估中产生 allow / wait / block 决策。
     3. 最后看 `flush_records()` 如何导出本次 execution 累积的事件与计数器增量。
     """
 
@@ -324,6 +325,7 @@ class AccountControlGuard:
         self._sleep = self._wait_clock.sleep if sleep is None else sleep
         self._wait_poll_interval_ms = max(wait_poll_interval_ms, 1)
         self._termination_checkpoint = termination_checkpoint
+        self._state_lock = RLock()
         self._event_seq = 0
         self._events: list[AccountControlEventWrite] = []
         self._account_counters: dict[AccountCounterKey, int] = {}
@@ -381,23 +383,32 @@ class AccountControlGuard:
         assert self.account_id is not None
         assert self.execution_id is not None
 
-        resolved_attempt = self._resolve_operation_attempt(
-            operation=operation,
-            symbol=symbol,
-        )
-        if resolved_attempt.decision.kind == "block":
-            self._record_blocked_attempt(
-                operation=operation,
-                symbol=symbol,
-                metadata=metadata,
-                resolved_attempt=resolved_attempt,
-            )
-        return self._record_allowed_attempt(
-            operation=operation,
-            symbol=symbol,
-            metadata=metadata,
-            resolved_attempt=resolved_attempt,
-        )
+        while True:
+            # 同一把锁覆盖“检查额度 → 预占额度 → 记录事件”，避免并发 symbol
+            # 同时看到旧快照后全部放行。等待必须在锁外进行，否则一个受限请求会
+            # 阻塞其他本可立即执行的 operation，也会拖慢终止检查。
+            with self._state_lock:
+                resolved_attempt = self._resolve_operation_attempt(
+                    operation=operation,
+                    symbol=symbol,
+                )
+                if resolved_attempt.decision.kind == "block":
+                    self._record_blocked_attempt(
+                        operation=operation,
+                        symbol=symbol,
+                        metadata=metadata,
+                        resolved_attempt=resolved_attempt,
+                    )
+                if resolved_attempt.decision.kind == "allow":
+                    return self._record_allowed_attempt(
+                        operation=operation,
+                        symbol=symbol,
+                        metadata=metadata,
+                        resolved_attempt=resolved_attempt,
+                    )
+
+                wait_ms = resolved_attempt.decision.wait_ms
+            self._wait_for_quota(wait_ms, symbol)
 
     def update_event_outcome(
         self,
@@ -418,13 +429,14 @@ class AccountControlGuard:
         metadata : Mapping[str, object] | None, optional
             需要合并到原事件中的附加元数据。
         """
-        event = self._events[event_index]
-        self._events[event_index] = event.model_copy(
-            update={
-                "outcome": outcome,
-                "metadata": _merge_metadata(event.metadata, metadata),
-            }
-        )
+        with self._state_lock:
+            event = self._events[event_index]
+            self._events[event_index] = event.model_copy(
+                update={
+                    "outcome": outcome,
+                    "metadata": _merge_metadata(event.metadata, metadata),
+                }
+            )
 
     def flush_records(self) -> tuple[list[AccountControlCounterDeltaWrite], list[AccountControlEventWrite]]:
         """
@@ -440,8 +452,9 @@ class AccountControlGuard:
         assert self.account_id is not None
         assert self.execution_id is not None
 
-        counter_deltas = self._build_counter_deltas()
-        return counter_deltas, list(self._events)
+        with self._state_lock:
+            counter_deltas = self._build_counter_deltas()
+            return counter_deltas, list(self._events)
 
     def _enabled(self) -> bool:
         return self.account_id is not None and self.execution_id is not None and self.policy is not None
@@ -479,20 +492,13 @@ class AccountControlGuard:
         operation: str,
         symbol: str | None,
     ) -> AccountControlResolvedAttempt:
+        """返回当前时刻的一轮额度评估结果，不在此处执行等待。"""
         context = self._current_context()
         decision = self._evaluate_enforcement(
             operation=operation,
             symbol=symbol,
             context=context,
         )
-        while decision.kind == "wait":
-            self._wait_for_quota(decision.wait_ms, symbol)
-            context = self._current_context()
-            decision = self._evaluate_enforcement(
-                operation=operation,
-                symbol=symbol,
-                context=context,
-            )
         return AccountControlResolvedAttempt(context=context, decision=decision)
 
     def _record_blocked_attempt(
