@@ -33,7 +33,6 @@ const SESS = {
     open: '09:30',
     close: '14:50',
     dayClose: '15:00',
-    dow: '1-5',
     m15: ['09:45', '10:00', '10:15', '10:30', '10:45', '11:00', '11:15', '11:30', '13:15', '13:30', '13:45', '14:00', '14:15', '14:30', '14:45', '15:00'],
     m60: ['10:30', '11:30', '14:00', '15:00'],
     m120: ['11:30', '15:00'],
@@ -42,7 +41,6 @@ const SESS = {
     open: '09:00',
     close: '15:00',
     dayClose: '15:00',
-    dow: '1-5',
     m15: ['09:15', '09:30', '09:45', '10:00', '10:15', '10:30', '10:45', '11:00', '11:15', '11:30', '13:45', '14:00', '14:15', '14:30', '14:45', '15:00'],
     m60: ['10:00', '11:00', '14:30', '15:00'],
     m120: ['11:30', '15:00'],
@@ -94,15 +92,15 @@ export const PRESETS: Record<ScheduleKind, Preset[]> = {
     { id: 'd1', label: '每天', sub: '08:00', build: (o) => [`${continuousMinutes([0], o)} 8 * * *`] },
   ],
   cn_stock: [
-    { id: 'open', label: '每交易日 · 开盘', sub: '09:30', build: (o) => timesToCron([SESS.cn_stock.open], '1-5', o) },
-    { id: 'close', label: '每交易日 · 临收', sub: '14:50', build: (o) => timesToCron([SESS.cn_stock.close], '1-5', o) },
-    { id: 'm15', label: '盘中每 15 分', build: (o) => timesToCron(SESS.cn_stock.m15, '1-5', o) },
-    { id: 'm60', label: '盘中每 60 分', build: (o) => timesToCron(SESS.cn_stock.m60, '1-5', o) },
+    { id: 'open', label: '每交易日 · 开盘', sub: '09:30', build: (o) => timesToCron([SESS.cn_stock.open], '*', o) },
+    { id: 'close', label: '每交易日 · 临收', sub: '14:50', build: (o) => timesToCron([SESS.cn_stock.close], '*', o) },
+    { id: 'm15', label: '盘中每 15 分', build: (o) => timesToCron(SESS.cn_stock.m15, '*', o) },
+    { id: 'm60', label: '盘中每 60 分', build: (o) => timesToCron(SESS.cn_stock.m60, '*', o) },
   ],
   cn_futures: [
-    { id: 'close', label: '日盘收盘', sub: '15:00', build: (o) => timesToCron([SESS.cn_futures.dayClose], '1-5', o) },
-    { id: 'm15', label: '日盘每 15 分', build: (o) => timesToCron(SESS.cn_futures.m15, '1-5', o) },
-    { id: 'm60', label: '日盘每 60 分', build: (o) => timesToCron(SESS.cn_futures.m60, '1-5', o) },
+    { id: 'close', label: '日盘收盘', sub: '15:00', build: (o) => timesToCron([SESS.cn_futures.dayClose], '*', o) },
+    { id: 'm15', label: '日盘每 15 分', build: (o) => timesToCron(SESS.cn_futures.m15, '*', o) },
+    { id: 'm60', label: '日盘每 60 分', build: (o) => timesToCron(SESS.cn_futures.m60, '*', o) },
   ],
 }
 
@@ -215,12 +213,12 @@ export function isRuleComplete(rule: ScheduleRule): boolean {
   return true
 }
 
-/** 周几 → cron 第 5 段；空 = 市场默认。 */
-export function daysToCronField(days: number[], market: ScheduleKind): string {
-  if (!days.length) return market === 'continuous' ? '*' : '1-5'
+/** UI 周几（0=日…6=六）→ APScheduler cron 第 5 段（0=一…6=日）。 */
+export function daysToCronField(days: number[]): string {
+  if (!days.length) return '*'
   const sorted = [...new Set(days)].sort((a, b) => a - b)
   if (sorted.length === 7) return '*'
-  return sorted.join(',')
+  return sorted.map((day) => (day === 0 ? 6 : day - 1)).sort((a, b) => a - b).join(',')
 }
 
 /** 市场默认一条完整规则（进高级 / 重置用）。 */
@@ -229,9 +227,9 @@ export function defaultScheduleRule(market: ScheduleKind): ScheduleRule {
     return { id: newRuleId(), freq: 'd1', time: '08:00', days: [], anchor: 'open', draft: false }
   }
   if (market === 'cn_stock') {
-    return { id: newRuleId(), freq: 'd1', time: '09:30', days: [1, 2, 3, 4, 5], anchor: 'open', draft: false }
+    return { id: newRuleId(), freq: 'd1', time: '09:30', days: [], anchor: 'open', draft: false }
   }
-  return { id: newRuleId(), freq: 'd1', time: '15:00', days: [1, 2, 3, 4, 5], anchor: 'close', draft: false }
+  return { id: newRuleId(), freq: 'd1', time: '15:00', days: [], anchor: 'close', draft: false }
 }
 
 /** 由快捷预设 id 展开为一条高级规则。 */
@@ -300,7 +298,7 @@ export function compileScheduleRule(
 ): string[] {
   if (!isRuleComplete(rule)) return []
   const offs = supOffsets(supN, supM)
-  const dow = daysToCronField(rule.days, market)
+  const dow = daysToCronField(rule.days)
 
   if (market === 'continuous') {
     if (rule.freq === 'd1') {
@@ -585,12 +583,11 @@ export function defaultTimerEditorState(market: ScheduleKind): TimerEditorState 
 }
 
 /** 解析 cron 第 5 段（周）为 days 掩码；无法识别返回 null。 */
-function parseDowField(dow: string, market: ScheduleKind): number[] | null {
+function parseDowField(dow: string): number[] | null {
   if (dow === '*') return []
-  // 时段市场默认工作日 → 空数组（UI 显示市场默认）；连续交易则显式 1-5。
-  if (dow === '1-5') return market === 'continuous' ? [1, 2, 3, 4, 5] : []
   if (!/^\d+(,\d+)*$/.test(dow)) return null
-  const days = [...new Set(dow.split(',').map(Number))].filter((d) => d >= 0 && d <= 6).sort((a, b) => a - b)
+  const cronDays = [...new Set(dow.split(',').map(Number))].filter((d) => d >= 0 && d <= 6)
+  const days = cronDays.map((day) => (day === 6 ? 0 : day + 1)).sort((a, b) => a - b)
   return days.length ? days : null
 }
 
@@ -599,7 +596,7 @@ function parseDowField(dow: string, market: ScheduleKind): number[] | null {
  *
  * 仅支持 ``M H * * DOW``（分/时为单个数字）；列表分钟、步长、DOM/MON 非 ``*`` 时放弃。
  */
-function tryParseDailyRules(market: ScheduleKind, cronExpr: string): ScheduleRule[] | null {
+function tryParseDailyRules(cronExpr: string): ScheduleRule[] | null {
   const lines = cronExpr
     .split(/[|\n]/)
     .map((s) => s.trim())
@@ -612,7 +609,7 @@ function tryParseDailyRules(market: ScheduleKind, cronExpr: string): ScheduleRul
     const [min, hour, dom, mon, dow] = parts
     if (dom !== '*' || mon !== '*') return null
     if (!/^\d{1,2}$/.test(min) || !/^\d{1,2}$/.test(hour)) return null
-    const days = parseDowField(dow, market)
+    const days = parseDowField(dow)
     if (days == null) return null
     const h = Number(hour)
     const m = Number(min)
@@ -685,7 +682,7 @@ export function parseTimerIntent(market: ScheduleKind, cronExpr: string): TimerE
     }
   }
 
-  const daily = tryParseDailyRules(market, trimmed)
+  const daily = tryParseDailyRules(trimmed)
   if (daily?.length) {
     return {
       autoOn: true,

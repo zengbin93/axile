@@ -61,22 +61,22 @@ describe('compileCustom · continuous', () => {
 
 describe('compileCustom · 时段市场按锚点落点', () => {
   it('A股日线 open=09:30 / close=14:50', () => {
-    expect(compileCustom('cn_stock', 'd1', 'open', 0, 0)).toEqual(['30 9 * * 1-5'])
-    expect(compileCustom('cn_stock', 'd1', 'close', 0, 0)).toEqual(['50 14 * * 1-5'])
+    expect(compileCustom('cn_stock', 'd1', 'open', 0, 0)).toEqual(['30 9 * * *'])
+    expect(compileCustom('cn_stock', 'd1', 'close', 0, 0)).toEqual(['50 14 * * *'])
   })
 
   it('CTP 日线 close=15:00', () => {
-    expect(compileCustom('cn_futures', 'd1', 'close', 0, 0)).toEqual(['0 15 * * 1-5'])
+    expect(compileCustom('cn_futures', 'd1', 'close', 0, 0)).toEqual(['0 15 * * *'])
   })
 
   it('m240 与日线同锚点', () => {
-    expect(compileCustom('cn_stock', 'm240', 'close', 0, 0)).toEqual(['50 14 * * 1-5'])
+    expect(compileCustom('cn_stock', 'm240', 'close', 0, 0)).toEqual(['50 14 * * *'])
   })
 
   it('A股 m120 用时段表 11:30/15:00（含 m120，验证 SESS 已补齐）', () => {
     expect(compileCustom('cn_stock', 'm120', 'open', 0, 0)).toEqual([
-      '0 15 * * 1-5',
-      '30 11 * * 1-5',
+      '0 15 * * *',
+      '30 11 * * *',
     ])
   })
 })
@@ -86,10 +86,14 @@ describe('compileScheduleRule · 可调时刻与周几', () => {
     expect(compileScheduleRule('continuous', rule({ time: '09:30' }), 0, 0)).toEqual(['30 9 * * *'])
   })
 
-  it('连续交易工作日 08:00', () => {
+  it('显式选择周一至周五时转换为 APScheduler 编号', () => {
     expect(compileScheduleRule('continuous', rule({ time: '08:00', days: [1, 2, 3, 4, 5] }), 0, 0)).toEqual([
-      '0 8 * * 1,2,3,4,5',
+      '0 8 * * 0,1,2,3,4',
     ])
+  })
+
+  it('显式选择周日时转换为 APScheduler 的 6', () => {
+    expect(compileScheduleRule('continuous', rule({ days: [0] }), 0, 0)).toEqual(['0 8 * * 6'])
   })
 
   it('空槽不编译', () => {
@@ -145,7 +149,7 @@ describe('buildCronList · 补发放大偏移', () => {
   })
 
   it('A股多选预设拼接多条规则（开盘+临收）', () => {
-    expect(buildCronList('cn_stock', ['open', 'close'], 0, 0)).toEqual(['30 9 * * 1-5', '50 14 * * 1-5'])
+    expect(buildCronList('cn_stock', ['open', 'close'], 0, 0)).toEqual(['30 9 * * *', '50 14 * * *'])
   })
 })
 

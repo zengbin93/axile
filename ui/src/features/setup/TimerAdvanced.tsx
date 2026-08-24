@@ -93,12 +93,12 @@ function patchRule(rule: ScheduleRule, patch: Partial<ScheduleRule>): ScheduleRu
   return next
 }
 
-function defaultDaysHint(market: ScheduleKind): string {
-  return market === 'continuous' ? '每天' : '工作日'
+function defaultDaysHint(): string {
+  return '不限日期'
 }
 
-function daysSub(days: number[], market: ScheduleKind): string {
-  if (!days.length) return defaultDaysHint(market)
+function daysSub(days: number[]): string {
+  if (!days.length) return defaultDaysHint()
   if (days.length === 7) return '每天'
   const work = [1, 2, 3, 4, 5]
   if (days.length === 5 && work.every((d) => days.includes(d))) return '工作日'
@@ -108,11 +108,11 @@ function daysSub(days: number[], market: ScheduleKind): string {
     .join('')}`
 }
 
-function ruleLines(rule: ScheduleRule, market: ScheduleKind): { title: string; sub: string } {
+function ruleLines(rule: ScheduleRule): { title: string; sub: string } {
   if (rule.draft && rule.freq === 'd1' && !isValidTime(rule.time)) {
     return { title: '新时间', sub: '未设置' }
   }
-  const days = daysSub(rule.days, market)
+  const days = daysSub(rule.days)
   if (rule.freq === 'd1') {
     const t = isValidTime(rule.time) ? rule.time : '—:—'
     return { title: t, sub: days }
@@ -122,12 +122,10 @@ function ruleLines(rule: ScheduleRule, market: ScheduleKind): { title: string; s
 
 /** 主锚下方的周几。 */
 function DayStrip({
-  market,
   days,
   onToggle,
   onReset,
 }: {
-  market: ScheduleKind
   days: number[]
   onToggle: (d: number) => void
   onReset: () => void
@@ -136,7 +134,7 @@ function DayStrip({
   return (
     <div className="flex flex-col items-center gap-2">
       <div className="flex items-center gap-2 text-[12px] text-ink-3">
-        <span>重复 · {customized ? daysSub(days, market) : defaultDaysHint(market)}</span>
+        <span>重复 · {customized ? daysSub(days) : defaultDaysHint()}</span>
         {customized && (
           <button type="button" className="font-semibold text-accent hover:underline" onClick={onReset}>
             默认
@@ -239,9 +237,7 @@ export function TimerAdvanced({ market, rules, selectedId, customCronOn, onChang
   const toggleDay = (d: number) => {
     if (!selected) return
     if (selected.days.length === 0) {
-      const seed = market === 'continuous' ? [0, 1, 2, 3, 4, 5, 6] : [1, 2, 3, 4, 5]
-      const days = seed.includes(d) ? seed.filter((x) => x !== d) : [...seed, d]
-      replaceSelected({ days: days.sort((a, b) => a - b) })
+      replaceSelected({ days: [d] })
       return
     }
     const has = selected.days.includes(d)
@@ -302,7 +298,6 @@ export function TimerAdvanced({ market, rules, selectedId, customCronOn, onChang
 
       <div className="mt-6">
         <DayStrip
-          market={market}
           days={selected.days}
           onToggle={toggleDay}
           onReset={() => replaceSelected({ days: [] })}
@@ -345,7 +340,7 @@ export function TimerAdvanced({ market, rules, selectedId, customCronOn, onChang
           {rules.map((r, i) => {
             const active = r.id === selected.id
             const incomplete = !isRuleComplete(r)
-            const { title, sub } = ruleLines(r, market)
+            const { title, sub } = ruleLines(r)
             return (
               <li key={r.id}>
                 <div
@@ -429,7 +424,7 @@ export function TimerCustomCron({ customCronOn, rawCron, rawErr, onCustomCronOn,
             <textarea
               value={rawCron}
               onChange={(e) => onRawCron(e.target.value)}
-              placeholder="0 8 * * * | 0 20 * * 1-5"
+              placeholder="0 8 * * * | 0 20 * * 0,2,4"
               tabIndex={customCronOn ? 0 : -1}
               className="min-h-[80px] w-full rounded-[9px] border border-ink-3/30 bg-surface p-3 font-mono text-xs outline-none focus:border-ink-2"
             />
