@@ -407,8 +407,8 @@ export function TimerCustomCron({ customCronOn, rawCron, rawErr, onCustomCronOn,
     <div className="border-t border-line pt-4">
       <div className="flex items-center justify-between gap-3">
         <div>
-          <div className="text-[14px] font-[640]">自定义模式</div>
-          <div className="text-xs text-ink-3">开启后以表达式为准，上方图形配置不再生效</div>
+          <div className="text-[14px] font-[640]">Cron 表达式</div>
+          <div className="text-xs text-ink-3">开启后以 Cron 为准，上方图形配置不再生效</div>
         </div>
         <Switch on={customCronOn} onClick={() => onCustomCronOn(!customCronOn)} />
       </div>
@@ -420,7 +420,7 @@ export function TimerCustomCron({ customCronOn, rawCron, rawErr, onCustomCronOn,
       >
         <div className="overflow-hidden">
           <div className={customCronOn && fade.current ? 'panel-fade-in' : ''}>
-            <div className="mb-1.5 text-xs text-ink-3">多条用 | 分隔 · 北京时间 · 5 段 cron</div>
+            <div className="mb-1.5 text-xs text-ink-3">多条用 | 分隔 · 北京时间 · 5 段 Cron</div>
             <textarea
               value={rawCron}
               onChange={(e) => onRawCron(e.target.value)}

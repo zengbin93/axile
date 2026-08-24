@@ -303,7 +303,7 @@ export function TimerEditor({ tradeChannel, scheduleKind, value, onChange }: Tim
                   </div>
                   {scheduleKind === 'cn_futures' && (
                     <div className="mt-2 text-xs text-ink-3">
-                      夜盘及品种时段差异大，请用「高级」或自定义表达式。
+                      夜盘及品种时段差异大，请用「高级」或 Cron 表达式。
                     </div>
                   )}
                 </div>
@@ -333,7 +333,7 @@ export function TimerEditor({ tradeChannel, scheduleKind, value, onChange }: Tim
               {!tradeChannel ? (
                 <p className="text-[13px] text-ink-3">选择交易渠道后显示。</p>
               ) : rawErr ? (
-                <p className="text-[13px] text-ink-3">修正表达式后显示。</p>
+                <p className="text-[13px] text-ink-3">修正 Cron 表达式后显示。</p>
               ) : previewError ? (
                 <p className="border-l-2 border-warn px-3 text-[13px] text-warn">预览暂不可用，仍可保存。{previewError}</p>
               ) : previewLoading && !schedulePreview ? (

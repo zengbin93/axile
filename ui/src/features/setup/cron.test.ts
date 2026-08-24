@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'bun:test'
+import { describe, it, expect, setSystemTime } from 'bun:test'
 
 import {
   buildCronList,
@@ -7,6 +7,7 @@ import {
   describeCron,
   describeRule,
   makeEmptySlot,
+  nextFires,
   parseTimerIntent,
   resolveCronList,
   timerStateToCronExpr,
@@ -185,13 +186,52 @@ describe('describeCron · cron 反解人话', () => {
     expect(describeCron('cn_stock', buildCronList('cn_stock', ['open'], 0, 0).join(' | '))).toBe('每交易日 · 开盘 09:30')
   })
 
-  it('多选 / 裸 cron 等非单预设组合返回 null', () => {
-    expect(describeCron('continuous', '7 3 * * *')).toBeNull()
-    expect(describeCron('cn_stock', buildCronList('cn_stock', ['open', 'close'], 0, 0).join(' | '))).toBeNull()
+  it('通用固定时刻使用自然语言', () => {
+    expect(describeCron('continuous', '0 15 * * *')).toBe('每天 15:00')
+  })
+
+  it('按 APScheduler 编号描述显式星期', () => {
+    expect(describeCron('continuous', '0 9 * * 0,2,4')).toBe('每周一、三、五 09:00')
+    expect(describeCron('continuous', '0 9 * * 6')).toBe('每周日 09:00')
+  })
+
+  it('描述常见分钟和小时步长', () => {
+    expect(describeCron('continuous', '*/15 * * * *')).toBe('每 15 分钟')
+    expect(describeCron('continuous', '0 */4 * * *')).toBe('每 4 小时')
+  })
+
+  it('合并星期相同的多个固定时刻', () => {
+    expect(describeCron('continuous', '0 9 * * * | 0 15 * * *')).toBe('每天 09:00、15:00')
+  })
+
+  it('不猜测复杂日期、范围或异构多规则', () => {
+    expect(describeCron('continuous', '0 9 1 * *')).toBeNull()
+    expect(describeCron('continuous', '0 9 * * 0-4')).toBeNull()
+    expect(describeCron('continuous', '0 9 * * * | */15 * * * *')).toBeNull()
+  })
+
+  it('预设未命中时继续描述通用固定时刻', () => {
+    expect(describeCron('continuous', '7 3 * * *')).toBe('每天 03:07')
+    expect(describeCron('cn_stock', buildCronList('cn_stock', ['open', 'close'], 0, 0).join(' | '))).toBe(
+      '每天 09:30、14:50',
+    )
   })
 
   it('空表达式返回 null', () => {
     expect(describeCron('continuous', '')).toBeNull()
+  })
+})
+
+describe('nextFires · APScheduler 星期语义', () => {
+  it('0 表示周一而不是周日', () => {
+    setSystemTime(new Date(2026, 7, 23, 12, 0))
+    try {
+      const [next] = nextFires(['0 9 * * 0'], 1)
+      expect(next?.getDay()).toBe(1)
+      expect(next?.getHours()).toBe(9)
+    } finally {
+      setSystemTime()
+    }
   })
 })
 

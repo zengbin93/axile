@@ -67,10 +67,10 @@ export function AccountEditTimerPage() {
   // 与总览入口同构摘要（随草稿变）。
   const timerSummary = !cronNext.trim()
     ? '已关 · 仅手动'
-    : (describeCron(scheduleKind, cronNext) ?? '自定义节奏')
+    : (describeCron(scheduleKind, cronNext) ?? '自定义执行节奏')
 
   const save = async () => {
-    if (err) return toast(`定时表达式有误：${err}`)
+    if (err) return toast(`执行节奏有误：${err}`)
     if (!dirty) return toast('没有改动')
     setSaving(true)
     try {
@@ -95,7 +95,7 @@ export function AccountEditTimerPage() {
         summary={timerSummary}
         trailing={<Chip>{channelLabel(acc.trade_channel, acc.market)}</Chip>}
         shellVtName={editShellVtName(accountId, 'timer')}
-        lead={`${acc.name} · 完整快捷 / 高级配置 · 时间均为北京时间。保存只更新排程表达式，不改启停状态。`}
+        lead={`${acc.name} · 完整快捷 / 高级配置 · 时间均为北京时间。保存只更新自动执行计划，不改启停状态。`}
       />
 
       <div className="mt-6">

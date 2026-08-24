@@ -413,7 +413,7 @@ export function AccountDetail({ accountId, item, onDashboardRefresh }: AccountDe
             <span className="flex min-w-0 flex-1 items-center justify-end">
               <OverflowText
                 className="min-w-0 flex-1 text-right font-medium text-ink-1"
-                text={cronExpr ? (cronHuman ?? '自定义') : '—'}
+                text={cronExpr ? (cronHuman ?? '自定义执行节奏') : '—'}
               />
               <span className="ml-1.5 flex-none text-ink-3" aria-hidden>
                 ›

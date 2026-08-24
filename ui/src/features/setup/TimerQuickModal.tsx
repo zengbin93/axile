@@ -222,7 +222,7 @@ function TimerQuickModalReady({
                   <div>
                     <div className="text-sm font-[640]">{state.autoOn ? '自动调仓已开' : '自动调仓已关'}</div>
                     <div className="text-xs text-ink-3">
-                      {state.autoOn ? '按下方节奏自动执行' : '仅手动 / 外接触发（清空排程表达式）'}
+                      {state.autoOn ? '按下方节奏自动执行' : '仅手动 / 外接触发'}
                     </div>
                   </div>
                 </div>
@@ -302,7 +302,7 @@ function TimerQuickModalReady({
                     className="text-[12.5px] font-semibold text-accent hover:underline"
                     onClick={onClose}
                   >
-                    高级节奏 · 多时刻 / 自定义表达式 →
+                    高级节奏 · 多时刻 / Cron 表达式 →
                   </Link>
                 </div>
               </div>

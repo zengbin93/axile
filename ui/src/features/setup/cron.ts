@@ -432,7 +432,7 @@ export function cronError(raw: string): string | null {
     .map((s) => s.trim())
     .filter(Boolean)
   const bad = rules.some((s) => s.split(/\s+/).length !== 5)
-  return bad ? 'cron 格式有误：每条规则须为 5 段（分 时 日 月 周）。' : null
+  return bad ? 'Cron 格式有误：每条规则须为 5 段（分 时 日 月 周）。' : null
 }
 
 /** 拼成后端要的单字符串（`|` 分隔）。 */
@@ -468,12 +468,14 @@ function matchField(expr: string, val: number): boolean {
 }
 
 function cronMatch(f: string[], d: Date): boolean {
+  const jsDay = d.getDay()
+  const apschedulerDay = jsDay === 0 ? 6 : jsDay - 1
   return (
     matchField(f[0], d.getMinutes()) &&
     matchField(f[1], d.getHours()) &&
     matchField(f[2], d.getDate()) &&
     matchField(f[3], d.getMonth() + 1) &&
-    matchField(f[4].replace(/7/g, '0'), d.getDay())
+    matchField(f[4], apschedulerDay)
   )
 }
 
@@ -524,12 +526,71 @@ function normCronSet(expr: string): string {
 const SUP_N = [0, 1, 2, 3, 4]
 const SUP_M = [1, 2, 3, 5]
 
+interface FixedCronTime {
+  time: string
+  dow: string
+}
+
+/** APScheduler 周字段→人话；仅接受 ``*`` 或显式数字列表。 */
+function describeDow(dow: string): string | null {
+  if (dow === '*') return '每天'
+  if (!/^\d(?:,\d)*$/.test(dow)) return null
+  const days = [...new Set(dow.split(',').map(Number))].sort((a, b) => a - b)
+  if (!days.length || days.some((day) => day < 0 || day > 6)) return null
+  if (days.length === 7) return '每天'
+  const labels = ['一', '二', '三', '四', '五', '六', '日']
+  return `每周${days.map((day) => labels[day]).join('、')}`
+}
+
+/** 仅解析无日/月限制的单一固定时刻。 */
+function parseFixedCronTime(line: string): FixedCronTime | null {
+  const [minute, hour, dom, month, dow, ...rest] = line.trim().split(/\s+/)
+  if (rest.length || dom !== '*' || month !== '*' || describeDow(dow) == null) return null
+  if (!/^\d{1,2}$/.test(minute) || !/^\d{1,2}$/.test(hour)) return null
+  const m = Number(minute)
+  const h = Number(hour)
+  if (m > 59 || h > 23) return null
+  return { time: `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`, dow }
+}
+
+/** 常见五段 Cron 的保守型人话描述；无法无损表达时返回 ``null``。 */
+function describeCommonCron(expr: string): string | null {
+  const lines = expr.split(/[|\n]/).map((line) => line.trim()).filter(Boolean)
+  if (!lines.length) return null
+
+  const fixed = lines.map(parseFixedCronTime)
+  if (fixed.every((item): item is FixedCronTime => item != null)) {
+    const dow = fixed[0]!.dow
+    if (!fixed.every((item) => item.dow === dow)) return null
+    const prefix = describeDow(dow)
+    if (!prefix) return null
+    const times = [...new Set(fixed.map((item) => item.time))].sort()
+    return `${prefix} ${times.join('、')}`
+  }
+
+  if (lines.length !== 1) return null
+  const [minute, hour, dom, month, dow, ...rest] = lines[0]!.split(/\s+/)
+  if (rest.length || dom !== '*' || month !== '*' || dow !== '*') return null
+  const minuteStep = minute.match(/^\*\/(\d{1,2})$/)
+  if (minuteStep && hour === '*') {
+    const step = Number(minuteStep[1])
+    return step >= 1 && step <= 59 ? `每 ${step} 分钟` : null
+  }
+  if (minute === '0' && hour === '*') return '每小时'
+  const hourStep = hour.match(/^\*\/(\d{1,2})$/)
+  if (minute === '0' && hourStep) {
+    const step = Number(hourStep[1])
+    return step >= 1 && step <= 23 ? `每 ${step} 小时` : null
+  }
+  return null
+}
+
 /**
  * 反解 cron 为设置向导同款人话（预设名 + 补发次数）。
  *
  * 复用正向 {@link buildCronList} 穷举「单预设 × 补发档位」，规范化后与目标比对，命中即
  * 得如「每 15 分钟 · 补发 2 次」的短语；命不中任何预设组合（多选 / 自定义节奏 / 裸 cron）
- * 时返回 ``null``，由上层降级为「自定义 + 下次触发预览」。
+ * 时再尝试通用五段 Cron 人话描述；仍无法无损表达时返回 ``null``。
  *
  * @param market 目标市场，决定候选预设集。
  * @param cronExpr 存储的 crontab（多条以 `|` 或换行分隔）。
@@ -547,7 +608,7 @@ export function describeCron(market: ScheduleKind, cronExpr: string): string | n
       }
     }
   }
-  return null
+  return describeCommonCron(target)
 }
 
 /* ------------------ cron → 编辑器意图反解（账户编辑页） ------------------ */

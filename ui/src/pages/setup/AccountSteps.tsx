@@ -22,7 +22,7 @@ import { useDomainStore } from '@/stores/domain'
 import { useChannelCatalogStore, useChannelDescriptor } from '@/stores/channels'
 import { initialTimerForSchedule, useWizardStore } from '@/stores/wizard'
 import { useToastStore } from '@/stores/ui'
-import { resolveCronList, cronToExpr } from '@/features/setup/cron'
+import { resolveCronList, cronToExpr, describeCron, fmtFire, nextFires } from '@/features/setup/cron'
 import { TimerEditor, type TimerEditorState } from '@/features/setup/TimerEditor'
 import { algoLabel, intentFromParams, validateAlgorithmRef } from '@/features/setup/algorithms'
 import { AlgorithmEditor } from '@/features/setup/AlgorithmEditor'
@@ -664,6 +664,11 @@ export function AcctConfirm() {
 
   const cronList = scheduleKind ? resolveCronList(scheduleKind, acct) : []
   const cronExpr = cronToExpr(cronList)
+  const scheduleDescription = scheduleKind ? describeCron(scheduleKind, cronExpr) : null
+  const scheduleText = !acct.autoOn
+    ? '已关闭'
+    : scheduleDescription ?? '自定义执行节奏'
+  const scheduleFires = acct.autoOn && !scheduleDescription ? nextFires(cronList, 3) : []
 
   const intentText = algorithmSummary(acct.algorithm)
   const levText = showShortLeverage
@@ -754,9 +759,13 @@ export function AcctConfirm() {
             {acct.autoOn ? '自动' : '手动'}调仓，杠杆 <b className="font-[680]">{levText}</b>。
           </div>
           <div className="mt-2 text-xs text-ink-3">
-            执行超时 {acct.executionTimeout} 秒 · cron：
-            <code className="rounded bg-fill px-1.5 py-0.5 font-mono">{cronExpr}</code>
+            自动执行：{scheduleText} · 执行超时 {acct.executionTimeout} 秒
           </div>
+          {scheduleFires.length > 0 && (
+            <div className="mt-1 text-xs text-ink-3">
+              接下来：{scheduleFires.map(fmtFire).join(' · ')}
+            </div>
+          )}
 
           <div className="mt-5">
             <button className="cursor-pointer rounded-[11px] border-0 bg-ink-1 px-[22px] py-2.5 text-[14px] font-[550] text-surface" onClick={preview}>
