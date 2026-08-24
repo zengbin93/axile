@@ -324,7 +324,7 @@ class AccountListPublic(SQLModel):
 
 
 class AccountNextRunPublic(SQLModel):
-    """账户下一次调度执行时间的响应载荷.
+    """账户未来调度执行时间的响应载荷.
 
     Attributes
     ----------
@@ -334,11 +334,17 @@ class AccountNextRunPublic(SQLModel):
         当前是否存在对应的调度任务（账户已启动且已绑定组合时才有）。
     next_run_time : Optional[str]
         下一次执行时间的 ISO8601 字符串；无调度任务或任务无下次触发时为 ``None``。
+    next_run_times : List[str]
+        未来最多三次执行时间的 ISO8601 字符串，按时间升序排列。
+    next_execution_times : List[str]
+        按交易日历过滤后，未来最多三次实际执行时间。
     """
 
     account_id: int
     is_scheduled: bool
     next_run_time: Optional[str] = None
+    next_run_times: List[str] = Field(default_factory=list)
+    next_execution_times: List[str] = Field(default_factory=list)
 
 
 class AccountDashboardItemPublic(SQLModel):

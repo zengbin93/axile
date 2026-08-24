@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import date, datetime, time, timedelta
 from typing import Any, cast
 
 from fastapi import APIRouter, HTTPException, status
@@ -14,7 +15,7 @@ from axile.common.trade_channel import TradeChannel
 from axile.executor.account_control.models import AccountControlOverride
 from axile.server.api.deps import SchedDep, SessionDep
 from axile.server.api.routes.account_support import _get_account_or_404
-from axile.server.cron import parse_cron_expr
+from axile.server.cron import SCHEDULER_TIMEZONE, parse_cron_expr
 from axile.server.db.models import (
     Account,
     AccountAssetSnapshot,
@@ -46,6 +47,7 @@ from axile.server.repositories import (
     get_recent_account_asset_snapshots_for_accounts,
     get_recent_execute_records_for_accounts,
 )
+from axile.server.trading_calendar import CalendarDecisionStatus, evaluate_channel_calendar_days
 
 router = APIRouter()
 
@@ -76,6 +78,77 @@ def _account_route_module() -> Any:
     from axile.server.api.routes import account as account_routes
 
     return account_routes
+
+
+def _next_job_run_times(job: Any, *, limit: int = 3) -> list[str]:
+    """从 APScheduler 任务真源展开未来触发时间.
+
+    Parameters
+    ----------
+    job : Any
+        APScheduler 任务；须提供 ``next_run_time`` 与 ``trigger``。
+    limit : int, optional
+        最多返回的触发次数。
+
+    Returns
+    -------
+    list[str]
+        按时间升序排列的 ISO8601 时间；暂停或已结束任务返回空列表。
+    """
+    current = getattr(job, "next_run_time", None)
+    trigger = getattr(job, "trigger", None)
+    result: list[str] = []
+    while current is not None and len(result) < limit:
+        encoded = current.isoformat()
+        if not result or result[-1] != encoded:
+            result.append(encoded)
+        if trigger is None:
+            break
+        current = trigger.get_next_fire_time(current, current)
+    return result
+
+
+async def _next_job_execution_times(
+    session: SessionDep,
+    job: Any,
+    channel: TradeChannel | str,
+    *,
+    limit: int = 3,
+) -> list[str]:
+    """按交易日历过滤未来真正会执行的触发时间.
+
+    明确休市的自然日整体跳过；无日历或日历不可用时遵循执行链路的
+    fail-open 契约，仍把原始排程视为会执行。
+    """
+    current = getattr(job, "next_run_time", None)
+    trigger = getattr(job, "trigger", None)
+    if current is None:
+        return []
+
+    result: list[str] = []
+    decisions: dict[date, CalendarDecisionStatus] = {}
+    first_day = current.astimezone(SCHEDULER_TIMEZONE).date()
+    last_day = first_day + timedelta(days=400)
+    while current is not None and len(result) < limit:
+        local_time = current.astimezone(SCHEDULER_TIMEZONE)
+        calendar_day = local_time.date()
+        if calendar_day > last_day:
+            break
+        if calendar_day not in decisions:
+            decision = (await evaluate_channel_calendar_days(session, channel, [calendar_day]))[calendar_day]
+            decisions[calendar_day] = decision.status
+        if decisions[calendar_day] is not CalendarDecisionStatus.AVAILABLE_CLOSED:
+            result.append(current.isoformat())
+            if trigger is None:
+                break
+            current = trigger.get_next_fire_time(current, current)
+            continue
+
+        if trigger is None:
+            break
+        next_day = datetime.combine(calendar_day + timedelta(days=1), time.min, tzinfo=SCHEDULER_TIMEZONE)
+        current = trigger.get_next_fire_time(current, next_day)
+    return result
 
 
 async def _create_account_record(
@@ -477,7 +550,7 @@ async def account_next_run_time(
     account_id: int,
 ) -> AccountNextRunPublic:
     """
-    获取账户下一次调度执行时间.
+    获取账户未来三次调度执行时间.
 
     Parameters
     ----------
@@ -491,7 +564,7 @@ async def account_next_run_time(
     Returns
     -------
     AccountNextRunPublic
-        账户的调度状态与下一次执行时间（ISO8601 字符串；无任务或无下次触发时为 ``None``）。
+        账户的调度状态、原始触发时间，以及按交易日历过滤后的实际执行时间。
 
     Raises
     ------
@@ -500,16 +573,21 @@ async def account_next_run_time(
 
     Notes
     -----
-    直接读取 APScheduler 中已算好的 ``next_run_time``，避免前端用 ``cron_expr``
-    在客户端自行推算而踩到时区/夏令时误差。
+    首次时间直接读取 APScheduler 的 ``next_run_time``，后续时间从同一任务 trigger
+    继续展开。实际执行时间再复用执行链路的交易日历 fail-open 契约，仅过滤明确休市日。
     """
-    await _get_account_or_404(session, account_id)
+    account = await _get_account_or_404(session, account_id)
     job = sched.get_job(str(account_id))  # type: ignore[no-untyped-call]
-    next_run = getattr(job, "next_run_time", None) if job is not None else None
+    next_run_times = _next_job_run_times(job) if job is not None else []
+    next_execution_times = (
+        await _next_job_execution_times(session, job, account.trade_channel) if job is not None else []
+    )
     return AccountNextRunPublic(
         account_id=account_id,
         is_scheduled=job is not None,
-        next_run_time=next_run.isoformat() if next_run is not None else None,
+        next_run_time=next_run_times[0] if next_run_times else None,
+        next_run_times=next_run_times,
+        next_execution_times=next_execution_times,
     )
 
 

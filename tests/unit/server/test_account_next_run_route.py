@@ -4,13 +4,19 @@ from __future__ import annotations
 
 from collections.abc import AsyncGenerator
 from datetime import datetime
+from types import SimpleNamespace
 
+import pytest
+from apscheduler.triggers.combining import OrTrigger
+from apscheduler.triggers.cron import CronTrigger
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from axile.server.api.deps import get_db, get_scheduler
 from axile.server.api.routes import account as account_routes
+from axile.server.api.routes import account_crud
 from axile.server.db.models import Account
+from axile.server.trading_calendar import CalendarDecisionStatus
 from tests.unit.server._execution_test_support import build_account
 
 
@@ -25,8 +31,9 @@ class _RouteSession:
 
 
 class _Job:
-    def __init__(self, next_run_time: datetime | None) -> None:
+    def __init__(self, next_run_time: datetime | None, trigger: object | None = None) -> None:
         self.next_run_time = next_run_time
+        self.trigger = trigger
 
 
 class _Scheduler:
@@ -49,10 +56,22 @@ def _build_app(session: _RouteSession, scheduler: _Scheduler) -> FastAPI:
     return app
 
 
+@pytest.fixture(autouse=True)
+def _calendar_not_required(monkeypatch: pytest.MonkeyPatch) -> None:
+    """默认模拟无需交易日历的渠道，专门用例再覆盖判定。"""
+
+    async def evaluate(_session: object, _channel: object, days: list[object]) -> dict[object, SimpleNamespace]:
+        return {day: SimpleNamespace(status=CalendarDecisionStatus.NOT_REQUIRED) for day in days}
+
+    monkeypatch.setattr(account_crud, "evaluate_channel_calendar_days", evaluate)
+
+
 def test_next_run_time_returns_iso_when_job_scheduled() -> None:
-    """存在调度任务且有下次触发时，返回 ISO 时间与 is_scheduled=True。"""
-    next_run = datetime(2026, 7, 2, 9, 3, 0)
-    app = _build_app(_RouteSession(build_account(id=1)), _Scheduler(_Job(next_run)))
+    """存在调度任务时返回未来三次，并保留单值字段兼容调用方。"""
+    timezone = "Asia/Shanghai"
+    trigger = CronTrigger(hour=9, minute=3, timezone=timezone)
+    next_run = datetime.fromisoformat("2026-07-02T09:03:00+08:00")
+    app = _build_app(_RouteSession(build_account(id=1)), _Scheduler(_Job(next_run, trigger)))
 
     response = TestClient(app).get("/account/1/next_run_time")
 
@@ -61,7 +80,88 @@ def test_next_run_time_returns_iso_when_job_scheduled() -> None:
         "account_id": 1,
         "is_scheduled": True,
         "next_run_time": next_run.isoformat(),
+        "next_run_times": [
+            "2026-07-02T09:03:00+08:00",
+            "2026-07-03T09:03:00+08:00",
+            "2026-07-04T09:03:00+08:00",
+        ],
+        "next_execution_times": [
+            "2026-07-02T09:03:00+08:00",
+            "2026-07-03T09:03:00+08:00",
+            "2026-07-04T09:03:00+08:00",
+        ],
     }
+
+
+def test_next_run_times_merge_multiple_cron_rules_in_order() -> None:
+    """组合触发器跨日展开时保持去重与升序。"""
+    timezone = "Asia/Shanghai"
+    trigger = OrTrigger(
+        [
+            CronTrigger(hour=10, minute=0, timezone=timezone),
+            CronTrigger(hour=15, minute=0, timezone=timezone),
+        ]
+    )
+    next_run = datetime.fromisoformat("2026-07-02T10:00:00+08:00")
+    app = _build_app(_RouteSession(build_account(id=1)), _Scheduler(_Job(next_run, trigger)))
+
+    response = TestClient(app).get("/account/1/next_run_time")
+
+    assert response.status_code == 200
+    assert response.json()["next_run_times"] == [
+        "2026-07-02T10:00:00+08:00",
+        "2026-07-02T15:00:00+08:00",
+        "2026-07-03T10:00:00+08:00",
+    ]
+
+
+def test_next_execution_times_skip_closed_calendar_days(monkeypatch: pytest.MonkeyPatch) -> None:
+    """明确休市的触发点不进入实际执行时间表，并继续向后补满三次。"""
+    trigger = CronTrigger(hour=10, minute=0, timezone="Asia/Shanghai")
+    next_run = datetime.fromisoformat("2026-07-03T10:00:00+08:00")  # 周五
+
+    async def evaluate(_session: object, _channel: object, days: list[object]) -> dict[object, SimpleNamespace]:
+        return {
+            day: SimpleNamespace(
+                status=(
+                    CalendarDecisionStatus.AVAILABLE_CLOSED
+                    if str(day) in {"2026-07-03", "2026-07-04", "2026-07-05"}
+                    else CalendarDecisionStatus.AVAILABLE_OPEN
+                )
+            )
+            for day in days
+        }
+
+    monkeypatch.setattr(account_crud, "evaluate_channel_calendar_days", evaluate)
+    app = _build_app(_RouteSession(build_account(id=1)), _Scheduler(_Job(next_run, trigger)))
+
+    response = TestClient(app).get("/account/1/next_run_time")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["next_run_time"] == "2026-07-03T10:00:00+08:00"
+    assert payload["next_execution_times"] == [
+        "2026-07-06T10:00:00+08:00",
+        "2026-07-07T10:00:00+08:00",
+        "2026-07-08T10:00:00+08:00",
+    ]
+
+
+def test_next_execution_times_fail_open_when_calendar_unavailable(monkeypatch: pytest.MonkeyPatch) -> None:
+    """交易日历不可用时与真实调度一致，保留原始触发时间。"""
+    trigger = CronTrigger(hour=10, minute=0, timezone="Asia/Shanghai")
+    next_run = datetime.fromisoformat("2026-07-03T10:00:00+08:00")
+
+    async def evaluate(_session: object, _channel: object, days: list[object]) -> dict[object, SimpleNamespace]:
+        return {day: SimpleNamespace(status=CalendarDecisionStatus.UNAVAILABLE) for day in days}
+
+    monkeypatch.setattr(account_crud, "evaluate_channel_calendar_days", evaluate)
+    app = _build_app(_RouteSession(build_account(id=1)), _Scheduler(_Job(next_run, trigger)))
+
+    response = TestClient(app).get("/account/1/next_run_time")
+
+    assert response.status_code == 200
+    assert response.json()["next_execution_times"] == response.json()["next_run_times"]
 
 
 def test_next_run_time_null_when_no_job() -> None:
@@ -75,6 +175,8 @@ def test_next_run_time_null_when_no_job() -> None:
         "account_id": 1,
         "is_scheduled": False,
         "next_run_time": None,
+        "next_run_times": [],
+        "next_execution_times": [],
     }
 
 
@@ -89,6 +191,8 @@ def test_next_run_time_null_when_job_has_no_next_fire() -> None:
         "account_id": 1,
         "is_scheduled": True,
         "next_run_time": None,
+        "next_run_times": [],
+        "next_execution_times": [],
     }
 
 

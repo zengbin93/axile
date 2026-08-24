@@ -13,6 +13,7 @@ import { AccountActions } from '@/features/account/AccountActions'
 import { useExecutionRunner } from '@/features/account/useExecutionRunner'
 import { useTerminateAction } from '@/features/account/useTerminateAction'
 import { buildRecentActivity } from '@/features/account/recent'
+import { ScheduleTimeline } from '@/features/account/ScheduleTimeline'
 import { accountAssetTerms, INTEGRITY_ICON, INTEGRITY_TEXT_CLASS, STATUS_ICON, STATUS_TEXT_CLASS, channelLabel } from '@/features/dashboard/display'
 import { phaseLabel, runVerb } from '@/features/dashboard/execProgress'
 import { useRunning } from '@/stores/liveExec'
@@ -30,7 +31,7 @@ import {
 import { usePolling } from '@/lib/hooks/usePolling'
 import { stateVerdict, gateOf, rebalancePlan, positionsOf, positionsOfAssets, type StatusLevel } from '@/lib/derive'
 import { displayCurrencyUnit } from '@/lib/format'
-import { describeCron, nextFires, fmtFire } from '@/features/setup/cron'
+import { describeCron } from '@/features/setup/cron'
 import { TimerQuickModal } from '@/features/setup/TimerQuickModal'
 import { useToastStore } from '@/stores/ui'
 import { useChannelDescriptor } from '@/stores/channels'
@@ -137,20 +138,9 @@ export function AccountDetail({ accountId, item, onDashboardRefresh }: AccountDe
     : undefined
 
   // 定时节奏：把存储的 crontab 反解成设置向导同款人话（命中预设时如「每 15 分钟 · 补发 2 次」）；
-  // 命不中则退为「自定义」并给出下次触发预览，原始表达式收进 tooltip。
+  // 命不中则退为「自定义执行节奏」。未来时刻统一使用服务端 APScheduler 真源，不在此处近似推算。
   const cronExpr = account.data?.cron_expr ?? ''
   const cronHuman = cronExpr && scheduleKind ? describeCron(scheduleKind, cronExpr) : null
-  const cronFires =
-    cronExpr && !cronHuman
-      ? nextFires(
-          cronExpr
-            .split(/[|\n]/)
-            .map((s) => s.trim())
-            .filter(Boolean),
-          3,
-        )
-      : []
-
   const onToggleStarted = async () => {
     const next = !isStarted
     setStartedOverride(next)
@@ -420,11 +410,10 @@ export function AccountDetail({ accountId, item, onDashboardRefresh }: AccountDe
               </span>
             </span>
           </button>
-          <Kv k="上次" v={item.last_exec_at ? item.last_exec_at.replace('T', ' ').slice(5, 16) : '—'} />
-          <Kv k="下次排程" v={nextRun.data?.next_run_time ? nextRun.data.next_run_time.replace('T', ' ').slice(5, 16) : '未排程'} />
-          {cronFires.length > 0 && (
-            <div className="num pt-1.5 text-right text-[12px] text-ink-3">接下来 {cronFires.map(fmtFire).join(' · ')}</div>
-          )}
+          <ScheduleTimeline
+            lastExecutedAt={item.last_exec_at}
+            nextRunTimes={nextRun.data?.next_execution_times ?? []}
+          />
         </Card>
       </div>
 
