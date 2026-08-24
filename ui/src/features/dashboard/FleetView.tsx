@@ -7,6 +7,7 @@ import { ExposureBar } from '@/components/viz/ExposureBar'
 import { INTEGRITY_ICON, INTEGRITY_TEXT_CLASS, INTEGRITY_ORDER, channelLabel } from '@/features/dashboard/display'
 import { phaseLabel, runVerb } from '@/features/dashboard/execProgress'
 import { integrityOf, gateOf, stateVerdict, holdingText, type Integrity } from '@/lib/derive'
+import { displayCurrencyUnit } from '@/lib/format'
 import { useRunning } from '@/stores/liveExec'
 import type { AccountDashboardItem } from '@/types/api'
 
@@ -72,7 +73,7 @@ function FleetCard({
           <span className="num text-[26px] font-[640] tracking-tight">
             <NumberTicker value={item.total_asset} format={{ minimumFractionDigits: 2, maximumFractionDigits: 2 }} />
           </span>
-          <span className="text-[13px] text-ink-3">{item.currency}</span>
+          <span className="text-[13px] text-ink-3">{displayCurrencyUnit(item.currency)}</span>
           {pct != null && (
             <span className={`num text-[13px] ${pctCls}`}>
               今日 {pct >= 0 ? '+' : '−'}

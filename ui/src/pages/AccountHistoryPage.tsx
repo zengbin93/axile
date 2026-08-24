@@ -18,6 +18,7 @@ import { usePolling } from '@/lib/hooks/usePolling'
 import { withViewTransition } from '@/lib/viewTransition'
 import { accountAssetTerms, channelLabel } from '@/features/dashboard/display'
 import { formatMoney } from '@/lib/derive'
+import { displayCurrencyUnit } from '@/lib/format'
 import {
   aggregateStats,
   buildDailyBars,
@@ -101,6 +102,7 @@ export function AccountHistoryPage() {
   const points = buildEquityPoints(rangedSnapshots)
   const snapshotCurrency = [...rangedSnapshots].reverse().find((s) => s.assets.currency)?.assets.currency ?? ''
   const stats = aggregateStats(ranged, points, snapshotCurrency)
+  const currencyUnit = displayCurrencyUnit(stats.currency)
   const segments = buildSegments(bindings.data?.data ?? [], points)
   const events = buildEvents(bindings.data?.data ?? [], ranged, rangedSkips)
 
@@ -202,7 +204,7 @@ export function AccountHistoryPage() {
               style={amountVt ? { viewTransitionName: `equity-amount-${accountId}` } : undefined}
             >
               {heroEq != null ? formatMoney(heroEq) : '—'}
-              <span className="ml-1.5 text-[15px] font-medium text-ink-3">{stats.currency}</span>
+              <span className="ml-1.5 text-[15px] font-medium text-ink-3">{currencyUnit}</span>
               {reviewing && (
                 // 明确「这是回看历史点、非实时」，避免 hero 跳动被误读为账户实变。
                 <span className="ml-2 align-middle text-xs font-normal text-ink-3">· 回看 {readout.when}</span>
@@ -214,7 +216,7 @@ export function AccountHistoryPage() {
                 <>
                   {readout.label}{' '}
                   <span className={`num ${readout.pnl == null ? 'text-ink-3' : readout.pnl >= 0 ? 'text-up' : 'text-down'}`}>
-                    {readout.pnl == null ? '—' : sgn(readout.pnl)} {stats.currency}
+                    {readout.pnl == null ? '—' : sgn(readout.pnl)} {currencyUnit}
                     {readout.pct != null && `（${readout.pct >= 0 ? '+' : '−'}${Math.abs(readout.pct).toFixed(1)}%）`}
                   </span>
                 </>
@@ -225,7 +227,7 @@ export function AccountHistoryPage() {
                 <>
                   区间估值变化{' '}
                   <span className="num text-ink-1">
-                    {sgn(stats.pnl)} {stats.currency}
+                    {sgn(stats.pnl)} {currencyUnit}
                   </span>
                   <span className="text-warn"> · 含疑似资金进出 {stats.transfers.length} 笔（见图标注）</span>
                 </>
@@ -234,7 +236,7 @@ export function AccountHistoryPage() {
                 <>
                   区间盈亏{' '}
                   <span className={`num ${stats.pnl >= 0 ? 'text-up' : 'text-down'}`}>
-                    {sgn(stats.pnl)} {stats.currency}
+                    {sgn(stats.pnl)} {currencyUnit}
                     {ret != null && `（${ret >= 0 ? '+' : '−'}${Math.abs(ret).toFixed(1)}%）`}
                   </span>
                 </>
@@ -267,13 +269,13 @@ export function AccountHistoryPage() {
               k={hasTransfer ? '区间估值变化' : '区间盈亏'}
               v={stats.pnl != null ? `${sgn(stats.pnl)}` : '—'}
               vClass={stats.pnl == null || hasTransfer ? '' : stats.pnl >= 0 ? 'text-up' : 'text-down'}
-              sub={hasTransfer ? `${stats.currency} · 含资金进出` : `${stats.currency} · 真盈亏`}
+              sub={hasTransfer ? `${currencyUnit} · 含资金进出` : `${currencyUnit} · 真盈亏`}
               subWarn={hasTransfer}
             />
             <StatCard
               k="累计手续费"
               v={stats.fee > 0 ? stats.fee.toFixed(4) : '0'}
-              sub={feeDrag != null ? `${assetTerms.ratioLabel} ${feeDrag.toFixed(2)}%` : stats.currency}
+              sub={feeDrag != null ? `${assetTerms.ratioLabel} ${feeDrag.toFixed(2)}%` : currencyUnit}
               subWarn={feeDrag != null && feeDrag > 0}
             />
             <StatCard

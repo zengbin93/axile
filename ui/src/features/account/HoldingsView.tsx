@@ -1,5 +1,5 @@
 import { rebalancePlan, type RebalanceRow } from '@/lib/derive'
-import { fmtMoney, signedPct, withCurrency } from '@/lib/format'
+import { displayCurrencyUnit, fmtMoney, signedPct, withCurrency } from '@/lib/format'
 import type { LatestWeights, Position } from '@/types/api'
 
 /**
@@ -149,7 +149,7 @@ export function HoldingsView({
         {equity > 0 && (
           <>
             {' · '}{assetLabel} {fmtMoney(equity)}
-            {currency && <span className="text-ink-2"> {currency}</span>}
+            {currency && <span className="text-ink-2"> {displayCurrencyUnit(currency)}</span>}
           </>
         )}
         {' · '}净敞口 {signedPct(plan.netExposure)} → 目标 {signedPct(plan.targetNet)}

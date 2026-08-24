@@ -28,6 +28,7 @@ import {
 } from '@/lib/api/accounts'
 import { usePolling } from '@/lib/hooks/usePolling'
 import { stateVerdict, gateOf, rebalancePlan, positionsOf, positionsOfAssets, type StatusLevel } from '@/lib/derive'
+import { displayCurrencyUnit } from '@/lib/format'
 import { marketForChannel, describeCron, nextFires, fmtFire } from '@/features/setup/cron'
 import { TimerQuickModal } from '@/features/setup/TimerQuickModal'
 import { useToastStore } from '@/stores/ui'
@@ -320,7 +321,7 @@ export function AccountDetail({ accountId, item, onDashboardRefresh }: AccountDe
                 style={amountVt ? { viewTransitionName: `equity-amount-${accountId}` } : undefined}
               >
                 <NumberTicker value={item.total_asset} format={{ minimumFractionDigits: 2, maximumFractionDigits: 2 }} />
-                <span className="ml-1.5 text-[16px] font-medium text-ink-3">{item.currency}</span>
+                <span className="ml-1.5 text-[16px] font-medium text-ink-3">{displayCurrencyUnit(item.currency)}</span>
               </div>
               <div className="mt-1.5 text-[13.5px] text-ink-2">
                 {pct != null && (

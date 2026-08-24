@@ -18,6 +18,12 @@ export function fmtMoney(v: number): string {
   return a.toFixed(2)
 }
 
+/** 将后端币种代码转换为面向用户的简短金额单位。 */
+export function displayCurrencyUnit(currency: string | null | undefined): string {
+  const normalized = currency?.trim() ?? ''
+  return normalized.toUpperCase() === 'CNY' ? '元' : normalized
+}
+
 /**
  * 给金额数字缀简短货币记号：人民币用前缀「¥」，私有渠道计价币用后缀「U」。
  *
@@ -25,9 +31,10 @@ export function fmtMoney(v: number): string {
  * 空格后缀，`currency` 为空则不缀。
  */
 export function withCurrency(numStr: string, currency: string): string {
-  if (/^USD.$/.test(currency)) return `${numStr}U`
-  if (currency === 'CNY') return `¥${numStr}`
-  return currency ? `${numStr} ${currency}` : numStr
+  const normalized = currency.trim()
+  if (/^USD.$/i.test(normalized)) return `${numStr}U`
+  if (normalized.toUpperCase() === 'CNY') return `¥${numStr}`
+  return normalized ? `${numStr} ${normalized}` : numStr
 }
 
 /** 金额直接带货币记号（`fmtMoney` + `withCurrency` 的组合便捷式）。 */

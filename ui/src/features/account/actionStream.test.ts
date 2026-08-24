@@ -127,6 +127,6 @@ describe('buildSymbolActionStream', () => {
       { quantityLabel: '基础资产', quantityMaxDecimals: 3, priceLabel: 'CNY' },
     )
 
-    expect(lines[0]?.text).toBe('挂单 买 0.001 基础资产 @62,000 CNY')
+    expect(lines[0]?.text).toBe('挂单 买 0.001 基础资产 @62,000 元')
   })
 })

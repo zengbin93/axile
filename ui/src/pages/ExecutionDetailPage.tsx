@@ -7,7 +7,7 @@ import { NumberTicker } from '@/components/ui/NumberTicker'
 import { usePolling } from '@/lib/hooks/usePolling'
 import { getExecutionArtifacts, getExecutionEvents } from '@/lib/api/executions'
 import { currencyOf } from '@/lib/derive'
-import { fmtMoney, withCurrency } from '@/lib/format'
+import { displayCurrencyUnit, fmtMoney, withCurrency } from '@/lib/format'
 import {
   buildExecutionDetail,
   SOURCE_DEGRADED_LABEL,
@@ -78,7 +78,7 @@ function fmtQty(v: number, units: DisplayUnits, withUnit = true): string {
 /** 价格按通用精度格式化，并追加渠道报价单位。 */
 function fmtPrice(v: number, units: DisplayUnits, currency: string): string {
   const value = Math.abs(v).toLocaleString('zh-CN', { maximumFractionDigits: 6 })
-  const label = units.price_label || currency
+  const label = displayCurrencyUnit(units.price_label || currency)
   return label ? `${value} ${label}` : value
 }
 
@@ -163,7 +163,7 @@ function Header({ m, currency, assetLabel }: { m: ExecutionDetailModel; currency
         {h.equityBefore != null && h.equityAfter != null && (
           <span className={`font-semibold ${h.equityAfter >= h.equityBefore ? 'text-up' : 'text-down'}`}>
             {' '}
-            ({fmtDelta(h.equityBefore, h.equityAfter)}) {currency}
+            ({fmtDelta(h.equityBefore, h.equityAfter)}) {displayCurrencyUnit(currency)}
           </span>
         )}
         {h.exposureBefore != null && (

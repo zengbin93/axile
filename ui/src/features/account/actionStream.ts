@@ -11,6 +11,7 @@
  */
 import { eventError } from '@/features/account/executionRows'
 import { executionReasonText } from '@/features/account/executionReason'
+import { displayCurrencyUnit } from '@/lib/format'
 import type { ExecutionEvent } from '@/types/api'
 
 /** 动作流的一行：一条事件渲染成的动词句。 */
@@ -67,7 +68,7 @@ function fmtQty(v: number | null, units: ActionDisplayUnits): string {
 function fmtPrice(v: number | null, units: ActionDisplayUnits): string {
   if (v == null) return ''
   const value = v.toLocaleString('zh-CN', { maximumFractionDigits: 6 })
-  return units.priceLabel ? `${value} ${units.priceLabel}` : value
+  return units.priceLabel ? `${value} ${displayCurrencyUnit(units.priceLabel)}` : value
 }
 
 /** 订单方向枚举串（`OrderDirection.SELL`）→ 买/卖/空。 */
