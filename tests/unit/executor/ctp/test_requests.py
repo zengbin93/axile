@@ -2,12 +2,12 @@
 
 import threading
 from types import SimpleNamespace
-from unittest.mock import Mock, call
+from unittest.mock import Mock
 
 import pytest
 from openctp_ctp import thosttraderapi as td
 
-from axile.executor.ctp.ctp_execute import CTPExecutor, _PendingQuery, _request_trader_login, _Stage
+from axile.executor.ctp.ctp_execute import CTPExecutor, _PendingQuery, _Stage
 from axile.executor.ctp.requests import (
     build_order_cancel,
     build_order_insert,
@@ -143,34 +143,6 @@ def test_trader_login_uses_openctp_677_signature(config: CTPAccountConfig) -> No
 
     args = executor._trader_api.ReqUserLogin.call_args.args
     assert args[1:] == (1,)
-
-
-def test_trader_login_falls_back_to_macos_openctp_677_signature() -> None:
-    api = Mock()
-    request = Mock(spec=td.CThostFtdcReqUserLoginField)
-    api.ReqUserLogin.side_effect = [
-        TypeError("CThostFtdcTraderApi_ReqUserLogin expected 5 arguments, got 3"),
-        0,
-    ]
-
-    result = _request_trader_login(api, request, 7)
-
-    assert result == 0
-    assert api.ReqUserLogin.call_args_list == [
-        call(request, 7),
-        call(request, 7, 0, ""),
-    ]
-
-
-def test_trader_login_does_not_mask_unrelated_type_error() -> None:
-    api = Mock()
-    request = Mock(spec=td.CThostFtdcReqUserLoginField)
-    api.ReqUserLogin.side_effect = TypeError("invalid request field")
-
-    with pytest.raises(TypeError, match="invalid request field"):
-        _request_trader_login(api, request, 7)
-
-    api.ReqUserLogin.assert_called_once_with(request, 7)
 
 
 def test_query_response_copies_reused_swig_frame() -> None:
