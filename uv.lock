@@ -348,6 +348,7 @@ dependencies = [
 all = [
     { name = "gm", marker = "sys_platform != 'darwin'" },
     { name = "openctp-ctp" },
+    { name = "shinny-calendar" },
     { name = "tqsdk" },
     { name = "tushare" },
 ]
@@ -356,6 +357,9 @@ ctp = [
 ]
 gm = [
     { name = "gm", marker = "sys_platform != 'darwin'" },
+]
+shinny = [
+    { name = "shinny-calendar" },
 ]
 tqsdk = [
     { name = "tqsdk" },
@@ -388,6 +392,7 @@ requires-dist = [
     { name = "apscheduler", specifier = ">=3.11.0" },
     { name = "axile", extras = ["ctp"], marker = "extra == 'all'" },
     { name = "axile", extras = ["gm"], marker = "extra == 'all'" },
+    { name = "axile", extras = ["shinny"], marker = "extra == 'all'" },
     { name = "axile", extras = ["tqsdk"], marker = "extra == 'all'" },
     { name = "axile", extras = ["tushare"], marker = "extra == 'all'" },
     { name = "croniter", specifier = ">=5.0.0" },
@@ -401,6 +406,7 @@ requires-dist = [
     { name = "polars", specifier = ">=1.37.1" },
     { name = "pydantic-settings", specifier = ">=2.8.1" },
     { name = "python-dotenv", specifier = ">=1.1.0" },
+    { name = "shinny-calendar", marker = "extra == 'shinny'", specifier = "==1.0.2026" },
     { name = "sqlalchemy", specifier = ">=2.0.46" },
     { name = "sqlmodel", specifier = ">=0.0.24" },
     { name = "streamlit", specifier = ">=1.41.0" },
@@ -409,7 +415,7 @@ requires-dist = [
     { name = "tushare", marker = "extra == 'tushare'", specifier = ">=1.4.24" },
     { name = "typer", specifier = ">=0.20.1" },
 ]
-provides-extras = ["ctp", "gm", "tqsdk", "tushare", "all"]
+provides-extras = ["ctp", "gm", "tqsdk", "tushare", "shinny", "all"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -3744,6 +3750,15 @@ source = { registry = "https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple" }
 sdist = { url = "https://mirrors.tuna.tsinghua.edu.cn/pypi/web/packages/58/15/8b3609fd3830ef7b27b655beb4b4e9c62313a4e8da8c676e142cc210d58e/shellingham-1.5.4.tar.gz", hash = "sha256:8dbca0739d487e5bd35ab3ca4b36e11c4078f3a234bfce294b0a0291363404de", size = 10310, upload-time = "2023-10-24T04:13:40.426Z" }
 wheels = [
     { url = "https://mirrors.tuna.tsinghua.edu.cn/pypi/web/packages/e0/f9/0595336914c5619e5f28a1fb793285925a8cd4b432c9da0a987836c7f822/shellingham-1.5.4-py2.py3-none-any.whl", hash = "sha256:7ecfff8f2fd72616f7481040475a65b2bf8af90a56c89140852d1120324e8686", size = 9755, upload-time = "2023-10-24T04:13:38.866Z" },
+]
+
+[[package]]
+name = "shinny-calendar"
+version = "1.0.2026"
+source = { registry = "https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple" }
+sdist = { url = "https://mirrors.tuna.tsinghua.edu.cn/pypi/web/packages/bf/ae/e60a453fdfb03f4dff0a303ab7a09be75fcb32969851ca4616d9c8a61e05/shinny_calendar-1.0.2026.tar.gz", hash = "sha256:2b655c35d6ac0410d31d56b0f777a88ed633f1c9c5cde6f2f3ce330570777deb", size = 6560, upload-time = "2025-11-06T03:43:50.159Z" }
+wheels = [
+    { url = "https://mirrors.tuna.tsinghua.edu.cn/pypi/web/packages/3a/d4/28a67d662bcfc6d92b4c019dbcbb69ad5fed7c6cd0f975cedb5f9c3a8eee/shinny_calendar-1.0.2026-py3-none-any.whl", hash = "sha256:70e9368c631b1e710a5308b0b3d5c0e2dac4362e9636c0355213f16474f715aa", size = 6945, upload-time = "2025-11-06T03:43:48.892Z" },
 ]
 
 [[package]]

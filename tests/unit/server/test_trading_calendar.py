@@ -483,6 +483,145 @@ def test_futures_night_trigger_maps_to_trading_day(
     assert decision.reason_code == expected_reason
 
 
+def test_shinny_calendar_materializes_records_using_midnight(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Shinny 日历固定以自然日 00:00 判定并写入执行器读取的表。"""
+    session_factory = asyncio.run(_create_database(tmp_path / "shinny-save.db"))
+    seen: list[datetime] = []
+
+    class FakeCalendarUtility:
+        def trading_day(self, value: datetime) -> date:
+            seen.append(value)
+            return value.date()
+
+    monkeypatch.setattr(calendar_service, "CalendarUtility", FakeCalendarUtility)
+
+    async def exercise() -> None:
+        async with session_factory() as session:
+            await calendar_service.save_shinny_calendar(
+                session,
+                calendar_id="china",
+                start=date(2026, 8, 20),
+                end=date(2026, 8, 21),
+            )
+            rows = await calendar_service.list_calendar_entries(
+                session, calendar_id="china", start=date(2026, 8, 20), end=date(2026, 8, 21)
+            )
+            config = await session.get(TradingCalendarConfig, "china")
+            assert [item.is_open for item in rows] == [True, True]
+            assert config is not None and config.refresh_kind == "shinny"
+
+    asyncio.run(exercise())
+    assert seen == [datetime(2026, 8, 20), datetime(2026, 8, 21)]
+
+
+def test_shinny_calendar_does_not_materialize_beyond_2026(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """内置节假日止于 2026，超出范围必须保持未覆盖而非伪造工作日。"""
+    session_factory = asyncio.run(_create_database(tmp_path / "shinny-boundary.db"))
+
+    class FakeCalendarUtility:
+        def trading_day(self, value: datetime) -> date:
+            return value.date()
+
+    monkeypatch.setattr(calendar_service, "CalendarUtility", FakeCalendarUtility)
+
+    async def exercise() -> None:
+        async with session_factory() as session:
+            await calendar_service.save_shinny_calendar(
+                session,
+                calendar_id="china",
+                start=date(2026, 9, 30),
+                end=date(2027, 1, 2),
+            )
+            entries = await calendar_service.list_calendar_entries(
+                session, calendar_id="china", start=date(2026, 9, 30), end=date(2027, 1, 2)
+            )
+            diagnostics = await calendar_service.list_calendar_diagnostics(
+                session, calendar_id="china", start=date(2027, 1, 1), end=date(2027, 1, 2)
+            )
+            config = await session.get(TradingCalendarConfig, "china")
+            assert entries[-1].cal_date == date(2026, 12, 31)
+            assert diagnostics == [
+                calendar_service.CalendarDiagnosticEntry(calendarId="china", calDate=date(2027, 1, 1)),
+                calendar_service.CalendarDiagnosticEntry(calendarId="china", calDate=date(2027, 1, 2)),
+            ]
+            assert config is not None and config.refresh_kind == "shinny"
+
+    asyncio.run(exercise())
+
+
+def test_shinny_calendar_rejects_non_china_calendar(tmp_path: Path) -> None:
+    """Shinny 仅作中国期货和通用节假日兜底。"""
+    session_factory = asyncio.run(_create_database(tmp_path / "shinny-calendar-id.db"))
+
+    async def exercise() -> None:
+        async with session_factory() as session:
+            with pytest.raises(ValueError, match="china"):
+                await calendar_service.save_shinny_calendar(
+                    session,
+                    calendar_id="vendor",
+                    start=date(2026, 1, 1),
+                    end=date(2026, 1, 1),
+                )
+
+    asyncio.run(exercise())
+
+
+def test_shinny_calendar_marks_builtin_holiday_closed(tmp_path: Path) -> None:
+    """Shinny 的内置国庆节必须物化为休市。"""
+    session_factory = asyncio.run(_create_database(tmp_path / "shinny-holiday.db"))
+
+    async def exercise() -> None:
+        async with session_factory() as session:
+            await calendar_service.save_shinny_calendar(
+                session, calendar_id="china", start=date(2026, 10, 1), end=date(2026, 10, 1)
+            )
+            entries = await calendar_service.list_calendar_entries(
+                session, calendar_id="china", start=date(2026, 10, 1), end=date(2026, 10, 1)
+            )
+            assert [entry.is_open for entry in entries] == [False]
+
+    asyncio.run(exercise())
+
+
+def test_shinny_calendar_requires_optional_dependency(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """缺少可选依赖时不得把工作日规则静默写入日历。"""
+    session_factory = asyncio.run(_create_database(tmp_path / "shinny-dependency.db"))
+    monkeypatch.setattr(calendar_service, "CalendarUtility", None)
+
+    async def exercise() -> None:
+        async with session_factory() as session:
+            with pytest.raises(ValueError, match="axile\\[shinny\\]"):
+                await calendar_service.save_shinny_calendar(
+                    session, calendar_id="china", start=date(2026, 1, 1), end=date(2026, 1, 1)
+                )
+
+    asyncio.run(exercise())
+
+
+def test_shinny_refresh_stops_after_supported_year(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """2027 年后自动刷新保留未覆盖状态，不得退化成纯工作日。"""
+    session_factory = asyncio.run(_create_database(tmp_path / "shinny-refresh-boundary.db"))
+
+    class FutureDate(date):
+        @classmethod
+        def today(cls) -> date:
+            return cls(2027, 1, 1)
+
+    monkeypatch.setattr(calendar_service, "SessionLocal", session_factory)
+    monkeypatch.setattr(calendar_service, "date", FutureDate)
+    save = AsyncMock()
+    monkeypatch.setattr(calendar_service, "_save_shinny_calendar", save)
+
+    async def exercise() -> bool:
+        async with session_factory() as session:
+            session.add(TradingCalendarConfig(calendar_id="china", refresh_kind="shinny"))
+            await session.commit()
+        return await calendar_service.sync_calendar_shinny(calendar_id="china", force=True)
+
+    assert asyncio.run(exercise()) is False
+    save.assert_not_awaited()
+
+
 def test_tushare_calendar_maps_all_natural_days(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Tushare 的 trade_cal 返回完整自然日，保存时不需补齐日期。"""
     session_factory = asyncio.run(_create_database(tmp_path / "tushare-save.db"))
@@ -546,6 +685,32 @@ def test_tushare_refresh_skips_covered_calendar(tmp_path: Path, monkeypatch: pyt
     assert asyncio.run(exercise()) is False
 
 
+@pytest.mark.parametrize(
+    ("calendar_id", "detail"),
+    [
+        ("vendor", "Shinny 兜底仅支持 china 日历"),
+        ("china", "Shinny 内置节假日仅覆盖至 2026-12-31"),
+    ],
+)
+def test_shinny_route_rejects_unsupported_request(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, calendar_id: str, detail: str
+) -> None:
+    """Shinny 路由不得为不支持的日历或年份写入伪造数据。"""
+    session_factory = asyncio.run(_create_database(tmp_path / "shinny-route.db"))
+
+    if calendar_id == "china":
+        monkeypatch.setattr(
+            "axile.server.api.routes.trading_calendar.save_shinny_calendar",
+            AsyncMock(side_effect=ValueError(detail)),
+        )
+
+    with TestClient(_calendar_app(session_factory)) as client:
+        response = client.put(f"/api/v1/market/trading-calendar/shinny?calendarId={calendar_id}")
+
+    assert response.status_code == 422
+    assert response.json()["detail"] == detail
+
+
 def test_tushare_route_sanitizes_upstream_errors(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     session_factory = asyncio.run(_create_database(tmp_path / "tushare-route.db"))
     token = "tushare-token-123"
@@ -563,9 +728,7 @@ def test_tushare_route_sanitizes_upstream_errors(tmp_path: Path, monkeypatch: py
     assert token not in response.text
 
 
-def test_failed_tushare_refresh_preserves_existing_calendar(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_failed_tushare_refresh_preserves_existing_calendar(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Tushare 不可用时保留已有数据与人工调整。"""
     session_factory = asyncio.run(_create_database(tmp_path / "tushare-failure.db"))
     calendar_day = date(2026, 1, 1)

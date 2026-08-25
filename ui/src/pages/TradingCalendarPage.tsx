@@ -18,6 +18,7 @@ import {
   restoreCalendarOverrides,
   saveCalendarFunction,
   saveCalendarOverrides,
+  saveShinnyCalendar,
   saveTushareCalendar,
   validateCalendarFunction,
   type CalendarDiagnostic,
@@ -232,6 +233,23 @@ export function TradingCalendarPage() {
     })
   }
 
+  const saveShinny = () => {
+    replaceWithConfirmation('Shinny', async () => {
+      setSaving(true)
+      setSaveError(null)
+      try {
+        await saveShinnyCalendar(calendarId)
+        toast('Shinny 日历已刷新并保存')
+        await afterReplacement()
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        setSaveError(message)
+      } finally {
+        setSaving(false)
+      }
+    })
+  }
+
   const saveTushare = () => {
     replaceWithConfirmation('Tushare', async () => {
       setSaving(true)
@@ -332,7 +350,7 @@ export function TradingCalendarPage() {
           {!status ? Array.from({ length: 4 }, (_, index) => (
             <div key={index} className="min-h-[66px] bg-surface px-4 py-3"><Skeleton className="h-3 w-16" /><Skeleton className="mt-2 h-4 w-28" /></div>
           )) : [
-            ['刷新方式', status?.refreshKind === 'python' ? '自定义函数' : status?.refreshKind === 'tushare' ? 'Tushare 兜底' : status?.refreshKind === 'csv' ? 'CSV' : '未配置'],
+            ['刷新方式', status?.refreshKind === 'python' ? '自定义函数' : status?.refreshKind === 'shinny' ? 'Shinny 期货兜底' : status?.refreshKind === 'tushare' ? 'Tushare 兜底' : status?.refreshKind === 'csv' ? 'CSV' : '未配置'],
             ['有效覆盖', status?.coverageStart ? `${status.coverageStart} 至 ${status.coverageEnd}` : '暂无'],
             ['同步状态', status?.lastSyncAt ? status.lastSyncAt.replace('T', ' ') : '尚未同步'],
             ['人工调整', `${status?.overrideCount ?? 0} 条`],
@@ -351,6 +369,7 @@ export function TradingCalendarPage() {
               options={[
                 { value: 'csv', label: 'CSV' },
                 { value: 'python', label: '自定义函数' },
+                { value: 'shinny', label: 'Shinny 期货兜底' },
                 { value: 'tushare', label: 'Tushare 兜底' },
               ]}
               onChange={(value) => setMode(value as CalendarRefreshKind)}
@@ -358,7 +377,7 @@ export function TradingCalendarPage() {
           </div>
           <p className="mt-1 text-[12.5px] text-ink-2">成功替换基础日历时，人工调整会一并清除。</p>
 
-          {(['csv', 'python', 'tushare'] as const).map((kind) => {
+          {(['csv', 'python', 'shinny', 'tushare'] as const).map((kind) => {
             const active = mode === kind
             return (
               <div key={kind} inert={!active} className={`grid transition-[grid-template-rows] duration-200 motion-reduce:transition-none ${active ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'}`}>
@@ -404,6 +423,21 @@ export function TradingCalendarPage() {
                           )}
                         </div>
                         <ErrorNotice title="保存自定义函数失败" error={saveError} variant="mutation" onRetry={saveFunction} />
+                      </>
+                    ) : kind === 'shinny' ? (
+                      <>
+                        <p className="text-[13px] leading-relaxed text-ink-2">使用 Shinny 物化中国期货与通用节假日日历，固定按每个自然日 <span className="num">00:00</span> 判断。内置节假日仅覆盖至 <span className="num">2026-12-31</span>；之后不会生成日历记录。A 股请使用 Tushare、CSV 或自定义函数。</p>
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          <button className="inline-flex items-center gap-1.5 rounded-[8px] bg-ink-1 px-4 py-2 text-[13px] text-surface disabled:cursor-default disabled:opacity-45" disabled={saving || calendarId !== 'china'} onClick={saveShinny}>
+                            {saving ? <LoaderCircle size={14} className="animate-spin motion-reduce:animate-none" /> : <Save size={14} />}
+                            {saving ? '正在生成并保存…' : '使用 Shinny 保存并刷新'}
+                          </button>
+                          {status?.refreshKind === 'shinny' && (
+                            <button disabled={mutating} className="inline-flex items-center gap-1.5 rounded-[8px] border border-line px-4 py-2 text-[13px] text-ink-2 disabled:opacity-45" onClick={() => void refreshConfiguredCalendar()}>{mutating ? <LoaderCircle size={14} className="animate-spin motion-reduce:animate-none" /> : <RefreshCw size={14} />} {mutating ? '刷新中…' : '立即刷新'}</button>
+                          )}
+                        </div>
+                        {calendarId !== 'china' && <p className="mt-2 text-[12.5px] text-warn">Shinny 仅支持中国交易日历。</p>}
+                        <ErrorNotice title="保存 Shinny 日历失败" error={saveError} variant="mutation" onRetry={saveShinny} />
                       </>
                     ) : (
                       <>
