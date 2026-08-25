@@ -1,5 +1,5 @@
 /**
- * 共享元素 FLIP 门禁：只允许约定四类 viewTransitionName 前缀；
+ * 共享元素 FLIP 门禁：只允许约定的 viewTransitionName 前缀；
  * 禁止 history-chart / equity-viz 等内容 morph 共享名。
  */
 import { describe, expect, it } from 'bun:test'
@@ -16,6 +16,7 @@ const ALLOWED_VT_PREFIXES = [
   'portfolio-name-',
   'equity-amount-',
   'edit-shell-',
+  'app-nav-selection',
 ] as const
 
 /** 禁止的内容 morph / 已撤共享名。 */

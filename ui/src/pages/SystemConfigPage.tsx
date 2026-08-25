@@ -4,13 +4,12 @@ import { InitWizard } from '@/features/init/InitWizard'
 import { initStatus, peekInitValues, type InitValues } from '@/lib/api/init'
 
 /**
- * 系统配置页（整屏、`AppShell` 之外）。
+ * 系统配置页（常驻应用导航内）。
  *
  * 已配置用户从顶栏齿轮进入，以「编辑」模式复用 :func:`InitWizard`。预填值优先
  * 取启动时已拉取的缓存（:func:`peekInitValues`），从而首帧即渲染向导、与 `/setup`
  * 一样无加载闪屏；仅当缓存缺失（启动探测失败）时才回退到即时拉取。保存 → 后端写
- * config.toml 并重启 → 向导内部轮询就绪后自动刷新。页面级导航与关闭操作由
- * :func:`SettingsLayout` 统一承载。
+ * config.toml 并重启 → 向导内部轮询就绪后自动刷新。
  */
 export function SystemConfigPage() {
   const navigate = useNavigate()
@@ -34,7 +33,7 @@ export function SystemConfigPage() {
 
   if (!values) {
     return (
-      <div className="grid h-screen place-items-center bg-bg text-ink-3">
+      <div className="grid h-full place-items-center bg-bg text-ink-3">
         <div className="text-[15px] tracking-wide">读取配置中…</div>
       </div>
     )

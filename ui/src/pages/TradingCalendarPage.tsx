@@ -264,7 +264,7 @@ export function TradingCalendarPage() {
 
   return (
     <div className="min-h-full bg-bg">
-      <main className="mx-auto max-w-[1080px] px-5 py-7 sm:px-10 sm:py-9">
+      <main className="py-2">
         <div className="flex flex-wrap items-end justify-between gap-4">
           <div>
             <div className="text-[12px] font-[620] text-ink-3">设置</div>

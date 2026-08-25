@@ -16,13 +16,13 @@ import { AccountHoldingsPage } from '@/pages/AccountHoldingsPage'
 import { ExecutionDetailPage } from '@/pages/ExecutionDetailPage'
 import { ScratchHoldings } from '@/pages/_ScratchHoldings'
 import { AccountHistoryPage } from '@/pages/AccountHistoryPage'
+import { AccountExecutionsPage } from '@/pages/AccountExecutionsPage'
 import { PortfoliosPage } from '@/pages/PortfoliosPage'
 import { PortfolioDetailPage } from '@/pages/PortfolioDetailPage'
 import { PortfolioEditPage } from '@/pages/PortfolioEditPage'
 import { Placeholder } from '@/pages/Placeholder'
 import { SystemConfigPage } from '@/pages/SystemConfigPage'
 import { TradingCalendarPage } from '@/pages/TradingCalendarPage'
-import { SettingsLayout } from '@/pages/SettingsLayout'
 import { WizardLayout } from '@/features/setup/WizardLayout'
 import { SetupHub } from '@/pages/setup/SetupHub'
 import { PfName, PfDefine, PfDone } from '@/pages/setup/PortfolioSteps'
@@ -103,19 +103,14 @@ const router = createBrowserRouter([
           { path: 'accounts/:id/edit/control', element: <AccountEditControlPage /> },
           { path: 'accounts/:id/holdings', element: <AccountHoldingsPage /> },
           { path: 'accounts/:id/history', element: <AccountHistoryPage /> },
+          { path: 'accounts/:id/executions', element: <AccountExecutionsPage /> },
           { path: 'accounts/:id/executions/:executionId', element: <ExecutionDetailPage /> },
           { path: 'portfolios', element: <PortfoliosPage /> },
           { path: 'portfolios/:id', element: <PortfolioDetailPage /> },
           { path: 'portfolios/:id/edit', element: <PortfolioEditPage /> },
+          { path: 'settings', element: <SystemConfigPage /> },
+          { path: 'settings/trading-calendar', element: <TradingCalendarPage /> },
           { path: '*', element: <Placeholder title="页面不存在" milestone="—" /> },
-        ],
-      },
-      {
-        path: 'settings',
-        element: <SettingsLayout />,
-        children: [
-          { index: true, element: <SystemConfigPage /> },
-          { path: 'trading-calendar', element: <TradingCalendarPage /> },
         ],
       },
       { path: 'docs/custom-calc', element: <CustomCalcDocPage /> },

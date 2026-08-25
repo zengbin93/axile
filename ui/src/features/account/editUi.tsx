@@ -337,12 +337,12 @@ export function EditSaveBar({
   const open = changes.length > 0
   return (
     <div
-      className={`fixed inset-x-0 bottom-0 z-30 border-t border-line bg-surface/85 backdrop-blur-md transition-opacity ${MOTION_LAYOUT} ${
+      className={`fixed bottom-0 left-1/2 z-30 w-full max-w-[860px] -translate-x-1/2 border-t border-line bg-surface/85 backdrop-blur-md transition-opacity ${MOTION_LAYOUT} ${
         open ? 'opacity-100' : 'pointer-events-none opacity-0'
       }`}
       aria-hidden={!open}
     >
-      <div className="mx-auto flex max-w-[860px] items-center gap-4 px-6 py-3">
+      <div className="flex items-center gap-4 px-6 py-3">
         <div className="min-w-0 flex-1">
           <div className="text-[11px] font-semibold tracking-wide text-ink-3">
             待保存 · {changes.length} 项{blocked && <span className="text-warn"> · 有错误</span>}
@@ -362,7 +362,7 @@ export function EditSaveBar({
           {saving ? '保存中…' : '保存'}
         </button>
       </div>
-      <div className="mx-auto max-w-[860px] px-6">
+      <div className="px-6">
         <ErrorNotice title="保存失败" error={error} variant="mutation" onRetry={onSave} />
       </div>
     </div>

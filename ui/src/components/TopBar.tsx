@@ -39,7 +39,7 @@ export function TopBar() {
     : `与服务器失联 · ${shortErrorReason(error)}`
 
   return (
-    <header className="sticky top-0 z-20 flex flex-wrap items-center gap-3 border-b border-line bg-surface/75 px-6 py-3 backdrop-blur-md">
+    <header className="sticky top-0 z-20 flex flex-none flex-wrap items-center gap-3 border-b border-line bg-surface/75 px-6 py-3 backdrop-blur-md">
       <Link to="/" className="text-[15px] font-[650] tracking-wide">
         axile
       </Link>

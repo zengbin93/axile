@@ -9,6 +9,12 @@ interface ToastState {
   clear: () => void
 }
 
+interface NavigationState {
+  /** 全局页面没有账户 ID 时，侧栏仍保留用户最近选择的账户。 */
+  activeAccountId: number | null
+  setActiveAccountId: (accountId: number | null) => void
+}
+
 let timer: ReturnType<typeof setTimeout> | undefined
 
 /** 全局轻提示（toast）。跨页面共用，故放 store 而非局部状态。 */
@@ -23,4 +29,10 @@ export const useToastStore = create<ToastState>((set) => ({
     if (timer) clearTimeout(timer)
     set({ message: null })
   },
+}))
+
+/** 常驻导航的账户上下文；路由中的账户 ID 始终拥有更高优先级。 */
+export const useNavigationStore = create<NavigationState>((set) => ({
+  activeAccountId: null,
+  setActiveAccountId: (activeAccountId) => set({ activeAccountId }),
 }))

@@ -221,23 +221,48 @@
   }
 }
 
+.app-workspace {
+  view-transition-name: app-workspace;
+}
+
+@keyframes app-workspace-old {
+  to {
+    opacity: 0;
+  }
+}
+
+@keyframes app-workspace-new {
+  from {
+    opacity: 0;
+  }
+}
+
 /*
- * 路由切换过渡（L2/L3）。
- *
- * 整页 root 快照做交叉淡入，把「硬替换」收成一次连续变化；被赋予
- * view-transition-name 的共享元素（账户卡名→详情头、金额、同构壳等）做共享元素 FLIP
- * （平移为主 + 微缩；禁止内容 morph）。尊重系统「减少动态效果」偏好：reduce 时全部关掉。
+ * 路由切换只替换右侧工作区；顶栏和悬浮导航属于稳定骨架，不参与整页淡入。
+ * 导航选中标记是同一个“当前位置”对象，跨二级入口用共享元素位移。
  */
 @media (prefers-reduced-motion: no-preference) {
   ::view-transition-old(root),
   ::view-transition-new(root) {
-    animation-duration: 200ms;
-    animation-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+    animation: none;
+  }
+  ::view-transition-old(root) {
+    opacity: 0;
+  }
+  ::view-transition-old(app-workspace) {
+    animation: app-workspace-old 180ms cubic-bezier(0.4, 0, 0.2, 1) both;
+  }
+  ::view-transition-new(app-workspace) {
+    animation: app-workspace-new 180ms cubic-bezier(0.4, 0, 0.2, 1) both;
   }
   /* 共享元素 FLIP 的时长/缓动（L3）。 */
   ::view-transition-group(*) {
     animation-duration: 240ms;
     animation-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+  }
+  ::view-transition-group(app-nav-selection) {
+    animation-duration: 200ms;
+    animation-timing-function: cubic-bezier(0.32, 0.72, 0, 1);
   }
 }
 
