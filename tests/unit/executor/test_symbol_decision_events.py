@@ -73,7 +73,7 @@ def test_emit_symbol_decision_events_covers_each_symbol() -> None:
     assert au["status"] == ExecutionEventStatus.SUCCESS
 
 
-def test_emit_ctp_session_precheck_as_market_rule_warning() -> None:
+def test_emit_symbol_decision_metadata_as_market_rule_warning() -> None:
     runtime = _FakeRuntime()
     engine = ExecutionEngine(object(), runtime=runtime)  # type: ignore[arg-type]
 
@@ -84,8 +84,11 @@ def test_emit_ctp_session_precheck_as_market_rule_warning() -> None:
                 symbol="ag2609C5000",
                 algorithm="SINGLE-MAKER",
                 status=ExecutionStatus.BLOCKED,
-                error="CTP.SESSION.NO_SESSION_TABLE",
-                memory={"precheck_reason_code": "CTP.SESSION.NO_SESSION_TABLE"},
+                error="session unavailable",
+                memory={
+                    "symbol_decision_reason_code": "CHANNEL.SESSION.UNAVAILABLE",
+                    "symbol_decision_reason_family": ExecutionReasonFamily.MARKET_RULE.value,
+                },
             )
         ],
     )
@@ -94,7 +97,7 @@ def test_emit_ctp_session_precheck_as_market_rule_warning() -> None:
     assert event["event_type"] == ExecutionEventType.SYMBOL_DECISION_MADE
     assert event["status"] == ExecutionEventStatus.WARNING
     assert event["reason_family"] == ExecutionReasonFamily.MARKET_RULE
-    assert event["reason_code"] == "CTP.SESSION.NO_SESSION_TABLE"
+    assert event["reason_code"] == "CHANNEL.SESSION.UNAVAILABLE"
 
 
 def _results(*statuses: ExecutionStatus) -> dict[str, AlgorithmResult]:

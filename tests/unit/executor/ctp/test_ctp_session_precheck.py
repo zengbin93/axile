@@ -47,29 +47,26 @@ def _executor() -> CTPExecutor:
     return executor
 
 
-def test_precheck_fails_closed_for_missing_contract_metadata() -> None:
-    allowed, reason_code = _executor()._precheck_symbol("unknown")
+def test_session_check_fails_closed_for_missing_contract_metadata() -> None:
+    reason_code = _executor()._get_ctp_session_block_reason("unknown")
 
-    assert (allowed, reason_code) == (False, "CTP.SESSION.NO_METADATA")
+    assert reason_code == "CTP.SESSION.NO_METADATA"
 
 
-def test_precheck_uses_static_contract_exchange_and_product(monkeypatch) -> None:
+def test_session_check_uses_static_contract_exchange_and_product(monkeypatch) -> None:
     monkeypatch.setattr(
         "axile.executor.ctp.ctp_execute.clock_now",
         lambda **_kwargs: datetime(2026, 8, 24, 21, 29, tzinfo=_SHANGHAI),
     )
 
-    allowed, reason_code = _executor()._precheck_symbol("ag2612")
-
-    assert (allowed, reason_code) == (True, None)
+    assert _executor()._get_ctp_session_block_reason("ag2612") is None
 
 
-def test_precheck_blocks_unknown_product_and_options_without_session_table() -> None:
+def test_session_check_blocks_unknown_product_and_options_without_session_table() -> None:
     executor = _executor()
 
     for symbol in ("unknown2612", "ag2609C5000", "missingclass2612"):
-        allowed, reason_code = executor._precheck_symbol(symbol)
-        assert (allowed, reason_code) == (False, "CTP.SESSION.NO_SESSION_TABLE")
+        assert executor._get_ctp_session_block_reason(symbol) == "CTP.SESSION.NO_SESSION_TABLE"
 
 
 def test_ctp_scoped_cancel_only_queries_allowed_dispatch_symbols() -> None:
@@ -78,7 +75,7 @@ def test_ctp_scoped_cancel_only_queries_allowed_dispatch_symbols() -> None:
     executor.get_pending_orders = Mock(side_effect=lambda symbol: [pending] if symbol == "ag2612" else [])
     executor.cancel_order = Mock(return_value=True)
 
-    executor._cancel_orders_before_symbol_dispatch(["ag2612"])
+    executor._cancel_ctp_orders_for_symbols(["ag2612"])
 
     executor.get_pending_orders.assert_called_once_with("ag2612")
     executor.cancel_order.assert_called_once_with("ag2612", "ag-pending")

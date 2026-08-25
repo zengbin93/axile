@@ -1,11 +1,15 @@
-"""ExecutionEngine symbol 预检测试。"""
+"""CTP 渠道品种时段执行编排测试。"""
 
 from __future__ import annotations
+
+from typing import Any
 
 import pytest
 
 from axile.common.trade_channel import TradeChannel
+from axile.domain.execution import ExecutionReasonFamily
 from axile.executor.abstract_executor.base import AbstractExecutor
+from axile.executor.ctp.ctp_execute import CtpExecutionEngine
 from axile.executor.models.execution_result import AlgorithmResult, ExecutionStatus
 from axile.executor.models.unified_account_assets import UnifiedAccountAssets
 from axile.executor.models.unified_input import CTPAccountConfig, UnifiedStandardInput
@@ -13,12 +17,12 @@ from axile.executor.models.unified_order import OrderDirection, OrderType, Trade
 from axile.executor.models.unified_price import UnifiedPriceData
 
 
-class _PrecheckExecutor(AbstractExecutor):
-    def __init__(self, decisions: dict[str, tuple[bool, str | None]]) -> None:
+class _CtpSessionExecutor(AbstractExecutor):
+    def __init__(self, decisions: dict[str, str | None]) -> None:
         self.decisions = decisions
         self.market_data_requests: list[list[str]] = []
         self.websocket_requests: list[list[str]] = []
-        self.cancel_calls = 0
+        self.cancelled_symbol_sets: list[list[str]] = []
         super().__init__(
             TradeChannel.CTP,
             CTPAccountConfig(
@@ -41,8 +45,14 @@ class _PrecheckExecutor(AbstractExecutor):
     def _check_trading_time(self) -> bool:
         return True
 
-    def _precheck_symbol(self, symbol: str) -> tuple[bool, str | None]:
+    def _execution_engine(self) -> CtpExecutionEngine:
+        return CtpExecutionEngine(self, self.require_execution_runtime())
+
+    def _get_ctp_session_block_reason(self, symbol: str) -> str | None:
         return self.decisions[symbol]
+
+    def _cancel_ctp_orders_for_symbols(self, symbols: list[str]) -> None:
+        self.cancelled_symbol_sets.append(symbols)
 
     def get_account_assets(self) -> UnifiedAccountAssets:
         return UnifiedAccountAssets(available_cash=1000, total_asset=1000, market_value=0, positions=[])
@@ -69,7 +79,7 @@ class _PrecheckExecutor(AbstractExecutor):
         self.websocket_requests.append(list(symbols or []))
 
     def cancel_all_orders(self) -> None:
-        self.cancel_calls += 1
+        raise AssertionError("CTP 不应调用账户级 cancel_all_orders")
 
     def _place_order_impl(
         self,
@@ -103,7 +113,7 @@ class _PrecheckExecutor(AbstractExecutor):
         return None
 
     def _get_account_mark(self) -> str:
-        return "precheck"
+        return "ctp-session"
 
     def _get_default_trade_rules_for_empty(self, symbols: list[str]) -> dict[str, dict[str, object]]:
         return {symbol: {} for symbol in symbols}
@@ -145,38 +155,83 @@ def _input() -> UnifiedStandardInput:
     )
 
 
-def test_symbol_precheck_only_queries_and_dispatches_allowed_symbols(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_ctp_engine_only_queries_and_dispatches_session_allowed_symbols(monkeypatch: pytest.MonkeyPatch) -> None:
     from axile.executor import execution_engine as engine_module
 
-    executor = _PrecheckExecutor({"IF2609": (False, "CTP.SESSION.CLOSED"), "ag2612": (True, None)})
+    executor = _CtpSessionExecutor({"IF2609": "CTP.SESSION.CLOSED", "ag2612": None})
+    dispatched_symbols: list[str] = []
     monkeypatch.setattr(
         engine_module,
         "resolve_algorithm",
         lambda _name, _session: (
-            lambda _session, algorithm_input: AlgorithmResult(
-                symbol=algorithm_input.symbol, algorithm="SINGLE-MAKER", target_volume=algorithm_input.target_volume
+            lambda _session, algorithm_input: (
+                dispatched_symbols.append(algorithm_input.symbol)
+                or AlgorithmResult(
+                    symbol=algorithm_input.symbol,
+                    algorithm="SINGLE-MAKER",
+                    target_volume=algorithm_input.target_volume,
+                )
             )
         ),
     )
 
     output = executor.execute(_input(), cleanup=False)
 
-    assert output.status in {ExecutionStatus.PARTIAL, ExecutionStatus.SUCCEEDED}
+    assert output.status == ExecutionStatus.PARTIAL
     assert output.symbol_results["IF2609"].status == ExecutionStatus.BLOCKED
     assert output.symbol_results["IF2609"].error == "CTP.SESSION.CLOSED"
+    assert output.symbol_results["IF2609"].memory == {
+        "symbol_decision_reason_code": "CTP.SESSION.CLOSED",
+        "symbol_decision_reason_family": ExecutionReasonFamily.MARKET_RULE.value,
+    }
     assert executor.market_data_requests == [["ag2612"]]
     assert all("IF2609" not in request for request in executor.websocket_requests)
+    assert executor.cancelled_symbol_sets == [["ag2612"]]
+    assert dispatched_symbols == ["ag2612"]
 
 
-def test_all_symbol_prechecks_block_without_market_data_websocket_or_cancel() -> None:
-    executor = _PrecheckExecutor(
-        {"IF2609": (False, "CTP.SESSION.CLOSED"), "ag2612": (False, "CTP.SESSION.NO_SESSION_TABLE")}
-    )
+def test_ctp_engine_blocks_all_session_rejections_without_execution_io() -> None:
+    executor = _CtpSessionExecutor({"IF2609": "CTP.SESSION.CLOSED", "ag2612": "CTP.SESSION.NO_SESSION_TABLE"})
 
     output = executor.execute(_input(), cleanup=False)
 
     assert output.status == ExecutionStatus.BLOCKED
+    assert output.error == "2 个品种因交易时段不可执行"
     assert set(output.symbol_results) == {"IF2609", "ag2612"}
     assert executor.market_data_requests == []
     assert executor.websocket_requests == []
-    assert executor.cancel_calls == 0
+    assert executor.cancelled_symbol_sets == []
+
+
+class _AuditRuntime:
+    def __init__(self) -> None:
+        self.events: list[dict[str, Any]] = []
+
+    def emit_audit_event(self, **kwargs: Any) -> bool:
+        self.events.append(kwargs)
+        return True
+
+
+def test_ctp_session_decision_emits_market_rule_audit() -> None:
+    runtime = _AuditRuntime()
+    engine = CtpExecutionEngine(object(), runtime=runtime)  # type: ignore[arg-type]
+
+    engine._emit_symbol_decision_events(
+        _input(),
+        [
+            AlgorithmResult(
+                symbol="ag2609C5000",
+                algorithm="SINGLE-MAKER",
+                status=ExecutionStatus.BLOCKED,
+                error="CTP.SESSION.NO_SESSION_TABLE",
+                memory={
+                    "symbol_decision_reason_code": "CTP.SESSION.NO_SESSION_TABLE",
+                    "symbol_decision_reason_family": ExecutionReasonFamily.MARKET_RULE.value,
+                },
+            )
+        ],
+    )
+
+    event = runtime.events[0]
+    assert event["reason_family"] == ExecutionReasonFamily.MARKET_RULE
+    assert event["reason_code"] == "CTP.SESSION.NO_SESSION_TABLE"

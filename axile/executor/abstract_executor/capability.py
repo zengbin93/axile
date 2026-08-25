@@ -59,16 +59,6 @@ class AbstractExecutorCapabilityMixin:
                 symbols.append(symbol)
         return symbols
 
-    def _precheck_symbol(self, symbol: str) -> tuple[bool, str | None]:
-        """在行情、订阅及撤单前检查单个 symbol；默认恒等且不产生 I/O。"""
-        _ = symbol
-        return True, None
-
-    def _cancel_orders_before_symbol_dispatch(self, symbols: list[str]) -> None:
-        """为将要分发的 symbol 准备挂单状态；默认保持账户级全撤单语义。"""
-        _ = symbols
-        _executor(self).cancel_all_orders()
-
     def _create_non_trading_output(self, standard_input: UnifiedStandardInput) -> UnifiedStandardOutput:
         """
         创建非交易时间场景下的阻断输出.
