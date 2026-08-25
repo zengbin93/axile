@@ -34,8 +34,9 @@ CALENDAR_MIN_FUTURE_DAYS = 14
 CALENDAR_TARGET_FUTURE_DAYS = 365
 CALENDAR_INITIAL_HISTORY_DAYS = 365
 CALENDAR_JOB_ID = "ensure-trading-calendar"
+TUSHARE_CALENDAR_REFRESH_KIND = "tushare"
 
-type CalendarRefreshKind = Literal["csv", "python"]
+type CalendarRefreshKind = Literal["csv", "python", "tushare"]
 type CalendarSkipReason = Literal["CALENDAR.CLOSED", "CALENDAR.NO_NIGHT_SESSION"]
 _CALENDAR_ID_PATTERN = re.compile(r"^[a-z][a-z0-9_-]*$")
 _SYNC_LOCKS: dict[str, asyncio.Lock] = {}
@@ -594,6 +595,59 @@ async def import_calendar_csv(
     return preview
 
 
+async def fetch_tushare_trade_cal(start: date, end: date) -> list[dict[str, str]]:
+    """从 config.toml 读取凭据并拉取 Tushare 全量交易日历。"""
+    from axile.common.config import settings
+
+    token = settings.tushare_token.strip()
+    if not token:
+        raise ValueError("未配置 Tushare Token")
+
+    def fetch() -> list[dict[str, str]]:
+        import tushare as ts
+
+        client = ts.pro_api(token)
+        frame = client.trade_cal(
+            exchange="SSE", start_date=start.strftime("%Y%m%d"), end_date=end.strftime("%Y%m%d")
+        )
+        return cast("list[dict[str, str]]", frame.to_dict("records"))
+
+    return await asyncio.to_thread(fetch)
+
+
+async def _save_tushare_calendar(
+    session: AsyncSession, *, calendar_id: str, start: date, end: date
+) -> None:
+    """在已持有日历锁时拉取并替换 Tushare 日历。"""
+    rows = await fetch_tushare_trade_cal(start, end)
+    entries = [
+        CalendarInputEntry(
+            calendar_id=calendar_id,
+            cal_date=datetime.strptime(str(row["cal_date"]), "%Y%m%d").date(),
+            is_open=str(row["is_open"]) == "1",
+        )
+        for row in rows
+    ]
+    validate_calendar_entries(entries, calendar_id=calendar_id, start=start, end=end)
+    await _replace_calendar(session, entries, refresh_kind=TUSHARE_CALENDAR_REFRESH_KIND)
+
+
+async def save_tushare_calendar(
+    session: AsyncSession,
+    *,
+    calendar_id: str = CALENDAR_ID,
+    start: date,
+    end: date,
+) -> None:
+    """用 Tushare trade_cal 原子替换一份日历；凭据不入库。"""
+    calendar_id = normalize_calendar_id(calendar_id)
+    if start > end:
+        raise ValueError("start 必须 <= end")
+    lock = _SYNC_LOCKS.setdefault(calendar_id, asyncio.Lock())
+    async with lock:
+        await _save_tushare_calendar(session, calendar_id=calendar_id, start=start, end=end)
+
+
 def _calendar_script_error(error: ScriptExecutionError) -> CalendarFunctionResult:
     return CalendarFunctionResult(
         valid=False,
@@ -758,6 +812,40 @@ async def get_calendar_status(session: AsyncSession, calendar_id: str = CALENDAR
     )
 
 
+async def _sync_one_tushare(calendar_id: str, *, force: bool) -> bool:
+    lock = _SYNC_LOCKS.setdefault(calendar_id, asyncio.Lock())
+    if lock.locked():
+        return False
+    async with lock, SessionLocal() as session:
+        config = await session.get(TradingCalendarConfig, calendar_id)
+        if config is None or config.refresh_kind != TUSHARE_CALENDAR_REFRESH_KIND:
+            return False
+        today = date.today()
+        covered = await session.scalar(
+            select(func.count())
+            .select_from(TradingCalendarRecord)
+            .where(
+                col(TradingCalendarRecord.calendar_id) == calendar_id,
+                col(TradingCalendarRecord.cal_date) >= today,
+                col(TradingCalendarRecord.cal_date) <= today + timedelta(days=CALENDAR_MIN_FUTURE_DAYS),
+            )
+        )
+        if not force and int(covered or 0) == CALENDAR_MIN_FUTURE_DAYS + 1:
+            return False
+        try:
+            await _save_tushare_calendar(
+                session,
+                calendar_id=calendar_id,
+                start=today - timedelta(days=CALENDAR_INITIAL_HISTORY_DAYS),
+                end=today + timedelta(days=CALENDAR_TARGET_FUTURE_DAYS),
+            )
+        except Exception as exc:  # noqa: BLE001 - 刷新失败保留旧日历
+            logger.error("刷新 {} Tushare 交易日历失败，保留现有数据: {}", calendar_id, type(exc).__name__)
+            return False
+        logger.info("已刷新 {} Tushare 交易日历", calendar_id)
+        return True
+
+
 async def _sync_one_python(calendar_id: str, *, force: bool) -> bool:
     lock = _SYNC_LOCKS.setdefault(calendar_id, asyncio.Lock())
     if lock.locked():
@@ -793,6 +881,21 @@ async def _sync_one_python(calendar_id: str, *, force: bool) -> bool:
         return True
 
 
+async def sync_calendar_tushare(*, calendar_id: str | None = None, force: bool = False) -> bool:
+    """刷新一个或全部配置为 Tushare 的日历。"""
+    if calendar_id is not None:
+        return await _sync_one_tushare(normalize_calendar_id(calendar_id), force=force)
+    async with SessionLocal() as session:
+        rows = await session.execute(
+            select(TradingCalendarConfig.calendar_id).where(
+                col(TradingCalendarConfig.refresh_kind) == TUSHARE_CALENDAR_REFRESH_KIND
+            )
+        )
+        calendar_ids = list(rows.scalars().all())
+    results = await asyncio.gather(*(_sync_one_tushare(item, force=force) for item in calendar_ids))
+    return any(results)
+
+
 async def sync_calendar_python(*, calendar_id: str | None = None, force: bool = False) -> bool:
     """刷新一个或全部配置为 Python 的日历。"""
     if calendar_id is not None:
@@ -810,8 +913,8 @@ async def sync_calendar_python(*, calendar_id: str | None = None, force: bool = 
 
 
 async def ensure_trading_calendar_coverage() -> None:
-    """定时检查全部 Python 日历的未来覆盖。"""
-    await sync_calendar_python(force=False)
+    """定时检查全部自动刷新日历的未来覆盖。"""
+    await asyncio.gather(sync_calendar_python(force=False), sync_calendar_tushare())
 
 
 def register_trading_calendar_job(scheduler: Scheduler) -> None:
@@ -857,8 +960,10 @@ __all__ = [
     "register_trading_calendar_job",
     "run_calendar_function",
     "save_calendar_function",
+    "save_tushare_calendar",
     "set_calendar_overrides",
     "stage_initial_calendars",
     "sync_calendar_python",
+    "sync_calendar_tushare",
     "validate_calendar_entries",
 ]

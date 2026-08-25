@@ -86,6 +86,7 @@ class Settings(BaseSettings):
     exe_err_feishu_key: str = ""
     app_log_dir: Path = Path("./logs")
     axile_log_rotation: str = "1 day"
+    tushare_token: str = ""
     algorithm_modules: list[str] = []
     algorithm_directories: list[str] = []
 

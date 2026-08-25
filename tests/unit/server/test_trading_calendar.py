@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import sqlite3
 from collections.abc import AsyncGenerator
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
@@ -481,6 +481,118 @@ def test_futures_night_trigger_maps_to_trading_day(
     assert decision.day == expected_day
     assert decision.status is expected_status
     assert decision.reason_code == expected_reason
+
+
+def test_tushare_calendar_maps_all_natural_days(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Tushare 的 trade_cal 返回完整自然日，保存时不需补齐日期。"""
+    session_factory = asyncio.run(_create_database(tmp_path / "tushare-save.db"))
+
+    async def fake_fetch(start: date, end: date) -> list[dict[str, str]]:
+        assert (start, end) == (date(2026, 1, 1), date(2026, 1, 3))
+        return [
+            {"cal_date": "20260101", "is_open": "0"},
+            {"cal_date": "20260102", "is_open": "1"},
+            {"cal_date": "20260103", "is_open": "0"},
+        ]
+
+    monkeypatch.setattr(calendar_service, "fetch_tushare_trade_cal", fake_fetch)
+
+    async def exercise() -> None:
+        async with session_factory() as session:
+            await calendar_service.save_tushare_calendar(
+                session,
+                calendar_id="china",
+                start=date(2026, 1, 1),
+                end=date(2026, 1, 3),
+            )
+            rows = await calendar_service.list_calendar_entries(
+                session, calendar_id="china", start=date(2026, 1, 1), end=date(2026, 1, 3)
+            )
+            config = await session.get(TradingCalendarConfig, "china")
+            status = await calendar_service.get_calendar_status(session, "china")
+            assert [item.is_open for item in rows] == [False, True, False]
+            assert config is not None and config.refresh_kind == "tushare"
+            assert config.function_code == ""
+            assert status.function_code == ""
+
+    asyncio.run(exercise())
+
+
+def test_tushare_refresh_skips_covered_calendar(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    session_factory = asyncio.run(_create_database(tmp_path / "tushare-covered.db"))
+    today = date.today()
+
+    async def fail_if_called(_start: date, _end: date) -> list[dict[str, str]]:
+        raise AssertionError("covered calendar must not fetch")
+
+    monkeypatch.setattr(calendar_service, "SessionLocal", session_factory)
+    monkeypatch.setattr(calendar_service, "fetch_tushare_trade_cal", fail_if_called)
+
+    async def exercise() -> bool:
+        async with session_factory() as session:
+            session.add(TradingCalendarConfig(calendar_id="china", refresh_kind="tushare"))
+            session.add_all(
+                TradingCalendarRecord(calendar_id="china", cal_date=today + timedelta(days=offset), is_open=True)
+                for offset in range(calendar_service.CALENDAR_MIN_FUTURE_DAYS + 1)
+            )
+            session.add(TradingCalendarOverride(calendar_id="china", cal_date=today, is_open=False))
+            await session.commit()
+        refreshed = await calendar_service.sync_calendar_tushare(calendar_id="china")
+        async with session_factory() as session:
+            override = await session.get(TradingCalendarOverride, ("china", today))
+            assert override is not None and override.is_open is False
+        return refreshed
+
+    assert asyncio.run(exercise()) is False
+
+
+def test_tushare_route_sanitizes_upstream_errors(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    session_factory = asyncio.run(_create_database(tmp_path / "tushare-route.db"))
+    token = "tushare-token-123"
+
+    async def failed_fetch(_start: date, _end: date) -> list[dict[str, str]]:
+        raise RuntimeError(f"upstream rejected {token}")
+
+    monkeypatch.setattr(calendar_service, "fetch_tushare_trade_cal", failed_fetch)
+
+    with TestClient(_calendar_app(session_factory)) as client:
+        response = client.put("/api/v1/market/trading-calendar/tushare?calendarId=china")
+
+    assert response.status_code == 502
+    assert response.json()["detail"] == "Tushare 交易日历拉取失败"
+    assert token not in response.text
+
+
+def test_failed_tushare_refresh_preserves_existing_calendar(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Tushare 不可用时保留已有数据与人工调整。"""
+    session_factory = asyncio.run(_create_database(tmp_path / "tushare-failure.db"))
+    calendar_day = date(2026, 1, 1)
+
+    async def failed_fetch(_start: date, _end: date) -> list[dict[str, str]]:
+        raise ValueError("Tushare trade_cal 不可用")
+
+    monkeypatch.setattr(calendar_service, "fetch_tushare_trade_cal", failed_fetch)
+
+    async def exercise() -> None:
+        async with session_factory() as session:
+            session.add(TradingCalendarRecord(calendar_id="china", cal_date=calendar_day, is_open=False))
+            session.add(TradingCalendarOverride(calendar_id="china", cal_date=calendar_day, is_open=True))
+            session.add(TradingCalendarConfig(calendar_id="china", refresh_kind="tushare"))
+            await session.commit()
+            with pytest.raises(ValueError, match="Tushare trade_cal 不可用"):
+                await calendar_service.save_tushare_calendar(
+                    session, calendar_id="china", start=calendar_day, end=calendar_day
+                )
+            base = await session.get(TradingCalendarRecord, ("china", calendar_day))
+            override = await session.get(TradingCalendarOverride, ("china", calendar_day))
+            config = await session.get(TradingCalendarConfig, "china")
+            assert base is not None and base.is_open is False
+            assert override is not None and override.is_open is True
+            assert config is not None and config.refresh_kind == "tushare"
+
+    asyncio.run(exercise())
 
 
 def test_calendar_function_contract_runs_in_sandbox() -> None:
