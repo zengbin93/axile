@@ -178,7 +178,8 @@ export function AccountEditPage({ section = 'basic' }: { section?: EditSection }
   const acc = account.data
   const channelDescriptor = useChannelDescriptor(acc?.trade_channel)
   const item = accounts?.find((a) => a.account_id === accountId) ?? null
-  // 首帧用仪表盘缓存名挂共享元素，避免等 getAccount 时落点缺失、FLIP 断档。
+  // 首帧用仪表盘缓存名/渠道挂标题，避免等 getAccount 时落点缺失、FLIP 断档，
+  // 也避免 Chip 在过渡尾巴上闪现。
   const displayName = acc?.name ?? item?.name
 
   const [ready, setReady] = useState(false)
@@ -197,8 +198,8 @@ export function AccountEditPage({ section = 'basic' }: { section?: EditSection }
       accountId={accountId}
       page={SECTION_TITLE[section]}
       name={displayName}
-      channel={acc?.trade_channel}
-      market={acc?.market}
+      channel={acc?.trade_channel ?? item?.trade_channel}
+      market={acc?.market ?? item?.market}
     />
   )
 

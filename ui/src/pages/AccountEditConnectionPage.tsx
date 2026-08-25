@@ -26,18 +26,40 @@ export function AccountEditConnectionPage() {
     queryKey: `account:${accountId}:connection`, intervalMs: 0,
   })
   const acc = account.data
+  const accounts = useDomainStore((state) => state.accounts)
+  const cachedAccount = accounts?.find((item) => item.account_id === accountId) ?? null
   const channelDescriptor = useChannelDescriptor(acc?.trade_channel)
   const fields = useMemo(() => channelDescriptor?.account_form.fields ?? [], [channelDescriptor])
   const [draft, setDraft] = useState<Record<string, unknown> | null>(null)
   const [errors, setErrors] = useState<Record<string, string>>({})
   const [saveError, setSaveError] = useState<Error | null>(null)
 
+  // 首帧用仪表盘缓存名/渠道，加载态也渲染真实标题：新侧快照缺名会让账户名
+  // 原地淡出再随数据闪现，读起来像「位移一下又回来」。
+  const title = (
+    <div className="flex flex-wrap items-baseline gap-3">
+      <AccountPageTitle
+        accountId={accountId}
+        page="连接设置"
+        name={acc?.name ?? cachedAccount?.name}
+        channel={acc?.trade_channel ?? cachedAccount?.trade_channel}
+        market={acc?.market ?? cachedAccount?.market}
+      />
+    </div>
+  )
+
   useEffect(() => {
     if (acc && channelDescriptor && draft === null) setDraft(initialConnectionDraft(acc, fields))
   }, [acc, channelDescriptor, draft, fields])
 
   if (account.error && !acc) return <EditError error={account.error} onRetry={account.refresh} />
-  if (!acc || !draft || (catalogLoading && !channelDescriptor)) return <EditLoading />
+  if (!acc || !draft || (catalogLoading && !channelDescriptor))
+    return (
+      <section className="pb-24">
+        {title}
+        <EditLoading bare />
+      </section>
+    )
 
   const setField = (field: ChannelAccountField, value: unknown) => {
     setSaveError(null)
@@ -93,7 +115,7 @@ export function AccountEditConnectionPage() {
 
   return (
     <section className="pb-24">
-      <div className="flex flex-wrap items-baseline gap-3"><AccountPageTitle accountId={accountId} page="连接设置" name={acc.name} channel={acc.trade_channel} market={acc.market} /></div>
+      {title}
       <div className="mt-3 border-l-2 border-warn/60 bg-warn-tint/50 py-2 pl-3 pr-2 text-[13px] text-ink-2">修改会在下次创建执行器时生效；密码与密钥不会回显。</div>
       <Section label={`${channelDescriptor?.label ?? acc.trade_channel} 连接`}>
         {fields.map((field) => {

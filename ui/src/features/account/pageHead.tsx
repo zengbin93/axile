@@ -1,12 +1,13 @@
 /**
  * 账户域页头原子：统一大标题（``页名 · 账户名`` + 渠道 chip）与账户名共享元素门控。
  *
- * 身份协议（先命名同一逻辑物）：
- * - 账户名是账户域跨页唯一不变的逻辑物（同字号 18/640、同槽位族、内容真不变），
- *   统一挂 ``account-name-*``：域内互切只剩**纯平移** FLIP，缩放恒 1、绝不拉皮；
- *   进出账户域（舰队卡 → 标题头）沿用既有配对。
+ * 身份协议（先命名同一逻辑物；FLIP 只在「身份对 + 几何真变」时才有信息量）：
+ * - 挂名只服务几何真变的配对：详情头（hero 卡内 16/620）↔ 各页标题槽（内容顶 18/640），
+ *   以及舰队卡 / 组合行 ↔ 详情头（这两对由卡片侧自行挂名，详情头常配对）。
+ * - 标题槽页面之间互切（基本信息 ↔ 连接设置 ↔ … ↔ 组合执行）落点恒等：恒等 FLIP 没有
+ *   信息量，反而把名字从工作区快照里抠到一条与 180ms 交叉淡**不同步的轨道**上，读起来
+ *   像「晃」——故同槽互切不挂名，名字随工作区同轨淡换。
  * - 页名前缀是内容真变，不挂名，随工作区 180ms 交叉淡（同槽换字，诚实）。
- * - 「同账户」的连续感由本标题行承担。
  */
 import { useViewTransitionState } from 'react-router'
 import { Chip } from '@/components/ui/Card'
@@ -14,33 +15,16 @@ import { channelLabel } from '@/features/dashboard/display'
 import type { TradeChannel } from '@/types/api'
 
 /**
- * 账户名共享元素门控：仅在「往返账户域」的 View Transition 期间为真。
+ * 账户名共享元素门控：仅在「本次过渡涉及账户详情页」时为真。
  *
- * ``useViewTransitionState`` 只认精确路径、不支持通配，故逐路径展开（hooks 不可进循环）。
- * 执行详情含动态段（executionId）无法在此登记，不参与名字 FLIP（``AccountPageTitle``
- * 用 ``flip={false}`` 关掉）。**新增账户域页面时必须在此登记**，否则切到该页时
- * 旧侧快照缺名、FLIP 断档。
+ * ViewTransitionContext 在整个过渡期间同时固定持有 currentLocation 与 nextLocation，
+ * 新旧两侧用同一个精确路径判定即可一致挂名，无需逐路径登记。详情头是账户域内唯一
+ * 与标题槽几何不同的名字落点；同槽标题页互切一律为假（恒等 FLIP 是假连续，摁死）。
+ * 执行详情等不愿参与的页由 ``AccountPageTitle`` 的 ``flip={false}`` 关闭。
  */
 // oxlint-disable-next-line react/only-export-components -- 门控 hook 与标题原子同属页头一处，刻意合并
 export function useAccountNameVt(accountId: number): boolean {
-  const base = `/accounts/${accountId}`
-  const tDetail = useViewTransitionState(base)
-  const tHoldings = useViewTransitionState(`${base}/holdings`)
-  const tExecutions = useViewTransitionState(`${base}/executions`)
-  const tHistory = useViewTransitionState(`${base}/history`)
-  const tEdit = useViewTransitionState(`${base}/edit`)
-  const tEditConnection = useViewTransitionState(`${base}/edit/connection`)
-  const tEditLeverage = useViewTransitionState(`${base}/edit/leverage`)
-  const tEditSymbols = useViewTransitionState(`${base}/edit/symbols`)
-  const tEditPortfolio = useViewTransitionState(`${base}/edit/portfolio`)
-  const tEditTimer = useViewTransitionState(`${base}/edit/timer`)
-  const tEditAlgorithm = useViewTransitionState(`${base}/edit/algorithm`)
-  const tEditControl = useViewTransitionState(`${base}/edit/control`)
-  return (
-    tDetail || tHoldings || tExecutions || tHistory ||
-    tEdit || tEditConnection || tEditLeverage || tEditSymbols || tEditPortfolio ||
-    tEditTimer || tEditAlgorithm || tEditControl
-  )
+  return useViewTransitionState(`/accounts/${accountId}`)
 }
 
 /**
@@ -53,7 +37,7 @@ export function useAccountNameVt(accountId: number): boolean {
  * name : string | null | undefined
  *     账户名；缺省时回退 ``账户 #id`` 且不挂共享名（身份未就位不做假连续）。
  * flip : boolean
- *     为假时账户名不做共享元素 FLIP（执行详情等无法门控的页）。
+ *     为假时账户名不做共享元素 FLIP（执行详情等主动退出的页）。
  */
 export function AccountPageTitle({
   accountId,
