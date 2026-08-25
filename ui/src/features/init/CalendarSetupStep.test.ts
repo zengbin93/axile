@@ -11,6 +11,8 @@ const requirement = {
   label: '中国交易日历',
   channels: ['ctp'],
   channel_labels: ['CTP'],
+  legacy_fallback_channels: [],
+  legacy_fallback_channel_labels: [],
 }
 
 const entries = [{ calendar_id: 'china', cal_date: '2026-08-23', is_open: false }]

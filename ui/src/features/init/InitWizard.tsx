@@ -88,6 +88,7 @@ interface Draft {
   environment: string
   app_log_dir: string
   axile_log_rotation: string
+  tushare_token: string
   algorithm_modules: string
   algorithm_directories: string
 }
@@ -100,6 +101,7 @@ function draftFromInitial(initial: InitValues): Draft {
     environment: initial.environment || 'local',
     app_log_dir: initial.app_log_dir || './logs',
     axile_log_rotation: initial.axile_log_rotation || '1 day',
+    tushare_token: '',
     algorithm_modules: (initial.algorithm_modules ?? []).join('\n'),
     algorithm_directories: (initial.algorithm_directories ?? []).join('\n'),
   }
@@ -112,6 +114,7 @@ function splitLines(value: string): string[] {
 function advancedValues(draft: Draft, initial: InitValues): InitValues {
   return {
     ...initial,
+    tushare_token: draft.tushare_token || undefined,
     sqlalchemy_database_uri: draft.sqlalchemy_database_uri,
     exe_err_feishu_key: draft.exe_err_feishu_key,
     environment: draft.environment,
@@ -267,7 +270,10 @@ export function InitWizard({
   const [savedAlertKey, setSavedAlertKey] = useState(
     initial.exe_err_feishu_key ?? '',
   )
-  const [draft, setDraft] = useState<Draft>(() => draftFromInitial(initial))
+  const [draft, setDraft] = useState<Draft>(() => ({
+    ...draftFromInitial(initial),
+    tushare_token: '',
+  }))
   const initialDraft = draftFromInitial(initial)
   const currentAdvancedValues = advancedValues(draft, initial)
   const advancedChanges = advancedConfigChanges(initial, currentAdvancedValues)
@@ -324,6 +330,7 @@ export function InitWizard({
       }
       await saveInit({
         ...draft,
+        tushare_token: draft.tushare_token || undefined,
         ...(!isEdit ? { trading_calendars: calendarSetup.calendars } : {}),
         algorithm_modules: splitLines(draft.algorithm_modules),
         algorithm_directories: splitLines(draft.algorithm_directories),
@@ -487,6 +494,12 @@ export function InitWizard({
                           : [['交易日历', '未配置，自动排程继续执行']]
                         : []),
                       [
+                        'Tushare 日历',
+                        draft.tushare_token || initial.tushare_configured
+                          ? '已配置 Token'
+                          : '（未配置 · 不启用 Tushare 兜底）',
+                      ],
+                      [
                         '执行告警',
                         draft.exe_err_feishu_key
                           ? '已配置飞书推送'
@@ -552,6 +565,21 @@ export function InitWizard({
                         set({ axile_log_rotation: e.target.value })
                       }
                     />
+                    <label className={labelCls} htmlFor="tushare-token">
+                      Tushare Token（交易日历兜底）
+                    </label>
+                    <input
+                      id="tushare-token"
+                      className={inputCls}
+                      type="password"
+                      value={draft.tushare_token}
+                      onChange={(e) => set({ tushare_token: e.target.value })}
+                      placeholder={initial.tushare_configured ? '已配置；留空保持不变' : '留空则不启用'}
+                    />
+                    <p className="mt-1.5 text-[12px] leading-relaxed text-ink-3">
+                      仅写入受管 <span className="num">config.toml</span>，不进入日历函数、日志或接口响应。Tushare{' '}
+                      <span className="num">trade_cal</span> 需要 ≥2000 积分。
+                    </p>
                     <label className={labelCls}>用户算法目录（每行一个）</label>
                     <textarea
                       className={`${inputCls} min-h-[72px] font-mono`}
@@ -688,6 +716,22 @@ export function InitWizard({
                     </div>
                     <p className="mt-1.5 text-[11px] leading-5 text-ink-3">
                       服务运行日志的写入目录，可直接输入或浏览服务所在机器。
+                    </p>
+                  </Row>
+                </Section>
+
+                <Section label="交易日历">
+                  <Row label="Tushare Token" hint="A 股日历" top span>
+                    <input
+                      id="tushare-token"
+                      className={`${TEXT} font-mono`}
+                      type="password"
+                      value={draft.tushare_token}
+                      onChange={(event) => set({ tushare_token: event.target.value })}
+                      placeholder={initial.tushare_configured ? '已配置；输入新 Token 轮换' : '留空则不启用'}
+                    />
+                    <p className="mt-1.5 text-[11px] leading-5 text-ink-3">
+                      仅用于 A 股 <span className="num">trade_cal</span>；输入新 Token 后保存并重启生效，不进入接口响应或日志。
                     </p>
                   </Row>
                 </Section>

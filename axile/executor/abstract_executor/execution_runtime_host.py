@@ -55,6 +55,7 @@ class AbstractExecutorExecutionRuntimeHostMixin:
         executor._execution_query_runtime_bridge = ExecutionQueryRuntimeBridge(executor)
         executor._trading_calendar = None
         executor._channel_calendar_id = None
+        executor._channel_calendar_fallback_id = None
 
         if account_config is not None:
             executor._initialize_connection(account_config)
@@ -63,16 +64,36 @@ class AbstractExecutorExecutionRuntimeHostMixin:
         """绑定执行器使用的本地交易日历读取器。"""
         _executor(self)._trading_calendar = calendar
 
-    def set_channel_calendar(self, calendar_id: str | None) -> None:
-        """绑定当前渠道由插件声明的日历标识。"""
-        _executor(self)._channel_calendar_id = calendar_id
+    def set_channel_calendar(self, calendar_id: str | None, fallback_calendar_id: str | None = None) -> None:
+        """绑定当前渠道由插件声明的主日历及可选存量回退。"""
+        executor = _executor(self)
+        executor._channel_calendar_id = calendar_id
+        executor._channel_calendar_fallback_id = fallback_calendar_id
 
     def _is_channel_calendar_open(self, day: date | None = None) -> bool:
-        """查询当前渠道声明的日历；未声明时不限制执行。"""
-        calendar_id = cast("str | None", getattr(_executor(self), "_channel_calendar_id", None))
+        """查询当前渠道声明的日历；主日历未覆盖时才读取存量回退。"""
+        executor = _executor(self)
+        calendar_id = cast("str | None", getattr(executor, "_channel_calendar_id", None))
         if calendar_id is None:
             return True
-        return self._is_calendar_open(calendar_id, day)
+        current = day or date.today()
+        calendar = cast("TradingCalendar | None", getattr(executor, "_trading_calendar", None))
+        if calendar is not None:
+            try:
+                is_open = calendar.is_open(calendar_id, current)
+                if is_open is not None:
+                    return is_open
+                fallback_id = cast("str | None", getattr(executor, "_channel_calendar_fallback_id", None))
+                if fallback_id is not None:
+                    fallback_open = calendar.is_open(fallback_id, current)
+                    if fallback_open is not None:
+                        return fallback_open
+                executor.logger.warning("{} {} 缺少有效交易日历，继续放行", calendar_id, current)
+            except Exception as exc:  # noqa: BLE001 - 日历故障按兼容口径降级
+                executor.logger.warning("读取 {} {} 交易日历失败，继续放行: {}", calendar_id, current, exc)
+        else:
+            executor.logger.warning("未绑定本地交易日历，{} {} 继续放行", calendar_id, current)
+        return True
 
     def _is_calendar_open(self, calendar_id: str, day: date | None = None) -> bool:
         """查询交易日历；未配置、缺失或读取失败时按原排程执行。"""
@@ -114,7 +135,11 @@ class AbstractExecutorExecutionRuntimeHostMixin:
             return self._is_channel_calendar_open(session_start_day)
 
         try:
-            if calendar.is_open(calendar_id, session_start_day) is not True:
+            session_state = calendar.is_open(calendar_id, session_start_day)
+            if session_state is None:
+                executor.logger.warning("{} {} 缺少有效交易日历，继续放行", calendar_id, session_start_day)
+                return True
+            if not session_state:
                 return False
             for offset in range(1, 15):
                 candidate = session_start_day + timedelta(days=offset)

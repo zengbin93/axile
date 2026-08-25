@@ -62,6 +62,9 @@ class SchedulePreviewItem(BaseModel):
     calendar_status: CalendarDecisionStatus
     action: Literal["execute", "skip"]
     unavailable_reason: CalendarUnavailableReason | None = None
+    calendar_id: str | None = None
+    label: str | None = None
+    using_legacy_fallback: bool = False
     reason_code: Literal["CALENDAR.CLOSED", "CALENDAR.NO_NIGHT_SESSION"] | None = None
 
 
@@ -160,6 +163,9 @@ async def schedule_preview(session: SessionDep, payload: SchedulePreviewRequest)
                 calendar_status=decision.status,
                 action="skip" if decision.status is CalendarDecisionStatus.AVAILABLE_CLOSED else "execute",
                 unavailable_reason=decision.unavailable_reason,
+                calendar_id=decision.calendar_id,
+                label=decision.label,
+                using_legacy_fallback=decision.using_legacy_fallback,
                 reason_code=decision.reason_code,
             )
         )

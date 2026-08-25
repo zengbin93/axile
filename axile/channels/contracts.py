@@ -266,10 +266,21 @@ class ChannelAccountForm(_FrozenDescriptorModel):
 
 
 class ChannelCalendar(_FrozenDescriptorModel):
-    """描述渠道使用的共享交易日历。"""
+    """描述渠道使用的共享交易日历及可选存量回退。"""
 
     calendar_id: str = Field(pattern=r"^[a-z][a-z0-9_-]*$")
     label: str = Field(min_length=1)
+    fallback_calendar_id: str | None = Field(default=None, pattern=r"^[a-z][a-z0-9_-]*$")
+    fallback_label: str | None = Field(default=None, min_length=1)
+
+    @model_validator(mode="after")
+    def validate_fallback(self) -> "ChannelCalendar":
+        """回退日历必须有完整且不同于主日历的声明。"""
+        if (self.fallback_calendar_id is None) != (self.fallback_label is None):
+            raise ValueError("fallback_calendar_id 与 fallback_label 必须同时声明")
+        if self.fallback_calendar_id == self.calendar_id:
+            raise ValueError("fallback_calendar_id 不能与 calendar_id 相同")
+        return self
 
 
 class ChannelNightSchedule(_FrozenDescriptorModel):

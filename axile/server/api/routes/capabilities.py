@@ -61,6 +61,8 @@ class CalendarRequirementPublic(BaseModel):
     label: str
     channels: list[str]
     channel_labels: list[str]
+    legacy_fallback_channels: list[str]
+    legacy_fallback_channel_labels: list[str]
 
 
 @router.get("/channels", response_model=list[ChannelCapabilityPublic])
@@ -104,8 +106,24 @@ def list_calendar_requirements() -> list[CalendarRequirementPublic]:
                 label=calendar.label,
                 channels=[],
                 channel_labels=[],
+                legacy_fallback_channels=[],
+                legacy_fallback_channel_labels=[],
             )
             grouped[calendar.calendar_id] = item
         item.channels.append(plugin.descriptor.channel)
         item.channel_labels.append(plugin.descriptor.label)
+        if calendar.fallback_calendar_id is not None:
+            fallback = grouped.get(calendar.fallback_calendar_id)
+            if fallback is None:
+                fallback = CalendarRequirementPublic(
+                    calendar_id=calendar.fallback_calendar_id,
+                    label=calendar.fallback_label or calendar.fallback_calendar_id,
+                    channels=[],
+                    channel_labels=[],
+                    legacy_fallback_channels=[],
+                    legacy_fallback_channel_labels=[],
+                )
+                grouped[calendar.fallback_calendar_id] = fallback
+            fallback.legacy_fallback_channels.append(plugin.descriptor.channel)
+            fallback.legacy_fallback_channel_labels.append(plugin.descriptor.label)
     return list(grouped.values())
