@@ -1,7 +1,6 @@
 import type { InitValues } from '@/lib/api/init'
 
 const ADVANCED_KEYS = [
-  ['tushare_token', 'Tushare Token'],
   ['sqlalchemy_database_uri', '数据库地址'],
   ['environment', '运行环境'],
   ['app_log_dir', '日志目录'],

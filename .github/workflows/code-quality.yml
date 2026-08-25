@@ -99,7 +99,7 @@ jobs:
 
     - name: Sync test dependencies
       run: |
-        uv sync --group dev --extra ctp --extra shinny
+        uv sync --group dev --extra ctp
 
     - name: 验证 CTP 原生模块
       run: |

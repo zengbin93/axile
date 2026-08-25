@@ -16,7 +16,14 @@ from sqlmodel import SQLModel
 from axile.common.trade_channel import TradeChannel
 from axile.server.api.routes import account_schedule
 from axile.server.cron import SCHEDULER_TIMEZONE, parse_cron_expr
-from axile.server.db.models import ExecuteRecord, ExecutionActivity, ScheduleSkip, ScheduleSkipActivity
+from axile.server.db.models import (
+    ExecuteRecord,
+    ExecutionActivity,
+    ScheduleSkip,
+    ScheduleSkipActivity,
+    TradingCalendarConfig,
+    TradingCalendarRecord,
+)
 from axile.server.execution import rebalance as rebalance_execution
 from axile.server.execution import scheduler as execution_scheduler
 from axile.server.trading_calendar import (
@@ -263,6 +270,36 @@ def test_schedule_preview_maps_only_closed_to_skip(monkeypatch: pytest.MonkeyPat
     )
     assert [item.action for item in response.items] == ["skip", "execute"]
     assert response.items[1].unavailable_reason is CalendarUnavailableReason.UNCOVERED
+
+
+def test_schedule_preview_reads_legacy_refresh_kind_without_error(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """旧刷新方式不会阻断排程预览，仍按既有基础记录决策。"""
+    session_factory = asyncio.run(_create_database(tmp_path / "legacy-preview.db"))
+    scheduled_at = datetime.now(SCHEDULER_TIMEZONE).replace(hour=9, minute=30, second=0, microsecond=0)
+    monkeypatch.setattr(account_schedule, "_next_schedule_times", lambda *_args, **_kwargs: [scheduled_at])
+
+    async def exercise() -> account_schedule.SchedulePreviewResponse:
+        async with session_factory() as session:
+            session.add_all(
+                [
+                    TradingCalendarConfig(calendar_id="china", refresh_kind="tushare"),
+                    TradingCalendarRecord(calendar_id="china", cal_date=scheduled_at.date(), is_open=False),
+                ]
+            )
+            await session.commit()
+            return await account_schedule.schedule_preview(
+                session,
+                account_schedule.SchedulePreviewRequest(
+                    trade_channel=TradeChannel.CTP,
+                    cron_expr="30 9 * * *",
+                    limit=1,
+                ),
+            )
+
+    response = asyncio.run(exercise())
+    assert response.calendar.availability == "available"
+    assert response.items[0].action == "skip"
+    assert response.items[0].calendar_status is CalendarDecisionStatus.AVAILABLE_CLOSED
 
 
 def test_schedule_preview_exposes_legacy_fallback_source(monkeypatch: pytest.MonkeyPatch) -> None:

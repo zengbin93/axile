@@ -31,12 +31,6 @@ describe('advancedConfigChanges', () => {
     ).toEqual(['运行环境', '算法模块'])
   })
 
-  test('输入新 Tushare Token 允许在高级配置中保存', () => {
-    expect(
-      advancedConfigChanges(initial, { ...initial, tushare_token: 'rotated-token' }),
-    ).toEqual(['Tushare Token'])
-  })
-
   test('数组顺序变化也视为配置变化', () => {
     const current = { ...initial, algorithm_modules: ['pkg.b', 'pkg.a'] }
     expect(advancedConfigChanges(initial, current)).toEqual(['算法模块'])

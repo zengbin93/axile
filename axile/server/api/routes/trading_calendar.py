@@ -11,7 +11,6 @@ from pydantic import BaseModel, Field
 
 from axile.server.api.deps import SessionDep
 from axile.server.trading_calendar import (
-    ASHARE_CALENDAR_ID,
     CALENDAR_ID,
     CALENDAR_INITIAL_HISTORY_DAYS,
     CALENDAR_TARGET_FUTURE_DAYS,
@@ -33,11 +32,9 @@ from axile.server.trading_calendar import (
     run_calendar_function,
     save_calendar_function,
     save_shinny_calendar,
-    save_tushare_calendar,
     set_calendar_overrides,
     sync_calendar_python,
     sync_calendar_shinny,
-    sync_calendar_tushare,
 )
 
 router = APIRouter(prefix="/market/trading-calendar", tags=["market"])
@@ -172,7 +169,7 @@ async def update_shinny_calendar(
     session: SessionDep,
     calendar_id: Annotated[str, Query(alias="calendarId", min_length=1)] = CALENDAR_ID,
 ) -> CalendarStatus:
-    """物化 Shinny 中国期货/通用节假日日历；内置数据仅覆盖至 2026 年。"""
+    """物化 Shinny A 股和国内期货共用日历；内置数据仅覆盖至 2026 年。"""
     today = _today()
     if today > date(2026, 12, 31):
         raise HTTPException(status_code=422, detail="Shinny 内置节假日仅覆盖至 2026-12-31")
@@ -189,39 +186,14 @@ async def update_shinny_calendar(
     return await get_calendar_status(session, calendar_id)
 
 
-@router.put("/tushare", response_model=CalendarStatus, response_model_by_alias=True)
-async def update_tushare_calendar(
-    session: SessionDep,
-    calendar_id: Annotated[str, Query(alias="calendarId", min_length=1)] = ASHARE_CALENDAR_ID,
-) -> CalendarStatus:
-    """用 config.toml 中的 Tushare 凭据生成并保存 A 股日历。"""
-    today = date.today()
-    try:
-        await save_tushare_calendar(
-            session,
-            calendar_id=calendar_id,
-            start=today - timedelta(days=CALENDAR_INITIAL_HISTORY_DAYS),
-            end=today + timedelta(days=CALENDAR_TARGET_FUTURE_DAYS),
-        )
-    except ValueError as exc:
-        logger.warning("刷新 {} Tushare 交易日历失败: {}", calendar_id, type(exc).__name__)
-        raise HTTPException(status_code=422, detail="Tushare 交易日历配置或数据无效") from exc
-    except Exception as exc:  # noqa: BLE001 - 不回显上游响应或凭据
-        logger.warning("刷新 {} Tushare 交易日历失败: {}", calendar_id, type(exc).__name__)
-        raise HTTPException(status_code=502, detail="Tushare 交易日历拉取失败") from exc
-    return await get_calendar_status(session, calendar_id)
-
-
 @router.post("/refresh", response_model=OperationResult)
 async def refresh_calendar(
     calendar_id: Annotated[str, Query(alias="calendarId", min_length=1)] = CALENDAR_ID,
 ) -> OperationResult:
-    """立即执行一次已配置的 Python、Shinny 或 Tushare 刷新。"""
+    """立即执行一次已配置的 Python 或 Shinny 刷新。"""
     refreshed = await sync_calendar_python(calendar_id=calendar_id, force=True)
     if not refreshed:
         refreshed = await sync_calendar_shinny(calendar_id=calendar_id, force=True)
-    if not refreshed:
-        refreshed = await sync_calendar_tushare(calendar_id=calendar_id, force=True)
     return OperationResult(
         ok=refreshed,
         message="刷新完成" if refreshed else "未刷新：未配置自动刷新、已有刷新运行或数据拉取失败",
