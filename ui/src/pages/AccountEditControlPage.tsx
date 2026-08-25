@@ -7,7 +7,6 @@ import { Chip } from '@/components/ui/Card'
 import { ErrorNotice } from '@/components/ui/ErrorNotice'
 import { Select } from '@/components/ui/Select'
 import {
-  EditBreadcrumb,
   EditError,
   EditLoading,
   EditSaveBar,
@@ -334,19 +333,16 @@ export function AccountEditControlPage() {
     Object.values(operation ?? {}).flatMap((scope) => RULES.map(({ key }) => ruleError(key, scope?.[key])).filter(Boolean)),
   ).concat(Object.values(override.groups ?? {}).flatMap((scope) => RULES.map(({ key }) => ruleError(key, scope?.[key])).filter(Boolean)))
 
-  if (account.error && !acc) return <EditError id={accountId} error={account.error} onRetry={account.refresh} />
+  if (account.error && !acc) return <EditError error={account.error} onRetry={account.refresh} />
   if (policyError && !model)
     return (
       <EditError
-        id={accountId}
-        name={acc?.name}
-        channel={acc?.trade_channel}
         error={policyError}
         onRetry={loadPolicy}
       />
     )
   if (!acc || !model || !effective)
-    return <EditLoading id={accountId} name={acc?.name} channel={acc?.trade_channel} leaf="流控" />
+    return <EditLoading />
 
   const switchPreset = async (nextKey: string) => {
     if (nextKey === presetKey) return
@@ -417,7 +413,6 @@ export function AccountEditControlPage() {
 
   return (
     <section className="pb-24">
-      <EditBreadcrumb id={accountId} name={acc.name} channel={acc.trade_channel} leaf="流控" />
       <EditWorktopBar
         label="流控"
         hint="请求节奏"

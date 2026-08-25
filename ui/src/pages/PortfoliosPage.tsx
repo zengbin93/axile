@@ -1,7 +1,6 @@
 import { useState } from 'react'
 import { useViewTransitionState } from 'react-router'
 import { Link, useNavigate } from '@/components/ui/nav'
-import { Breadcrumb } from '@/components/ui/Breadcrumb'
 import { Card, Chip } from '@/components/ui/Card'
 import { Skeleton } from '@/components/ui/Skeleton'
 import { ConfirmModal, type ConfirmSpec } from '@/components/ui/ConfirmModal'
@@ -62,8 +61,7 @@ export function PortfoliosPage() {
 
   return (
     <section>
-      <Breadcrumb trail={[{ label: '组合' }]} />
-      <div className="mt-3 mb-4 flex items-center justify-between">
+      <div className="mb-4 flex items-center justify-between">
         <h1 className="text-[18px] font-[640]">组合</h1>
         <Link
           to="/setup/pf/name"

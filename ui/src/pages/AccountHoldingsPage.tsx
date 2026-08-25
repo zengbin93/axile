@@ -1,11 +1,11 @@
 import { useCallback } from 'react'
 import { useParams } from 'react-router'
-import { Breadcrumb } from '@/components/ui/Breadcrumb'
 import { Card } from '@/components/ui/Card'
 import { Skeleton, SkeletonLines } from '@/components/ui/Skeleton'
 import { ErrorNotice } from '@/components/ui/ErrorNotice'
 import { HoldingsView } from '@/features/account/HoldingsView'
-import { accountAssetTerms, channelLabel } from '@/features/dashboard/display'
+import { AccountPageTitle } from '@/features/account/pageHead'
+import { accountAssetTerms } from '@/features/dashboard/display'
 import { TargetSnapshotControl } from '@/features/portfolio/TargetSnapshotControl'
 import { getAccount, getAccountAssetSnapshots, getAccountTargetSnapshot, refreshAccountTargetSnapshot } from '@/lib/api/accounts'
 import { usePolling } from '@/lib/hooks/usePolling'
@@ -48,7 +48,6 @@ export function AccountHoldingsPage() {
   const target = weights.data?.weights ?? {}
   const recEquity = Number(latestAssets?.total_asset) || 0
   const equity = item?.total_asset ?? recEquity
-  const name = item?.name ?? account.data?.name ?? `账户 #${accountId}`
   const tradeChannel = item?.trade_channel ?? account.data?.trade_channel
   const portfolioId = item?.portfolio_id ?? account.data?.portfolio_id ?? null
   // 快照缺失但实时口径（dashboard.holdings_count）显示有持仓：资产观测未返回有效持仓明细，
@@ -59,17 +58,15 @@ export function AccountHoldingsPage() {
 
   return (
     <section>
-      <Breadcrumb
-        trail={[
-          {
-            label: name,
-            to: `/accounts/${accountId}`,
-            annotation: tradeChannel ? channelLabel(tradeChannel, '') : undefined,
-          },
-          { label: '持仓明细' },
-        ]}
-      />
-      <div className="mt-3 text-[18px] font-[640]">{name}</div>
+      <div className="flex flex-wrap items-baseline gap-3">
+        <AccountPageTitle
+          accountId={accountId}
+          page="持仓明细"
+          name={item?.name ?? account.data?.name}
+          channel={tradeChannel}
+          market={item?.market ?? account.data?.market}
+        />
+      </div>
 
       <Card className="mt-4 px-6 py-5">
         <div className="mb-3 border-b border-line pb-3">

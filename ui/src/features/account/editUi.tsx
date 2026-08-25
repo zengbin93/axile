@@ -1,5 +1,5 @@
 /**
- * 账户编辑壳：总览与子页共用的排版原子（小节 / 行 / 面包屑 / 底栏）。
+ * 账户编辑壳：总览与子页共用的排版原子（小节 / 行 / 底栏）。
  *
  * 动效：页内仍偏静（α）；进/出子系统做「整卡 → 工作台顶栏」共享元素 FLIP
  * （同构壳几何连续，不共享文案内容 morph）。底栏仅 opacity。
@@ -7,13 +7,10 @@
 
 import type { CSSProperties, ReactNode } from 'react'
 import { Link } from '@/components/ui/nav'
-import { Breadcrumb } from '@/components/ui/Breadcrumb'
 import { OverflowText } from '@/components/ui/OverflowText'
 import { Skeleton } from '@/components/ui/Skeleton'
 import { ErrorNotice } from '@/components/ui/ErrorNotice'
-import { channelLabel } from '@/features/dashboard/display'
 import { MOTION_LAYOUT } from '@/lib/viewTransition'
-import type { TradeChannel } from '@/types/api'
 
 /** 入口卡 ↔ 子页顶栏 共享容器名（同构壳 FLIP，非文案内容 morph）。 */
 export function editShellVtName(accountId: number, kind: 'timer' | 'algorithm' | 'control'): string {
@@ -31,45 +28,11 @@ export const NUM =
 export const AREA =
   'w-full rounded-[9px] border border-ink-3/25 bg-surface px-3 py-2 font-mono text-[13px] leading-6 outline-none focus:border-ink-2'
 
-/** 面包屑：账户 → 编辑（→ 子页）。 */
-export function EditBreadcrumb({
-  id,
-  name,
-  channel,
-  leaf,
-}: {
-  id: number
-  name?: string
-  channel?: TradeChannel
-  leaf?: string
-}) {
-  const trail = [
-    {
-      label: name ?? `账户 #${id}`,
-      to: `/accounts/${id}`,
-      annotation: channel ? channelLabel(channel, '') : undefined,
-    },
-    leaf
-      ? { label: '编辑', to: `/accounts/${id}/edit` }
-      : { label: '编辑' },
-    ...(leaf ? [{ label: leaf }] : []),
-  ]
-  return <Breadcrumb trail={trail} />
-}
-
 /** 加载骨架。 */
 export function EditLoading({
-  id,
-  name,
-  channel,
-  leaf,
-  /** 为真时不渲染 section/面包屑/标题骨架（外层已挂真实标题做 FLIP）。 */
+  /** 为真时不渲染 section/标题骨架（外层已挂真实标题做 FLIP）。 */
   bare = false,
 }: {
-  id: number
-  name?: string
-  channel?: TradeChannel
-  leaf?: string
   bare?: boolean
 }) {
   const body = (
@@ -86,7 +49,6 @@ export function EditLoading({
   if (bare) return body
   return (
     <section>
-      <EditBreadcrumb id={id} name={name} channel={channel} leaf={leaf} />
       {body}
     </section>
   )
@@ -94,21 +56,14 @@ export function EditLoading({
 
 /** 加载失败。 */
 export function EditError({
-  id,
-  name,
-  channel,
   error,
   onRetry,
 }: {
-  id: number
-  name?: string
-  channel?: TradeChannel
   error: unknown
   onRetry?: () => void
 }) {
   return (
     <section>
-      <EditBreadcrumb id={id} name={name} channel={channel} />
       <ErrorNotice title="账户加载失败" error={error} onRetry={onRetry} />
     </section>
   )

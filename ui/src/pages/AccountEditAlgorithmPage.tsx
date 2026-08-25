@@ -21,7 +21,6 @@ import {
 } from '@/features/setup/algorithms'
 import { AlgorithmEditor } from '@/features/setup/AlgorithmEditor'
 import {
-  EditBreadcrumb,
   EditError,
   EditLoading,
   EditSaveBar,
@@ -75,10 +74,10 @@ export function AccountEditAlgorithmPage() {
   }, [acc, descriptor, ready])
 
   if (account.error && !acc)
-    return <EditError id={accountId} error={account.error} onRetry={account.refresh} />
+    return <EditError error={account.error} onRetry={account.refresh} />
 
   if (account.loading || !ready || !acc || !trade || !descriptor)
-    return <EditLoading id={accountId} name={acc?.name} channel={acc?.trade_channel} leaf="执行算法" />
+    return <EditLoading />
 
   const origTrade = refFromAccount(acc.algorithm) ?? descriptor.defaults.trade_algorithm
   const origEmpty = refFromAccount(acc.empty_positions_algorithm)
@@ -141,7 +140,6 @@ export function AccountEditAlgorithmPage() {
 
   return (
     <section className="pb-24">
-      <EditBreadcrumb id={accountId} name={acc.name} channel={acc.trade_channel} leaf="执行算法" />
       <EditWorktopBar
         label="执行算法"
         hint="下单 / 清仓"

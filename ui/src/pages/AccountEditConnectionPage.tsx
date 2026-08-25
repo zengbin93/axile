@@ -6,47 +6,22 @@ import { ConditionalReveal } from '@/components/ui/ConditionalReveal'
 import { ConnectionField } from '@/components/ui/ConnectionField'
 import { Segmented } from '@/components/ui/Segmented'
 import { channelAccountFieldVisible, conditionalRevealFields, isConditionalRevealField, updateChannelAccountConfig } from '@/features/setup/channelAccountFields'
+import { initialConnectionDraft, mergedConnectionConfig, sameConnectionConfig } from '@/features/account/connectionConfig'
 import { connectionValueError } from '@/components/ui/connectionFieldValue'
-import { EditBreadcrumb, EditError, EditLoading, EditSaveBar, Section } from '@/features/account/editUi'
-import { channelLabel } from '@/features/dashboard/display'
+import { EditError, EditLoading, EditSaveBar, Section } from '@/features/account/editUi'
+import { AccountPageTitle } from '@/features/account/pageHead'
 import { getAccount, updateAccount } from '@/lib/api/accounts'
 import { usePolling } from '@/lib/hooks/usePolling'
 import { useChannelCatalogStore, useChannelDescriptor } from '@/stores/channels'
 import { useDomainStore } from '@/stores/domain'
 import { useToastStore } from '@/stores/ui'
-import type { Account, ChannelAccountField } from '@/types/api'
-
-function initialDraft(account: Account, fields: ChannelAccountField[]): Record<string, unknown> {
-  return Object.fromEntries(fields.map((field) => [
-    field.name,
-    field.kind === 'secret' ? '' : (account.account_config[field.name] ?? field.default ?? ''),
-  ]))
-}
-
-function mergedConfig(account: Account, fields: ChannelAccountField[], draft: Record<string, unknown>) {
-  const next = { ...account.account_config }
-  for (const field of fields) delete next[field.name]
-  for (const field of fields) {
-    if (!channelAccountFieldVisible(field, draft)) continue
-    const drafted = draft[field.name]
-    const value = field.kind === 'secret' && String(drafted ?? '').trim() === ''
-      ? account.account_config[field.name]
-      : drafted
-    if (value !== undefined && value !== null && value !== '') next[field.name] = value
-  }
-  return next
-}
-
-function sameConfig(left: Record<string, unknown>, right: Record<string, unknown>): boolean {
-  return JSON.stringify(left) === JSON.stringify(right)
-}
+import type { ChannelAccountField } from '@/types/api'
 
 export function AccountEditConnectionPage() {
   const accountId = Number(useParams().id)
   const toast = useToastStore((state) => state.toast)
   const refreshAccounts = useDomainStore((state) => state.refreshAccounts)
   const catalogLoading = useChannelCatalogStore((state) => state.loading)
-  const descriptor = useChannelDescriptor(undefined)
   const account = usePolling(useCallback((signal: AbortSignal) => getAccount(accountId, signal), [accountId]), {
     queryKey: `account:${accountId}:connection`, intervalMs: 0,
   })
@@ -58,11 +33,11 @@ export function AccountEditConnectionPage() {
   const [saveError, setSaveError] = useState<Error | null>(null)
 
   useEffect(() => {
-    if (acc && channelDescriptor && draft === null) setDraft(initialDraft(acc, fields))
+    if (acc && channelDescriptor && draft === null) setDraft(initialConnectionDraft(acc, fields))
   }, [acc, channelDescriptor, draft, fields])
 
-  if (account.error && !acc) return <EditError id={accountId} error={account.error} onRetry={account.refresh} />
-  if (!acc || !draft || (catalogLoading && !channelDescriptor)) return <EditLoading id={accountId} leaf="连接设置" />
+  if (account.error && !acc) return <EditError error={account.error} onRetry={account.refresh} />
+  if (!acc || !draft || (catalogLoading && !channelDescriptor)) return <EditLoading />
 
   const setField = (field: ChannelAccountField, value: unknown) => {
     setSaveError(null)
@@ -74,8 +49,8 @@ export function AccountEditConnectionPage() {
       return next
     })
   }
-  const nextConfig = mergedConfig(acc, fields, draft)
-  const changed = !sameConfig(nextConfig, acc.account_config)
+  const nextConfig = mergedConnectionConfig(acc, fields, draft)
+  const changed = !sameConnectionConfig(nextConfig, acc.account_config)
 
   const validate = () => {
     const nextErrors: Record<string, string> = {}
@@ -102,7 +77,7 @@ export function AccountEditConnectionPage() {
       toast('连接设置已更新')
       void refreshAccounts()
       account.refresh()
-      setDraft(initialDraft({ ...acc, account_config: nextConfig }, fields))
+      setDraft(initialConnectionDraft({ ...acc, account_config: nextConfig }, fields))
     } catch (caught) {
       setSaveError(caught instanceof Error ? caught : new Error(String(caught)))
     }
@@ -118,8 +93,7 @@ export function AccountEditConnectionPage() {
 
   return (
     <section className="pb-24">
-      <EditBreadcrumb id={accountId} name={acc.name} channel={acc.trade_channel} leaf="连接设置" />
-      <div className="mt-3 flex flex-wrap items-baseline gap-3"><span className="text-[18px] font-[640]">连接设置 · {acc.name}</span><span className="text-[12px] text-ink-3">{channelLabel(acc.trade_channel, acc.market)}</span></div>
+      <div className="flex flex-wrap items-baseline gap-3"><AccountPageTitle accountId={accountId} page="连接设置" name={acc.name} channel={acc.trade_channel} market={acc.market} /></div>
       <div className="mt-3 border-l-2 border-warn/60 bg-warn-tint/50 py-2 pl-3 pr-2 text-[13px] text-ink-2">修改会在下次创建执行器时生效；密码与密钥不会回显。</div>
       <Section label={`${channelDescriptor?.label ?? acc.trade_channel} 连接`}>
         {fields.map((field) => {

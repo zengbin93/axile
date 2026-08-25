@@ -1,13 +1,12 @@
 import { useCallback } from 'react'
 import { useParams } from 'react-router'
 import { ChevronRight } from 'lucide-react'
-import { Breadcrumb } from '@/components/ui/Breadcrumb'
 import { Card } from '@/components/ui/Card'
 import { ErrorNotice } from '@/components/ui/ErrorNotice'
 import { Skeleton } from '@/components/ui/Skeleton'
 import { useNavigate } from '@/components/ui/nav'
 import { buildRecentActivity, type RecentRow } from '@/features/account/recent'
-import { channelLabel } from '@/features/dashboard/display'
+import { AccountPageTitle } from '@/features/account/pageHead'
 import { getAccountActivity } from '@/lib/api/accounts'
 import { usePolling } from '@/lib/hooks/usePolling'
 import { useDomainStore } from '@/stores/domain'
@@ -32,19 +31,20 @@ export function AccountExecutionsPage() {
     { queryKey: `account:${accountId}:activity:100`, intervalMs: 0 },
   )
   const rows = buildRecentActivity(activity.data?.data ?? [], { cap: 100, fetchLimit: 100 }).rows
-  const name = item?.name ?? `账户 #${accountId}`
-
   return (
     <section>
-      <Breadcrumb trail={[{
-        label: name,
-        to: `/accounts/${accountId}`,
-        annotation: item ? channelLabel(item.trade_channel, '') : undefined,
-      }, { label: '执行记录' }]} />
-      <div className="mt-3 mb-4 flex items-end justify-between gap-4">
+      <div className="mb-4 flex items-end justify-between gap-4">
         <div>
-          <h1 className="text-[18px] font-[640]">执行记录</h1>
-          <p className="mt-1 text-[13px] text-ink-2">{name} 最近的调仓、清仓、终止与排程跳过记录。</p>
+          <div className="flex flex-wrap items-baseline gap-3">
+            <AccountPageTitle
+              accountId={accountId}
+              page="执行记录"
+              name={item?.name}
+              channel={item?.trade_channel}
+              market={item?.market}
+            />
+          </div>
+          <p className="mt-1 text-[13px] text-ink-2">最近的调仓、清仓、终止与排程跳过记录。</p>
         </div>
         {activity.data && <span className="text-[12px] text-ink-3">共 {activity.data.count} 条</span>}
       </div>

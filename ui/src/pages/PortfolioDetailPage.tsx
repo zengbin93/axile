@@ -1,7 +1,6 @@
 import { useCallback, useState, type ReactNode } from 'react'
 import { useParams, useViewTransitionState } from 'react-router'
 import { Link, useNavigate } from '@/components/ui/nav'
-import { Breadcrumb } from '@/components/ui/Breadcrumb'
 import { Card, SectionLabel, Chip } from '@/components/ui/Card'
 import { Skeleton, SkeletonLines } from '@/components/ui/Skeleton'
 import { ExposureBar } from '@/components/viz/ExposureBar'
@@ -57,12 +56,6 @@ export function PortfolioDetailPage() {
   if (portfolio.error && !pf)
     return (
       <section>
-        <Breadcrumb
-          trail={[
-            { label: '组合', to: '/portfolios' },
-            { label: lite?.name ?? `组合 #${portfolioId}` },
-          ]}
-        />
         <ErrorNotice title="组合加载失败" error={portfolio.error} onRetry={portfolio.refresh} />
       </section>
     )
@@ -93,15 +86,8 @@ export function PortfolioDetailPage() {
 
   return (
     <section>
-      <Breadcrumb
-        trail={[
-          { label: '组合', to: '/portfolios' },
-          { label: head?.name ?? `组合 #${portfolioId}` },
-        ]}
-      />
-
       {/* Hero：有 head（成品或列表 lite）即时渲染，全空才骨架 */}
-      <Card className="mt-3 p-6">
+      <Card className="p-6">
         {head ? (
           <>
             <div className="flex flex-wrap items-center gap-3">

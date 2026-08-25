@@ -1,13 +1,13 @@
 import { useCallback, useState } from 'react'
 import { useParams, useViewTransitionState } from 'react-router'
 import { useNavigate } from '@/components/ui/nav'
-import { Breadcrumb } from '@/components/ui/Breadcrumb'
 import { Card, SectionLabel } from '@/components/ui/Card'
 import { Skeleton } from '@/components/ui/Skeleton'
 import { EquityChart, type ChartMarker } from '@/components/viz/EquityChart'
 import { DailyBars } from '@/components/viz/DailyBars'
 import { Segmented } from '@/components/ui/Segmented'
 import { ErrorNotice } from '@/components/ui/ErrorNotice'
+import { AccountPageTitle } from '@/features/account/pageHead'
 import {
   getAccount,
   getAccountActivity,
@@ -17,7 +17,7 @@ import {
 } from '@/lib/api/accounts'
 import { usePolling } from '@/lib/hooks/usePolling'
 import { withViewTransition } from '@/lib/viewTransition'
-import { accountAssetTerms, channelLabel } from '@/features/dashboard/display'
+import { accountAssetTerms } from '@/features/dashboard/display'
 import { formatMoney } from '@/lib/derive'
 import { displayCurrencyUnit } from '@/lib/format'
 import {
@@ -157,17 +157,16 @@ export function AccountHistoryPage() {
 
   return (
     <section>
-      <div className="mb-3 flex items-center justify-between">
-        <Breadcrumb
-          trail={[
-            {
-              label: account.data?.name ?? `账户 #${accountId}`,
-              to: `/accounts/${accountId}`,
-              annotation: account.data ? channelLabel(account.data.trade_channel, '') : undefined,
-            },
-            { label: '回看 · 绩效' },
-          ]}
-        />
+      <div className="mb-4 flex items-center justify-between gap-4">
+        <div className="flex flex-wrap items-baseline gap-3">
+          <AccountPageTitle
+            accountId={accountId}
+            page="回看与绩效"
+            name={account.data?.name}
+            channel={account.data?.trade_channel}
+            market={account.data?.market}
+          />
+        </div>
         <Segmented size="sm" value={range} options={RANGES} onChange={switchRange} />
       </div>
 
@@ -202,17 +201,11 @@ export function AccountHistoryPage() {
 
       {recordsData && snapshots.data && (
         <>
-          {/* Hero + 曲线 */}
+          {/* Hero + 曲线（账户名/渠道已在页头标题行，此处不再重复）。 */}
           <Card className="p-6">
-            <div className="flex flex-wrap items-baseline gap-3">
-              <span className="text-[15px] font-[620]">{account.data?.name ?? `账户 #${accountId}`}</span>
-              {account.data && (
-                <span className="text-xs text-ink-3">{channelLabel(account.data.trade_channel, account.data.market)}</span>
-              )}
-            </div>
             <div
               // w-fit：金额盒贴文字宽（与卡片金额同形），FLIP 只剩上移平移 + 微缩，避免横向硬拉。
-              className="num mt-1.5 w-fit text-[32px] font-[640] tracking-tight"
+              className="num w-fit text-[32px] font-[640] tracking-tight"
               style={amountVt ? { viewTransitionName: `equity-amount-${accountId}` } : undefined}
             >
               {heroEq != null ? formatMoney(heroEq) : '—'}

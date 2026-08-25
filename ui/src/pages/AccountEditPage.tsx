@@ -6,9 +6,8 @@
  */
 
 import { useCallback, useEffect, useState } from 'react'
-import { useParams, useViewTransitionState } from 'react-router'
+import { useParams } from 'react-router'
 import { useNavigate } from '@/components/ui/nav'
-import { Chip } from '@/components/ui/Card'
 import { ErrorNotice } from '@/components/ui/ErrorNotice'
 import { Skeleton } from '@/components/ui/Skeleton'
 import { Select } from '@/components/ui/Select'
@@ -17,6 +16,7 @@ import { ExecutionTimeoutInput } from '@/features/account/ExecutionTimeoutInput'
 import { executionTimeoutError } from '@/features/account/executionTimeout'
 import { LeverageInput } from '@/features/account/LeverageInput'
 import { leverageError } from '@/features/account/leverage'
+import { AccountPageTitle } from '@/features/account/pageHead'
 import { WeightPrecisionInput } from '@/features/account/WeightPrecisionInput'
 import { weightPrecisionError } from '@/features/account/weightPrecision'
 import { getAccount, updateAccount } from '@/lib/api/accounts'
@@ -25,10 +25,8 @@ import { usePolling } from '@/lib/hooks/usePolling'
 import { useDomainStore } from '@/stores/domain'
 import { useChannelCatalogStore, useChannelDescriptor } from '@/stores/channels'
 import { useToastStore } from '@/stores/ui'
-import { channelLabel } from '@/features/dashboard/display'
 import {
   TEXT,
-  EditBreadcrumb,
   EditError,
   EditLoading,
   EditSaveBar,
@@ -173,11 +171,6 @@ export function AccountEditPage({ section = 'basic' }: { section?: EditSection }
   const channelCatalogError = useChannelCatalogStore((s) => s.error)
   const refreshAccounts = useDomainStore((s) => s.refreshAccounts)
 
-  // 与详情 hero 账户名配对 FLIP：进编辑 / 回详情时挂同一 ``account-name-*``。
-  const tEdit = useViewTransitionState(`/accounts/${accountId}/edit`)
-  const tDetail = useViewTransitionState(`/accounts/${accountId}`)
-  const nameVt = tEdit || tDetail
-
   const account = usePolling(useCallback((s: AbortSignal) => getAccount(accountId, s), [accountId]), {
     queryKey: `account:${accountId}`,
     intervalMs: 0,
@@ -198,31 +191,25 @@ export function AccountEditPage({ section = 'basic' }: { section?: EditSection }
     setReady(true)
   }, [acc, ready])
 
-  /** 标题行账户名（可挂 FLIP）；「编辑 ·」前缀不进共享身份。 */
+  /** 统一页头标题行（页名 · 账户名 + 渠道 chip）；账户名 FLIP 门控在原子内部。 */
   const titleName = (
-    <span className="text-[18px] font-[640]">
-      {SECTION_TITLE[section]} ·{' '}
-      <span
-        style={
-          nameVt && displayName != null
-            ? { viewTransitionName: `account-name-${accountId}` }
-            : undefined
-        }
-      >
-        {displayName ?? `账户 #${accountId}`}
-      </span>
-    </span>
+    <AccountPageTitle
+      accountId={accountId}
+      page={SECTION_TITLE[section]}
+      name={displayName}
+      channel={acc?.trade_channel}
+      market={acc?.market}
+    />
   )
 
   if (account.error && !acc)
-    return <EditError id={accountId} name={displayName} error={account.error} onRetry={account.refresh} />
+    return <EditError error={account.error} onRetry={account.refresh} />
 
   if (account.loading || !ready || !acc || !draft || (channelDescriptor == null && channelCatalogLoading))
     return (
       <section className="pb-24">
-        <EditBreadcrumb id={accountId} name={displayName} channel={acc?.trade_channel} />
-        <div className="mt-3 flex flex-wrap items-baseline gap-3">{titleName}</div>
-        <EditLoading id={accountId} name={displayName} bare />
+        <div className="flex flex-wrap items-baseline gap-3">{titleName}</div>
+        <EditLoading bare />
       </section>
     )
 
@@ -280,11 +267,7 @@ export function AccountEditPage({ section = 'basic' }: { section?: EditSection }
 
   return (
     <section className="pb-24">
-      <EditBreadcrumb id={accountId} name={acc.name} channel={acc.trade_channel} />
-      <div className="mt-3 flex flex-wrap items-baseline gap-3">
-        {titleName}
-        <Chip>{channelLabel(acc.trade_channel, acc.market)}</Chip>
-      </div>
+      <div className="flex flex-wrap items-baseline gap-3">{titleName}</div>
 
       <div className="mt-3 border-l-2 border-warn/60 bg-warn-tint/50 py-2 pl-3 pr-2 text-[13px] text-ink-2">
         修改不会立即下单，从下次调仓开始生效。

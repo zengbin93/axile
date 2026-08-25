@@ -23,7 +23,6 @@ import {
 import { TimerEditor, timerEditorError } from '@/features/setup/TimerEditor'
 import { useChannelDescriptor } from '@/stores/channels'
 import {
-  EditBreadcrumb,
   EditError,
   EditLoading,
   EditSaveBar,
@@ -56,10 +55,10 @@ export function AccountEditTimerPage() {
   }, [acc, descriptor, ready])
 
   if (account.error && !acc)
-    return <EditError id={accountId} error={account.error} onRetry={account.refresh} />
+    return <EditError error={account.error} onRetry={account.refresh} />
 
   if (account.loading || !ready || !acc || !timer || !descriptor)
-    return <EditLoading id={accountId} name={acc?.name} channel={acc?.trade_channel} leaf="定时" />
+    return <EditLoading />
 
   const scheduleKind = descriptor.schedule.kind
   const cronNext = timerStateToCronExpr(scheduleKind, timer, descriptor.schedule.night)
@@ -93,7 +92,6 @@ export function AccountEditTimerPage() {
 
   return (
     <section className="pb-24">
-      <EditBreadcrumb id={accountId} name={acc.name} channel={acc.trade_channel} leaf="定时" />
       <EditWorktopBar
         label="定时"
         hint="自动调仓"

@@ -1,6 +1,5 @@
 import { useCallback, useState } from 'react'
 import { useParams } from 'react-router'
-import { Breadcrumb } from '@/components/ui/Breadcrumb'
 import { Card } from '@/components/ui/Card'
 import { SkeletonLines } from '@/components/ui/Skeleton'
 import { NumberTicker } from '@/components/ui/NumberTicker'
@@ -17,9 +16,10 @@ import {
   type SymbolChain,
 } from '@/features/account/executionDetail'
 import { buildSymbolActionStream, type ActionLine } from '@/features/account/actionStream'
+import { AccountPageTitle } from '@/features/account/pageHead'
 import { BLAME_LABEL, type FailureReason } from '@/features/account/failureReason'
 import { PhaseBar } from '@/features/dashboard/PhaseBar'
-import { accountAssetTerms, channelLabel } from '@/features/dashboard/display'
+import { accountAssetTerms } from '@/features/dashboard/display'
 import { useDomainStore } from '@/stores/domain'
 import { useChannelDescriptor } from '@/stores/channels'
 import { useRunning } from '@/stores/liveExec'
@@ -523,7 +523,6 @@ export function ExecutionDetailPage() {
   const accountId = Number(id)
   const accounts = useDomainStore((s) => s.accounts)
   const item = accounts?.find((a) => a.account_id === accountId) ?? null
-  const name = item?.name ?? `账户 #${accountId}`
   const currency = currencyOf(item?.currency)
   const descriptor = useChannelDescriptor(item?.trade_channel)
   const units = descriptor?.units ?? DEFAULT_UNITS
@@ -572,17 +571,18 @@ export function ExecutionDetailPage() {
 
   return (
     <section>
-      <Breadcrumb
-        trail={[
-          {
-            label: name,
-            to: `/accounts/${accountId}`,
-            annotation: item ? channelLabel(item.trade_channel, '') : undefined,
-          },
-          { label: '执行详情' },
-        ]}
-      />
-      <div className="num mt-3 text-[15px] font-mono text-ink-2">{executionId}</div>
+      <div className="flex flex-wrap items-baseline gap-3">
+        {/* 执行详情路径含动态段、无法纳入账户名 FLIP 门控（flip=false），结构仍与全域统一。 */}
+        <AccountPageTitle
+          accountId={accountId}
+          page="执行详情"
+          name={item?.name}
+          channel={item?.trade_channel}
+          market={item?.market}
+          flip={false}
+        />
+      </div>
+      <div className="num mt-2 text-[15px] font-mono text-ink-2">{executionId}</div>
       <div>
         <ErrorNotice title="执行状态加载失败" error={status.error} onRetry={status.refresh} />
       </div>

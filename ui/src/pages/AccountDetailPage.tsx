@@ -1,5 +1,4 @@
 import { useParams } from 'react-router'
-import { Breadcrumb } from '@/components/ui/Breadcrumb'
 import { useDomainStore } from '@/stores/domain'
 import { AccountDetail, AccountDetailSkeleton } from '@/features/account/AccountDetail'
 import { ErrorNotice } from '@/components/ui/ErrorNotice'
@@ -16,13 +15,10 @@ export function AccountDetailPage() {
 
   return (
     <section>
-      <Breadcrumb trail={[{ label: item?.name ?? `账户 #${accountId}` }]} />
-      <div className="mt-3">
-        {accounts == null && !error && <AccountDetailSkeleton />}
-        <ErrorNotice title="账户数据加载失败" error={accounts == null ? error : null} onRetry={refresh} />
-        {accounts != null && !item && <p className="text-[14px] text-ink-3">未找到账户 #{accountId}。</p>}
-        {item && <AccountDetail accountId={accountId} item={item} onDashboardRefresh={refresh} />}
-      </div>
+      {accounts == null && !error && <AccountDetailSkeleton />}
+      <ErrorNotice title="账户数据加载失败" error={accounts == null ? error : null} onRetry={refresh} />
+      {accounts != null && !item && <p className="text-[14px] text-ink-3">未找到账户 #{accountId}。</p>}
+      {item && <AccountDetail accountId={accountId} item={item} onDashboardRefresh={refresh} />}
     </section>
   )
 }

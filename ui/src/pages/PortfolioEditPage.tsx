@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useParams } from 'react-router'
-import { Breadcrumb } from '@/components/ui/Breadcrumb'
 import { Card, SectionLabel } from '@/components/ui/Card'
 import { useNavigate } from '@/components/ui/nav'
 import { Skeleton, SkeletonLines } from '@/components/ui/Skeleton'
@@ -65,8 +64,7 @@ export function PortfolioEditPage() {
   if (portfolio.loading || (!pf && !portfolio.error) || (pf && !ready)) {
     return (
       <section>
-        <EditCrumb id={portfolioId} name={pf?.name} />
-        <Card className="mt-3 px-6 py-4"><SkeletonLines rows={2} /></Card>
+        <Card className="px-6 py-4"><SkeletonLines rows={2} /></Card>
         <SectionLabel>组合名称</SectionLabel>
         <Skeleton className="h-12 w-full max-w-[520px]" />
         <Card className="mt-6 px-6 py-4"><SkeletonLines rows={5} /></Card>
@@ -76,7 +74,6 @@ export function PortfolioEditPage() {
   if (portfolio.error || !pf) {
     return (
       <section>
-        <EditCrumb id={portfolioId} name={pf?.name} />
         <ErrorNotice title="组合加载失败" error={portfolio.error ?? new Error('组合不存在')} onRetry={portfolio.refresh} />
       </section>
     )
@@ -84,8 +81,7 @@ export function PortfolioEditPage() {
 
   return (
     <section>
-      <EditCrumb id={portfolioId} name={pf.name} />
-      <Card className="mt-3 border border-warn/30 bg-warn-tint px-6 py-4">
+      <Card className="border border-warn/30 bg-warn-tint px-6 py-4">
         <div className="text-[14px]">
           <b>影响范围</b> · {accountsError ? (
             <span className="text-warn">绑定关系暂不可用</span>
@@ -122,17 +118,5 @@ export function PortfolioEditPage() {
         </button>
       </div>
     </section>
-  )
-}
-
-function EditCrumb({ id, name }: { id: number; name?: string }) {
-  return (
-    <Breadcrumb
-      trail={[
-        { label: '组合', to: '/portfolios' },
-        { label: name ?? `组合 #${id}`, to: `/portfolios/${id}` },
-        { label: '编辑' },
-      ]}
-    />
   )
 }
