@@ -3,10 +3,11 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 describe('InitWizard', () => {
-  it('associates the Tushare Token label with its password input', () => {
+  it('exposes a Tushare Token input in init and advanced edit modes', () => {
     const source = readFileSync(join(import.meta.dir, 'InitWizard.tsx'), 'utf8')
 
     expect(source).toContain('htmlFor="tushare-token"')
-    expect(source).toContain('id="tushare-token"')
+    expect(source.match(/id="tushare-token"/g)).toHaveLength(2)
+    expect(source).toContain("<Section label=\"交易日历\">")
   })
 })

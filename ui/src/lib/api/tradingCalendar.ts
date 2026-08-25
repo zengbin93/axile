@@ -73,7 +73,7 @@ export const saveCalendarFunction = (calendarId: string, functionCode: string) =
   apiSend<CalendarStatus>('PUT', '/market/trading-calendar/python', { calendarId, functionCode })
 export const saveShinnyCalendar = (calendarId = 'china') =>
   apiSend<CalendarStatus>('PUT', `/market/trading-calendar/shinny?${query(calendarId)}`)
-export const saveTushareCalendar = (calendarId = 'china') =>
+export const saveTushareCalendar = (calendarId = 'ashare') =>
   apiSend<CalendarStatus>('PUT', `/market/trading-calendar/tushare?${query(calendarId)}`)
 export const refreshCalendar = (calendarId = 'china') =>
   apiSend<{ ok: boolean; message: string }>('POST', `/market/trading-calendar/refresh?${query(calendarId)}`)

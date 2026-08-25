@@ -114,6 +114,7 @@ function splitLines(value: string): string[] {
 function advancedValues(draft: Draft, initial: InitValues): InitValues {
   return {
     ...initial,
+    tushare_token: draft.tushare_token || undefined,
     sqlalchemy_database_uri: draft.sqlalchemy_database_uri,
     exe_err_feishu_key: draft.exe_err_feishu_key,
     environment: draft.environment,
@@ -715,6 +716,22 @@ export function InitWizard({
                     </div>
                     <p className="mt-1.5 text-[11px] leading-5 text-ink-3">
                       服务运行日志的写入目录，可直接输入或浏览服务所在机器。
+                    </p>
+                  </Row>
+                </Section>
+
+                <Section label="交易日历">
+                  <Row label="Tushare Token" hint="A 股日历" top span>
+                    <input
+                      id="tushare-token"
+                      className={`${TEXT} font-mono`}
+                      type="password"
+                      value={draft.tushare_token}
+                      onChange={(event) => set({ tushare_token: event.target.value })}
+                      placeholder={initial.tushare_configured ? '已配置；输入新 Token 轮换' : '留空则不启用'}
+                    />
+                    <p className="mt-1.5 text-[11px] leading-5 text-ink-3">
+                      仅用于 A 股 <span className="num">trade_cal</span>；输入新 Token 后保存并重启生效，不进入接口响应或日志。
                     </p>
                   </Row>
                 </Section>

@@ -35,6 +35,7 @@ except ImportError:
     CalendarUtility = None  # type: ignore[assignment,misc]
 
 CALENDAR_ID = "china"
+ASHARE_CALENDAR_ID = "ashare"
 CALENDAR_MIN_FUTURE_DAYS = 14
 CALENDAR_TARGET_FUTURE_DAYS = 365
 CALENDAR_INITIAL_HISTORY_DAYS = 365
@@ -636,6 +637,9 @@ async def save_shinny_calendar(
 ) -> None:
     """用 Shinny 物化中国期货/通用节假日日历，2026 年后不再生成数据。"""
     calendar_id = normalize_calendar_id(calendar_id)
+    last_supported_day = date(SHINNY_CALENDAR_LAST_YEAR, 12, 31)
+    if date.today() > last_supported_day or start > last_supported_day:
+        raise ValueError(f"Shinny 内置节假日仅覆盖至 {SHINNY_CALENDAR_LAST_YEAR}-12-31")
     if start > end:
         raise ValueError("start 必须 <= end")
     lock = _SYNC_LOCKS.setdefault(calendar_id, asyncio.Lock())
@@ -644,7 +648,7 @@ async def save_shinny_calendar(
 
 
 async def fetch_tushare_trade_cal(start: date, end: date) -> list[dict[str, str]]:
-    """从 config.toml 读取凭据并拉取 Tushare 全量交易日历。"""
+    """从 config.toml 读取凭据并拉取 Tushare A 股交易日历。"""
     from axile.common.config import settings
 
     token = settings.tushare_token.strip()
@@ -679,12 +683,14 @@ async def _save_tushare_calendar(session: AsyncSession, *, calendar_id: str, sta
 async def save_tushare_calendar(
     session: AsyncSession,
     *,
-    calendar_id: str = CALENDAR_ID,
+    calendar_id: str = ASHARE_CALENDAR_ID,
     start: date,
     end: date,
 ) -> None:
-    """用 Tushare trade_cal 原子替换一份日历；凭据不入库。"""
+    """用 Tushare trade_cal 原子替换 A 股日历；凭据不入库。"""
     calendar_id = normalize_calendar_id(calendar_id)
+    if calendar_id != ASHARE_CALENDAR_ID:
+        raise ValueError("Tushare 兜底仅支持 ashare 日历")
     if start > end:
         raise ValueError("start 必须 <= end")
     lock = _SYNC_LOCKS.setdefault(calendar_id, asyncio.Lock())
@@ -980,13 +986,17 @@ async def sync_calendar_shinny(*, calendar_id: str | None = None, force: bool = 
 
 
 async def sync_calendar_tushare(*, calendar_id: str | None = None, force: bool = False) -> bool:
-    """刷新一个或全部配置为 Tushare 的日历。"""
+    """刷新一个或全部配置为 Tushare 的 A 股日历。"""
     if calendar_id is not None:
-        return await _sync_one_tushare(normalize_calendar_id(calendar_id), force=force)
+        calendar_id = normalize_calendar_id(calendar_id)
+        if calendar_id != ASHARE_CALENDAR_ID:
+            return False
+        return await _sync_one_tushare(calendar_id, force=force)
     async with SessionLocal() as session:
         rows = await session.execute(
             select(TradingCalendarConfig.calendar_id).where(
-                col(TradingCalendarConfig.refresh_kind) == TUSHARE_CALENDAR_REFRESH_KIND
+                col(TradingCalendarConfig.refresh_kind) == TUSHARE_CALENDAR_REFRESH_KIND,
+                col(TradingCalendarConfig.calendar_id) == ASHARE_CALENDAR_ID,
             )
         )
         calendar_ids = list(rows.scalars().all())
@@ -1032,6 +1042,7 @@ def register_trading_calendar_job(scheduler: Scheduler) -> None:
 
 
 __all__ = [
+    "ASHARE_CALENDAR_ID",
     "CALENDAR_ID",
     "CalendarAvailability",
     "CalendarDayDecision",

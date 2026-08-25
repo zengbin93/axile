@@ -350,7 +350,7 @@ export function TradingCalendarPage() {
           {!status ? Array.from({ length: 4 }, (_, index) => (
             <div key={index} className="min-h-[66px] bg-surface px-4 py-3"><Skeleton className="h-3 w-16" /><Skeleton className="mt-2 h-4 w-28" /></div>
           )) : [
-            ['刷新方式', status?.refreshKind === 'python' ? '自定义函数' : status?.refreshKind === 'shinny' ? 'Shinny 期货兜底' : status?.refreshKind === 'tushare' ? 'Tushare 兜底' : status?.refreshKind === 'csv' ? 'CSV' : '未配置'],
+            ['刷新方式', status?.refreshKind === 'python' ? '自定义函数' : status?.refreshKind === 'shinny' ? 'Shinny 期货兜底' : status?.refreshKind === 'tushare' ? 'Tushare A 股兜底' : status?.refreshKind === 'csv' ? 'CSV' : '未配置'],
             ['有效覆盖', status?.coverageStart ? `${status.coverageStart} 至 ${status.coverageEnd}` : '暂无'],
             ['同步状态', status?.lastSyncAt ? status.lastSyncAt.replace('T', ' ') : '尚未同步'],
             ['人工调整', `${status?.overrideCount ?? 0} 条`],
@@ -370,7 +370,7 @@ export function TradingCalendarPage() {
                 { value: 'csv', label: 'CSV' },
                 { value: 'python', label: '自定义函数' },
                 { value: 'shinny', label: 'Shinny 期货兜底' },
-                { value: 'tushare', label: 'Tushare 兜底' },
+                { value: 'tushare', label: 'Tushare A 股兜底' },
               ]}
               onChange={(value) => setMode(value as CalendarRefreshKind)}
             />
@@ -441,16 +441,17 @@ export function TradingCalendarPage() {
                       </>
                     ) : (
                       <>
-                        <p className="text-[13px] leading-relaxed text-ink-2">使用 <span className="num">config.toml</span> 中的 Token 拉取 Tushare <span className="num">trade_cal</span>，该接口需要 ≥2000 积分。Token 不会进入日历函数、日志或接口响应。</p>
+                        <p className="text-[13px] leading-relaxed text-ink-2">使用 <span className="num">config.toml</span> 中的 Token 拉取 Tushare <span className="num">trade_cal</span>，仅物化 A 股 <span className="num">ashare</span> 日历；该接口需要 ≥2000 积分。期货请使用 Shinny、CSV 或自定义函数。Token 不会进入日历函数、日志或接口响应。</p>
                         <div className="mt-3 flex flex-wrap gap-2">
-                          <button className="inline-flex items-center gap-1.5 rounded-[8px] bg-ink-1 px-4 py-2 text-[13px] text-surface disabled:cursor-default disabled:opacity-45" disabled={saving} onClick={saveTushare}>
+                          <button className="inline-flex items-center gap-1.5 rounded-[8px] bg-ink-1 px-4 py-2 text-[13px] text-surface disabled:cursor-default disabled:opacity-45" disabled={saving || calendarId !== 'ashare'} onClick={saveTushare}>
                             {saving ? <LoaderCircle size={14} className="animate-spin motion-reduce:animate-none" /> : <Save size={14} />}
                             {saving ? '正在拉取并保存…' : '使用 Tushare 保存并刷新'}
                           </button>
                           {status?.refreshKind === 'tushare' && (
-                            <button disabled={mutating} className="inline-flex items-center gap-1.5 rounded-[8px] border border-line px-4 py-2 text-[13px] text-ink-2 disabled:opacity-45" onClick={() => void refreshConfiguredCalendar()}>{mutating ? <LoaderCircle size={14} className="animate-spin motion-reduce:animate-none" /> : <RefreshCw size={14} />} {mutating ? '刷新中…' : '立即刷新'}</button>
+                            <button disabled={mutating || calendarId !== 'ashare'} className="inline-flex items-center gap-1.5 rounded-[8px] border border-line px-4 py-2 text-[13px] text-ink-2 disabled:opacity-45" onClick={() => void refreshConfiguredCalendar()}>{mutating ? <LoaderCircle size={14} className="animate-spin motion-reduce:animate-none" /> : <RefreshCw size={14} />} {mutating ? '刷新中…' : '立即刷新'}</button>
                           )}
                         </div>
+                        {calendarId !== 'ashare' && <p className="mt-2 text-[12.5px] text-warn">Tushare trade_cal 仅支持 A 股日历。</p>}
                         <ErrorNotice title="保存 Tushare 日历失败" error={saveError} variant="mutation" onRetry={saveTushare} />
                       </>
                     )}

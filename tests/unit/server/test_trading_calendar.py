@@ -549,6 +549,36 @@ def test_shinny_calendar_does_not_materialize_beyond_2026(tmp_path: Path, monkey
     asyncio.run(exercise())
 
 
+def test_shinny_calendar_service_preserves_calendar_after_supported_year(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """共享保存入口在 2027 年也必须拒绝，避免旁路路由清空人工调整。"""
+    session_factory = asyncio.run(_create_database(tmp_path / "shinny-service-future.db"))
+    calendar_day = date(2026, 12, 31)
+
+    class FutureDate(date):
+        @classmethod
+        def today(cls) -> date:
+            return cls(2027, 1, 1)
+
+    async def exercise() -> None:
+        async with session_factory() as session:
+            session.add(TradingCalendarRecord(calendar_id="china", cal_date=calendar_day, is_open=False))
+            session.add(TradingCalendarOverride(calendar_id="china", cal_date=calendar_day, is_open=True))
+            await session.commit()
+            with pytest.raises(ValueError, match="2026-12-31"):
+                await calendar_service.save_shinny_calendar(
+                    session, calendar_id="china", start=calendar_day, end=date(2027, 1, 2)
+                )
+            record = await session.get(TradingCalendarRecord, ("china", calendar_day))
+            override = await session.get(TradingCalendarOverride, ("china", calendar_day))
+            assert record is not None and record.is_open is False
+            assert override is not None and override.is_open is True
+
+    monkeypatch.setattr(calendar_service, "date", FutureDate)
+    asyncio.run(exercise())
+
+
 def test_shinny_calendar_rejects_non_china_calendar(tmp_path: Path) -> None:
     """Shinny 仅作中国期货和通用节假日兜底。"""
     session_factory = asyncio.run(_create_database(tmp_path / "shinny-calendar-id.db"))
@@ -675,19 +705,33 @@ def test_tushare_calendar_maps_all_natural_days(tmp_path: Path, monkeypatch: pyt
         async with session_factory() as session:
             await calendar_service.save_tushare_calendar(
                 session,
-                calendar_id="china",
+                calendar_id="ashare",
                 start=date(2026, 1, 1),
                 end=date(2026, 1, 3),
             )
             rows = await calendar_service.list_calendar_entries(
-                session, calendar_id="china", start=date(2026, 1, 1), end=date(2026, 1, 3)
+                session, calendar_id="ashare", start=date(2026, 1, 1), end=date(2026, 1, 3)
             )
-            config = await session.get(TradingCalendarConfig, "china")
-            status = await calendar_service.get_calendar_status(session, "china")
+            config = await session.get(TradingCalendarConfig, "ashare")
+            status = await calendar_service.get_calendar_status(session, "ashare")
             assert [item.is_open for item in rows] == [False, True, False]
             assert config is not None and config.refresh_kind == "tushare"
             assert config.function_code == ""
             assert status.function_code == ""
+
+    asyncio.run(exercise())
+
+
+def test_tushare_calendar_rejects_non_ashare_calendar(tmp_path: Path) -> None:
+    """SSE trade_cal 不得被写入期货共用日历。"""
+    session_factory = asyncio.run(_create_database(tmp_path / "tushare-calendar-id.db"))
+
+    async def exercise() -> None:
+        async with session_factory() as session:
+            with pytest.raises(ValueError, match="ashare"):
+                await calendar_service.save_tushare_calendar(
+                    session, calendar_id="china", start=date(2026, 1, 1), end=date(2026, 1, 1)
+                )
 
     asyncio.run(exercise())
 
@@ -704,16 +748,16 @@ def test_tushare_refresh_skips_covered_calendar(tmp_path: Path, monkeypatch: pyt
 
     async def exercise() -> bool:
         async with session_factory() as session:
-            session.add(TradingCalendarConfig(calendar_id="china", refresh_kind="tushare"))
+            session.add(TradingCalendarConfig(calendar_id="ashare", refresh_kind="tushare"))
             session.add_all(
-                TradingCalendarRecord(calendar_id="china", cal_date=today + timedelta(days=offset), is_open=True)
+                TradingCalendarRecord(calendar_id="ashare", cal_date=today + timedelta(days=offset), is_open=True)
                 for offset in range(calendar_service.CALENDAR_MIN_FUTURE_DAYS + 1)
             )
-            session.add(TradingCalendarOverride(calendar_id="china", cal_date=today, is_open=False))
+            session.add(TradingCalendarOverride(calendar_id="ashare", cal_date=today, is_open=False))
             await session.commit()
-        refreshed = await calendar_service.sync_calendar_tushare(calendar_id="china")
+        refreshed = await calendar_service.sync_calendar_tushare(calendar_id="ashare")
         async with session_factory() as session:
-            override = await session.get(TradingCalendarOverride, ("china", today))
+            override = await session.get(TradingCalendarOverride, ("ashare", today))
             assert override is not None and override.is_open is False
         return refreshed
 
@@ -760,6 +804,17 @@ def test_shinny_route_preserves_calendar_after_supported_year(tmp_path: Path, mo
     asyncio.run(verify())
 
 
+def test_tushare_route_rejects_futures_calendar(tmp_path: Path) -> None:
+    """Tushare 路由不得把 SSE 数据替换到期货日历。"""
+    session_factory = asyncio.run(_create_database(tmp_path / "tushare-route-calendar-id.db"))
+
+    with TestClient(_calendar_app(session_factory)) as client:
+        response = client.put("/api/v1/market/trading-calendar/tushare?calendarId=china")
+
+    assert response.status_code == 422
+    assert response.json()["detail"] == "Tushare 交易日历配置或数据无效"
+
+
 def test_tushare_route_sanitizes_upstream_errors(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     session_factory = asyncio.run(_create_database(tmp_path / "tushare-route.db"))
     token = "tushare-token-123"
@@ -770,7 +825,7 @@ def test_tushare_route_sanitizes_upstream_errors(tmp_path: Path, monkeypatch: py
     monkeypatch.setattr(calendar_service, "fetch_tushare_trade_cal", failed_fetch)
 
     with TestClient(_calendar_app(session_factory)) as client:
-        response = client.put("/api/v1/market/trading-calendar/tushare?calendarId=china")
+        response = client.put("/api/v1/market/trading-calendar/tushare?calendarId=ashare")
 
     assert response.status_code == 502
     assert response.json()["detail"] == "Tushare 交易日历拉取失败"
@@ -789,17 +844,17 @@ def test_failed_tushare_refresh_preserves_existing_calendar(tmp_path: Path, monk
 
     async def exercise() -> None:
         async with session_factory() as session:
-            session.add(TradingCalendarRecord(calendar_id="china", cal_date=calendar_day, is_open=False))
-            session.add(TradingCalendarOverride(calendar_id="china", cal_date=calendar_day, is_open=True))
-            session.add(TradingCalendarConfig(calendar_id="china", refresh_kind="tushare"))
+            session.add(TradingCalendarRecord(calendar_id="ashare", cal_date=calendar_day, is_open=False))
+            session.add(TradingCalendarOverride(calendar_id="ashare", cal_date=calendar_day, is_open=True))
+            session.add(TradingCalendarConfig(calendar_id="ashare", refresh_kind="tushare"))
             await session.commit()
             with pytest.raises(ValueError, match="Tushare trade_cal 不可用"):
                 await calendar_service.save_tushare_calendar(
-                    session, calendar_id="china", start=calendar_day, end=calendar_day
+                    session, calendar_id="ashare", start=calendar_day, end=calendar_day
                 )
-            base = await session.get(TradingCalendarRecord, ("china", calendar_day))
-            override = await session.get(TradingCalendarOverride, ("china", calendar_day))
-            config = await session.get(TradingCalendarConfig, "china")
+            base = await session.get(TradingCalendarRecord, ("ashare", calendar_day))
+            override = await session.get(TradingCalendarOverride, ("ashare", calendar_day))
+            config = await session.get(TradingCalendarConfig, "ashare")
             assert base is not None and base.is_open is False
             assert override is not None and override.is_open is True
             assert config is not None and config.refresh_kind == "tushare"

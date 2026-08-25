@@ -136,6 +136,7 @@ def test_builtin_channels_have_stable_order_and_descriptor_shape() -> None:
     assert plugins[2].descriptor.defaults.trade_algorithm.method == "TARGET-POS-TASK"
     assert plugins[1].descriptor.portfolio.market_label == "A股"
     assert plugins[1].descriptor.portfolio.example_symbols == ("600000.SH", "000001.SZ")
+    assert [plugin.descriptor.calendar.calendar_id for plugin in plugins] == ["china", "ashare", "china"]
     assert plugins[2].descriptor.portfolio == plugins[0].descriptor.portfolio
     assert [plugin.max_parallel_symbols for plugin in plugins] == [10, 10, 10]
     assert plugins[2].descriptor.account_form.fields[0].default is None

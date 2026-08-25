@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field
 
 from axile.server.api.deps import SessionDep
 from axile.server.trading_calendar import (
+    ASHARE_CALENDAR_ID,
     CALENDAR_ID,
     CALENDAR_INITIAL_HISTORY_DAYS,
     CALENDAR_TARGET_FUTURE_DAYS,
@@ -191,9 +192,9 @@ async def update_shinny_calendar(
 @router.put("/tushare", response_model=CalendarStatus, response_model_by_alias=True)
 async def update_tushare_calendar(
     session: SessionDep,
-    calendar_id: Annotated[str, Query(alias="calendarId", min_length=1)] = CALENDAR_ID,
+    calendar_id: Annotated[str, Query(alias="calendarId", min_length=1)] = ASHARE_CALENDAR_ID,
 ) -> CalendarStatus:
-    """用 config.toml 中的 Tushare 凭据生成并保存日历。"""
+    """用 config.toml 中的 Tushare 凭据生成并保存 A 股日历。"""
     today = date.today()
     try:
         await save_tushare_calendar(
