@@ -23,7 +23,7 @@ export function Card({
 /** 小节标题（灰、字号 12、字距）。 */
 export function SectionLabel({ children }: { children: ReactNode }) {
   return (
-    <div className="mx-0.5 mt-6 mb-3 text-xs font-semibold tracking-wide text-ink-3">
+    <div className="mx-0.5 mt-2 mb-1 text-xs font-semibold tracking-wide text-ink-3">
       {children}
     </div>
   )

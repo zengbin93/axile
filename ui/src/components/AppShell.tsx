@@ -7,7 +7,7 @@ export function AppShell() {
   return (
     <div className="flex min-h-full flex-col">
       <TopBar />
-      <main className="mx-auto w-full max-w-[860px] flex-1 px-6 pt-8 pb-16">
+      <main className="mx-auto w-full max-w-[860px] flex-1 px-6 pt-2 pb-16">
         <Outlet />
       </main>
       <Toast />
