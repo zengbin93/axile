@@ -9,6 +9,7 @@ import { useLiveExecSync } from '@/lib/api/executionStream'
 import { DashboardPage } from '@/pages/DashboardPage'
 import { AccountDetailPage } from '@/pages/AccountDetailPage'
 import { AccountEditPage } from '@/pages/AccountEditPage'
+import { AccountEditConnectionPage } from '@/pages/AccountEditConnectionPage'
 import { AccountEditTimerPage } from '@/pages/AccountEditTimerPage'
 import { AccountEditAlgorithmPage } from '@/pages/AccountEditAlgorithmPage'
 import { AccountEditControlPage } from '@/pages/AccountEditControlPage'
@@ -98,6 +99,7 @@ const router = createBrowserRouter([
           { index: true, element: <DashboardPage /> },
           { path: 'accounts/:id', element: <AccountDetailPage /> },
           { path: 'accounts/:id/edit', element: <AccountEditPage /> },
+          { path: 'accounts/:id/edit/connection', element: <AccountEditConnectionPage /> },
           { path: 'accounts/:id/edit/leverage', element: <AccountEditPage section="leverage" /> },
           { path: 'accounts/:id/edit/symbols', element: <AccountEditPage section="symbols" /> },
           { path: 'accounts/:id/edit/portfolio', element: <AccountEditPage section="portfolio" /> },

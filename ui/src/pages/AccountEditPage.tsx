@@ -1,7 +1,7 @@
 /**
  * 账户浅配置页 /accounts/:id/edit/*。
  *
- * 基本信息、杠杆、品种控制、组合执行各走可直达子路由；定时、算法、流控
+ * 基本信息、杠杆、品种控制、组合执行各走可直达子路由；连接设置、定时、算法、流控
  * 仍由各自的完整编辑器承载。保存保持最小 PATCH + 底栏变更摘要。
  */
 
@@ -27,7 +27,6 @@ import { useChannelCatalogStore, useChannelDescriptor } from '@/stores/channels'
 import { useToastStore } from '@/stores/ui'
 import { channelLabel } from '@/features/dashboard/display'
 import {
-  AREA,
   TEXT,
   EditBreadcrumb,
   EditError,
@@ -52,8 +51,6 @@ interface Draft {
   weightPrecision: string
   executionTimeout: string
   writeEmpty: boolean
-  tradeRules: string
-  newConfig: string
 }
 
 /**
@@ -72,23 +69,6 @@ function sameList(a: string[], b: string[]): boolean {
   return a.length === b.length && a.every((x, i) => x === b[i])
 }
 
-function parseJson(s: string): { value?: unknown; error?: string } {
-  try {
-    return { value: JSON.parse(s) }
-  } catch (e) {
-    return { error: e instanceof Error ? e.message : '无效 JSON' }
-  }
-}
-
-function norm(v: unknown): string {
-  return JSON.stringify(v ?? null)
-}
-
-function jsonText(v: Record<string, unknown> | null | undefined): string {
-  if (v == null || (typeof v === 'object' && Object.keys(v).length === 0)) return ''
-  return JSON.stringify(v, null, 2)
-}
-
 function draftOf(acc: Account): Draft {
   return {
     name: acc.name,
@@ -102,17 +82,7 @@ function draftOf(acc: Account): Draft {
     weightPrecision: String(acc.weight_precision ?? ''),
     executionTimeout: String(acc.execution_timeout ?? ''),
     writeEmpty: Boolean(acc.write_empty_record),
-    tradeRules: jsonText(acc.trade_rules),
-    newConfig: '',
   }
-}
-
-function jsonDiff(text: string, original: unknown): { changed: boolean; value?: unknown } {
-  const t = text.trim()
-  if (!t) return original == null ? { changed: false } : { changed: true, value: null }
-  const p = parseJson(t)
-  if (p.error !== undefined) return { changed: false }
-  return { changed: norm(p.value) !== norm(original), value: p.value }
 }
 
 function buildPatch(draft: Draft, acc: Account, showShortLeverage: boolean): Partial<Account> {
@@ -147,13 +117,6 @@ function buildPatch(draft: Draft, acc: Account, showShortLeverage: boolean): Par
   const we = draft.writeEmpty ? 1 : 0
   if (we !== (acc.write_empty_record ?? 0)) patch.write_empty_record = we
 
-  const tr = jsonDiff(draft.tradeRules, acc.trade_rules)
-  if (tr.changed) patch.trade_rules = tr.value as Record<string, unknown> | null
-
-  if (draft.newConfig.trim()) {
-    const cfg = parseJson(draft.newConfig)
-    if (cfg.error === undefined) patch.account_config = cfg.value as Record<string, unknown>
-  }
   return patch
 }
 
@@ -169,8 +132,6 @@ const FIELD_LABEL: Record<string, string> = {
   forbidden_symbols: '禁投',
   risk_symbols: '风险品种',
   write_empty_record: '空仓记录',
-  trade_rules: '交易规则',
-  account_config: '连接密钥',
 }
 
 function summarize(patch: Partial<Account>, acc: Account, portfolios: PortfolioLite[] | null): string[] {
@@ -228,7 +189,6 @@ export function AccountEditPage({ section = 'basic' }: { section?: EditSection }
   const displayName = acc?.name ?? item?.name
 
   const [ready, setReady] = useState(false)
-  const [advanced, setAdvanced] = useState(false)
   const [draft, setDraft] = useState<Draft | null>(null)
   const [feishuTest, setFeishuTest] = useState<TestResult | 'busy' | null>(null)
   const [saveError, setSaveError] = useState<Error | null>(null)
@@ -284,9 +244,6 @@ export function AccountEditPage({ section = 'basic' }: { section?: EditSection }
     }
   }
 
-  const jsonEntries: string[] = [d.tradeRules, d.newConfig]
-  const jsonErr = jsonEntries.map((t) => (t.trim() ? parseJson(t).error : undefined)).find(Boolean) ?? null
-
   // 杠杆边界校验由渠道目录给出；空=不改，0=该方向不启用。与服务端同口径，
   // 避免像旧版那样「填 999 也能保存、错误配置直进仓位计算」。
   const leverageOptions = { ...channelDescriptor?.leverage, allowEmpty: true }
@@ -301,11 +258,10 @@ export function AccountEditPage({ section = 'basic' }: { section?: EditSection }
   const changes = summarize(patch, acc, portfolios)
   const dirty = changes.length > 0
   const blocked = Boolean(
-    jsonErr || levErr || timeoutErr || weightPrecisionErr || portfolios == null || portfoliosError || channelCatalogError,
+    levErr || timeoutErr || weightPrecisionErr || portfolios == null || portfoliosError || channelCatalogError,
   )
 
   const save = async () => {
-    if (jsonErr) return toast(`高级 JSON 有误：${jsonErr}`)
     if (levErr) return toast(`杠杆有误：${levErr}`)
     if (timeoutErr) return toast(`执行超时有误：${timeoutErr}`)
     if (weightPrecisionErr) return toast(`权重精度有误：${weightPrecisionErr}`)
@@ -320,24 +276,6 @@ export function AccountEditPage({ section = 'basic' }: { section?: EditSection }
     } catch (e) {
       setSaveError(e instanceof Error ? e : new Error(String(e)))
     }
-  }
-
-  const jsonRow = (key: 'tradeRules', label: string) => {
-    const text = d[key]
-    const err = text.trim() ? parseJson(text).error : undefined
-    return (
-      <Row label={label} top span>
-        <textarea
-          className={AREA}
-          rows={3}
-          value={text}
-          spellCheck={false}
-          placeholder="留空 = 不设置 / 不改"
-          onChange={(e) => set({ [key]: e.target.value })}
-        />
-        {err && <div className="mt-1 text-[12px] text-warn">JSON 有误：{err}</div>}
-      </Row>
-    )
   }
 
   return (
@@ -529,37 +467,6 @@ export function AccountEditPage({ section = 'basic' }: { section?: EditSection }
           </div>
           </Row>
         </Section>
-      )}
-
-      {section === 'basic' && (
-        <button
-          type="button"
-          className="mx-0.5 mt-7 flex w-full cursor-pointer items-center gap-3 border-0 bg-transparent p-0 text-left"
-          onClick={() => setAdvanced((v) => !v)}
-        >
-          <span className="text-[11px] font-semibold tracking-wide text-ink-3">
-            {advanced ? '▾' : '▸'} 高级 · JSON 规则与换密钥
-          </span>
-          <span className="h-px flex-1 bg-line" />
-        </button>
-      )}
-      {section === 'basic' && advanced && (
-        <div className="mt-2 grid grid-cols-1 gap-x-8 gap-y-3 md:grid-cols-2">
-          {jsonRow('tradeRules', 'trade_rules')}
-          <Row label="换连接密钥" hint="只写 · 不回显" top span>
-            <textarea
-              className={AREA}
-              rows={3}
-              value={d.newConfig}
-              spellCheck={false}
-              placeholder="填入新 account_config（JSON）整体替换；留空 = 不改"
-              onChange={(e) => set({ newConfig: e.target.value })}
-            />
-            {d.newConfig.trim() && parseJson(d.newConfig).error && (
-              <div className="mt-1 text-[12px] text-warn">JSON 有误：{parseJson(d.newConfig).error}</div>
-            )}
-          </Row>
-        </div>
       )}
 
       <EditSaveBar

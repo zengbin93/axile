@@ -1,0 +1,136 @@
+/** 账户连接设置：按渠道描述渲染字段，敏感值只写不回显。 */
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useParams } from 'react-router'
+
+import { ConditionalReveal } from '@/components/ui/ConditionalReveal'
+import { ConnectionField } from '@/components/ui/ConnectionField'
+import { Segmented } from '@/components/ui/Segmented'
+import { channelAccountFieldVisible, conditionalRevealFields, isConditionalRevealField, updateChannelAccountConfig } from '@/features/setup/channelAccountFields'
+import { connectionValueError } from '@/components/ui/connectionFieldValue'
+import { EditBreadcrumb, EditError, EditLoading, EditSaveBar, Section } from '@/features/account/editUi'
+import { channelLabel } from '@/features/dashboard/display'
+import { getAccount, updateAccount } from '@/lib/api/accounts'
+import { usePolling } from '@/lib/hooks/usePolling'
+import { useChannelCatalogStore, useChannelDescriptor } from '@/stores/channels'
+import { useDomainStore } from '@/stores/domain'
+import { useToastStore } from '@/stores/ui'
+import type { Account, ChannelAccountField } from '@/types/api'
+
+function initialDraft(account: Account, fields: ChannelAccountField[]): Record<string, unknown> {
+  return Object.fromEntries(fields.map((field) => [
+    field.name,
+    field.kind === 'secret' ? '' : (account.account_config[field.name] ?? field.default ?? ''),
+  ]))
+}
+
+function mergedConfig(account: Account, fields: ChannelAccountField[], draft: Record<string, unknown>) {
+  const next = { ...account.account_config }
+  for (const field of fields) delete next[field.name]
+  for (const field of fields) {
+    if (!channelAccountFieldVisible(field, draft)) continue
+    const drafted = draft[field.name]
+    const value = field.kind === 'secret' && String(drafted ?? '').trim() === ''
+      ? account.account_config[field.name]
+      : drafted
+    if (value !== undefined && value !== null && value !== '') next[field.name] = value
+  }
+  return next
+}
+
+function sameConfig(left: Record<string, unknown>, right: Record<string, unknown>): boolean {
+  return JSON.stringify(left) === JSON.stringify(right)
+}
+
+export function AccountEditConnectionPage() {
+  const accountId = Number(useParams().id)
+  const toast = useToastStore((state) => state.toast)
+  const refreshAccounts = useDomainStore((state) => state.refreshAccounts)
+  const catalogLoading = useChannelCatalogStore((state) => state.loading)
+  const descriptor = useChannelDescriptor(undefined)
+  const account = usePolling(useCallback((signal: AbortSignal) => getAccount(accountId, signal), [accountId]), {
+    queryKey: `account:${accountId}:connection`, intervalMs: 0,
+  })
+  const acc = account.data
+  const channelDescriptor = useChannelDescriptor(acc?.trade_channel)
+  const fields = useMemo(() => channelDescriptor?.account_form.fields ?? [], [channelDescriptor])
+  const [draft, setDraft] = useState<Record<string, unknown> | null>(null)
+  const [errors, setErrors] = useState<Record<string, string>>({})
+  const [saveError, setSaveError] = useState<Error | null>(null)
+
+  useEffect(() => {
+    if (acc && channelDescriptor && draft === null) setDraft(initialDraft(acc, fields))
+  }, [acc, channelDescriptor, draft, fields])
+
+  if (account.error && !acc) return <EditError id={accountId} error={account.error} onRetry={account.refresh} />
+  if (!acc || !draft || (catalogLoading && !channelDescriptor)) return <EditLoading id={accountId} leaf="连接设置" />
+
+  const setField = (field: ChannelAccountField, value: unknown) => {
+    setSaveError(null)
+    setDraft((current) => current ? updateChannelAccountConfig(fields, current, field.name, value) : current)
+    setErrors((current) => {
+      if (!(field.name in current)) return current
+      const next = { ...current }
+      delete next[field.name]
+      return next
+    })
+  }
+  const nextConfig = mergedConfig(acc, fields, draft)
+  const changed = !sameConfig(nextConfig, acc.account_config)
+
+  const validate = () => {
+    const nextErrors: Record<string, string> = {}
+    for (const field of fields) {
+      if (!channelAccountFieldVisible(field, draft)) continue
+      const value = nextConfig[field.name]
+      if (field.kind === 'select') {
+        if (field.required && !field.options?.some((option) => option.value === value)) nextErrors[field.name] = `请选择${field.label}`
+      } else if (field.kind !== 'boolean') {
+        const error = connectionValueError({ kind: field.kind, value: String(value ?? ''), required: field.required, label: field.label, placeholder: field.placeholder, constraints: field.constraints })
+        if (error) nextErrors[field.name] = error
+      }
+    }
+    setErrors(nextErrors)
+    return Object.keys(nextErrors).length === 0
+  }
+
+  const save = async () => {
+    if (!changed) return toast('没有改动')
+    if (!validate()) return toast('请检查连接设置')
+    setSaveError(null)
+    try {
+      await updateAccount(accountId, { account_config: nextConfig })
+      toast('连接设置已更新')
+      void refreshAccounts()
+      account.refresh()
+      setDraft(initialDraft({ ...acc, account_config: nextConfig }, fields))
+    } catch (caught) {
+      setSaveError(caught instanceof Error ? caught : new Error(String(caught)))
+    }
+  }
+
+  const renderControl = (field: ChannelAccountField) => {
+    const raw = draft[field.name] ?? field.default ?? ''
+    if (field.kind === 'boolean') return <Segmented value={raw === true ? 'true' : 'false'} options={[{ value: 'false', label: '关闭' }, { value: 'true', label: '启用' }]} onChange={(value) => setField(field, value === 'true')} />
+    if (field.kind === 'select') return <Segmented value={String(raw)} options={field.options ?? []} onChange={(value) => setField(field, value)} />
+    const configuredSecret = field.kind === 'secret' && Boolean(acc.account_config[field.name])
+    return <ConnectionField label={field.label} kind={field.kind} value={String(raw)} required={field.required} placeholder={configuredSecret ? '已配置 · 留空保持不变' : field.placeholder} help={configuredSecret ? '密钥不回显；只有填入新值才会替换。' : field.help} error={errors[field.name]} constraints={field.constraints} clipboard={field.clipboard} onChange={(value) => setField(field, value)} />
+  }
+
+  return (
+    <section className="pb-24">
+      <EditBreadcrumb id={accountId} name={acc.name} channel={acc.trade_channel} leaf="连接设置" />
+      <div className="mt-3 flex flex-wrap items-baseline gap-3"><span className="text-[18px] font-[640]">连接设置 · {acc.name}</span><span className="text-[12px] text-ink-3">{channelLabel(acc.trade_channel, acc.market)}</span></div>
+      <div className="mt-3 border-l-2 border-warn/60 bg-warn-tint/50 py-2 pl-3 pr-2 text-[13px] text-ink-2">修改会在下次创建执行器时生效；密码与密钥不会回显。</div>
+      <Section label={`${channelDescriptor?.label ?? acc.trade_channel} 连接`}>
+        {fields.map((field) => {
+          if (isConditionalRevealField(fields, field)) return null
+          const visible = channelAccountFieldVisible(field, draft)
+          return <div key={field.name} inert={!visible} className={`${field.width === 'full' ? 'md:col-span-2' : ''} grid transition-[grid-template-rows] duration-200 ${visible ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'}`}><div className="min-h-0 overflow-hidden">
+            {field.kind === 'select' && field.presentation === 'conditional_reveal' ? <ConditionalReveal label={field.label} help={field.help} value={String(draft[field.name] ?? '')} options={field.options ?? []} error={errors[field.name]} onChange={(value) => setField(field, value)} renderPanel={(option) => conditionalRevealFields(fields, field.name, option).map((dependent) => <div key={dependent.name} className="mt-3">{renderControl(dependent)}</div>)} /> : <>{(field.kind === 'boolean' || field.kind === 'select') && <div className="mb-2 text-[13px] text-ink-2">{field.label}</div>}{renderControl(field)}</>}
+          </div></div>
+        })}
+      </Section>
+      <EditSaveBar changes={changed ? ['连接设置已改'] : []} blocked={Object.keys(errors).length > 0} cancelTo={`/accounts/${accountId}`} onSave={() => void save()} error={saveError} />
+    </section>
+  )
+}

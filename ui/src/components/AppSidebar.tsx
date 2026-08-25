@@ -12,6 +12,7 @@ import {
   Plus,
   Scale,
   Settings2,
+  ShieldKeyhole,
   SlidersHorizontal,
   Timer,
   UserRoundCog,
@@ -120,6 +121,7 @@ export function AppSidebar() {
   ]
   const accountParameters: NavItemSpec[] = [
     { label: '基本信息', icon: UserRoundCog, to: accountPath('/edit'), active: exact(accountPath('/edit')) },
+    { label: '连接设置', icon: ShieldKeyhole, to: accountPath('/edit/connection'), active: exact(accountPath('/edit/connection')) },
     { label: '杠杆设置', icon: Scale, to: accountPath('/edit/leverage'), active: exact(accountPath('/edit/leverage')) },
     { label: '品种控制', icon: Ban, to: accountPath('/edit/symbols'), active: exact(accountPath('/edit/symbols')) },
   ]
