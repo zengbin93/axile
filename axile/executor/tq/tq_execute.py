@@ -8,6 +8,7 @@ from uuid import uuid4
 
 from axile.common.trade_channel import TradeChannel
 from axile.executor.abstract_executor.base import AbstractExecutor
+from axile.executor.exceptions import ExecutionBlockedError
 from axile.executor.models.unified_account_assets import UnifiedAccountAssets
 from axile.executor.models.unified_callback import OrderUpdateCallback, PriceDataCallback, TradeRecordCallback
 from axile.executor.models.unified_input import AccountConfig, TQAccountConfig, UnifiedStandardInput
@@ -15,6 +16,7 @@ from axile.executor.models.unified_order import OrderDirection, OrderType, Trade
 from axile.executor.models.unified_price import UnifiedPriceData
 from axile.executor.tq.converters import account_to_unified, order_to_unified, quote_to_unified, trade_to_unified
 from axile.executor.tq.runtime import TQRuntime, snapshot_entity
+from axile.executor.tq.trading_time import TQTradingTimeDecision, check_tq_trading_time
 
 _OFFSET_MAP = {"0": "OPEN", "1": "CLOSE", "3": "CLOSETODAY", "4": "CLOSE"}
 
@@ -70,7 +72,23 @@ class TQExecutor(AbstractExecutor):
 
     @override
     def _check_trading_time(self) -> bool:
-        return self._is_china_futures_session_open()
+        """TqSdk 按合约交易时段判定，不能在渠道级提前阻断整组订单。"""
+        return True
+
+    @override
+    def _get_symbol_execution_blocks(self, symbols: list[str]) -> dict[str, str]:
+        runtime = self._require_runtime()
+        blocks: dict[str, str] = {}
+        for symbol in dict.fromkeys(symbols):
+            try:
+                tq_symbol = runtime.resolver.to_tq(symbol, for_trade=True)
+                decision = runtime.call(lambda api: check_tq_trading_time(api, tq_symbol))
+            except Exception:  # noqa: BLE001 - TqSdk 查询失败必须逐品种 fail-closed
+                blocks[symbol] = "TqSdk 合约交易时段不可用"
+                continue
+            if decision.reason is not None:
+                blocks[symbol] = decision.reason
+        return blocks
 
     @override
     def _normalize_connected_standard_input(self, standard_input: UnifiedStandardInput) -> UnifiedStandardInput:
@@ -165,7 +183,15 @@ class TQExecutor(AbstractExecutor):
             row["order_id"] = order_id
             return row
 
-        row = runtime.call(submit)
+        def check_and_submit(api: object) -> tuple[TQTradingTimeDecision, dict[str, object] | None]:
+            decision = check_tq_trading_time(api, tq_symbol)
+            return decision, None if decision.reason is not None else submit(api)
+
+        decision, row = runtime.call(check_and_submit)
+        if decision.reason is not None:
+            raise ExecutionBlockedError(decision.reason)
+        if row is None:
+            raise RuntimeError("TqSdk 下单结果不可用")
         return order_to_unified(row, runtime.resolver)
 
     @override

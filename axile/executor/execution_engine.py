@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING
 from axile.domain.execution import ExecutionEventStatus, ExecutionEventType, ExecutionReasonFamily
 from axile.executor.account_control.exceptions import AccountControlBlockedError
 from axile.executor.algorithms.core.base import AlgorithmInput, resolve_algorithm
+from axile.executor.exceptions import ExecutionBlockedError
 from axile.executor.execution_runtime import ExecutionRuntime
 from axile.executor.execution_session import ExecutionSession
 from axile.executor.models.execution_result import AlgorithmResult, ExecutionStatus, is_success_status
@@ -257,12 +258,15 @@ class ExecutionEngine:
         dispatch_phases = self._build_dispatch_phases(planning)
         self._prepare_account_for_symbol_dispatch(dispatch_phases)
         phase_one_results = self._run_phase_one_dispatch(dispatch_phases.phase_one_tasks)
-        # 第二阶段只有在第一阶段没有未成功结果时才继续，避免边减仓失败边开新仓。
+        # 第二阶段只有在第一阶段执行失败时才停止；planning 阶段被跳过的 symbol 不影响其他品种。
+        phase_one_dispatch_failures = [
+            result for result in phase_one_results if not is_success_status(result.status)
+        ]
         phase_two_results = self._run_phase_two_dispatch(
             standard_input=standard_input,
             planning=planning,
             dispatch_phases=dispatch_phases,
-            phase_one_results=phase_one_results,
+            phase_one_results=phase_one_dispatch_failures,
         )
         merged_results = self._merge_symbol_algorithm_results(
             [
@@ -360,7 +364,7 @@ class ExecutionEngine:
             # 协作式终止不是失败：必须穿透 symbol 级错误捕获，交给上层 lifecycle
             # 记录为 TERMINATED（携带 reason/mode），否则会被归一化成「执行失败：未知原因」。
             raise
-        except AccountControlBlockedError as exc:
+        except (AccountControlBlockedError, ExecutionBlockedError) as exc:
             return self._build_failed_algorithm_result(
                 symbol=task.symbol,
                 algorithm_name=task.algorithm_name,
@@ -398,20 +402,33 @@ class ExecutionEngine:
         if not symbols:
             raise ValueError("当前输入没有可执行的 symbol")
 
+        blocks = self._owner._get_symbol_execution_blocks(symbols)
+        eligible_symbols = [symbol for symbol in symbols if symbol not in blocks]
         planning_market_data, target_volumes = self._plan_target_volumes_for_symbols(
             standard_input=standard_input,
             account_assets=planning_account_assets,
-            symbols=symbols,
+            symbols=eligible_symbols,
             effective_curr_target=effective_curr_target,
         )
 
         plans: list[_PlannedSymbolAlgorithm] = []
         planning_failures: list[AlgorithmResult] = []
         for symbol in symbols:
+            symbol_algorithm = standard_input.get_symbol_algorithm(symbol)
+            algorithm_name = str(symbol_algorithm.get("method", standard_input.algorithm.get("method", "SINGLE-MAKER")))
+            block_reason = blocks.get(symbol)
+            if block_reason is not None:
+                planning_failures.append(
+                    self._build_failed_algorithm_result(
+                        symbol=symbol,
+                        algorithm_name=algorithm_name,
+                        error=block_reason,
+                        status=ExecutionStatus.BLOCKED,
+                        account_assets=planning_account_assets,
+                    )
+                )
+                continue
             resolved_algorithm = standard_input.get_resolved_symbol_algorithm(symbol)
-            algorithm_name = str(
-                resolved_algorithm.get("method", standard_input.algorithm.get("method", "SINGLE-MAKER"))
-            )
             target_volume = target_volumes.get(symbol)
             if target_volume is None:
                 planning_failures.append(
@@ -470,7 +487,9 @@ class ExecutionEngine:
         if not symbols:
             return {}, {}
 
-        current_target = effective_curr_target or self._build_effective_curr_target(standard_input, account_assets)
+        current_target = effective_curr_target if effective_curr_target is not None else self._build_effective_curr_target(
+            standard_input, account_assets
+        )
         scoped_curr_target = {symbol: current_target[symbol] for symbol in symbols if symbol in current_target}
         scoped_last_target = {
             symbol: weight for symbol, weight in standard_input.last_target.items() if symbol in set(symbols)

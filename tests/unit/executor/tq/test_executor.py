@@ -4,10 +4,12 @@ from types import SimpleNamespace
 
 import pytest
 
+from axile.executor.exceptions import ExecutionBlockedError
 from axile.executor.models.unified_account_assets import UnifiedAccountAssets
 from axile.executor.models.unified_input import TQAccountConfig
 from axile.executor.models.unified_order import OrderDirection, OrderType
 from axile.executor.tq import TQExecutor
+from axile.executor.tq.trading_time import TQTradingTimeDecision
 
 
 class FakeApi:
@@ -53,7 +55,7 @@ class FakeApi:
         self.closed = False
 
     def query_quotes(self, *, ins_class: str, expired: bool = False) -> list[str]:
-        return ["SHFE.rb2610"] if ins_class == "FUTURE" and not expired else []
+        return ["SHFE.rb2610", "SHFE.ag2612"] if ins_class == "FUTURE" and not expired else []
 
     def wait_update(self, *, deadline: float) -> bool:
         del deadline
@@ -113,6 +115,10 @@ class FakeApi:
 def executor(monkeypatch: pytest.MonkeyPatch) -> tuple[TQExecutor, FakeApi]:
     api = FakeApi()
     monkeypatch.setattr(TQExecutor, "_build_api", staticmethod(lambda _config: api))
+    monkeypatch.setattr(
+        "axile.executor.tq.tq_execute.check_tq_trading_time",
+        lambda _api, _symbol: TQTradingTimeDecision(available=True),
+    )
     instance = TQExecutor(TQAccountConfig(account_mode="kq", tq_username="user", tq_password="secret"))
     try:
         yield instance, api
@@ -152,6 +158,40 @@ def test_executor_converts_queries_and_order_primitives(executor: tuple[TQExecut
     assert instance._cancel_order_impl("rb2610", "o1") is True
     assert api.canceled == ["o1"]
     assert instance._query_trades_impl("rb2610", "o1")[0].symbol == "rb2610"
+
+
+def test_executor_blocks_only_the_symbol_with_unavailable_tqsdk_time(
+    executor: tuple[TQExecutor, FakeApi], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    instance, _api = executor
+
+    monkeypatch.setattr(
+        "axile.executor.tq.tq_execute.check_tq_trading_time",
+        lambda _api, symbol: TQTradingTimeDecision(
+            available=symbol == "SHFE.rb2610",
+            reason=None if symbol == "SHFE.rb2610" else "当前不在该合约的 TqSdk 交易时段",
+        ),
+    )
+
+    assert instance._check_trading_time() is True
+    assert instance._get_symbol_execution_blocks(["rb2610", "ag2612"]) == {
+        "ag2612": "当前不在该合约的 TqSdk 交易时段"
+    }
+
+
+def test_executor_rechecks_tqsdk_time_before_inserting_order(
+    executor: tuple[TQExecutor, FakeApi], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    instance, api = executor
+    monkeypatch.setattr(
+        "axile.executor.tq.tq_execute.check_tq_trading_time",
+        lambda _api, _symbol: TQTradingTimeDecision(False, "当前不在该合约的 TqSdk 交易时段"),
+    )
+
+    with pytest.raises(ExecutionBlockedError, match="当前不在该合约的 TqSdk 交易时段"):
+        instance._place_order_impl("rb2610", OrderDirection.BUY, OrderType.LIMIT, 1, 3200)
+
+    assert api.insert_args == {}
 
 
 def test_executor_uses_contract_multiplier_and_rejects_fractional_lots(

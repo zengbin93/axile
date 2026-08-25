@@ -9,6 +9,7 @@ import pytest
 from axile.common.trade_channel import TradeChannel
 from axile.executor.abstract_executor.base import AbstractExecutor
 from axile.executor.algorithms.core.base import AlgorithmInput
+from axile.executor.exceptions import ExecutionBlockedError
 from axile.executor.execution_engine import ExecutionEngine, _PreparedSymbolAlgorithm
 from axile.executor.models.execution_result import ExecutionStatus
 from axile.executor.models.unified_account_assets import UnifiedAccountAssets
@@ -297,6 +298,21 @@ def test_symbol_error_capture_propagates_termination_instead_of_marking_failed()
 
     assert exc_info.value.reason == "manual stop"
     assert exc_info.value.mode == "cancel_pending"
+
+
+def test_symbol_error_capture_maps_execution_block_to_blocked_result() -> None:
+    """执行期的品种级拒绝仍应保留 BLOCKED 语义。"""
+    executor = _LifecycleRecorderExecutor()
+    engine = ExecutionEngine(executor)
+
+    def blocked_runner() -> object:
+        raise ExecutionBlockedError("当前不在该合约的 TqSdk 交易时段")
+
+    result = engine._run_symbol_algorithm_with_error_capture(_prepared_task("ag2612"), runner=blocked_runner)
+
+    assert result.symbol == "ag2612"
+    assert result.status == ExecutionStatus.BLOCKED
+    assert result.error == "当前不在该合约的 TqSdk 交易时段"
 
 
 def test_symbol_error_capture_still_converts_generic_error_to_failed_result() -> None:

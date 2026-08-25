@@ -126,6 +126,11 @@ class AbstractExecutorCapabilityMixin:
         """在渠道连接及其运行时目录就绪后规范化标准输入."""
         return standard_input
 
+    def _get_symbol_execution_blocks(self, symbols: list[str]) -> dict[str, str]:
+        """返回渠道特定的品种级执行阻断原因；默认不阻断。"""
+        del symbols
+        return {}
+
     def _validate_input(self, standard_input: UnifiedStandardInput) -> None:
         """
         执行通用输入验证.

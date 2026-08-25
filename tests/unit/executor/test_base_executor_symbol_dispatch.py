@@ -1332,6 +1332,132 @@ def test_execute_aborts_before_dispatch_when_cancel_all_orders_fails(
     assert algorithm_calls == []
 
 
+def test_execution_blocks_only_the_affected_symbol(monkeypatch: pytest.MonkeyPatch) -> None:
+    """预检拒绝一个品种时，其他品种仍应完成算法执行。"""
+    from axile.executor import execution_engine as execution_engine_module
+    from axile.executor.algorithms.core import base as algorithm_base
+
+    executor = _TestExecutor()
+    algorithm_calls: list[str] = []
+
+    class _Params:
+        def __init__(self, timeout: int) -> None:
+            self.timeout = timeout
+
+    class _Meta:
+        params_class = _Params
+
+    def fake_get_algorithm_metadata(_name: str) -> _Meta:
+        return _Meta()
+
+    def fake_resolve_algorithm(name: str, _executor: AbstractExecutor) -> Any:
+        def _algorithm(_exec: AbstractExecutor, algorithm_input: AlgorithmInput) -> AlgorithmResult:
+            algorithm_calls.append(algorithm_input.symbol)
+            return AlgorithmResult(
+                account_assets=executor.get_account_assets(),
+                target_volume=algorithm_input.target_volume,
+                first_tick=_price(algorithm_input.symbol),
+                memory={"algorithm": name},
+            )
+
+        return _algorithm
+
+    monkeypatch.setattr(executor, "_get_symbol_execution_blocks", lambda _symbols: {"ag2612": "blocked"})
+    monkeypatch.setattr(algorithm_base, "get_algorithm_metadata", fake_get_algorithm_metadata)
+    monkeypatch.setattr(execution_engine_module, "resolve_algorithm", fake_resolve_algorithm)
+
+    output = executor.execute(
+        UnifiedStandardInput.from_dict(
+            {
+                "channel_type": TradeChannel.CTP.value,
+                "account_config": {
+                    "broker_id": "b",
+                    "investor_id": "i",
+                    "password": "p",
+                    "td_front": "tcp://td:1",
+                    "md_front": "tcp://md:2",
+                    "app_id": "app",
+                    "auth_code": "auth",
+                },
+                "curr_target": {"rb2610": 0.1, "ag2612": 0.2},
+                "algorithm": {"method": "DEFAULT-ALGO", "params": {"timeout": 3}},
+            }
+        )
+    )
+
+    assert executor.market_data_requests == [["rb2610"]]
+    assert algorithm_calls == ["rb2610"]
+    assert output.status == ExecutionStatus.PARTIAL
+    assert output.symbol_results["rb2610"].success is True
+    assert output.symbol_results["ag2612"].status == ExecutionStatus.BLOCKED
+    assert output.symbol_results["ag2612"].error == "blocked"
+
+
+def test_execution_blocks_skip_market_data_and_account_dispatch(monkeypatch: pytest.MonkeyPatch) -> None:
+    """planning 阶段拦截的品种不应触发行情查询、撤单或算法。"""
+    from axile.executor import execution_engine as execution_engine_module
+    from axile.executor.algorithms.core import base as algorithm_base
+
+    executor = _TestExecutor()
+    algorithm_calls: list[str] = []
+    cancel_calls: list[object] = []
+
+    class _Params:
+        def __init__(self, timeout: int) -> None:
+            self.timeout = timeout
+
+    class _Meta:
+        params_class = _Params
+
+    def fake_get_algorithm_metadata(_name: str) -> _Meta:
+        return _Meta()
+
+    def fake_resolve_algorithm(name: str, _executor: AbstractExecutor) -> Any:
+        def _algorithm(_exec: AbstractExecutor, algorithm_input: AlgorithmInput) -> AlgorithmResult:
+            algorithm_calls.append(algorithm_input.symbol)
+            return AlgorithmResult(
+                account_assets=executor.get_account_assets(),
+                target_volume=algorithm_input.target_volume,
+                first_tick=_price(algorithm_input.symbol),
+                memory={"algorithm": name},
+            )
+
+        return _algorithm
+
+    monkeypatch.setattr(executor, "_get_symbol_execution_blocks", lambda symbols: {symbol: "blocked" for symbol in symbols})
+    monkeypatch.setattr(executor, "cancel_all_orders", lambda: cancel_calls.append(object()))
+    monkeypatch.setattr(algorithm_base, "get_algorithm_metadata", fake_get_algorithm_metadata)
+    monkeypatch.setattr(execution_engine_module, "resolve_algorithm", fake_resolve_algorithm)
+
+    output = executor.execute(
+        UnifiedStandardInput.from_dict(
+            {
+                "channel_type": TradeChannel.CTP.value,
+                "account_config": {
+                    "broker_id": "b",
+                    "investor_id": "i",
+                    "password": "p",
+                    "td_front": "tcp://td:1",
+                    "md_front": "tcp://md:2",
+                    "app_id": "app",
+                    "auth_code": "auth",
+                },
+                "curr_target": {"rb2610": 0.1, "ag2612": 0.2},
+                "algorithm": {"method": "DEFAULT-ALGO", "params": {"timeout": 3}},
+            }
+        )
+    )
+
+    assert executor.market_data_requests == []
+    assert cancel_calls == []
+    assert algorithm_calls == []
+    assert output.status == ExecutionStatus.BLOCKED
+    assert {symbol: result.error for symbol, result in output.symbol_results.items()} == {
+        "rb2610": "blocked",
+        "ag2612": "blocked",
+    }
+
+
 def test_execute_blocks_open_phase_when_reduce_phase_has_failure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
