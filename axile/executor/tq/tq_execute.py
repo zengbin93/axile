@@ -52,14 +52,36 @@ _TQ_TRADING_SESSIONS = {
     ("INE", "ec"): (_DAY, ()),
     **{
         ("DCE", product): (_DAY, _NIGHT_23)
-        for product in ("a", "b", "m", "y", "p", "c", "cs", "rr", "jm", "j", "i", "pg", "l", "v", "eg", "pp", "eb", "bz")
+        for product in (
+            "a",
+            "b",
+            "m",
+            "y",
+            "p",
+            "c",
+            "cs",
+            "rr",
+            "jm",
+            "j",
+            "i",
+            "pg",
+            "l",
+            "v",
+            "eg",
+            "pp",
+            "eb",
+            "bz",
+        )
     },
     **{("DCE", product): (_DAY, ()) for product in ("jd", "lh", "lg", "fb", "bb")},
     **{
         ("CZCE", product): (_DAY, _NIGHT_23)
         for product in ("FG", "TA", "PR", "PX", "PL", "MA", "SA", "SH", "SR", "CF", "CY", "OI", "RM", "PF", "ZC")
     },
-    **{("CZCE", product): (_DAY, ()) for product in ("UR", "SF", "SM", "AP", "CJ", "PK", "WH", "PM", "RI", "LR", "JR", "RS")},
+    **{
+        ("CZCE", product): (_DAY, ())
+        for product in ("UR", "SF", "SM", "AP", "CJ", "PK", "WH", "PM", "RI", "LR", "JR", "RS")
+    },
     **{("GFEX", product): (_DAY, ()) for product in ("si", "lc", "ps")},
     **{("CFFEX", product): (_INDEX_DAY, ()) for product in ("IF", "IH", "IC", "IM")},
     **{("CFFEX", product): (_BOND_DAY, ()) for product in ("T", "TF", "TS", "TL")},
@@ -172,7 +194,9 @@ class TQExecutor(AbstractExecutor):
             trading_dates[calendar_date] = row["trading"]
         return trading_dates
 
-    def _trading_sessions(self, tq_symbol: str) -> tuple[tuple[tuple[int, int], ...], tuple[tuple[int, int], ...]] | None:
+    def _trading_sessions(
+        self, tq_symbol: str
+    ) -> tuple[tuple[tuple[int, int], ...], tuple[tuple[int, int], ...]] | None:
         instrument = self._require_runtime().resolver.instrument(tq_symbol)
         if instrument is None or instrument.ins_class != "FUTURE":
             return None
@@ -182,7 +206,9 @@ class TQExecutor(AbstractExecutor):
     @staticmethod
     def _night_session_check(calendar: dict[date, bool], session_day: date) -> TQTradingTimeCheck:
         if not calendar.get(session_day):
-            return TQTradingTimeCheck(TQTradingTimeStatus.CLOSED if session_day in calendar else TQTradingTimeStatus.CALENDAR_UNAVAILABLE)
+            return TQTradingTimeCheck(
+                TQTradingTimeStatus.CLOSED if session_day in calendar else TQTradingTimeStatus.CALENDAR_UNAVAILABLE
+            )
         for offset in range(1, 15):
             candidate = session_day + timedelta(days=offset)
             if candidate not in calendar:

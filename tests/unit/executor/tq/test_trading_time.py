@@ -148,9 +148,7 @@ def test_symbol_trading_time_respects_product_sessions(
         ("T2609", "2026-08-24T15:14:59"),
     ],
 )
-def test_static_sessions_cover_each_exchange(
-    executor: tuple[TQExecutor, FakeApi], symbol: str, moment: str
-) -> None:
+def test_static_sessions_cover_each_exchange(executor: tuple[TQExecutor, FakeApi], symbol: str, moment: str) -> None:
     instance, _ = executor
 
     assert instance._check_symbol_trading_time(symbol, _at(moment)).status is TQTradingTimeStatus.OPEN
@@ -161,15 +159,21 @@ def test_friday_night_continues_to_saturday_but_sunday_night_is_closed(executor:
 
     assert instance._check_symbol_trading_time("ag2612", _at("2026-08-21T21:30:00")).status is TQTradingTimeStatus.OPEN
     assert instance._check_symbol_trading_time("ag2612", _at("2026-08-22T00:30:00")).status is TQTradingTimeStatus.OPEN
-    assert instance._check_symbol_trading_time("ag2612", _at("2026-08-23T21:30:00")).status is TQTradingTimeStatus.CLOSED
-    assert instance._check_symbol_trading_time("ag2612", _at("2026-08-24T00:30:00")).status is TQTradingTimeStatus.CLOSED
+    assert (
+        instance._check_symbol_trading_time("ag2612", _at("2026-08-23T21:30:00")).status is TQTradingTimeStatus.CLOSED
+    )
+    assert (
+        instance._check_symbol_trading_time("ag2612", _at("2026-08-24T00:30:00")).status is TQTradingTimeStatus.CLOSED
+    )
 
 
 def test_night_session_before_holiday_is_closed(executor: tuple[TQExecutor, FakeApi]) -> None:
     instance, api = executor
     api.closed_dates.add(date(2026, 8, 21))
 
-    assert instance._check_symbol_trading_time("rb2610", _at("2026-08-20T21:30:00")).status is TQTradingTimeStatus.CLOSED
+    assert (
+        instance._check_symbol_trading_time("rb2610", _at("2026-08-20T21:30:00")).status is TQTradingTimeStatus.CLOSED
+    )
 
 
 @pytest.mark.parametrize("symbol", ["xx2601", "rb2610C3200", "rb2610&rb2611", "missing2601"])

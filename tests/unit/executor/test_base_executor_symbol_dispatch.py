@@ -93,7 +93,11 @@ class _TestExecutor(AbstractExecutor):
         return True
 
     def _get_symbol_trading_time_blocks(self, symbols: list[str]) -> dict[str, str]:
-        return {symbol: self.symbol_trading_time_blocks[symbol] for symbol in symbols if symbol in self.symbol_trading_time_blocks}
+        return {
+            symbol: self.symbol_trading_time_blocks[symbol]
+            for symbol in symbols
+            if symbol in self.symbol_trading_time_blocks
+        }
 
     def get_account_assets(self) -> UnifiedAccountAssets:
         self.account_assets_calls += 1
