@@ -176,6 +176,49 @@
   .dark ::-webkit-scrollbar-thumb:hover {
     background: rgba(255, 255, 255, 0.34);
   }
+
+  /*
+   * 卡片内的次级滚动区默认保持安静；gutter 仍常驻以锁定列宽，只有用户准备
+   * 操作（hover / 键盘 focus）时才显示位置提示。滚动本身就是唯一连续性。
+   */
+  .quiet-scrollbar {
+    scrollbar-color: transparent transparent;
+  }
+  .quiet-scrollbar:hover,
+  .quiet-scrollbar:focus-visible,
+  .quiet-scrollbar:focus-within {
+    scrollbar-color: rgba(15, 18, 22, 0.28) transparent;
+  }
+  .dark .quiet-scrollbar:hover,
+  .dark .quiet-scrollbar:focus-visible,
+  .dark .quiet-scrollbar:focus-within {
+    scrollbar-color: rgba(255, 255, 255, 0.3) transparent;
+  }
+  .quiet-scrollbar::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  .quiet-scrollbar::-webkit-scrollbar-button {
+    display: none;
+    width: 0;
+    height: 0;
+  }
+  .quiet-scrollbar::-webkit-scrollbar-thumb {
+    background: transparent;
+    border: 2px solid transparent;
+  }
+  .quiet-scrollbar:hover::-webkit-scrollbar-thumb,
+  .quiet-scrollbar:focus-visible::-webkit-scrollbar-thumb,
+  .quiet-scrollbar:focus-within::-webkit-scrollbar-thumb {
+    background: rgba(15, 18, 22, 0.28);
+    background-clip: padding-box;
+  }
+  .dark .quiet-scrollbar:hover::-webkit-scrollbar-thumb,
+  .dark .quiet-scrollbar:focus-visible::-webkit-scrollbar-thumb,
+  .dark .quiet-scrollbar:focus-within::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.3);
+    background-clip: padding-box;
+  }
 }
 
 /*

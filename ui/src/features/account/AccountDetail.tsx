@@ -449,17 +449,22 @@ export function AccountDetail({ accountId, item, onDashboardRefresh }: AccountDe
                   </>
                 )}
               </div>
-              <div className="h-40 overflow-y-auto overscroll-contain border-t border-line [scrollbar-gutter:stable] lg:border-t-0 lg:border-l lg:pl-5">
+              <div
+                role="list"
+                aria-label="当前持仓"
+                tabIndex={0}
+                className="quiet-scrollbar h-40 overflow-y-auto overscroll-contain border-t border-line [scrollbar-gutter:stable] focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-2 focus-visible:outline-line lg:border-t-0 lg:border-l lg:pl-5"
+              >
                 {currentHoldings.length === 0 ? (
                   <div className="flex h-full items-center text-[13px] text-ink-3">当前空仓</div>
                 ) : currentHoldings.map((holding) => (
-                  <div key={holding.key} className="grid min-h-12 grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-3 border-t border-line text-[13px] first:border-t-0">
+                  <div role="listitem" key={holding.key} className="grid min-h-8 grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-2 border-t border-line text-[12.5px] first:border-t-0">
                     <OverflowText className="font-mono font-medium text-ink-1" text={holding.symbol} />
                     <span className="num whitespace-nowrap text-ink-2">
                       {holding.direction === 'short' ? '空' : '多'}{' '}
                       {holding.weight == null ? '—' : `${Math.abs(holding.weight).toFixed(1)}%`}
                     </span>
-                    <span className="num min-w-20 whitespace-nowrap text-right font-medium text-ink-1">
+                    <span className="num min-w-18 whitespace-nowrap text-right font-medium text-ink-1">
                       {holding.value == null ? '—' : withCurrency(fmtMoney(holding.value), item.currency)}
                     </span>
                   </div>
