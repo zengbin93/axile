@@ -15,7 +15,7 @@ import { AccountActions } from '@/features/account/AccountActions'
 import { useExecutionRunner } from '@/features/account/useExecutionRunner'
 import { useTerminateAction } from '@/features/account/useTerminateAction'
 import { buildRecentActivity } from '@/features/account/recent'
-import { currentHoldingPreview, rebalanceTurnover } from '@/features/account/holdingPreview'
+import { currentHoldingPreview, formatHoldingQuantity, rebalanceTurnover } from '@/features/account/holdingPreview'
 import { ScheduleSummary, ScheduleTimeline, ScheduleTimelineSkeleton } from '@/features/account/ScheduleTimeline'
 import { accountAssetTerms, INTEGRITY_ICON, INTEGRITY_TEXT_CLASS, STATUS_TEXT_CLASS, channelLabel } from '@/features/dashboard/display'
 import { phaseLabel, runVerb } from '@/features/dashboard/execProgress'
@@ -426,8 +426,21 @@ export function AccountDetail({ accountId, item, onDashboardRefresh }: AccountDe
                 <Skeleton className="h-4 w-44" />
                 <Skeleton className="h-2 w-full" />
               </div>
-              <div className="space-y-3 border-t border-line pt-3 lg:border-t-0 lg:border-l lg:pt-0 lg:pl-5">
-                {Array.from({ length: 3 }, (_, index) => <Skeleton key={index} className="h-10 w-full" />)}
+              <div className="h-40 border-t border-line lg:border-t-0 lg:border-l lg:pl-5">
+                <div className="mr-2 grid h-8 grid-cols-[minmax(0,1fr)_42px_60px_66px] items-center gap-1.5">
+                  <Skeleton className="h-3 w-8" />
+                  <Skeleton className="h-3 w-7 justify-self-end" />
+                  <Skeleton className="h-3 w-12 justify-self-end" />
+                  <Skeleton className="h-3 w-8 justify-self-end" />
+                </div>
+                {Array.from({ length: 4 }, (_, index) => (
+                  <div key={index} className="grid h-8 grid-cols-[minmax(0,1fr)_42px_60px_66px] items-center gap-1.5 border-t border-line pr-2">
+                    <Skeleton className="h-3 w-12" />
+                    <Skeleton className="h-3 w-9 justify-self-end" />
+                    <Skeleton className="h-3 w-12 justify-self-end" />
+                    <Skeleton className="h-3 w-14 justify-self-end" />
+                  </div>
+                ))}
               </div>
             </SkeletonGroup>
           ) : comparisonError ? null : !weights.data?.calculated_at ? (
@@ -456,26 +469,52 @@ export function AccountDetail({ accountId, item, onDashboardRefresh }: AccountDe
                   </>
                 )}
               </div>
-              <div
-                role="list"
-                aria-label="当前持仓"
-                tabIndex={0}
-                className="quiet-scrollbar h-40 overflow-y-auto overscroll-contain border-t border-line [scrollbar-gutter:stable] focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-2 focus-visible:outline-line lg:border-t-0 lg:border-l lg:pl-5"
-              >
-                {currentHoldings.length === 0 ? (
-                  <div className="flex h-full items-center text-[13px] text-ink-3">当前空仓</div>
-                ) : currentHoldings.map((holding) => (
-                  <div role="listitem" key={holding.key} className="grid min-h-8 grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-2 border-t border-line text-[12.5px] first:border-t-0">
-                    <OverflowText className="text-[13px] font-[560] text-ink-1" text={holding.symbol} />
-                    <span className="num whitespace-nowrap text-ink-2">
-                      {holding.direction === 'short' ? '空' : '多'}{' '}
-                      {holding.weight == null ? '—' : `${Math.abs(holding.weight).toFixed(1)}%`}
-                    </span>
-                    <span className="num min-w-18 whitespace-nowrap text-right font-medium text-ink-1">
-                      {holding.value == null ? '—' : withCurrency(fmtMoney(holding.value), item.currency)}
-                    </span>
-                  </div>
-                ))}
+              <div className="h-40 border-t border-line lg:border-t-0 lg:border-l lg:pl-5">
+                <div aria-hidden className="mr-2 grid h-8 grid-cols-[minmax(0,1fr)_42px_60px_66px] items-center gap-1.5 text-[11px] font-medium text-ink-3">
+                  <span>品种</span>
+                  <span className="text-right">仓位</span>
+                  <span className="text-right">持仓/可用</span>
+                  <span className="text-right">市值</span>
+                </div>
+                <div
+                  role="list"
+                  aria-label="当前持仓"
+                  tabIndex={0}
+                  className="quiet-scrollbar h-32 overflow-y-auto overscroll-contain [scrollbar-gutter:stable] focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-2 focus-visible:outline-line"
+                >
+                  {currentHoldings.length === 0 ? (
+                    <div className="flex h-full items-center border-t border-line text-[13px] text-ink-3">当前空仓</div>
+                  ) : currentHoldings.map((holding) => {
+                    const volume = formatHoldingQuantity(holding.volume)
+                    const availableVolume = formatHoldingQuantity(holding.availableVolume)
+                    const quantityText = `${volume}/${availableVolume}`
+                    const quantityLabel = `持仓 ${volume}，可用 ${availableVolume}`
+                    const value = holding.value == null ? '—' : withCurrency(fmtMoney(holding.value), item.currency)
+                    return (
+                      <div role="listitem" key={holding.key} className="grid h-8 grid-cols-[minmax(0,1fr)_42px_60px_66px] items-center gap-1.5 border-t border-line text-[12.5px]">
+                        <OverflowText className="text-[13px] font-[560] text-ink-1" text={holding.symbol} />
+                        <span className="num min-w-0 truncate whitespace-nowrap text-right text-ink-2">
+                          {holding.direction === 'short' ? '空' : '多'}
+                          {holding.weight == null ? '—' : `${Math.abs(holding.weight).toFixed(1)}%`}
+                        </span>
+                        <span
+                          className="num min-w-0 truncate whitespace-nowrap text-right text-ink-2"
+                          aria-label={quantityLabel}
+                          title={quantityLabel}
+                        >
+                          {quantityText}
+                        </span>
+                        <span
+                          className="num min-w-0 truncate whitespace-nowrap text-right font-medium text-ink-1"
+                          aria-label={`市值 ${value}`}
+                          title={value}
+                        >
+                          {value}
+                        </span>
+                      </div>
+                    )
+                  })}
+                </div>
               </div>
             </div>
           ) : null}

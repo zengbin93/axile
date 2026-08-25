@@ -6,6 +6,18 @@ export interface CurrentHoldingPreview {
   symbol: string
   direction: 'long' | 'short'
   weight: number | null
+  volume: number | null
+  availableVolume: number | null
+  value: number | null
+}
+
+interface HoldingAggregate {
+  symbol: string
+  direction: 'long' | 'short'
+  volume: number
+  volumeComplete: boolean
+  availableVolume: number
+  availableVolumeComplete: boolean
   value: number | null
 }
 
@@ -13,12 +25,24 @@ function isShort(direction: unknown): boolean {
   return typeof direction === 'string' && (direction.includes('空') || direction.toLowerCase().includes('short'))
 }
 
+function quantity(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : null
+}
+
+/** 紧凑显示跨渠道持仓数量，保留最多六位有效小数。 */
+export function formatHoldingQuantity(value: number | null | undefined): string {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) return '—'
+  if (value === 0) return '0'
+  if (value < 0.000001) return '<0.000001'
+  return value.toLocaleString('zh-CN', { maximumFractionDigits: 6 })
+}
+
 /** 按品种与方向聚合当前持仓，并按持仓市值绝对值降序排列。 */
 export function currentHoldingPreview(
   positions: Position[],
   equity: number,
 ): CurrentHoldingPreview[] {
-  const holdings = new Map<string, { symbol: string; direction: 'long' | 'short'; value: number | null }>()
+  const holdings = new Map<string, HoldingAggregate>()
 
   for (const position of positions) {
     const symbol = typeof position.symbol === 'string' ? position.symbol.trim() : ''
@@ -27,10 +51,16 @@ export function currentHoldingPreview(
     const key = `${symbol}:${direction}`
     const rawValue = Number(position.market_value)
     const value = Number.isFinite(rawValue) ? Math.abs(rawValue) : null
+    const volume = quantity(position.volume)
+    const availableVolume = quantity(position.available_volume)
     const previous = holdings.get(key)
     holdings.set(key, {
       symbol,
       direction,
+      volume: (previous?.volume ?? 0) + (volume ?? 0),
+      volumeComplete: (previous?.volumeComplete ?? true) && volume != null,
+      availableVolume: (previous?.availableVolume ?? 0) + (availableVolume ?? 0),
+      availableVolumeComplete: (previous?.availableVolumeComplete ?? true) && availableVolume != null,
       value: value == null ? previous?.value ?? null : (previous?.value ?? 0) + value,
     })
   }
@@ -43,6 +73,8 @@ export function currentHoldingPreview(
         symbol: holding.symbol,
         direction: holding.direction,
         weight: signedValue != null && equity > 0 ? (signedValue / equity) * 100 : null,
+        volume: holding.volumeComplete ? holding.volume : null,
+        availableVolume: holding.availableVolumeComplete ? holding.availableVolume : null,
         value: signedValue,
       }
     })

@@ -393,6 +393,8 @@ export interface Position {
   direction?: string
   /** 持仓数量。 */
   volume?: number
+  /** 当前可用于交易的持仓数量。 */
+  available_volume?: number
   avg_price?: number
   [k: string]: unknown
 }
