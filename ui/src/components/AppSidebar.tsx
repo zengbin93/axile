@@ -1,14 +1,21 @@
 import { useEffect, type ComponentType, type CSSProperties, type ReactNode } from 'react'
 import { useLocation } from 'react-router'
 import {
+  Ban,
   Boxes,
   CalendarDays,
   ChartNoAxesCombined,
   CircleGauge,
+  Layers3,
   ListChecks,
   Plus,
+  Scale,
   Settings2,
+  SlidersHorizontal,
+  Timer,
+  UserRoundCog,
   WalletCards,
+  Workflow,
 } from 'lucide-react'
 import { Link } from '@/components/ui/nav'
 import { useDomainStore } from '@/stores/domain'
@@ -32,9 +39,9 @@ function accountIdFromPath(pathname: string): number | null {
 
 function NavSection({ label, children }: { label: string; children: ReactNode }) {
   return (
-    <section className="mt-4 first:mt-0">
-      <div className="mb-1.5 px-3 text-[11px] font-semibold tracking-wide text-ink-3">{label}</div>
-      <div className="space-y-0.5">{children}</div>
+    <section className="mt-2 first:mt-0">
+      <div className="mb-0.5 px-2.5 text-[11px] font-semibold tracking-wide text-ink-3">{label}</div>
+      <div>{children}</div>
     </section>
   )
 }
@@ -46,9 +53,7 @@ function NavItem({ item }: { item: NavItemSpec }) {
   const content = (
     <>
       {active && (
-        <span aria-hidden className="absolute inset-0 rounded-[7px] bg-accent-soft" style={activeMarkerStyle}>
-          <span className="absolute inset-y-1 left-0 w-0.5 rounded-full bg-accent" />
-        </span>
+        <span aria-hidden className="absolute inset-0 rounded-[7px] bg-accent-soft" style={activeMarkerStyle} />
       )}
       <span className="relative z-[1] flex items-center gap-2.5">
         {Icon && <Icon size={15} aria-hidden />}
@@ -59,7 +64,7 @@ function NavItem({ item }: { item: NavItemSpec }) {
 
   if (!item.to) {
     return (
-      <span className="relative flex h-8.5 items-center gap-2.5 rounded-[7px] px-3 text-[13px] text-ink-3" aria-disabled="true">
+      <span className="relative flex h-7.5 items-center gap-2 rounded-[7px] px-2.5 text-[13px] text-ink-3" aria-disabled="true">
         {content}
       </span>
     )
@@ -69,7 +74,7 @@ function NavItem({ item }: { item: NavItemSpec }) {
     <Link
       to={item.to}
       aria-current={active ? 'page' : undefined}
-      className={`relative flex h-8.5 items-center gap-2.5 rounded-[7px] px-3 text-[13px] transition-colors duration-150 motion-reduce:transition-none ${
+      className={`relative flex h-7.5 items-center gap-2 rounded-[7px] px-2.5 text-[13px] transition-colors duration-150 motion-reduce:transition-none ${
         active ? 'text-ink-1' : 'text-ink-2 hover:bg-bg-subtle hover:text-ink-1'
       }`}
     >
@@ -113,24 +118,24 @@ export function AppSidebar() {
     { label: '回看与绩效', icon: ChartNoAxesCombined, to: accountPath('/history'), active: exact(accountPath('/history')) },
   ]
   const accountParameters: NavItemSpec[] = [
-    { label: '基本信息', to: accountPath('/edit'), active: exact(accountPath('/edit')) },
-    { label: '杠杆设置', to: accountPath('/edit/leverage'), active: exact(accountPath('/edit/leverage')) },
-    { label: '品种控制', to: accountPath('/edit/symbols'), active: exact(accountPath('/edit/symbols')) },
+    { label: '基本信息', icon: UserRoundCog, to: accountPath('/edit'), active: exact(accountPath('/edit')) },
+    { label: '杠杆设置', icon: Scale, to: accountPath('/edit/leverage'), active: exact(accountPath('/edit/leverage')) },
+    { label: '品种控制', icon: Ban, to: accountPath('/edit/symbols'), active: exact(accountPath('/edit/symbols')) },
   ]
   const accountExecution: NavItemSpec[] = [
-    { label: '定时节奏', to: accountPath('/edit/timer'), active: exact(accountPath('/edit/timer')) },
-    { label: '执行算法', to: accountPath('/edit/algorithm'), active: exact(accountPath('/edit/algorithm')) },
-    { label: '执行流控', to: accountPath('/edit/control'), active: exact(accountPath('/edit/control')) },
-    { label: '组合执行', to: accountPath('/edit/portfolio'), active: exact(accountPath('/edit/portfolio')) },
+    { label: '定时节奏', icon: Timer, to: accountPath('/edit/timer'), active: exact(accountPath('/edit/timer')) },
+    { label: '执行算法', icon: Workflow, to: accountPath('/edit/algorithm'), active: exact(accountPath('/edit/algorithm')) },
+    { label: '执行流控', icon: SlidersHorizontal, to: accountPath('/edit/control'), active: exact(accountPath('/edit/control')) },
+    { label: '组合执行', icon: Layers3, to: accountPath('/edit/portfolio'), active: exact(accountPath('/edit/portfolio')) },
   ]
 
   return (
     <aside
-      className="quiet-scrollbar absolute top-5 bottom-5 z-10 flex w-[224px] flex-col overflow-y-auto rounded-card bg-surface p-3 shadow-card"
+      className="quiet-scrollbar absolute top-5 bottom-5 z-10 flex w-[224px] flex-col overflow-y-auto rounded-card bg-surface p-2.5 shadow-card"
       style={{ left: 'max(20px, calc(50% - 430px - 24px - 224px))' }}
       aria-label="主导航"
     >
-      <div className="space-y-0.5">
+      <div>
         <NavItem item={{ label: '账户', icon: CircleGauge, to: '/', active: (pathname) => pathname === '/' }} />
         <NavItem item={{ label: '组合', icon: Boxes, to: '/portfolios', active: (pathname) => pathname.startsWith('/portfolios') }} />
       </div>
@@ -152,12 +157,12 @@ export function AppSidebar() {
         <NavItem item={{ label: '系统配置', icon: Settings2, to: '/settings', active: exact('/settings') }} />
       </NavSection>
 
-      <div className="mt-auto border-t border-line pt-3">
-        <div className="grid grid-cols-2 gap-2">
-          <Link to="/setup/acct/channel" className="flex items-center justify-center gap-1.5 rounded-[9px] border border-line px-2 py-2 text-[12px] text-ink-2 hover:border-ink-3/40 hover:text-ink-1">
+      <div className="mt-auto border-t border-line pt-2">
+        <div className="grid grid-cols-2 gap-1.5">
+          <Link to="/setup/acct/channel" className="flex items-center justify-center gap-1.5 rounded-[9px] border border-line px-2 py-1.5 text-[12px] text-ink-2 hover:border-ink-3/40 hover:text-ink-1">
             <Plus size={14} aria-hidden />账户
           </Link>
-          <Link to="/setup/pf/name" className="flex items-center justify-center gap-1.5 rounded-[9px] border border-line px-2 py-2 text-[12px] text-ink-2 hover:border-ink-3/40 hover:text-ink-1">
+          <Link to="/setup/pf/name" className="flex items-center justify-center gap-1.5 rounded-[9px] border border-line px-2 py-1.5 text-[12px] text-ink-2 hover:border-ink-3/40 hover:text-ink-1">
             <Plus size={14} aria-hidden />组合
           </Link>
         </div>

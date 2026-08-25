@@ -9,7 +9,7 @@ import { Tooltip } from '@/components/ui/Tooltip'
 import { shortErrorReason } from '@/lib/errorInfo'
 
 /**
- * 顶栏 —— 品牌、后端活性点、设置入口。
+ * 顶栏 —— 品牌、后端活性点、风险提示与主题切换。
  *
  * 活性点/新鲜度直接来自共享账户数据的刷新（比单独 ping health 更诚实）：
  * 有数据且最近一次刷新无误=中性+「数据 N 秒前」；刷新出错=琥珀并保留原因。
@@ -80,38 +80,6 @@ export function TopBar() {
       )}
       <span className="flex-1" />
       <ThemeToggle />
-      <Link
-        to="/settings"
-        aria-label="系统配置"
-        title="系统配置"
-        className="flex items-center rounded-chip border border-line px-2.5 py-1.5 text-ink-2 hover:border-ink-3/40 hover:text-ink-1"
-      >
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-          <path
-            d="M12 15.5a3.5 3.5 0 100-7 3.5 3.5 0 000 7z"
-            stroke="currentColor"
-            strokeWidth="1.6"
-          />
-          <path
-            d="M19.4 13a7.6 7.6 0 000-2l2-1.6-2-3.4-2.4 1a7.6 7.6 0 00-1.7-1l-.4-2.5h-4l-.4 2.5a7.6 7.6 0 00-1.7 1l-2.4-1-2 3.4L4.6 11a7.6 7.6 0 000 2l-2 1.6 2 3.4 2.4-1c.5.4 1.1.7 1.7 1l.4 2.5h4l.4-2.5c.6-.3 1.2-.6 1.7-1l2.4 1 2-3.4-2-1.6z"
-            stroke="currentColor"
-            strokeWidth="1.6"
-            strokeLinejoin="round"
-          />
-        </svg>
-      </Link>
-      <Link
-        to="/portfolios"
-        className="rounded-chip border border-line px-3 py-1.5 text-[13px] text-ink-2 hover:border-ink-3/40 hover:text-ink-1"
-      >
-        组合
-      </Link>
-      <Link
-        to="/setup"
-        className="rounded-chip border border-line px-3 py-1.5 text-[13px] text-ink-2 hover:border-ink-3/40 hover:text-ink-1"
-      >
-        新建
-      </Link>
     </header>
   )
 }
