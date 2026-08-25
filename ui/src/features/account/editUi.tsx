@@ -337,7 +337,7 @@ export function EditSaveBar({
   const open = changes.length > 0
   return (
     <div
-      className={`fixed bottom-0 left-1/2 z-30 w-full max-w-[860px] -translate-x-1/2 border-t border-line bg-surface/85 backdrop-blur-md transition-opacity ${MOTION_LAYOUT} ${
+      className={`fixed bottom-0 left-[calc(50%+6rem)] z-30 w-full max-w-[860px] -translate-x-1/2 border-t border-line bg-surface/85 backdrop-blur-md transition-opacity ${MOTION_LAYOUT} ${
         open ? 'opacity-100' : 'pointer-events-none opacity-0'
       }`}
       aria-hidden={!open}

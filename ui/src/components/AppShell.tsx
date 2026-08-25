@@ -11,7 +11,7 @@ export function AppShell() {
       <div className="relative min-h-0 flex-1">
         <AppSidebar />
         <main className="app-workspace h-full overflow-y-auto [scrollbar-gutter:stable]">
-          <div className="mx-auto h-full w-full max-w-[860px] px-6 pt-2 pb-16">
+          <div className="relative left-24 mx-auto h-full w-full max-w-[860px] px-6 pt-2 pb-16">
             <Outlet />
           </div>
         </main>
