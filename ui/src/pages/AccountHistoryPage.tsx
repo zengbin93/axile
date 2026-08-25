@@ -160,7 +160,11 @@ export function AccountHistoryPage() {
       <div className="mb-3 flex items-center justify-between">
         <Breadcrumb
           trail={[
-            { label: account.data?.name ?? `账户 #${accountId}`, to: `/accounts/${accountId}` },
+            {
+              label: account.data?.name ?? `账户 #${accountId}`,
+              to: `/accounts/${accountId}`,
+              annotation: account.data ? channelLabel(account.data.trade_channel, '') : undefined,
+            },
             { label: '回看 · 绩效' },
           ]}
         />

@@ -11,7 +11,9 @@ import { Breadcrumb } from '@/components/ui/Breadcrumb'
 import { OverflowText } from '@/components/ui/OverflowText'
 import { Skeleton } from '@/components/ui/Skeleton'
 import { ErrorNotice } from '@/components/ui/ErrorNotice'
+import { channelLabel } from '@/features/dashboard/display'
 import { MOTION_LAYOUT } from '@/lib/viewTransition'
+import type { TradeChannel } from '@/types/api'
 
 /** 入口卡 ↔ 子页顶栏 共享容器名（同构壳 FLIP，非文案内容 morph）。 */
 export function editShellVtName(accountId: number, kind: 'timer' | 'algorithm' | 'control'): string {
@@ -33,14 +35,20 @@ export const AREA =
 export function EditBreadcrumb({
   id,
   name,
+  channel,
   leaf,
 }: {
   id: number
   name?: string
+  channel?: TradeChannel
   leaf?: string
 }) {
   const trail = [
-    { label: name ?? `账户 #${id}`, to: `/accounts/${id}` },
+    {
+      label: name ?? `账户 #${id}`,
+      to: `/accounts/${id}`,
+      annotation: channel ? channelLabel(channel, '') : undefined,
+    },
     leaf
       ? { label: '编辑', to: `/accounts/${id}/edit` }
       : { label: '编辑' },
@@ -53,12 +61,14 @@ export function EditBreadcrumb({
 export function EditLoading({
   id,
   name,
+  channel,
   leaf,
   /** 为真时不渲染 section/面包屑/标题骨架（外层已挂真实标题做 FLIP）。 */
   bare = false,
 }: {
   id: number
   name?: string
+  channel?: TradeChannel
   leaf?: string
   bare?: boolean
 }) {
@@ -76,17 +86,29 @@ export function EditLoading({
   if (bare) return body
   return (
     <section>
-      <EditBreadcrumb id={id} name={name} leaf={leaf} />
+      <EditBreadcrumb id={id} name={name} channel={channel} leaf={leaf} />
       {body}
     </section>
   )
 }
 
 /** 加载失败。 */
-export function EditError({ id, name, error, onRetry }: { id: number; name?: string; error: unknown; onRetry?: () => void }) {
+export function EditError({
+  id,
+  name,
+  channel,
+  error,
+  onRetry,
+}: {
+  id: number
+  name?: string
+  channel?: TradeChannel
+  error: unknown
+  onRetry?: () => void
+}) {
   return (
     <section>
-      <EditBreadcrumb id={id} name={name} />
+      <EditBreadcrumb id={id} name={name} channel={channel} />
       <ErrorNotice title="账户加载失败" error={error} onRetry={onRetry} />
     </section>
   )

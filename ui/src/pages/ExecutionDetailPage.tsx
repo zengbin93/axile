@@ -19,7 +19,7 @@ import {
 import { buildSymbolActionStream, type ActionLine } from '@/features/account/actionStream'
 import { BLAME_LABEL, type FailureReason } from '@/features/account/failureReason'
 import { PhaseBar } from '@/features/dashboard/PhaseBar'
-import { accountAssetTerms } from '@/features/dashboard/display'
+import { accountAssetTerms, channelLabel } from '@/features/dashboard/display'
 import { useDomainStore } from '@/stores/domain'
 import { useChannelDescriptor } from '@/stores/channels'
 import { useRunning } from '@/stores/liveExec'
@@ -574,7 +574,11 @@ export function ExecutionDetailPage() {
     <section>
       <Breadcrumb
         trail={[
-          { label: name, to: `/accounts/${accountId}` },
+          {
+            label: name,
+            to: `/accounts/${accountId}`,
+            annotation: item ? channelLabel(item.trade_channel, '') : undefined,
+          },
           { label: '执行详情' },
         ]}
       />

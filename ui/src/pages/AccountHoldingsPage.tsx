@@ -5,7 +5,7 @@ import { Card } from '@/components/ui/Card'
 import { Skeleton, SkeletonLines } from '@/components/ui/Skeleton'
 import { ErrorNotice } from '@/components/ui/ErrorNotice'
 import { HoldingsView } from '@/features/account/HoldingsView'
-import { accountAssetTerms } from '@/features/dashboard/display'
+import { accountAssetTerms, channelLabel } from '@/features/dashboard/display'
 import { TargetSnapshotControl } from '@/features/portfolio/TargetSnapshotControl'
 import { getAccount, getAccountAssetSnapshots, getAccountTargetSnapshot, refreshAccountTargetSnapshot } from '@/lib/api/accounts'
 import { usePolling } from '@/lib/hooks/usePolling'
@@ -49,6 +49,7 @@ export function AccountHoldingsPage() {
   const recEquity = Number(latestAssets?.total_asset) || 0
   const equity = item?.total_asset ?? recEquity
   const name = item?.name ?? account.data?.name ?? `账户 #${accountId}`
+  const tradeChannel = item?.trade_channel ?? account.data?.trade_channel
   const portfolioId = item?.portfolio_id ?? account.data?.portfolio_id ?? null
   // 快照缺失但实时口径（dashboard.holdings_count）显示有持仓：资产观测未返回有效持仓明细，
   // 逐只对照会把「实际持有」误判为空仓并给出「买入建仓」的危险建议。此时降级为「待刷新」，
@@ -60,7 +61,11 @@ export function AccountHoldingsPage() {
     <section>
       <Breadcrumb
         trail={[
-          { label: name, to: `/accounts/${accountId}` },
+          {
+            label: name,
+            to: `/accounts/${accountId}`,
+            annotation: tradeChannel ? channelLabel(tradeChannel, '') : undefined,
+          },
           { label: '持仓明细' },
         ]}
       />

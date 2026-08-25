@@ -78,7 +78,7 @@ export function AccountEditAlgorithmPage() {
     return <EditError id={accountId} error={account.error} onRetry={account.refresh} />
 
   if (account.loading || !ready || !acc || !trade || !descriptor)
-    return <EditLoading id={accountId} leaf="执行算法" />
+    return <EditLoading id={accountId} name={acc?.name} channel={acc?.trade_channel} leaf="执行算法" />
 
   const origTrade = refFromAccount(acc.algorithm) ?? descriptor.defaults.trade_algorithm
   const origEmpty = refFromAccount(acc.empty_positions_algorithm)
@@ -141,7 +141,7 @@ export function AccountEditAlgorithmPage() {
 
   return (
     <section className="pb-24">
-      <EditBreadcrumb id={accountId} name={acc.name} leaf="执行算法" />
+      <EditBreadcrumb id={accountId} name={acc.name} channel={acc.trade_channel} leaf="执行算法" />
       <EditWorktopBar
         label="执行算法"
         hint="下单 / 清仓"

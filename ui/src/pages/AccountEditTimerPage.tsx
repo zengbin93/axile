@@ -59,7 +59,7 @@ export function AccountEditTimerPage() {
     return <EditError id={accountId} error={account.error} onRetry={account.refresh} />
 
   if (account.loading || !ready || !acc || !timer || !descriptor)
-    return <EditLoading id={accountId} leaf="定时" />
+    return <EditLoading id={accountId} name={acc?.name} channel={acc?.trade_channel} leaf="定时" />
 
   const scheduleKind = descriptor.schedule.kind
   const cronNext = timerStateToCronExpr(scheduleKind, timer)
@@ -93,7 +93,7 @@ export function AccountEditTimerPage() {
 
   return (
     <section className="pb-24">
-      <EditBreadcrumb id={accountId} name={acc.name} leaf="定时" />
+      <EditBreadcrumb id={accountId} name={acc.name} channel={acc.trade_channel} leaf="定时" />
       <EditWorktopBar
         label="定时"
         hint="自动调仓"

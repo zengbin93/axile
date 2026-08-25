@@ -281,7 +281,7 @@ export function AccountEditPage() {
   if (account.loading || !ready || !acc || !draft || (channelDescriptor == null && channelCatalogLoading))
     return (
       <section className="pb-24">
-        <EditBreadcrumb id={accountId} name={displayName} />
+        <EditBreadcrumb id={accountId} name={displayName} channel={acc?.trade_channel} />
         <div className="mt-3 flex flex-wrap items-baseline gap-3">{titleName}</div>
         <EditLoading id={accountId} name={displayName} bare />
       </section>
@@ -370,7 +370,7 @@ export function AccountEditPage() {
 
   return (
     <section className="pb-24">
-      <EditBreadcrumb id={accountId} name={acc.name} />
+      <EditBreadcrumb id={accountId} name={acc.name} channel={acc.trade_channel} />
       <div className="mt-3 flex flex-wrap items-baseline gap-3">
         {titleName}
         <Chip>{channelLabel(acc.trade_channel, acc.market)}</Chip>
