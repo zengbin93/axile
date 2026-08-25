@@ -118,6 +118,7 @@ class CalendarDayDecision(BaseModel):
     base_is_open: bool | None = None
     override_is_open: bool | None = None
     effective_is_open: bool | None = None
+    using_legacy_fallback: bool = False
     reason_code: CalendarSkipReason | None = None
 
 
@@ -297,12 +298,42 @@ async def evaluate_channel_calendar_days(
             for day in unique_days
         }
     by_day = {row.cal_date: row for row in diagnostics}
-    return {
+    decisions = {
         day: _decision_from_diagnostic(
             channel=channel_name, label=calendar.label, row=by_day[day], configured=configured
         )
         for day in unique_days
     }
+    fallback_days = [
+        day
+        for day, decision in decisions.items()
+        if decision.unavailable_reason
+        in (CalendarUnavailableReason.NOT_CONFIGURED, CalendarUnavailableReason.UNCOVERED)
+    ]
+    if calendar.fallback_calendar_id is None or not fallback_days:
+        return decisions
+    try:
+        fallback_configured = await session.get(TradingCalendarConfig, calendar.fallback_calendar_id) is not None
+        fallback_diagnostics = await list_calendar_diagnostics(
+            session,
+            calendar_id=calendar.fallback_calendar_id,
+            start=fallback_days[0],
+            end=fallback_days[-1],
+        )
+    except Exception as exc:  # noqa: BLE001 - 回退读取失败仍按主日历 fail-open
+        logger.warning("读取 {} 存量交易日历失败，按排程执行: {}", calendar.fallback_calendar_id, exc)
+        return decisions
+    fallback_by_day = {row.cal_date: row for row in fallback_diagnostics}
+    for day in fallback_days:
+        fallback = _decision_from_diagnostic(
+            channel=channel_name,
+            label=cast(str, calendar.fallback_label),
+            row=fallback_by_day[day],
+            configured=fallback_configured,
+        )
+        if fallback.status is not CalendarDecisionStatus.UNAVAILABLE:
+            decisions[day] = fallback.model_copy(update={"using_legacy_fallback": True})
+    return decisions
 
 
 async def evaluate_channel_calendar_day(

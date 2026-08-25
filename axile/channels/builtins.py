@@ -249,7 +249,12 @@ def _gm_plugin() -> ChannelPlugin:
                     ),
                 ),
             ),
-            calendar=ChannelCalendar(calendar_id="ashare", label="A 股交易日历"),
+            calendar=ChannelCalendar(
+                calendar_id="ashare",
+                label="A 股交易日历",
+                fallback_calendar_id="china",
+                fallback_label="中国交易日历",
+            ),
         ),
         account_config_model=GMAccountConfig,
         create_executor=_create_gm_executor,

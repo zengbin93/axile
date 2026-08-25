@@ -412,6 +412,67 @@ def test_unconfigured_calendar_and_channel_without_calendar_are_fail_open(
     assert decision.calendar_id is None
 
 
+def test_gm_uses_china_only_when_ashare_is_uncovered_and_preserves_override(tmp_path: Path) -> None:
+    session_factory = asyncio.run(_create_database(tmp_path / "gm-fallback.db"))
+    fallback_day = date(2026, 9, 1)
+    primary_override_day = date(2026, 9, 2)
+
+    async def exercise() -> tuple[calendar_service.CalendarDayDecision, calendar_service.CalendarDayDecision]:
+        async with session_factory() as session:
+            session.add_all(
+                [
+                    TradingCalendarConfig(calendar_id="china", refresh_kind="shinny"),
+                    TradingCalendarRecord(calendar_id="china", cal_date=fallback_day, is_open=True),
+                    TradingCalendarOverride(calendar_id="china", cal_date=fallback_day, is_open=False),
+                    TradingCalendarOverride(calendar_id="ashare", cal_date=primary_override_day, is_open=True),
+                ]
+            )
+            await session.commit()
+            decisions = await calendar_service.evaluate_channel_calendar_days(
+                session, "gm", [fallback_day, primary_override_day]
+            )
+            china_record = await session.get(TradingCalendarRecord, ("china", fallback_day))
+            china_override = await session.get(TradingCalendarOverride, ("china", fallback_day))
+            china_config = await session.get(TradingCalendarConfig, "china")
+            assert china_record is not None and china_record.is_open is True
+            assert china_override is not None and china_override.is_open is False
+            assert china_config is not None and china_config.refresh_kind == "shinny"
+            return decisions[fallback_day], decisions[primary_override_day]
+
+    fallback, primary = asyncio.run(exercise())
+    assert fallback.status is calendar_service.CalendarDecisionStatus.AVAILABLE_CLOSED
+    assert fallback.calendar_id == "china"
+    assert fallback.label == "中国交易日历"
+    assert fallback.base_is_open is True
+    assert fallback.override_is_open is False
+    assert fallback.effective_is_open is False
+    assert fallback.using_legacy_fallback is True
+    assert primary.status is calendar_service.CalendarDecisionStatus.AVAILABLE_OPEN
+    assert primary.calendar_id == "ashare"
+    assert primary.using_legacy_fallback is False
+
+
+def test_gm_primary_read_failure_does_not_read_legacy_calendar(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[str] = []
+
+    class _Session:
+        async def get(self, *_args: object) -> None:
+            return None
+
+    async def diagnostics(
+        _session: object, *, calendar_id: str, **_kwargs: object
+    ) -> list[calendar_service.CalendarDiagnosticEntry]:
+        calls.append(calendar_id)
+        raise OSError("database unavailable")
+
+    monkeypatch.setattr(calendar_service, "list_calendar_diagnostics", diagnostics)
+    decision = asyncio.run(calendar_service.evaluate_channel_calendar_day(_Session(), "gm", date(2026, 9, 1)))
+
+    assert decision.status is calendar_service.CalendarDecisionStatus.UNAVAILABLE
+    assert decision.unavailable_reason is calendar_service.CalendarUnavailableReason.READ_FAILED
+    assert calls == ["ashare"]
+
+
 @pytest.mark.parametrize(
     ("triggered_at", "open_days", "expected_day", "expected_status", "expected_reason"),
     [

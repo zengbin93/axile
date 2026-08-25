@@ -102,7 +102,10 @@ export function TradingCalendarPage() {
     void getCalendarRequirements().then((requirements) => {
       const options = requirements.map((item) => ({
         value: item.calendar_id,
-        label: `${item.label} · ${item.channel_labels.join('、')}`,
+        label: `${item.label} · ${[
+          item.channel_labels.join('、'),
+          item.legacy_fallback_channel_labels.length ? `${item.legacy_fallback_channel_labels.join('、')} 存量兼容保护` : '',
+        ].filter(Boolean).join(' · ')}`,
       }))
       setCalendarOptions(options.length > 0 ? options : [{ value: 'china', label: '中国交易日历' }])
       setCalendarId((current) => options.some((item) => item.value === current) ? current : options[0]?.value ?? current)

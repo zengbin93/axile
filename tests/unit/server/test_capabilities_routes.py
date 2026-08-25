@@ -97,11 +97,15 @@ def test_calendar_requirements_group_shared_available_channels(
             "label": "中国交易日历",
             "channels": ["ctp", "tq"],
             "channel_labels": ["CTP", "天勤"],
+            "legacy_fallback_channels": ["gm"],
+            "legacy_fallback_channel_labels": ["掘金"],
         },
         {
             "calendar_id": "ashare",
             "label": "A 股交易日历",
             "channels": ["gm"],
             "channel_labels": ["掘金"],
+            "legacy_fallback_channels": [],
+            "legacy_fallback_channel_labels": [],
         },
     ]

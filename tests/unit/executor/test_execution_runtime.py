@@ -209,6 +209,19 @@ class _UncoveredCalendar:
         return None
 
 
+def test_channel_calendar_uses_legacy_fallback_only_when_primary_is_uncovered() -> None:
+    class _PrimaryUncoveredCalendar:
+        def is_open(self, calendar_id: str, day: date) -> bool | None:
+            return None if calendar_id == "ashare" else day == date(2026, 8, 24)
+
+    executor = _RuntimeExecutor()
+    executor.set_channel_calendar("ashare", "china")
+    executor.set_trading_calendar(_PrimaryUncoveredCalendar())
+
+    assert executor._is_channel_calendar_open(date(2026, 8, 24)) is True
+    assert executor._is_channel_calendar_open(date(2026, 8, 25)) is False
+
+
 def test_china_futures_session_keeps_friday_night_open_after_midnight() -> None:
     executor = _RuntimeExecutor()
     executor.set_channel_calendar("china")

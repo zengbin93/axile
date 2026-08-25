@@ -40,5 +40,8 @@ def create_executor_instance(account: Account) -> AbstractExecutor:
     set_channel_calendar = getattr(executor, "set_channel_calendar", None)
     if callable(set_channel_calendar):
         calendar = plugin.descriptor.calendar
-        _ = set_channel_calendar(calendar.calendar_id if calendar is not None else None)
+        _ = set_channel_calendar(
+            calendar.calendar_id if calendar is not None else None,
+            calendar.fallback_calendar_id if calendar is not None else None,
+        )
     return executor

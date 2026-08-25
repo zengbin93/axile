@@ -73,7 +73,12 @@ export interface ChannelCapability {
   missing_packages: string[]
   /** 安装该渠道依赖所用 extra 名（`uv sync --extra <extra>`）。 */
   install_extra: string | null
-  calendar?: { calendar_id: string; label: string } | null
+  calendar?: {
+    calendar_id: string
+    label: string
+    fallback_calendar_id?: string | null
+    fallback_label?: string | null
+  } | null
   portfolio: {
     market_label: string
     example_symbols: string[]

@@ -37,7 +37,7 @@ def _target_transform(config: dict[str, float], frame: pd.DataFrame) -> pd.DataF
     return frame
 
 
-def _plugin() -> ChannelPlugin:
+def _plugin(*, fallback_calendar_id: str | None = None) -> ChannelPlugin:
     def create_executor(config: BaseAccountConfig) -> SimpleNamespace:
         return SimpleNamespace(config=config, set_trading_calendar=MagicMock(), set_channel_calendar=MagicMock())
 
@@ -58,7 +58,12 @@ def _plugin() -> ChannelPlugin:
             ),
             leverage=ChannelLeverage(min=0, max=2, step=0.1),
             account_form=ChannelAccountForm(),
-            calendar=ChannelCalendar(calendar_id="vendor", label="Vendor Calendar"),
+            calendar=ChannelCalendar(
+                calendar_id="vendor",
+                label="Vendor Calendar",
+                fallback_calendar_id=fallback_calendar_id,
+                fallback_label="Legacy Calendar" if fallback_calendar_id is not None else None,
+            ),
             portfolio=ChannelPortfolioPreset(market_label="Vendor", example_symbols=("DEMO",)),
         ),
         account_config_model=_Config,
@@ -83,7 +88,25 @@ def test_create_executor_instance_uses_registered_plugin(monkeypatch: pytest.Mon
         assert isinstance(executor.config, _Config)
         assert executor.config.channel_type == "factory-demo"
         executor.set_trading_calendar.assert_called_once()
-        executor.set_channel_calendar.assert_called_once_with("vendor")
+        executor.set_channel_calendar.assert_called_once_with("vendor", None)
+    finally:
+        registry._reset_registry_for_tests()
+
+
+def test_create_executor_instance_binds_declared_legacy_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
+    class _NoEntryPoints(list[object]):
+        def select(self, **_kwargs: object) -> _NoEntryPoints:
+            return self
+
+    monkeypatch.setattr(registry.metadata, "entry_points", lambda: _NoEntryPoints())
+    registry._reset_registry_for_tests()
+    list_channels()
+    register_channel(_plugin(fallback_calendar_id="legacy"))
+    try:
+        executor = create_executor_instance(
+            SimpleNamespace(trade_channel="factory-demo", account_config={"key": "secret"})
+        )
+        executor.set_channel_calendar.assert_called_once_with("vendor", "legacy")
     finally:
         registry._reset_registry_for_tests()
 
