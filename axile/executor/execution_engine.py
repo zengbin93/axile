@@ -105,6 +105,8 @@ def _derive_dispatch_error(
     if len(failed_results) == 1 and failed_results[0].error:
         return failed_results[0].error
     if status == ExecutionStatus.BLOCKED:
+        if all(result.memory.get("precheck_reason_code", "").startswith("CTP.SESSION.") for result in failed_results):
+            return f"{len(failed_results)} 个品种因交易时段不可执行"
         return f"{len(failed_results)} 个品种被账户风控拦截"
     return f"{len(failed_results)} 个品种执行未成功"
 
@@ -398,16 +400,35 @@ class ExecutionEngine:
         if not symbols:
             raise ValueError("当前输入没有可执行的 symbol")
 
+        plans: list[_PlannedSymbolAlgorithm] = []
+        planning_failures: list[AlgorithmResult] = []
+        allowed_symbols: list[str] = []
+        for symbol in symbols:
+            allowed, reason_code = self._owner._precheck_symbol(symbol)
+            if allowed:
+                allowed_symbols.append(symbol)
+                continue
+            resolved_algorithm = standard_input.get_resolved_symbol_algorithm(symbol)
+            algorithm_name = str(resolved_algorithm.get("method", standard_input.algorithm.get("method", "SINGLE-MAKER")))
+            planning_failures.append(
+                self._build_failed_algorithm_result(
+                    symbol=symbol,
+                    algorithm_name=algorithm_name,
+                    error=reason_code or "symbol 预检未通过",
+                    status=ExecutionStatus.BLOCKED,
+                    account_assets=planning_account_assets,
+                    memory={"precheck_reason_code": reason_code or "COMMON.SYMBOL_PRECHECK_BLOCKED"},
+                )
+            )
+
         planning_market_data, target_volumes = self._plan_target_volumes_for_symbols(
             standard_input=standard_input,
             account_assets=planning_account_assets,
-            symbols=symbols,
+            symbols=allowed_symbols,
             effective_curr_target=effective_curr_target,
         )
 
-        plans: list[_PlannedSymbolAlgorithm] = []
-        planning_failures: list[AlgorithmResult] = []
-        for symbol in symbols:
+        for symbol in allowed_symbols:
             resolved_algorithm = standard_input.get_resolved_symbol_algorithm(symbol)
             algorithm_name = str(
                 resolved_algorithm.get("method", standard_input.algorithm.get("method", "SINGLE-MAKER"))
@@ -554,7 +575,13 @@ class ExecutionEngine:
         if not dispatch_phases.phase_one_tasks and not dispatch_phases.phase_two_plans:
             return
         self._owner.handle_termination_checkpoint()
-        self._owner.cancel_all_orders()
+        symbols = list(
+            dict.fromkeys(
+                [task.symbol for task in dispatch_phases.phase_one_tasks]
+                + [plan.symbol for plan in dispatch_phases.phase_two_plans]
+            )
+        )
+        self._owner._cancel_orders_before_symbol_dispatch(symbols)
 
     def _run_phase_one_dispatch(
         self,
@@ -853,7 +880,17 @@ class ExecutionEngine:
                 continue
             is_skipped = result.status == ExecutionStatus.NOOP
             event_type = ExecutionEventType.SYMBOL_SKIPPED if is_skipped else ExecutionEventType.SYMBOL_DECISION_MADE
-            reason_code = "COMMON.SYMBOL_SKIPPED" if is_skipped else "COMMON.SYMBOL_DECISION_MADE"
+            precheck_reason_code = result.memory.get("precheck_reason_code")
+            reason_code = (
+                precheck_reason_code
+                if isinstance(precheck_reason_code, str)
+                else ("COMMON.SYMBOL_SKIPPED" if is_skipped else "COMMON.SYMBOL_DECISION_MADE")
+            )
+            reason_family = (
+                ExecutionReasonFamily.MARKET_RULE
+                if isinstance(precheck_reason_code, str) and precheck_reason_code.startswith("CTP.SESSION.")
+                else _SYMBOL_EVENT_REASON_FAMILY_MAP.get(result.status, ExecutionReasonFamily.SYSTEM)
+            )
             details: dict[str, object] = {
                 "decision": {
                     "symbol": result.symbol,
@@ -868,7 +905,7 @@ class ExecutionEngine:
             self._runtime.emit_audit_event(
                 event_type=event_type,
                 status=_SYMBOL_EVENT_STATUS_MAP.get(result.status, ExecutionEventStatus.INFO),
-                reason_family=_SYMBOL_EVENT_REASON_FAMILY_MAP.get(result.status, ExecutionReasonFamily.SYSTEM),
+                reason_family=reason_family,
                 reason_code=reason_code,
                 symbol=result.symbol,
                 details=details,

@@ -3,6 +3,7 @@
 from axile.channels import get_channel
 from axile.common.config import settings
 from axile.executor.abstract_executor.base import AbstractExecutor
+from axile.executor.ctp_session_snapshot import SqliteCtpSessionSnapshot
 from axile.executor.trading_calendar import SqliteTradingCalendar
 from axile.server.db.models import Account
 
@@ -37,6 +38,9 @@ def create_executor_instance(account: Account) -> AbstractExecutor:
     set_trading_calendar = getattr(executor, "set_trading_calendar", None)
     if callable(set_trading_calendar):
         _ = set_trading_calendar(SqliteTradingCalendar.from_database_uri(str(settings.sqlalchemy_database_uri)))
+    set_ctp_session_snapshot = getattr(executor, "set_ctp_session_snapshot", None)
+    if callable(set_ctp_session_snapshot):
+        _ = set_ctp_session_snapshot(SqliteCtpSessionSnapshot.from_database_uri(str(settings.sqlalchemy_database_uri)))
     set_channel_calendar = getattr(executor, "set_channel_calendar", None)
     if callable(set_channel_calendar):
         calendar = plugin.descriptor.calendar

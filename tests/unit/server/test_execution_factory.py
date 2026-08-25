@@ -39,7 +39,12 @@ def _target_transform(config: dict[str, float], frame: pd.DataFrame) -> pd.DataF
 
 def _plugin() -> ChannelPlugin:
     def create_executor(config: BaseAccountConfig) -> SimpleNamespace:
-        return SimpleNamespace(config=config, set_trading_calendar=MagicMock(), set_channel_calendar=MagicMock())
+        return SimpleNamespace(
+            config=config,
+            set_trading_calendar=MagicMock(),
+            set_ctp_session_snapshot=MagicMock(),
+            set_channel_calendar=MagicMock(),
+        )
 
     return ChannelPlugin(
         descriptor=ChannelDescriptor(
@@ -83,6 +88,7 @@ def test_create_executor_instance_uses_registered_plugin(monkeypatch: pytest.Mon
         assert isinstance(executor.config, _Config)
         assert executor.config.channel_type == "factory-demo"
         executor.set_trading_calendar.assert_called_once()
+        executor.set_ctp_session_snapshot.assert_called_once()
         executor.set_channel_calendar.assert_called_once_with("vendor")
     finally:
         registry._reset_registry_for_tests()

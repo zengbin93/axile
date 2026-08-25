@@ -13,12 +13,14 @@ from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
 from typing import TypeVar, override
+from zoneinfo import ZoneInfo
 
 from openctp_ctp import thostmduserapi as md
 from openctp_ctp import thosttraderapi as td
 
 from axile.common.trade_channel import TradeChannel
 from axile.executor.abstract_executor.base import AbstractExecutor
+from axile.executor.algorithms.utils import clock_now
 from axile.executor.constants.order_status import OrderStatus
 from axile.executor.ctp.converters import (
     account_to_unified,
@@ -53,6 +55,8 @@ from axile.executor.ctp.requests import (
     resolve_offset,
 )
 from axile.executor.ctp.spi import MarketSpi, TraderSpi
+from axile.executor.ctp_product_sessions import decide_ctp_product_session
+from axile.executor.ctp_session_snapshot import CtpSessionSnapshotReader
 from axile.executor.models.unified_account_assets import UnifiedAccountAssets
 from axile.executor.models.unified_callback import (
     UnifiedCallbackClient,
@@ -61,6 +65,7 @@ from axile.executor.models.unified_input import AccountConfig, CTPAccountConfig,
 from axile.executor.models.unified_order import OrderType, UnifiedOrder
 
 _CZCE_FUTURE_ALIAS = re.compile(r"^(?P<product>[A-Za-z]+)(?P<year>\d{2})(?P<month>\d{2})$")
+_SHANGHAI = ZoneInfo("Asia/Shanghai")
 _ValueT = TypeVar("_ValueT")
 
 
@@ -102,6 +107,8 @@ class CTPExecutor(AbstractExecutor, UnifiedCallbackClient):
         self._trader_spi = self._market_spi = None
         self._pending_queries = {}
         self._instruments = {}
+        self._ctp_session_snapshot: CtpSessionSnapshotReader | None = None
+        self._ctp_session_snapshot_warning_emitted = False
         self._quotes = {}
         self._order_keys = {}
         self._option_actions = {}
@@ -297,7 +304,55 @@ class CTPExecutor(AbstractExecutor, UnifiedCallbackClient):
 
     @override
     def _check_trading_time(self):
-        return self._is_china_futures_session_open()
+        """CTP 时段准入由 ExecutionEngine 的 symbol 预检负责。"""
+        return True
+
+    def set_ctp_session_snapshot(self, snapshot: CtpSessionSnapshotReader | None) -> None:
+        """绑定仅供执行路径本地读取的 CTP 品种时段快照。"""
+        self._ctp_session_snapshot = snapshot
+        self._ctp_session_snapshot_warning_emitted = False
+
+    def _precheck_symbol(self, symbol: str) -> tuple[bool, str | None]:
+        instrument = self._instruments.get(symbol)
+        if instrument is None:
+            return False, "CTP.SESSION.NO_METADATA"
+        exchange_id = str(getattr(instrument, "ExchangeID", "") or "")
+        product_id = str(getattr(instrument, "ProductID", "") or "")
+        if not exchange_id or not product_id:
+            return False, "CTP.SESSION.NO_METADATA"
+        snapshot = self._ctp_session_snapshot
+        if snapshot is None:
+            return False, "CTP.SESSION.SNAPSHOT_MISSING"
+        result = snapshot.get_sessions(exchange_id, product_id)
+        if result.reason_code is not None:
+            return False, result.reason_code
+        if result.warning and not getattr(self, "_ctp_session_snapshot_warning_emitted", False):
+            self.logger.warning("CTP 品种时段快照已超过 120 小时")
+            self._ctp_session_snapshot_warning_emitted = True
+        calendar = self._trading_calendar
+        if calendar is None:
+            return False, "CTP.SESSION.CALENDAR_UNAVAILABLE"
+        decision = decide_ctp_product_session(
+            result.sessions,
+            now=clock_now(tz=_SHANGHAI),
+            calendar_is_open=lambda day: calendar.is_open("china", day),
+        )
+        return decision.allowed, decision.reason_code
+
+    def _cancel_orders_before_symbol_dispatch(self, symbols: list[str]) -> None:
+        """CTP 仅撤销本轮实际可能分发的品种挂单。"""
+        failed_order_ids: list[str] = []
+        for symbol in symbols:
+            for order in self.get_pending_orders(symbol):
+                try:
+                    canceled = self.cancel_order(symbol, order.order_id)
+                except Exception:
+                    failed_order_ids.append(order.order_id)
+                    continue
+                if not canceled:
+                    failed_order_ids.append(order.order_id)
+        if failed_order_ids:
+            raise RuntimeError(f"部分订单撤销失败: {'; '.join(failed_order_ids)}")
 
     @override
     def _normalize_connected_standard_input(self, standard_input: UnifiedStandardInput) -> UnifiedStandardInput:

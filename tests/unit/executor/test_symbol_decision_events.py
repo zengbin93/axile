@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from axile.domain.execution import ExecutionEventStatus, ExecutionEventType
+from axile.domain.execution import ExecutionEventStatus, ExecutionEventType, ExecutionReasonFamily
 from axile.executor.execution_engine import ExecutionEngine, _derive_dispatch_status
 from axile.executor.models.execution_result import AlgorithmResult, ExecutionStatus
 from axile.executor.models.unified_input import UnifiedStandardInput
@@ -71,6 +71,30 @@ def test_emit_symbol_decision_events_covers_each_symbol() -> None:
     au = by_symbol["au2612"]
     assert au["event_type"] == ExecutionEventType.SYMBOL_DECISION_MADE
     assert au["status"] == ExecutionEventStatus.SUCCESS
+
+
+def test_emit_ctp_session_precheck_as_market_rule_warning() -> None:
+    runtime = _FakeRuntime()
+    engine = ExecutionEngine(object(), runtime=runtime)  # type: ignore[arg-type]
+
+    engine._emit_symbol_decision_events(
+        _standard_input(),
+        [
+            AlgorithmResult(
+                symbol="IF2609",
+                algorithm="SINGLE-MAKER",
+                status=ExecutionStatus.BLOCKED,
+                error="CTP.SESSION.CLOSED",
+                memory={"precheck_reason_code": "CTP.SESSION.CLOSED"},
+            )
+        ],
+    )
+
+    event = runtime.events[0]
+    assert event["event_type"] == ExecutionEventType.SYMBOL_DECISION_MADE
+    assert event["status"] == ExecutionEventStatus.WARNING
+    assert event["reason_family"] == ExecutionReasonFamily.MARKET_RULE
+    assert event["reason_code"] == "CTP.SESSION.CLOSED"
 
 
 def _results(*statuses: ExecutionStatus) -> dict[str, AlgorithmResult]:

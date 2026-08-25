@@ -37,6 +37,7 @@ from axile.server.db.models.account_control import (
     AccountControlEventPublic,
 )
 from axile.server.db.models.base import PydanticJSONType, new_execution_id, now_ms, now_str
+from axile.server.db.models.ctp_session_snapshot import CtpSessionSnapshot, CtpSessionSnapshotRecord
 from axile.server.db.models.execution import (
     ExecuteRecord,
     ExecuteRecordBase,
@@ -158,6 +159,8 @@ __all__ = [
     "TradingCalendarRecord",
     "TradingCalendarConfig",
     "TradingCalendarOverride",
+    "CtpSessionSnapshot",
+    "CtpSessionSnapshotRecord",
     "AccountActivityListPublic",
     "ExecutionActivity",
     "ScheduleSkip",

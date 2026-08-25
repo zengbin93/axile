@@ -20,6 +20,7 @@ from axile.executor.algorithms.core.loader import load_algorithm_modules
 from axile.server.api.main import api_router
 from axile.server.core.scheduler import scheduler
 from axile.server.core.single_worker import ensure_single_worker
+from axile.server.ctp_session_snapshot import register_ctp_session_snapshot_job
 from axile.server.execution.ctp_channels import prepare_china_channel_accounts, register_china_channel_jobs
 from axile.server.execution.live import live_hub
 from axile.server.execution.worker_backend.manager import shutdown_worker_backend_manager
@@ -220,6 +221,7 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     _load_configured_algorithm_modules()
     await apply_pending_initial_calendars()
     register_trading_calendar_job(scheduler)
+    register_ctp_session_snapshot_job(scheduler)
     register_china_channel_jobs(scheduler)
     scheduler.start()
     await init_scheduler()

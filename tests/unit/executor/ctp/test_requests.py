@@ -1,8 +1,10 @@
 """CTP 原生请求字段构造与调用测试。"""
 
 import threading
+from datetime import datetime, time
 from types import SimpleNamespace
 from unittest.mock import Mock
+from zoneinfo import ZoneInfo
 
 import pytest
 from openctp_ctp import thosttraderapi as td
@@ -14,9 +16,13 @@ from axile.executor.ctp.requests import (
     build_query_settlement_confirm,
     resolve_offset,
 )
+from axile.executor.ctp_product_sessions import CtpProductSession
+from axile.executor.ctp_session_snapshot import CtpSessionSnapshotResult
 from axile.executor.models.unified_account_assets import UnifiedAccountAssets
 from axile.executor.models.unified_input import CTPAccountConfig, UnifiedStandardInput
 from axile.executor.models.unified_order import OrderDirection, OrderType
+
+_SHANGHAI = ZoneInfo("Asia/Shanghai")
 
 
 @pytest.fixture
@@ -234,6 +240,35 @@ def test_market_subscription_encodes_instrument_ids() -> None:
 
     executor._market_api.SubscribeMarketData.assert_called_once_with([b"rb2610"], 1)
     assert executor._monitoring is True
+
+
+def test_ctp_precheck_warns_for_stale_but_usable_snapshot(monkeypatch: pytest.MonkeyPatch) -> None:
+    executor = CTPExecutor.__new__(CTPExecutor)
+    executor._instruments = {"ag2612": SimpleNamespace(ExchangeID="SHFE", ProductID="ag")}
+    executor._ctp_session_snapshot = Mock(
+        get_sessions=Mock(
+            return_value=CtpSessionSnapshotResult(
+                (CtpProductSession("SHFE", "ag", 1, time(21), time(2, 30)),),
+                warning=True,
+            )
+        )
+    )
+    executor._trading_calendar = Mock(is_open=Mock(return_value=True))
+    executor.logger = Mock()
+    monkeypatch.setattr(
+        "axile.executor.ctp.ctp_execute.clock_now",
+        lambda **_kwargs: datetime(2026, 8, 24, 21, 29, tzinfo=_SHANGHAI),
+    )
+
+    allowed, reason_code = executor._precheck_symbol("ag2612")
+
+    assert (allowed, reason_code) == (True, None)
+    executor.logger.warning.assert_called_once()
+
+    allowed, reason_code = executor._precheck_symbol("ag2612")
+
+    assert (allowed, reason_code) == (True, None)
+    executor.logger.warning.assert_called_once()
 
 
 def test_query_settlement_confirm_populates_account_key(config: CTPAccountConfig) -> None:
