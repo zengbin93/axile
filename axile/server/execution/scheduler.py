@@ -18,7 +18,7 @@ from axile.server.trading_calendar import (
     CalendarDayDecision,
     CalendarDecisionStatus,
     CalendarUnavailableReason,
-    evaluate_channel_calendar_day,
+    evaluate_channel_calendar_moment,
 )
 
 
@@ -31,7 +31,7 @@ async def execute_scheduled_rebalance(account_id: int) -> None:
         if account is None or not account.is_started or is_blank_cron_expr(account.cron_expr):
             return
         try:
-            decision = await evaluate_channel_calendar_day(session, account.trade_channel, triggered_at.date())
+            decision = await evaluate_channel_calendar_moment(session, account.trade_channel, triggered_at)
         except Exception:  # noqa: BLE001 - 任何日历异常都必须按排程放行
             loguru.logger.bind(account_id=account_id, channel=str(account.trade_channel)).exception(
                 "交易日历判断失败，按排程执行"
@@ -55,6 +55,7 @@ async def execute_scheduled_rebalance(account_id: int) -> None:
                         calendar_id=decision.calendar_id or "",
                         calendar_day=decision.day,
                         calendar_label=decision.label or "",
+                        reason_code=decision.reason_code or "CALENDAR.CLOSED",
                     )
                 )
                 await session.commit()

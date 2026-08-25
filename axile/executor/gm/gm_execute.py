@@ -145,7 +145,7 @@ class GMExecutor(AbstractExecutor, UnifiedCallbackClient):
                 raise RuntimeError("GM terminal 模式缺少终端目录")
             self.just_started = self._start_gm_desktop_if_not(terminal_path)
 
-        logger.success(f"[GM] 账户 {self.account_id} 初始化完成，GM runtime 将通过 bridge 懒启动")
+        logger.success(f"账户 {self.account_id} 初始化完成，GM runtime 将通过 bridge 懒启动")
 
     def _verify_connection(self) -> bool:
         """验证连接是否有效."""
@@ -153,7 +153,7 @@ class GMExecutor(AbstractExecutor, UnifiedCallbackClient):
             self._ensure_strategy_bridge(timeout=30.0)
             return True
         except Exception as e:
-            logger.error(f"[GM] 验证连接失败: {e}")
+            logger.error(f"验证连接失败: {e}")
             return False
 
     def _check_trading_time(self) -> bool:
@@ -187,10 +187,10 @@ class GMExecutor(AbstractExecutor, UnifiedCallbackClient):
         """
         try:
             self._ensure_strategy_bridge(timeout=timeout, subscribe_symbols=subscribe_symbols)
-            logger.success("[GM] 回调监控启动成功")
+            logger.success("回调监控启动成功")
             return True
         except Exception as e:
-            logger.error(f"[GM] 回调监控启动失败: {e}")
+            logger.error(f"回调监控启动失败: {e}")
             return False
 
     def subscribe_price(self, symbols: list[str]) -> None:
@@ -217,10 +217,10 @@ class GMExecutor(AbstractExecutor, UnifiedCallbackClient):
 
         if new_symbols and self._strategy_bridge is not None and self._strategy_bridge.is_running():
             self._strategy_bridge.request_symbols([GM_SYMBOL_RESOLVER.to_gm(symbol) for symbol in new_symbols])
-            logger.info(f"[GM] 已动态更新行情订阅: {new_symbols}")
+            logger.info(f"已动态更新行情订阅: {new_symbols}")
             return
 
-        logger.info(f"[GM] 已添加行情订阅: {normalized_symbols}")
+        logger.info(f"已添加行情订阅: {normalized_symbols}")
 
     def stop_callback_monitoring(self) -> None:
         """停止回调监控."""
@@ -228,7 +228,7 @@ class GMExecutor(AbstractExecutor, UnifiedCallbackClient):
             self._strategy_bridge.stop()
             self._strategy_bridge = None
         self._callback_monitoring = False
-        logger.info("[GM] 回调监控已停止")
+        logger.info("回调监控已停止")
 
     def initialize_websocket(self, symbols: list[str] | None = None) -> None:
         """
@@ -269,7 +269,7 @@ class GMExecutor(AbstractExecutor, UnifiedCallbackClient):
             raise ValueError("账户配置未初始化")
 
         if all_symbols:
-            logger.info(f"[GM] 将订阅以下标的的行情: {all_symbols}")
+            logger.info(f"将订阅以下标的的行情: {all_symbols}")
 
         bridge = GMStrategyBridge(
             token=self._gm_config.token,
@@ -325,7 +325,7 @@ class GMExecutor(AbstractExecutor, UnifiedCallbackClient):
         """停止回调客户端并清理资源."""
         self.stop_callback_monitoring()
         self._callback_dispatcher.clear_all_callbacks()
-        logger.info("[GM] 执行器已停止")
+        logger.info("执行器已停止")
 
     def get_callback_count(self) -> dict[str, int]:
         """获取当前注册的回调函数数量."""
@@ -346,16 +346,16 @@ class GMExecutor(AbstractExecutor, UnifiedCallbackClient):
         if not self.account_id:
             raise ValueError("账户ID未初始化")
 
-        logger.info(f"[GM] 开始获取账户资产: account_id={self.account_id}")
-        logger.info(f"[GM] 准备查询持仓: account_id={self.account_id}")
+        logger.info(f"开始获取账户资产: account_id={self.account_id}")
+        logger.info(f"准备查询持仓: account_id={self.account_id}")
         positions = cast(
             "list[Any]",
             self._call_bridge(GetPositionRequest(account_id=self.account_id), timeout=10.0),
         )
-        logger.info(f"[GM] 持仓查询完成: account_id={self.account_id}, positions={len(positions)}")
-        logger.info(f"[GM] 准备查询资金: account_id={self.account_id}")
+        logger.info(f"持仓查询完成: account_id={self.account_id}, positions={len(positions)}")
+        logger.info(f"准备查询资金: account_id={self.account_id}")
         raw_cash = self._call_bridge(GetCashRequest(account_id=self.account_id), timeout=10.0)
-        logger.info(f"[GM] 资金查询完成: account_id={self.account_id}, has_cash={bool(raw_cash)}")
+        logger.info(f"资金查询完成: account_id={self.account_id}, has_cash={bool(raw_cash)}")
         cash: dict[str, Any] = (
             cast("dict[str, Any]", dict(raw_cash)) if raw_cash else {}  # pyright: ignore[reportUnknownArgumentType]
         )
@@ -385,7 +385,7 @@ class GMExecutor(AbstractExecutor, UnifiedCallbackClient):
         total_asset = available_cash + market_value
 
         logger.info(
-            f"[GM] 账户资产构建完成: account_id={self.account_id}, "
+            f"账户资产构建完成: account_id={self.account_id}, "
             f"available_cash={available_cash}, positions={len(unified_positions)}, market_value={market_value}"
         )
 
@@ -402,18 +402,18 @@ class GMExecutor(AbstractExecutor, UnifiedCallbackClient):
         """获取市场数据."""
         normalized_symbols = [self._normalize_symbol(symbol) for symbol in symbols]
         gm_symbols = [GM_SYMBOL_RESOLVER.to_gm(symbol) for symbol in normalized_symbols]
-        logger.info(f"[GM] 开始获取以下标的的实时行情快照: {normalized_symbols}")
+        logger.info(f"开始获取以下标的的实时行情快照: {normalized_symbols}")
 
         market_data: dict[str, UnifiedPriceData] = {}
         try:
-            logger.info(f"[GM] 准备调用 current 获取行情快照, symbol_count={len(gm_symbols)}")
+            logger.info(f"准备调用 current 获取行情快照, symbol_count={len(gm_symbols)}")
             current_ticks = self._call_bridge(CurrentRequest(symbols=gm_symbols), timeout=10.0)
             logger.info(
-                f"[GM] current 调用完成, symbol_count={len(gm_symbols)}, tick_count={len(current_ticks) if current_ticks else 0}"
+                f"current 调用完成, symbol_count={len(gm_symbols)}, tick_count={len(current_ticks) if current_ticks else 0}"
             )
 
             if not current_ticks:
-                logger.warning("[GM] 实时行情数据为空或格式异常")
+                logger.warning("实时行情数据为空或格式异常")
                 return market_data
 
             for tick in current_ticks:
@@ -442,13 +442,13 @@ class GMExecutor(AbstractExecutor, UnifiedCallbackClient):
 
                     unified_price = from_gm_price(gm_tick, TradeChannel.GM)
                     market_data[unified_price.symbol] = unified_price
-                    logger.success(f"[GM] {unified_price.symbol} 的快照数据获取成功")
+                    logger.success(f"{unified_price.symbol} 的快照数据获取成功")
 
                 except Exception as e_inner:
-                    logger.exception(f"[GM] 处理 {tick_dict.get('symbol', 'UNKNOWN')} 的快照数据时发生异常: {e_inner}")
+                    logger.exception(f"处理 {tick_dict.get('symbol', 'UNKNOWN')} 的快照数据时发生异常: {e_inner}")
 
         except Exception as e_outer:
-            logger.exception(f"[GM] 获取实时快照数据时发生异常: {e_outer}")
+            logger.exception(f"获取实时快照数据时发生异常: {e_outer}")
 
         return market_data
 
@@ -520,17 +520,17 @@ class GMExecutor(AbstractExecutor, UnifiedCallbackClient):
         """
         symbol = self._normalize_symbol(symbol)
         if not self.account_id:
-            logger.warning("[GM] 无法撤销订单：账户ID未设置")
+            logger.warning("无法撤销订单：账户ID未设置")
             return False
 
         try:
             self._submit_cancel_request(
                 wait_cancel_orders=[GMCancelOrderTarget(cl_ord_id=order_id, account_id=self.account_id)],
             )
-            logger.info(f"[GM] 撤销订单请求已提交: {symbol} 订单ID {order_id}")
+            logger.info(f"撤销订单请求已提交: {symbol} 订单ID {order_id}")
             return True
         except Exception as e:
-            logger.error(f"[GM] 撤销订单失败: {symbol} 订单ID {order_id}, 错误: {e}")
+            logger.error(f"撤销订单失败: {symbol} 订单ID {order_id}, 错误: {e}")
             return False
 
     @override
@@ -605,7 +605,7 @@ class GMExecutor(AbstractExecutor, UnifiedCallbackClient):
             self._ensure_gm_sell_close_supported(symbol=symbol, requested_volume=gm_volume)
 
         logger.info(
-            f"[GM] 准备下单: symbol={symbol}, volume={volume}, "
+            f"准备下单: symbol={symbol}, volume={volume}, "
             f"side={'买开' if side is GMOrderSide.BUY else '卖平'}, order_type={order_type}, 价格={order_price}"
         )
 
@@ -634,7 +634,7 @@ class GMExecutor(AbstractExecutor, UnifiedCallbackClient):
             price=order_price,
         )
         logger.info(
-            f"[GM] 委托已提交，返回临时订单视图: "
+            f"委托已提交，返回临时订单视图: "
             f"order_id={provisional_order.order_id}, symbol={symbol}, status={provisional_order.status}"
         )
         return provisional_order
@@ -746,10 +746,10 @@ class GMExecutor(AbstractExecutor, UnifiedCallbackClient):
             gm_port = self._get_rpc_port_from_dir(base_path)
 
             if self._wait_for_port_listen(gm_port, 0.1):
-                logger.success("[GM] 掘金桌面端已经启动!")
+                logger.success("掘金桌面端已经启动!")
                 return False
 
-            logger.info("[GM] 启动掘金桌面端..")
+            logger.info("启动掘金桌面端..")
             startupinfo = None
             creationflags = 0
             if sys.platform == "win32":
@@ -763,63 +763,63 @@ class GMExecutor(AbstractExecutor, UnifiedCallbackClient):
             )
 
             if self._wait_for_port_listen(gm_port, 120):
-                logger.success("[GM] 掘金桌面端成功启动!")
+                logger.success("掘金桌面端成功启动!")
                 return True
             else:
                 raise ValueError("掘金终端等待超时")
 
         except Exception as e:
-            logger.exception(f"[GM] 启动掘金终端失败: {e}")
+            logger.exception(f"启动掘金终端失败: {e}")
             raise
 
     def _get_rpc_port_from_dir(self, base_path: Path) -> int:
         """从指定目录下的 gmserv.json 文件中提取 rpcPort 端口号."""
         json_path = base_path / "resources" / "app" / "gmserv.json"
 
-        logger.info(f"[GM] 开始查找 gmserv.json 文件：{json_path}")
+        logger.info(f"开始查找 gmserv.json 文件：{json_path}")
 
         if not json_path.is_file():
-            logger.error(f"[GM] 未找到 gmserv.json 文件，路径无效：{json_path}")
+            logger.error(f"未找到 gmserv.json 文件，路径无效：{json_path}")
             raise FileNotFoundError(f"gmserv.json 文件不存在: {json_path}")
 
         try:
             with json_path.open("r", encoding="utf-8") as f:
                 data = json.load(f)
-            logger.debug(f"[GM] 成功加载 JSON 数据: {data}")
+            logger.debug(f"成功加载 JSON 数据: {data}")
             port_str = data["default"]["rpcPort"]
             port = int(port_str)
-            logger.success(f"[GM] 成功解析 掘金桌面端端口: {port}")
+            logger.success(f"成功解析 掘金桌面端端口: {port}")
             return port
         except json.JSONDecodeError as e:
-            logger.exception(f"[GM] JSON 文件格式错误，无法解析: {e}")
+            logger.exception(f"JSON 文件格式错误，无法解析: {e}")
             raise
         except KeyError as e:
-            logger.exception(f"[GM] JSON 中缺少必要的字段: {e}")
+            logger.exception(f"JSON 中缺少必要的字段: {e}")
             raise
         except ValueError as e:
-            logger.exception(f"[GM] rpcPort 不是有效的整数: {e}")
+            logger.exception(f"rpcPort 不是有效的整数: {e}")
             raise
 
     def _wait_for_port_listen(self, port: int, timeout: int | float, log_interval: int = 5) -> bool:
         """在 Windows 上等待某端口进入监听状态."""
-        logger.info(f"[GM] 正在等待端口 {port} 进入监听状态（最长等待 {timeout} 秒）...")
+        logger.info(f"正在等待端口 {port} 进入监听状态（最长等待 {timeout} 秒）...")
         deadline = time.time() + timeout
         last_log_time = 0
 
         while time.time() < deadline:
             for conn in psutil.net_connections(kind="inet"):
                 if conn.status == psutil.CONN_LISTEN and conn.laddr and conn.laddr.port == port:  # type: ignore
-                    logger.success(f"[GM] 端口 {port} 已进入监听状态。")
+                    logger.success(f"端口 {port} 已进入监听状态。")
                     return True
 
             now = time.time()
             if now - last_log_time >= log_interval:
-                logger.info(f"[GM] 仍在等待端口 {port} 进入监听状态...")
+                logger.info(f"仍在等待端口 {port} 进入监听状态...")
                 last_log_time = now
 
             time.sleep(0.2)
 
-        logger.error(f"[GM] 超时未检测到端口 {port} 监听。")
+        logger.error(f"超时未检测到端口 {port} 监听。")
         return False
 
     def _build_provisional_order_from_submit_result(
@@ -860,7 +860,7 @@ class GMExecutor(AbstractExecutor, UnifiedCallbackClient):
     def _cancel_timeout_orders(self, account_id: str, timeout: int | float) -> None:
         """撤销指定账户中超时未完成的委托订单."""
         try:
-            logger.info(f"[GM] 开始检查账户 [{account_id}] 是否存在超时委托，超时时间设定为 {timeout} 秒")
+            logger.info(f"开始检查账户 [{account_id}] 是否存在超时委托，超时时间设定为 {timeout} 秒")
             unfinished_orders = self._query_unfinished_order_records(account_id)
             now = datetime.now(timezone.utc).astimezone()
 
@@ -872,7 +872,7 @@ class GMExecutor(AbstractExecutor, UnifiedCallbackClient):
 
                 created_at_raw = order.create_time
                 if not created_at_raw:
-                    logger.warning(f"[GM] 委托 {order.order_id} 缺少 created_at 字段，跳过处理")
+                    logger.warning(f"委托 {order.order_id} 缺少 created_at 字段，跳过处理")
                     continue
 
                 created_at = datetime.fromisoformat(created_at_raw)
@@ -882,7 +882,7 @@ class GMExecutor(AbstractExecutor, UnifiedCallbackClient):
                 elapsed_time = (now - created_at).total_seconds()
                 if elapsed_time > timeout:
                     logger.info(
-                        f"[GM] 委托超时，准备撤销：cl_ord_id={order.extra.get('cl_ord_id')}，"
+                        f"委托超时，准备撤销：cl_ord_id={order.extra.get('cl_ord_id')}，"
                         f"symbol={order.symbol}，委托时间={created_at}，"
                         f"已等待 {elapsed_time:.2f} 秒"
                     )
@@ -895,12 +895,12 @@ class GMExecutor(AbstractExecutor, UnifiedCallbackClient):
 
             if to_cancel:
                 self._submit_cancel_request(wait_cancel_orders=to_cancel)
-                logger.success(f"[GM] 成功提交撤销请求，共 {len(to_cancel)} 个超时委托已处理")
+                logger.success(f"成功提交撤销请求，共 {len(to_cancel)} 个超时委托已处理")
             else:
-                logger.info("[GM] 没有发现任何超时的委托，无需撤销")
+                logger.info("没有发现任何超时的委托，无需撤销")
 
         except Exception as e:
-            logger.exception(f"[GM] 处理超时撤单时发生异常: {e}")
+            logger.exception(f"处理超时撤单时发生异常: {e}")
 
     def _filter_recent_orders(self, within_seconds: int, account_id: str) -> list[UnifiedOrder]:
         """过滤指定 account_id 的订单，并返回在 within_seconds 秒内创建的订单."""

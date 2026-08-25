@@ -11,6 +11,8 @@ from sqlmodel import Field, SQLModel
 from axile.server.db.models.base import now_str
 from axile.server.db.models.execution import ExecuteRecordPublic
 
+type ScheduleSkipReason = Literal["CALENDAR.CLOSED", "CALENDAR.NO_NIGHT_SESSION"]
+
 
 class ScheduleSkip(SQLModel, table=True):
     """一次因明确休市而跳过的账户排程。"""
@@ -46,7 +48,7 @@ class ScheduleSkipActivity(SQLModel):
     calendar_id: str
     calendar_day: date
     calendar_label: str
-    reason_code: Literal["CALENDAR.CLOSED"] = "CALENDAR.CLOSED"
+    reason_code: ScheduleSkipReason = "CALENDAR.CLOSED"
 
 
 class AccountActivityListPublic(SQLModel):

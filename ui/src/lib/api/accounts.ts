@@ -34,6 +34,7 @@ export interface SchedulePreview {
     calendar_status: ScheduleCalendarStatus
     action: 'execute' | 'skip'
     unavailable_reason: ScheduleUnavailableReason | null
+    reason_code: 'CALENDAR.CLOSED' | 'CALENDAR.NO_NIGHT_SESSION' | null
   }>
 }
 
@@ -42,7 +43,7 @@ export interface ScheduleSkipActivity {
   occurred_at: string
   id: number
   channel: string
-  reason_code: 'CALENDAR.CLOSED'
+  reason_code: 'CALENDAR.CLOSED' | 'CALENDAR.NO_NIGHT_SESSION'
   calendar_day: string
   calendar_id: string
   calendar_label: string

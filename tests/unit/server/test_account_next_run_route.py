@@ -60,10 +60,10 @@ def _build_app(session: _RouteSession, scheduler: _Scheduler) -> FastAPI:
 def _calendar_not_required(monkeypatch: pytest.MonkeyPatch) -> None:
     """默认模拟无需交易日历的渠道，专门用例再覆盖判定。"""
 
-    async def evaluate(_session: object, _channel: object, days: list[object]) -> dict[object, SimpleNamespace]:
-        return {day: SimpleNamespace(status=CalendarDecisionStatus.NOT_REQUIRED) for day in days}
+    async def evaluate(*_args: object) -> SimpleNamespace:
+        return SimpleNamespace(status=CalendarDecisionStatus.NOT_REQUIRED)
 
-    monkeypatch.setattr(account_crud, "evaluate_channel_calendar_days", evaluate)
+    monkeypatch.setattr(account_crud, "evaluate_channel_calendar_moment", evaluate)
 
 
 def test_next_run_time_returns_iso_when_job_scheduled() -> None:
@@ -120,19 +120,15 @@ def test_next_execution_times_skip_closed_calendar_days(monkeypatch: pytest.Monk
     trigger = CronTrigger(hour=10, minute=0, timezone="Asia/Shanghai")
     next_run = datetime.fromisoformat("2026-07-03T10:00:00+08:00")  # 周五
 
-    async def evaluate(_session: object, _channel: object, days: list[object]) -> dict[object, SimpleNamespace]:
-        return {
-            day: SimpleNamespace(
-                status=(
-                    CalendarDecisionStatus.AVAILABLE_CLOSED
-                    if str(day) in {"2026-07-03", "2026-07-04", "2026-07-05"}
-                    else CalendarDecisionStatus.AVAILABLE_OPEN
-                )
-            )
-            for day in days
-        }
+    async def evaluate(_session: object, _channel: object, current: datetime) -> SimpleNamespace:
+        status = (
+            CalendarDecisionStatus.AVAILABLE_CLOSED
+            if current.date().isoformat() in {"2026-07-03", "2026-07-04", "2026-07-05"}
+            else CalendarDecisionStatus.AVAILABLE_OPEN
+        )
+        return SimpleNamespace(status=status)
 
-    monkeypatch.setattr(account_crud, "evaluate_channel_calendar_days", evaluate)
+    monkeypatch.setattr(account_crud, "evaluate_channel_calendar_moment", evaluate)
     app = _build_app(_RouteSession(build_account(id=1)), _Scheduler(_Job(next_run, trigger)))
 
     response = TestClient(app).get("/account/1/next_run_time")
@@ -152,10 +148,10 @@ def test_next_execution_times_fail_open_when_calendar_unavailable(monkeypatch: p
     trigger = CronTrigger(hour=10, minute=0, timezone="Asia/Shanghai")
     next_run = datetime.fromisoformat("2026-07-03T10:00:00+08:00")
 
-    async def evaluate(_session: object, _channel: object, days: list[object]) -> dict[object, SimpleNamespace]:
-        return {day: SimpleNamespace(status=CalendarDecisionStatus.UNAVAILABLE) for day in days}
+    async def evaluate(*_args: object) -> SimpleNamespace:
+        return SimpleNamespace(status=CalendarDecisionStatus.UNAVAILABLE)
 
-    monkeypatch.setattr(account_crud, "evaluate_channel_calendar_days", evaluate)
+    monkeypatch.setattr(account_crud, "evaluate_channel_calendar_moment", evaluate)
     app = _build_app(_RouteSession(build_account(id=1)), _Scheduler(_Job(next_run, trigger)))
 
     response = TestClient(app).get("/account/1/next_run_time")

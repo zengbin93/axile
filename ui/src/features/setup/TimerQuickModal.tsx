@@ -21,6 +21,7 @@ import {
   resolveCronList,
   ruleFromPreset,
   timerStateToCronExpr,
+  type NightSchedule,
   type ScheduleKind,
   type TimerEditorState,
 } from '@/features/setup/cron'
@@ -28,11 +29,12 @@ import { updateAccount } from '@/lib/api/accounts'
 import { useToastStore } from '@/stores/ui'
 import { useChannelDescriptor } from '@/stores/channels'
 
-function Switch({ on, onClick }: { on: boolean; onClick: () => void }) {
+function Switch({ on, ariaLabel, onClick }: { on: boolean; ariaLabel: string; onClick: () => void }) {
   return (
     <button
       type="button"
       role="switch"
+      aria-label={ariaLabel}
       aria-checked={on}
       onClick={onClick}
       className={`relative h-[27px] w-[46px] flex-none rounded-full transition-colors ${MOTION_LAYOUT} ${
@@ -51,8 +53,12 @@ function Switch({ on, onClick }: { on: boolean; onClick: () => void }) {
 /**
  * 打开弹层时的草稿：能落在快捷则原样；高级/自定义则降级为快捷默认，并标 ``fromComplex``。
  */
-function draftFromCron(market: ScheduleKind, cronExpr: string): { state: TimerEditorState; fromComplex: boolean } {
-  const parsed = parseTimerIntent(market, cronExpr)
+function draftFromCron(
+  market: ScheduleKind,
+  cronExpr: string,
+  night?: NightSchedule | null,
+): { state: TimerEditorState; fromComplex: boolean } {
+  const parsed = parseTimerIntent(market, cronExpr, night)
   const quick = parsed.timerTab === 'quick' && !parsed.customCronOn
   if (quick) return { state: { ...parsed, timerTab: 'quick', customCronOn: false, rawCron: '' }, fromComplex: false }
 
@@ -105,27 +111,28 @@ function TimerQuickModalReady({
   accountId,
   accountName,
   scheduleKind,
+  nightSchedule,
   cronExpr,
   onClose,
   onSaved,
-}: TimerQuickModalProps & { scheduleKind: ScheduleKind }) {
+}: TimerQuickModalProps & { scheduleKind: ScheduleKind; nightSchedule?: NightSchedule | null }) {
   const toast = useToastStore((s) => s.toast)
   const market = scheduleKind
   const bodyFade = usePanelFadeReady()
 
-  const [state, setState] = useState<TimerEditorState>(() => draftFromCron(market, cronExpr).state)
+  const [state, setState] = useState<TimerEditorState>(() => draftFromCron(market, cronExpr, nightSchedule).state)
   const [fromComplex, setFromComplex] = useState(false)
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<Error | null>(null)
 
   useEffect(() => {
     if (!open) return
-    const d = draftFromCron(market, cronExpr)
+    const d = draftFromCron(market, cronExpr, nightSchedule)
     setState(d.state)
     setFromComplex(d.fromComplex)
     setSaving(false)
     setSaveError(null)
-  }, [open, market, cronExpr])
+  }, [open, market, cronExpr, nightSchedule])
 
   useEffect(() => {
     if (!open) return
@@ -155,9 +162,9 @@ function TimerQuickModalReady({
   }
 
   const intent = asQuickIntent(market, state)
-  const cronNext = timerStateToCronExpr(market, intent)
+  const cronNext = timerStateToCronExpr(market, intent, nightSchedule)
   const dirty = !cronExprEqual(cronNext, cronExpr)
-  const fires = state.autoOn ? nextFires(resolveCronList(market, intent), 4) : []
+  const fires = state.autoOn ? nextFires(resolveCronList(market, intent, nightSchedule), 4) : []
 
   const save = async () => {
     if (!dirty) {
@@ -225,7 +232,7 @@ function TimerQuickModalReady({
 
               <div className="space-y-5">
                 <div className="flex items-center gap-3">
-                  <Switch on={state.autoOn} onClick={() => patch({ autoOn: !state.autoOn })} />
+                  <Switch ariaLabel="自动调仓" on={state.autoOn} onClick={() => patch({ autoOn: !state.autoOn })} />
                   <div>
                     <div className="text-sm font-[640]">{state.autoOn ? '自动调仓已开' : '自动调仓已关'}</div>
                     <div className="text-xs text-ink-3">
@@ -264,6 +271,20 @@ function TimerQuickModalReady({
                           })}
                         </div>
                       </div>
+
+                      {nightSchedule && (
+                        <div className="flex items-center gap-3">
+                          <Switch
+                            ariaLabel={nightSchedule.label}
+                            on={state.nightOn}
+                            onClick={() => patch({ nightOn: !state.nightOn })}
+                          />
+                          <div className="min-w-0">
+                            <div className="text-sm font-[640]">{nightSchedule.label}</div>
+                            <div className="text-xs text-ink-3">{nightSchedule.range_label}</div>
+                          </div>
+                        </div>
+                      )}
 
                       <div className="flex flex-wrap items-center gap-2 text-sm">
                         <span className="text-ink-3">到点后补发</span>
@@ -343,6 +364,8 @@ function TimerQuickModalReady({
 
 /** 渠道能力未加载时不猜测调度类型，也不挂载可编辑弹层。 */
 export function TimerQuickModal(props: TimerQuickModalProps) {
-  const scheduleKind = useChannelDescriptor(props.tradeChannel)?.schedule.kind
-  return scheduleKind ? <TimerQuickModalReady {...props} scheduleKind={scheduleKind} /> : null
+  const schedule = useChannelDescriptor(props.tradeChannel)?.schedule
+  return schedule
+    ? <TimerQuickModalReady {...props} scheduleKind={schedule.kind} nightSchedule={schedule.night} />
+    : null
 }

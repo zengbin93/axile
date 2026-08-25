@@ -609,6 +609,7 @@ export function AcctTimer() {
   const timerValue: TimerEditorState = {
     autoOn: acct.autoOn,
     presetIds: acct.presetIds,
+    nightOn: acct.nightOn,
     supN: acct.supN,
     supM: acct.supM,
     rawCron: acct.rawCron,
@@ -626,12 +627,14 @@ export function AcctTimer() {
             <TimerEditor
               tradeChannel={acct.channel}
               scheduleKind={scheduleKind}
+              nightSchedule={descriptor?.schedule.night}
               value={timerValue}
               onChange={(next) => {
                 const v = typeof next === 'function' ? next(timerValue) : next
                 setAcct({
                   autoOn: v.autoOn,
                   presetIds: v.presetIds,
+                  nightOn: v.nightOn,
                   supN: v.supN,
                   supM: v.supM,
                   rawCron: v.rawCron,
@@ -663,9 +666,11 @@ export function AcctConfirm() {
   >({ status: 'idle' })
   const [createError, setCreateError] = useState<Error | null>(null)
 
-  const cronList = scheduleKind ? resolveCronList(scheduleKind, acct) : []
+  const cronList = scheduleKind ? resolveCronList(scheduleKind, acct, descriptor?.schedule.night) : []
   const cronExpr = cronToExpr(cronList)
-  const scheduleDescription = scheduleKind ? describeCron(scheduleKind, cronExpr) : null
+  const scheduleDescription = scheduleKind
+    ? describeCron(scheduleKind, cronExpr, descriptor?.schedule.night)
+    : null
   const scheduleText = !acct.autoOn
     ? '已关闭'
     : scheduleDescription ?? '自定义执行节奏'

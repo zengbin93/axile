@@ -88,7 +88,7 @@ class GMCallbackDispatcher:
             "runtime_logs_received": 0,
         }
 
-        logger.debug("[GM] CallbackDispatcher 初始化完成")
+        logger.debug("CallbackDispatcher 初始化完成")
 
     def register_order_callback(self, callback: OrderUpdateCallback) -> None:
         """
@@ -103,9 +103,9 @@ class GMCallbackDispatcher:
             if callback not in self._order_callbacks:
                 self._order_callbacks.append(callback)
                 callback_name = getattr(callback, "__name__", "unknown")
-                logger.info(f"[GM] 已注册订单回调: {callback_name}")
+                logger.info(f"已注册订单回调: {callback_name}")
             else:
-                logger.warning(f"[GM] 订单回调已注册: {callback}")
+                logger.warning(f"订单回调已注册: {callback}")
 
     def register_order_observer(self, callback: OrderUpdateCallback) -> None:
         """注册内部订单观察者，不计入对外回调数量."""
@@ -132,9 +132,9 @@ class GMCallbackDispatcher:
             if callback not in self._trade_callbacks:
                 self._trade_callbacks.append(callback)
                 callback_name = getattr(callback, "__name__", "unknown")
-                logger.info(f"[GM] 已注册成交回调: {callback_name}")
+                logger.info(f"已注册成交回调: {callback_name}")
             else:
-                logger.warning(f"[GM] 成交回调已注册: {callback}")
+                logger.warning(f"成交回调已注册: {callback}")
 
     def register_price_callback(self, callback: PriceDataCallback) -> None:
         """
@@ -149,9 +149,9 @@ class GMCallbackDispatcher:
             if callback not in self._price_callbacks:
                 self._price_callbacks.append(callback)
                 callback_name = getattr(callback, "__name__", "unknown")
-                logger.info(f"[GM] 已注册价格回调: {callback_name}")
+                logger.info(f"已注册价格回调: {callback_name}")
             else:
-                logger.warning(f"[GM] 价格回调已注册: {callback}")
+                logger.warning(f"价格回调已注册: {callback}")
 
     def register_runtime_log_callback(self, callback: GMRuntimeLogCallback) -> None:
         """
@@ -166,9 +166,9 @@ class GMCallbackDispatcher:
             if callback not in self._runtime_log_callbacks:
                 self._runtime_log_callbacks.append(callback)
                 callback_name = getattr(callback, "__name__", "unknown")
-                logger.info(f"[GM] 已注册 runtime 日志回调: {callback_name}")
+                logger.info(f"已注册 runtime 日志回调: {callback_name}")
             else:
-                logger.warning(f"[GM] runtime 日志回调已注册: {callback}")
+                logger.warning(f"runtime 日志回调已注册: {callback}")
 
     def unregister_order_callback(self, callback: OrderUpdateCallback) -> None:
         """
@@ -183,9 +183,9 @@ class GMCallbackDispatcher:
             if callback in self._order_callbacks:
                 self._order_callbacks.remove(callback)
                 callback_name = getattr(callback, "__name__", "unknown")
-                logger.info(f"[GM] 已注销订单回调: {callback_name}")
+                logger.info(f"已注销订单回调: {callback_name}")
             else:
-                logger.warning(f"[GM] 订单回调未注册: {callback}")
+                logger.warning(f"订单回调未注册: {callback}")
 
     def unregister_trade_callback(self, callback: TradeRecordCallback) -> None:
         """
@@ -200,9 +200,9 @@ class GMCallbackDispatcher:
             if callback in self._trade_callbacks:
                 self._trade_callbacks.remove(callback)
                 callback_name = getattr(callback, "__name__", "unknown")
-                logger.info(f"[GM] 已注销成交回调: {callback_name}")
+                logger.info(f"已注销成交回调: {callback_name}")
             else:
-                logger.warning(f"[GM] 成交回调未注册: {callback}")
+                logger.warning(f"成交回调未注册: {callback}")
 
     def unregister_price_callback(self, callback: PriceDataCallback) -> None:
         """
@@ -217,9 +217,9 @@ class GMCallbackDispatcher:
             if callback in self._price_callbacks:
                 self._price_callbacks.remove(callback)
                 callback_name = getattr(callback, "__name__", "unknown")
-                logger.info(f"[GM] 已注销价格回调: {callback_name}")
+                logger.info(f"已注销价格回调: {callback_name}")
             else:
-                logger.warning(f"[GM] 价格回调未注册: {callback}")
+                logger.warning(f"价格回调未注册: {callback}")
 
     def unregister_runtime_log_callback(self, callback: GMRuntimeLogCallback) -> None:
         """
@@ -234,9 +234,9 @@ class GMCallbackDispatcher:
             if callback in self._runtime_log_callbacks:
                 self._runtime_log_callbacks.remove(callback)
                 callback_name = getattr(callback, "__name__", "unknown")
-                logger.info(f"[GM] 已注销 runtime 日志回调: {callback_name}")
+                logger.info(f"已注销 runtime 日志回调: {callback_name}")
             else:
-                logger.warning(f"[GM] runtime 日志回调未注册: {callback}")
+                logger.warning(f"runtime 日志回调未注册: {callback}")
 
     def dispatch_order_update(self, order: UnifiedOrder) -> None:
         """
@@ -258,19 +258,19 @@ class GMCallbackDispatcher:
                 observer(order)
             except Exception as e:
                 callback_name = getattr(observer, "__name__", "unknown")
-                logger.error(f"[GM] 内部订单观察者 {callback_name} 出错: {e}", exc_info=True)
+                logger.error(f"内部订单观察者 {callback_name} 出错: {e}", exc_info=True)
 
         if not callbacks:
             return
 
-        logger.debug(f"[GM] 正在分发订单更新到 {len(callbacks)} 个监听器: {order.order_id} - {order.status}")
+        logger.debug(f"正在分发订单更新到 {len(callbacks)} 个监听器: {order.order_id} - {order.status}")
 
         for callback in callbacks:
             try:
                 callback(order)
             except Exception as e:
                 callback_name = getattr(callback, "__name__", "unknown")
-                logger.error(f"[GM] 订单回调 {callback_name} 出错: {e}", exc_info=True)
+                logger.error(f"订单回调 {callback_name} 出错: {e}", exc_info=True)
 
     def dispatch_trade_record(self, trade: TradeRecord) -> None:
         """
@@ -292,19 +292,19 @@ class GMCallbackDispatcher:
                 observer(trade)
             except Exception as e:
                 callback_name = getattr(observer, "__name__", "unknown")
-                logger.error(f"[GM] 内部成交观察者 {callback_name} 出错: {e}", exc_info=True)
+                logger.error(f"内部成交观察者 {callback_name} 出错: {e}", exc_info=True)
 
         if not callbacks:
             return
 
-        logger.debug(f"[GM] 正在分发成交记录到 {len(callbacks)} 个监听器: {trade.trade_id}")
+        logger.debug(f"正在分发成交记录到 {len(callbacks)} 个监听器: {trade.trade_id}")
 
         for callback in callbacks:
             try:
                 callback(trade)
             except Exception as e:
                 callback_name = getattr(callback, "__name__", "unknown")
-                logger.error(f"[GM] 成交回调 {callback_name} 出错: {e}", exc_info=True)
+                logger.error(f"成交回调 {callback_name} 出错: {e}", exc_info=True)
 
     def dispatch_price_data(self, price_data: UnifiedPriceData) -> None:
         """
@@ -323,14 +323,14 @@ class GMCallbackDispatcher:
         if not callbacks:
             return
 
-        logger.debug(f"[GM] 正在分发价格更新到 {len(callbacks)} 个监听器: {price_data.symbol}")
+        logger.debug(f"正在分发价格更新到 {len(callbacks)} 个监听器: {price_data.symbol}")
 
         for callback in callbacks:
             try:
                 callback(price_data)
             except Exception as e:
                 callback_name = getattr(callback, "__name__", "unknown")
-                logger.error(f"[GM] 价格回调 {callback_name} 出错: {e}", exc_info=True)
+                logger.error(f"价格回调 {callback_name} 出错: {e}", exc_info=True)
 
     def dispatch_runtime_log(self, event: GMRuntimeLogEvent) -> None:
         """
@@ -357,7 +357,7 @@ class GMCallbackDispatcher:
                 callback(event)
             except Exception as e:
                 callback_name = getattr(callback, "__name__", "unknown")
-                logger.error(f"[GM] runtime 日志回调 {callback_name} 出错: {e}", exc_info=True)
+                logger.error(f"runtime 日志回调 {callback_name} 出错: {e}", exc_info=True)
 
     def get_recent_runtime_logs(self, limit: int = 100) -> list[GMRuntimeLogEvent]:
         """
@@ -412,4 +412,4 @@ class GMCallbackDispatcher:
             self._order_callbacks.clear()
             self._trade_callbacks.clear()
             self._price_callbacks.clear()
-        logger.info("[GM] 已清除所有回调函数")
+        logger.info("已清除所有回调函数")

@@ -81,6 +81,13 @@ export interface ChannelCapability {
   market: string
   schedule: {
     kind: 'continuous' | 'cn_stock' | 'cn_futures'
+    night?: {
+      label: string
+      range_label: string
+      close: string[]
+      m15: string[]
+      m60: string[]
+    } | null
   }
   currency: string
   units: {

@@ -114,7 +114,7 @@ def _wait_for_terminal(
             executor.handle_termination_checkpoint()
             break
         if clock.time() >= deadline:
-            executor.logger.warning(f"⏱ 行权指令 ref={order_ref} 在 {max_wait_seconds}s 内未进入终态，结束等待")
+            executor.logger.warning(f"行权指令 ref={order_ref} 在 {max_wait_seconds}s 内未进入终态，结束等待")
             break
         executor.sleep_or_terminate(poll_interval_seconds)
         record = executor.get_option_action_status(order_ref)
@@ -168,7 +168,7 @@ def ctp_option_exercise_algorithm(executor: ExecutorProtocol, algorithm_input: A
     params = _resolve_params(algorithm_input.params)
 
     if target <= 0:
-        executor.logger.info(f"🟡 期权指令 {symbol} 目标张数={target}，跳过")
+        executor.logger.info(f"期权指令 {symbol} 目标张数={target}，跳过")
         return AlgorithmResult(symbol=symbol, algorithm="CTP_OPTION_EXERCISE", status=ExecutionStatus.NOOP)
 
     # 行权前的内在价值检查：避免无价值行权造成账户损失
@@ -176,7 +176,7 @@ def ctp_option_exercise_algorithm(executor: ExecutorProtocol, algorithm_input: A
         option_executor = cast(CtpOptionExecutorProtocol, executor)
         valuable = option_executor.is_exercise_valuable(symbol)
         if not valuable:
-            executor.logger.warning(f"⚠️ 期权 {symbol} 当前无内在价值，跳过行权（如确需行权请关闭 require_value_check）")
+            executor.logger.warning(f"期权 {symbol} 当前无内在价值，跳过行权（如确需行权请关闭 require_value_check）")
             return AlgorithmResult(
                 symbol=symbol,
                 algorithm="CTP_OPTION_EXERCISE",
@@ -193,7 +193,7 @@ def ctp_option_exercise_algorithm(executor: ExecutorProtocol, algorithm_input: A
             trade_rule=algorithm_input.trade_rule,
         )
     except (RuntimeError, ValueError) as exc:
-        executor.logger.error(f"❌ 期权指令提交失败 {symbol} action={params.action}: {exc}")
+        executor.logger.error(f"期权指令提交失败 {symbol} action={params.action}: {exc}")
         return AlgorithmResult(
             symbol=symbol,
             algorithm="CTP_OPTION_EXERCISE",
@@ -241,9 +241,7 @@ def ctp_option_exercise_algorithm(executor: ExecutorProtocol, algorithm_input: A
         }
     }
 
-    executor.logger.info(
-        f"📊 期权指令 {symbol} ref={record.order_ref} action={params.action} 终态={final_status_value}"
-    )
+    executor.logger.info(f"期权指令 {symbol} ref={record.order_ref} action={params.action} 终态={final_status_value}")
 
     return AlgorithmResult(
         symbol=symbol,

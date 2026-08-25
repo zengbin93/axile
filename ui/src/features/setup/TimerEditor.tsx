@@ -19,6 +19,7 @@ import {
   defaultScheduleRule,
   resolveCronList,
   ruleFromPreset,
+  type NightSchedule,
   type ScheduleKind,
   type TimerEditorState,
 } from '@/features/setup/cron'
@@ -29,11 +30,12 @@ import type { TradeChannel } from '@/types/api'
 export type { TimerEditorState }
 
 /** 自动调仓总开关（accent，与成败红绿解耦）。 */
-function Switch({ on, onClick }: { on: boolean; onClick: () => void }) {
+function Switch({ on, ariaLabel, onClick }: { on: boolean; ariaLabel: string; onClick: () => void }) {
   return (
     <button
       type="button"
       role="switch"
+      aria-label={ariaLabel}
       aria-checked={on}
       onClick={onClick}
       className={`relative h-[27px] w-[46px] flex-none rounded-full transition-colors ${MOTION_LAYOUT} ${
@@ -85,6 +87,7 @@ function SupRow({
 export interface TimerEditorProps {
   tradeChannel: TradeChannel
   scheduleKind: ScheduleKind
+  nightSchedule?: NightSchedule | null
   value: TimerEditorState
   onChange: (next: TimerEditorState | ((prev: TimerEditorState) => TimerEditorState)) => void
 }
@@ -134,7 +137,7 @@ function calendarSummary(preview: SchedulePreview | null): { text: string; warni
   }
 }
 
-export function TimerEditor({ tradeChannel, scheduleKind, value, onChange }: TimerEditorProps) {
+export function TimerEditor({ tradeChannel, scheduleKind, nightSchedule, value, onChange }: TimerEditorProps) {
   const tabFade = usePanelFadeReady()
   const bodyFade = usePanelFadeReady()
   const v = value
@@ -158,6 +161,7 @@ export function TimerEditor({ tradeChannel, scheduleKind, value, onChange }: Tim
       onChange({
         ...v,
         presetIds: [DEFAULT_PRESET[scheduleKind]],
+        nightOn: false,
         rawCron: '',
         customCronOn: false,
         scheduleRules: [rule],
@@ -170,7 +174,7 @@ export function TimerEditor({ tradeChannel, scheduleKind, value, onChange }: Tim
   }, [scheduleKind])
 
   const rawErr = v.customCronOn && v.rawCron.trim() ? cronError(v.rawCron) : null
-  const cronList = v.autoOn ? resolveCronList(scheduleKind, v) : []
+  const cronList = v.autoOn ? resolveCronList(scheduleKind, v, nightSchedule) : []
   const cronExpr = rawErr ? '' : cronToExpr(cronList)
 
   useEffect(() => {
@@ -245,7 +249,7 @@ export function TimerEditor({ tradeChannel, scheduleKind, value, onChange }: Tim
   return (
     <div className="space-y-5">
       <div className="flex items-center gap-3">
-        <Switch on={v.autoOn} onClick={() => patch({ autoOn: !v.autoOn })} />
+        <Switch ariaLabel="自动调仓" on={v.autoOn} onClick={() => patch({ autoOn: !v.autoOn })} />
         <div>
           <div className="text-sm font-[640]">{v.autoOn ? '自动调仓已开' : '自动调仓已关'}</div>
           <div className="text-xs text-ink-3">{v.autoOn ? '按下面的节奏自动执行' : '仅手动 / 外接触发'}</div>
@@ -301,9 +305,17 @@ export function TimerEditor({ tradeChannel, scheduleKind, value, onChange }: Tim
                       )
                     })}
                   </div>
-                  {scheduleKind === 'cn_futures' && (
-                    <div className="mt-2 text-xs text-ink-3">
-                      夜盘及品种时段差异大，请用「高级」或 Cron 表达式。
+                  {nightSchedule && (
+                    <div className="mt-4 flex items-center gap-3">
+                      <Switch
+                        ariaLabel={nightSchedule.label}
+                        on={v.nightOn}
+                        onClick={() => patch({ nightOn: !v.nightOn })}
+                      />
+                      <div className="min-w-0">
+                        <div className="text-sm font-[640]">{nightSchedule.label}</div>
+                        <div className="text-xs text-ink-3">{nightSchedule.range_label}</div>
+                      </div>
                     </div>
                   )}
                 </div>
@@ -341,8 +353,11 @@ export function TimerEditor({ tradeChannel, scheduleKind, value, onChange }: Tim
               ) : schedulePreview?.items.length ? (
                 <div className="space-y-1.5">
                   {schedulePreview.items.map((item) => {
-                    const text = item.calendar_status === 'available_open'
-                      ? '交易日，执行'
+                    const tradingDay = item.calendar_day.slice(5)
+                    const text = item.reason_code === 'CALENDAR.NO_NIGHT_SESSION'
+                      ? '无对应夜盘，已跳过'
+                      : item.calendar_status === 'available_open'
+                      ? `${tradingDay} 交易日，执行`
                       : item.calendar_status === 'available_closed'
                         ? '休市，已跳过'
                         : item.calendar_status === 'unavailable'

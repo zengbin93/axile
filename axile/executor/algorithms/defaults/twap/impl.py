@@ -245,11 +245,11 @@ def _execute_one_slice(
             return detail
         detail["order_id"] = order.order_id
     except MemoryError:
-        executor.logger.exception(f"[{ALGORITHM_NAME}] {executor.symbol} 下单遇到不可恢复异常")
+        executor.logger.exception(f"{executor.symbol} 下单遇到不可恢复异常")
         raise
     except RECOVERABLE_ALGORITHM_EXCEPTIONS as exc:
         error_message = format_exception_message(exc)
-        executor.logger.error(f"[{ALGORITHM_NAME}] {executor.symbol} 下单失败: {error_message}")
+        executor.logger.error(f"{executor.symbol} 下单失败: {error_message}")
         detail["error"] = error_message
         return detail
 
@@ -305,7 +305,7 @@ def twap(
 
     delta = target_volume - start_volume
     if delta == 0:
-        executor.logger.info(f"[{ALGORITHM_NAME}] {symbol} 当前持仓已等于目标 {target_volume}，无需执行")
+        executor.logger.info(f"{symbol} 当前持仓已等于目标 {target_volume}，无需执行")
         return create_empty_result(account_assets, ALGORITHM_NAME, "当前持仓已等于目标，无需执行")
 
     direction = OrderDirection.BUY if delta > 0 else OrderDirection.SELL
@@ -313,9 +313,7 @@ def twap(
     interval = params.interval_seconds
     fill_wait = min(interval, float(params.max_wait_seconds))
 
-    executor.logger.info(
-        f"[{ALGORITHM_NAME}] {symbol} 开始执行: 目标={target_volume}, 当前={start_volume}, 增量={delta}, {params}"
-    )
+    executor.logger.info(f"{symbol} 开始执行: 目标={target_volume}, 当前={start_volume}, 增量={delta}, {params}")
 
     tracker = setup_order_tracker(executor, executor.get_market_data(), None)
     slice_details: list[dict[str, Any]] = []
@@ -333,8 +331,7 @@ def twap(
 
             if slice_qty > 0:
                 executor.logger.info(
-                    f"[{ALGORITHM_NAME}] {symbol} 第 {slice_index}/{params.slices} 片: "
-                    f"下单 {slice_qty}（已成交 {filled}/{total_qty}）"
+                    f"{symbol} 第 {slice_index}/{params.slices} 片: 下单 {slice_qty}（已成交 {filled}/{total_qty}）"
                 )
                 detail = _execute_one_slice(
                     executor,
@@ -366,8 +363,7 @@ def twap(
     trades = tracker.get_all_trades()
 
     executor.logger.info(
-        f"[{ALGORITHM_NAME}] {symbol} 执行完成: 最终持仓={final_volume}, 目标={target_volume}, "
-        f"订单数={len(orders)}, 成交数={len(trades)}"
+        f"{symbol} 执行完成: 最终持仓={final_volume}, 目标={target_volume}, 订单数={len(orders)}, 成交数={len(trades)}"
     )
 
     return AlgorithmResult(

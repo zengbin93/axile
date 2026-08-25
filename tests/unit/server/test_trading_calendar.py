@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import sqlite3
 from collections.abc import AsyncGenerator
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
@@ -410,6 +410,77 @@ def test_unconfigured_calendar_and_channel_without_calendar_are_fail_open(
     decision = asyncio.run(unconfigured())
     assert decision.status is calendar_service.CalendarDecisionStatus.NOT_REQUIRED
     assert decision.calendar_id is None
+
+
+@pytest.mark.parametrize(
+    ("triggered_at", "open_days", "expected_day", "expected_status", "expected_reason"),
+    [
+        (
+            "2026-08-24T21:15:00+08:00",
+            {date(2026, 8, 24), date(2026, 8, 25)},
+            date(2026, 8, 25),
+            calendar_service.CalendarDecisionStatus.AVAILABLE_OPEN,
+            None,
+        ),
+        (
+            "2026-08-29T01:00:00+08:00",
+            {date(2026, 8, 28), date(2026, 8, 31)},
+            date(2026, 8, 31),
+            calendar_service.CalendarDecisionStatus.AVAILABLE_OPEN,
+            None,
+        ),
+        (
+            "2026-08-30T21:15:00+08:00",
+            {date(2026, 8, 31)},
+            date(2026, 8, 30),
+            calendar_service.CalendarDecisionStatus.AVAILABLE_CLOSED,
+            "CALENDAR.NO_NIGHT_SESSION",
+        ),
+        (
+            "2026-09-29T21:15:00+08:00",
+            {date(2026, 9, 29), date(2026, 10, 1)},
+            date(2026, 10, 1),
+            calendar_service.CalendarDecisionStatus.AVAILABLE_CLOSED,
+            "CALENDAR.NO_NIGHT_SESSION",
+        ),
+    ],
+)
+def test_futures_night_trigger_maps_to_trading_day(
+    monkeypatch: pytest.MonkeyPatch,
+    triggered_at: str,
+    open_days: set[date],
+    expected_day: date,
+    expected_status: calendar_service.CalendarDecisionStatus,
+    expected_reason: str | None,
+) -> None:
+    async def evaluate(
+        _session: object,
+        channel: object,
+        days: list[date],
+    ) -> dict[date, calendar_service.CalendarDayDecision]:
+        return {
+            day: calendar_service.CalendarDayDecision(
+                channel=str(channel),
+                day=day,
+                calendar_id="china",
+                label="中国交易日历",
+                status=(
+                    calendar_service.CalendarDecisionStatus.AVAILABLE_OPEN
+                    if day in open_days
+                    else calendar_service.CalendarDecisionStatus.AVAILABLE_CLOSED
+                ),
+                effective_is_open=day in open_days,
+            )
+            for day in days
+        }
+
+    monkeypatch.setattr(calendar_service, "evaluate_channel_calendar_days", evaluate)
+    decision = asyncio.run(
+        calendar_service.evaluate_channel_calendar_moment(object(), "ctp", datetime.fromisoformat(triggered_at))
+    )
+    assert decision.day == expected_day
+    assert decision.status is expected_status
+    assert decision.reason_code == expected_reason
 
 
 def test_calendar_function_contract_runs_in_sandbox() -> None:

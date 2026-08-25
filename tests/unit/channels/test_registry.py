@@ -120,6 +120,12 @@ def test_builtin_channels_have_stable_order_and_descriptor_shape() -> None:
 
     assert [plugin.descriptor.channel for plugin in plugins] == ["ctp", "gm", "tq"]
     assert [plugin.descriptor.schedule.kind for plugin in plugins] == ["cn_futures", "cn_stock", "cn_futures"]
+    assert plugins[0].descriptor.schedule.night == plugins[2].descriptor.schedule.night
+    assert plugins[0].descriptor.schedule.night is not None
+    assert plugins[0].descriptor.schedule.night.close == ("02:30",)
+    assert plugins[0].descriptor.schedule.night.m15[0] == "21:15"
+    assert plugins[0].descriptor.schedule.night.m15[-1] == "02:30"
+    assert plugins[1].descriptor.schedule.night is None
     assert plugins[0].descriptor.account_form.fields
     assert plugins[0].descriptor.defaults.trade_algorithm.method == "TARGET-POS-TASK"
     assert plugins[0].descriptor.portfolio.market_label == "期货"

@@ -98,7 +98,7 @@ def test_scheduled_rebalance_executes_unless_calendar_is_explicitly_closed(
     async def execute_trade(*args: object) -> None:
         executions.append(args)
 
-    monkeypatch.setattr(execution_scheduler, "evaluate_channel_calendar_day", evaluate)
+    monkeypatch.setattr(execution_scheduler, "evaluate_channel_calendar_moment", evaluate)
     monkeypatch.setattr(rebalance_execution, "execute_trade", execute_trade)
 
     asyncio.run(execution_scheduler.execute_scheduled_rebalance(7))
@@ -123,7 +123,7 @@ def test_closed_day_never_executes_even_if_skip_record_fails(
         return _decision(CalendarDecisionStatus.AVAILABLE_CLOSED)
 
     execute_trade = MagicMock()
-    monkeypatch.setattr(execution_scheduler, "evaluate_channel_calendar_day", evaluate)
+    monkeypatch.setattr(execution_scheduler, "evaluate_channel_calendar_moment", evaluate)
     monkeypatch.setattr(rebalance_execution, "execute_trade", execute_trade)
 
     asyncio.run(execution_scheduler.execute_scheduled_rebalance(7))
@@ -147,7 +147,7 @@ def test_calendar_evaluation_exception_is_fail_open(monkeypatch: pytest.MonkeyPa
     async def execute_trade(*args: object) -> None:
         executions.append(args)
 
-    monkeypatch.setattr(execution_scheduler, "evaluate_channel_calendar_day", evaluate)
+    monkeypatch.setattr(execution_scheduler, "evaluate_channel_calendar_moment", evaluate)
     monkeypatch.setattr(rebalance_execution, "execute_trade", execute_trade)
     asyncio.run(execution_scheduler.execute_scheduled_rebalance(7))
     assert executions == [(7, None, "scheduler")]
@@ -160,7 +160,7 @@ def test_scheduled_rebalance_ignores_stale_job_for_stopped_account(monkeypatch: 
     async def evaluate(*_args: object) -> CalendarDayDecision:
         raise AssertionError("stopped account must not evaluate calendar")
 
-    monkeypatch.setattr(execution_scheduler, "evaluate_channel_calendar_day", evaluate)
+    monkeypatch.setattr(execution_scheduler, "evaluate_channel_calendar_moment", evaluate)
     asyncio.run(execution_scheduler.execute_scheduled_rebalance(7))
 
 
@@ -208,20 +208,19 @@ def test_schedule_preview_maps_only_closed_to_skip(monkeypatch: pytest.MonkeyPat
             label="中国交易日历",
         )
 
-    async def decisions(*_args: object) -> dict[date, CalendarDayDecision]:
-        return {
-            closed_at.date(): _decision(CalendarDecisionStatus.AVAILABLE_CLOSED),
-            unavailable_at.date(): CalendarDayDecision(
-                channel="ctp",
-                day=unavailable_at.date(),
-                calendar_id="china",
-                status=CalendarDecisionStatus.UNAVAILABLE,
-                unavailable_reason=CalendarUnavailableReason.UNCOVERED,
-            ),
-        }
+    async def decision(_session: object, _channel: object, current: datetime) -> CalendarDayDecision:
+        if current.date() == closed_at.date():
+            return _decision(CalendarDecisionStatus.AVAILABLE_CLOSED)
+        return CalendarDayDecision(
+            channel="ctp",
+            day=unavailable_at.date(),
+            calendar_id="china",
+            status=CalendarDecisionStatus.UNAVAILABLE,
+            unavailable_reason=CalendarUnavailableReason.UNCOVERED,
+        )
 
     monkeypatch.setattr(account_schedule, "_calendar_summary", summary)
-    monkeypatch.setattr(account_schedule, "evaluate_channel_calendar_days", decisions)
+    monkeypatch.setattr(account_schedule, "evaluate_channel_calendar_moment", decision)
     response = asyncio.run(
         account_schedule.schedule_preview(
             object(),  # type: ignore[arg-type]

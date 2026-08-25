@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import date, datetime, time, timedelta
+from datetime import datetime, time, timedelta
 from typing import Any, cast
 
 from fastapi import APIRouter, HTTPException, status
@@ -47,7 +47,7 @@ from axile.server.repositories import (
     get_recent_account_asset_snapshots_for_accounts,
     get_recent_execute_records_for_accounts,
 )
-from axile.server.trading_calendar import CalendarDecisionStatus, evaluate_channel_calendar_days
+from axile.server.trading_calendar import CalendarDecisionStatus, evaluate_channel_calendar_moment
 
 router = APIRouter()
 
@@ -126,7 +126,6 @@ async def _next_job_execution_times(
         return []
 
     result: list[str] = []
-    decisions: dict[date, CalendarDecisionStatus] = {}
     first_day = current.astimezone(SCHEDULER_TIMEZONE).date()
     last_day = first_day + timedelta(days=400)
     while current is not None and len(result) < limit:
@@ -134,10 +133,8 @@ async def _next_job_execution_times(
         calendar_day = local_time.date()
         if calendar_day > last_day:
             break
-        if calendar_day not in decisions:
-            decision = (await evaluate_channel_calendar_days(session, channel, [calendar_day]))[calendar_day]
-            decisions[calendar_day] = decision.status
-        if decisions[calendar_day] is not CalendarDecisionStatus.AVAILABLE_CLOSED:
+        decision = await evaluate_channel_calendar_moment(session, channel, local_time)
+        if decision.status is not CalendarDecisionStatus.AVAILABLE_CLOSED:
             result.append(current.isoformat())
             if trigger is None:
                 break

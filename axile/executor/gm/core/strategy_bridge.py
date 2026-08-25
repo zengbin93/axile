@@ -174,7 +174,7 @@ class GMStrategyBridge:
             "history": [{"phase": "initialized", "ts": time.time()}],
         }
 
-        logger.info(f"[GM] StrategyBridge 初始化: strategy_id={self._strategy_id}")
+        logger.info(f"StrategyBridge 初始化: strategy_id={self._strategy_id}")
 
     def start(self, timeout: float = 30.0) -> bool:
         """
@@ -191,7 +191,7 @@ class GMStrategyBridge:
             启动成功时返回 ``True``，否则返回 ``False``。
         """
         if self._running:
-            logger.warning("[GM] StrategyBridge 已经在运行中")
+            logger.warning("StrategyBridge 已经在运行中")
             return True
 
         self._stop_event.clear()
@@ -210,21 +210,21 @@ class GMStrategyBridge:
         # 等待策略框架就绪
         if self._ready_event.wait(timeout=timeout):
             self._running = True
-            logger.success("[GM] StrategyBridge 启动成功")
+            logger.success("StrategyBridge 启动成功")
             return True
 
         grace_timeout = self._compute_startup_grace_timeout(timeout)
         thread_alive = self._thread is not None and self._thread.is_alive()
         if thread_alive and grace_timeout > 0:
             logger.warning(
-                f"[GM] StrategyBridge 启动在 {timeout} 秒内未就绪，但线程仍存活；继续等待 {grace_timeout} 秒宽限窗口"
+                f"StrategyBridge 启动在 {timeout} 秒内未就绪，但线程仍存活；继续等待 {grace_timeout} 秒宽限窗口"
             )
             if self._ready_event.wait(timeout=grace_timeout):
                 self._running = True
-                logger.success("[GM] StrategyBridge 在宽限窗口内启动成功")
+                logger.success("StrategyBridge 在宽限窗口内启动成功")
                 return True
 
-        logger.error(f"[GM] StrategyBridge 启动超时 ({timeout}秒), {self._build_startup_timeout_summary()}")
+        logger.error(f"StrategyBridge 启动超时 ({timeout}秒), {self._build_startup_timeout_summary()}")
         self.stop()
         return False
 
@@ -247,7 +247,7 @@ class GMStrategyBridge:
         if not self._running and self._thread is None:
             return
 
-        logger.info("[GM] 正在停止 StrategyBridge...")
+        logger.info("正在停止 StrategyBridge...")
         self._stop_event.set()
         self._running = False
 
@@ -267,19 +267,19 @@ class GMStrategyBridge:
                     self._thread.join(timeout=grace_timeout)
                 if self._thread.is_alive():
                     logger.warning(
-                        f"[GM] StrategyBridge 线程未能在 {join_timeout + grace_timeout:.1f} 秒内结束; "
+                        f"StrategyBridge 线程未能在 {join_timeout + grace_timeout:.1f} 秒内结束; "
                         f"{self._build_thread_debug_summary(self._thread)}"
                     )
 
         self._thread = None
-        logger.info("[GM] StrategyBridge 已停止")
+        logger.info("StrategyBridge 已停止")
 
     def _request_gm_runtime_stop(self) -> None:
         """请求 GM SDK 软停止实时 run() 主循环，避免触发 sys.exit(2)."""
         try:
             from gm.api import basic as gm_basic  # type: ignore
         except Exception as exc:
-            logger.debug(f"[GM] 无法导入 gm.api.basic，跳过 runtime stop 请求: {exc}")
+            logger.debug(f"无法导入 gm.api.basic，跳过 runtime stop 请求: {exc}")
             return
 
         try:
@@ -291,9 +291,9 @@ class GMStrategyBridge:
                 if first_request and callable(unsubscribe_all):
                     unsubscribe_all()
             setattr(gm_basic, "running", False)
-            logger.debug("[GM] 已请求 GM runtime 软停止")
+            logger.debug("已请求 GM runtime 软停止")
         except Exception as exc:
-            logger.warning(f"[GM] 请求 GM runtime 停止失败: {exc}")
+            logger.warning(f"请求 GM runtime 停止失败: {exc}")
 
     def _update_startup_state(self, phase: str, **details: GMStartupStateValue) -> None:
         """记录 bridge 启动阶段."""
@@ -439,7 +439,7 @@ class GMStrategyBridge:
             strategy_dir = Path(__file__).parent
             strategy_file = strategy_dir / "gm_strategy.py"
             self._update_startup_state("thread_running", strategy_file=str(strategy_file))
-            logger.debug(f"[GM] 策略文件: {strategy_file}")
+            logger.debug(f"策略文件: {strategy_file}")
 
             if not strategy_file.exists():
                 raise FileNotFoundError(f"策略文件不存在: {strategy_file}")
@@ -462,7 +462,7 @@ class GMStrategyBridge:
         except Exception as e:
             self._stats["errors"] += 1
             self._update_startup_state("thread_error", error=str(e))
-            logger.error(f"[GM] 策略框架运行出错: {e}", exc_info=True)
+            logger.error(f"策略框架运行出错: {e}", exc_info=True)
         finally:
             self._update_startup_state("thread_exiting")
             self._running = False
@@ -507,7 +507,7 @@ class GMStrategyBridge:
 
             def dummy_signal(signum: int, _handler: SignalHandler) -> None:
                 """空操作的 signal 替代."""
-                logger.debug(f"[GM] 跳过 signal({signum}) 注册（非主线程）")
+                logger.debug(f"跳过 signal({signum}) 注册（非主线程）")
                 return None
 
             # 临时替换 signal.signal

@@ -273,11 +273,11 @@ def _place_participation_slice(
             return detail
         detail["order_id"] = order.order_id
     except MemoryError:
-        executor.logger.exception(f"[{ALGORITHM_NAME}] {executor.symbol} 下单遇到不可恢复异常")
+        executor.logger.exception(f"{executor.symbol} 下单遇到不可恢复异常")
         raise
     except RECOVERABLE_ALGORITHM_EXCEPTIONS as exc:
         error_message = format_exception_message(exc)
-        executor.logger.error(f"[{ALGORITHM_NAME}] {executor.symbol} 下单失败: {error_message}")
+        executor.logger.error(f"{executor.symbol} 下单失败: {error_message}")
         detail["error"] = error_message
         return detail
 
@@ -331,7 +331,7 @@ def pov(
 
     delta = target_volume - start_volume
     if delta == 0:
-        executor.logger.info(f"[{ALGORITHM_NAME}] {symbol} 当前持仓已等于目标 {target_volume}，无需执行")
+        executor.logger.info(f"{symbol} 当前持仓已等于目标 {target_volume}，无需执行")
         return create_empty_result(account_assets, ALGORITHM_NAME, "当前持仓已等于目标，无需执行")
 
     direction = OrderDirection.BUY if delta > 0 else OrderDirection.SELL
@@ -339,9 +339,7 @@ def pov(
     interval = params.interval_seconds
     fill_wait = min(interval, float(params.max_wait_seconds))
 
-    executor.logger.info(
-        f"[{ALGORITHM_NAME}] {symbol} 开始执行: 目标={target_volume}, 当前={start_volume}, 增量={delta}, {params}"
-    )
+    executor.logger.info(f"{symbol} 开始执行: 目标={target_volume}, 当前={start_volume}, 增量={delta}, {params}")
 
     accumulator = _VolumeAccumulator()
     tracker = setup_order_tracker(executor, executor.get_market_data(), None)
@@ -371,7 +369,7 @@ def pov(
     trades = tracker.get_all_trades()
 
     executor.logger.info(
-        f"[{ALGORITHM_NAME}] {symbol} 执行完成: 最终持仓={final_volume}, 目标={target_volume}, "
+        f"{symbol} 执行完成: 最终持仓={final_volume}, 目标={target_volume}, "
         f"市场累计量={accumulator.total:.4f}, 订单数={len(orders)}, 成交数={len(trades)}"
     )
 
@@ -456,8 +454,7 @@ def _run_participation_loop(
         want = compute_participation_want(params.participation_rate, accumulator.total, filled, total_qty)
         if want > 0:
             executor.logger.info(
-                f"[{ALGORITHM_NAME}] {executor.symbol} 参与下单 {want}"
-                f"（已见市场量 {accumulator.total:.4f}, 已成交 {filled}/{total_qty}）"
+                f"{executor.symbol} 参与下单 {want}（已见市场量 {accumulator.total:.4f}, 已成交 {filled}/{total_qty}）"
             )
             detail = _place_participation_slice(
                 executor, tracker, direction, want, params, account_assets, current_volume, target_volume, fill_wait
@@ -517,9 +514,7 @@ def _maybe_complete_on_timeout(
     if remaining <= 0:
         return
 
-    executor.logger.info(
-        f"[{ALGORITHM_NAME}] {executor.symbol} 到期补齐剩余量 {remaining}（已成交 {filled}/{total_qty}）"
-    )
+    executor.logger.info(f"{executor.symbol} 到期补齐剩余量 {remaining}（已成交 {filled}/{total_qty}）")
     detail = _place_participation_slice(
         executor, tracker, direction, remaining, params, account_assets, current_volume, target_volume, fill_wait
     )

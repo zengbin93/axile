@@ -272,10 +272,21 @@ class ChannelCalendar(_FrozenDescriptorModel):
     label: str = Field(min_length=1)
 
 
+class ChannelNightSchedule(_FrozenDescriptorModel):
+    """描述渠道快捷排程可合并的夜盘触发时点。"""
+
+    label: str = Field(min_length=1)
+    range_label: str = Field(min_length=1)
+    close: tuple[str, ...] = Field(min_length=1)
+    m15: tuple[str, ...] = Field(min_length=1)
+    m60: tuple[str, ...] = Field(min_length=1)
+
+
 class ChannelSchedule(_FrozenDescriptorModel):
     """描述渠道采用的公共定时规则类型。"""
 
     kind: ScheduleKind
+    night: ChannelNightSchedule | None = None
 
 
 class ChannelPortfolioPreset(_FrozenDescriptorModel):

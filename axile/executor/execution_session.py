@@ -9,6 +9,7 @@ from __future__ import annotations
 import threading
 from typing import TYPE_CHECKING, cast
 
+from axile.common.logging import LogComponent, bind_log_context
 from axile.executor.models.order_channel_health import OrderChannelHealth
 from axile.executor.models.unified_account_assets import PositionDirection, UnifiedAccountAssets
 from axile.executor.models.unified_callback import OrderUpdateCallback, PriceDataCallback, TradeRecordCallback
@@ -51,7 +52,7 @@ class ExecutionSession:
         self._runtime = runtime
         self.symbol = symbol
         self.channel_type = owner.channel_type
-        self.logger = owner.logger
+        self.logger = bind_log_context(owner.logger, component=LogComponent.ALGORITHM, symbol=symbol)
         self.memory: ObjectDict = {}
         self.audit_context: AuditContext = {}
         self._audit_seq = 0
@@ -282,7 +283,7 @@ class ExecutionSession:
         try:
             pending_orders = self.get_pending_orders()
         except Exception as exc:
-            self.logger.warning(f"[ExecutionSession] terminate 查询挂单失败: {exc}")
+            self.logger.warning(f"terminate 查询挂单失败: {exc}")
             return []
 
         failed_order_ids: list[str] = []
@@ -290,7 +291,7 @@ class ExecutionSession:
             try:
                 canceled = self.cancel_order(order.order_id)
             except Exception as exc:
-                self.logger.warning(f"[ExecutionSession] terminate 撤单失败: order_id={order.order_id}, error={exc}")
+                self.logger.warning(f"terminate 撤单失败: order_id={order.order_id}, error={exc}")
                 failed_order_ids.append(order.order_id)
                 continue
 

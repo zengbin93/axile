@@ -27,7 +27,7 @@ from axile.server.trading_calendar import (
     CalendarAvailability,
     CalendarDecisionStatus,
     CalendarUnavailableReason,
-    evaluate_channel_calendar_days,
+    evaluate_channel_calendar_moment,
     get_calendar_status,
 )
 
@@ -62,6 +62,7 @@ class SchedulePreviewItem(BaseModel):
     calendar_status: CalendarDecisionStatus
     action: Literal["execute", "skip"]
     unavailable_reason: CalendarUnavailableReason | None = None
+    reason_code: Literal["CALENDAR.CLOSED", "CALENDAR.NO_NIGHT_SESSION"] | None = None
 
 
 class SchedulePreviewResponse(BaseModel):
@@ -148,22 +149,18 @@ async def schedule_preview(session: SessionDep, payload: SchedulePreviewRequest)
         raise _field_error("cron_expr", str(exc)) from exc
 
     scheduled = _next_schedule_times(triggers, start=evaluated_at, limit=payload.limit)
-    decisions = await evaluate_channel_calendar_days(
-        session,
-        payload.trade_channel,
-        [value.astimezone(SCHEDULER_TIMEZONE).date() for value in scheduled],
-    )
     items = []
     for scheduled_at in scheduled:
         local_time = scheduled_at.astimezone(SCHEDULER_TIMEZONE)
-        decision = decisions[local_time.date()]
+        decision = await evaluate_channel_calendar_moment(session, payload.trade_channel, local_time)
         items.append(
             SchedulePreviewItem(
                 scheduled_at=local_time,
-                calendar_day=local_time.date(),
+                calendar_day=decision.day,
                 calendar_status=decision.status,
                 action="skip" if decision.status is CalendarDecisionStatus.AVAILABLE_CLOSED else "execute",
                 unavailable_reason=decision.unavailable_reason,
+                reason_code=decision.reason_code,
             )
         )
     return SchedulePreviewResponse(evaluated_at=evaluated_at, calendar=calendar, items=items)

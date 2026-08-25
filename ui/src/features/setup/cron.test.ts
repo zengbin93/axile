@@ -82,6 +82,34 @@ describe('compileCustom · 时段市场按锚点落点', () => {
   })
 })
 
+describe('期货渠道夜盘快捷节奏', () => {
+  const night = {
+    label: '夜盘',
+    range_label: '21:00–次日 02:30',
+    close: ['02:30'],
+    m15: ['21:15', '21:30', '21:45', '22:00', '02:30'],
+    m60: ['22:00', '23:00', '00:00', '01:00', '02:00', '02:30'],
+  }
+
+  it('关闭时保持既有日盘表达式，开启时合并渠道夜盘时点', () => {
+    expect(buildCronList('cn_futures', ['close'], 0, 1, night, false)).toEqual(['0 15 * * *'])
+    expect(buildCronList('cn_futures', ['close'], 0, 1, night, true)).toEqual([
+      '0 15 * * *',
+      '30 2 * * *',
+    ])
+  })
+
+  it('夜盘快捷表达式可无损反解开关状态', () => {
+    const expr = buildCronList('cn_futures', ['m60'], 0, 1, night, true).join(' | ')
+    const state = parseTimerIntent('cn_futures', expr, night)
+
+    expect(state.timerTab).toBe('quick')
+    expect(state.presetIds).toEqual(['m60'])
+    expect(state.nightOn).toBe(true)
+    expect(timerStateToCronExpr('cn_futures', state, night)).toBe(expr)
+  })
+})
+
 describe('compileScheduleRule · 可调时刻与周几', () => {
   it('连续交易每天 09:30', () => {
     expect(compileScheduleRule('continuous', rule({ time: '09:30' }), 0, 0)).toEqual(['30 9 * * *'])

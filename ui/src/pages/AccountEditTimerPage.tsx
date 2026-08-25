@@ -51,7 +51,7 @@ export function AccountEditTimerPage() {
 
   useEffect(() => {
     if (!acc || !descriptor || ready) return
-    setTimer(parseTimerIntent(descriptor.schedule.kind, acc.cron_expr ?? ''))
+    setTimer(parseTimerIntent(descriptor.schedule.kind, acc.cron_expr ?? '', descriptor.schedule.night))
     setReady(true)
   }, [acc, descriptor, ready])
 
@@ -62,7 +62,7 @@ export function AccountEditTimerPage() {
     return <EditLoading id={accountId} name={acc?.name} channel={acc?.trade_channel} leaf="定时" />
 
   const scheduleKind = descriptor.schedule.kind
-  const cronNext = timerStateToCronExpr(scheduleKind, timer)
+  const cronNext = timerStateToCronExpr(scheduleKind, timer, descriptor.schedule.night)
   const cronPrev = acc.cron_expr ?? ''
   const dirty = !cronExprEqual(cronNext, cronPrev)
   const err = timerEditorError(timer)
@@ -71,7 +71,7 @@ export function AccountEditTimerPage() {
   // 与总览入口同构摘要（随草稿变）。
   const timerSummary = !cronNext.trim()
     ? '已关 · 仅手动'
-    : (describeCron(scheduleKind, cronNext) ?? '自定义执行节奏')
+    : (describeCron(scheduleKind, cronNext, descriptor.schedule.night) ?? '自定义执行节奏')
 
   const save = async () => {
     if (err) return toast(`执行节奏有误：${err}`)
@@ -107,6 +107,7 @@ export function AccountEditTimerPage() {
         <TimerEditor
           tradeChannel={acc.trade_channel}
           scheduleKind={scheduleKind}
+          nightSchedule={descriptor.schedule.night}
           value={timer}
           onChange={(next) =>
             { setSaveError(null); setTimer((prev) => (typeof next === 'function' ? next(prev as TimerEditorState) : next)) }

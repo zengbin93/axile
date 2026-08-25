@@ -49,6 +49,10 @@ def test_channels_reports_all_available_when_deps_present(client: TestClient, mo
     connection_mode = next(field for field in gm["account_form"]["fields"] if field["name"] == "connection_mode")
     assert connection_mode["presentation"] == "conditional_reveal"
     assert connection_mode["options"][1]["label"] == "终端 RPC 地址"
+    assert gm["schedule"]["night"] is None
+    ctp = next(item for item in payload if item["channel"] == TradeChannel.CTP.value)
+    assert ctp["schedule"]["night"]["range_label"] == "21:00–次日 02:30"
+    assert ctp["schedule"]["night"]["m60"] == ["22:00", "23:00", "00:00", "01:00", "02:00", "02:30"]
 
 
 def test_channels_reports_missing_dependency_with_install_extra(

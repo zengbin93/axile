@@ -47,20 +47,20 @@ def determine_position_side(
     try:
         positions = executor.get_positions(account_assets)
     except Exception as e:
-        executor.logger.warning(f"[determine_position_side] 获取 {symbol} 持仓失败: {e}")
+        executor.logger.warning(f"获取 {symbol} 持仓失败: {e}")
         return position_side_kwargs
 
     if direction == OrderDirection.SELL:
         for pos_vol, pos_dir in positions:
             if pos_dir == PositionDirection.LONG and pos_vol > 0:
                 position_side_kwargs["position_side"] = "LONG"
-                executor.logger.debug(f"[determine_position_side] {symbol} 卖出将平多头持仓")
+                executor.logger.debug(f"{symbol} 卖出将平多头持仓")
                 break
     elif direction == OrderDirection.BUY:
         for pos_vol, pos_dir in positions:
             if pos_dir == PositionDirection.SHORT and pos_vol > 0:
                 position_side_kwargs["position_side"] = "SHORT"
-                executor.logger.debug(f"[determine_position_side] {symbol} 买入将平空头持仓")
+                executor.logger.debug(f"{symbol} 买入将平空头持仓")
                 break
 
     return position_side_kwargs
@@ -229,9 +229,7 @@ def setup_order_tracker(
         if market_data is not None:
             tracker.latest_prices[executor.symbol] = market_data
 
-    executor.logger.debug(
-        f"[setup_order_tracker] 订单跟踪器已设置: symbol={executor.symbol}, chase={chase_config is not None}"
-    )
+    executor.logger.debug(f"订单跟踪器已设置: symbol={executor.symbol}, chase={chase_config is not None}")
 
     return tracker
 
@@ -261,22 +259,22 @@ def teardown_order_tracker(
     try:
         executor.unregister_order_callback(tracker.on_order_update)
     except Exception as e:
-        executor.logger.warning(f"[teardown_order_tracker] 注销订单回调失败: {e}")
+        executor.logger.warning(f"注销订单回调失败: {e}")
 
     unregister_trade_callback = getattr(executor, "unregister_trade_callback", None)
     if callable(unregister_trade_callback):
         try:
             unregister_trade_callback(tracker.on_trade_record)
         except Exception as e:
-            executor.logger.warning(f"[teardown_order_tracker] 注销成交回调失败: {e}")
+            executor.logger.warning(f"注销成交回调失败: {e}")
 
     if chase_config:
         try:
             executor.unregister_price_callback(tracker.on_price_update)
         except Exception as e:
-            executor.logger.warning(f"[teardown_order_tracker] 注销价格回调失败: {e}")
+            executor.logger.warning(f"注销价格回调失败: {e}")
 
-    executor.logger.debug("[teardown_order_tracker] 订单跟踪器已清理")
+    executor.logger.debug("订单跟踪器已清理")
 
 
 def submit_and_track_order(
@@ -348,9 +346,7 @@ def submit_and_track_order(
                 "reason": decision.reason,
             },
         )
-        executor.logger.info(
-            f"[submit_and_track_order] {symbol} {direction.value} {volume} 名义价值不足最小值，跳过下单（{decision.reason}）"
-        )
+        executor.logger.info(f"{symbol} {direction.value} {volume} 名义价值不足最小值，跳过下单（{decision.reason}）")
         return None
     if decision.reduce_only:
         kwargs["reduce_only"] = True
@@ -381,7 +377,7 @@ def submit_and_track_order(
                 "reason": str(exc),
             },
         )
-        executor.logger.info(f"[submit_and_track_order] {symbol} {direction.value} {volume} 取整后数量为 0，跳过下单")
+        executor.logger.info(f"{symbol} {direction.value} {volume} 取整后数量为 0，跳过下单")
         return None
 
     # 补发「挂单」审计事件，供前端逐只动作流呈现「决策→挂单→追价→成交」中的挂单一步。
@@ -414,8 +410,6 @@ def submit_and_track_order(
         position_side=position_side if isinstance(position_side, str) else None,
     )
 
-    executor.logger.debug(
-        f"[submit_and_track_order] 订单已提交: {symbol} {direction.value} {volume} @{price}, 订单ID: {order.order_id}"
-    )
+    executor.logger.debug(f"订单已提交: {symbol} {direction.value} {volume} @{price}, 订单ID: {order.order_id}")
 
     return order

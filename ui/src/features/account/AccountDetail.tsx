@@ -68,7 +68,8 @@ export function AccountDetail({ accountId, item, onDashboardRefresh }: AccountDe
   const nameVt = tDetail || tEdit
   const amountVt = tHistory
   const assetTerms = accountAssetTerms(item.trade_channel)
-  const scheduleKind = useChannelDescriptor(item.trade_channel)?.schedule.kind
+  const channelSchedule = useChannelDescriptor(item.trade_channel)?.schedule
+  const scheduleKind = channelSchedule?.kind
 
   const isStarted = startedOverride ?? item.is_started
   useEffect(() => {
@@ -172,7 +173,7 @@ export function AccountDetail({ accountId, item, onDashboardRefresh }: AccountDe
   // 定时节奏：把存储的 crontab 反解成设置向导同款人话（命中预设时如「每 15 分钟 · 补发 2 次」）；
   // 命不中则退为「自定义执行节奏」。未来时刻统一使用服务端 APScheduler 真源，不在此处近似推算。
   const cronExpr = account.data?.cron_expr ?? ''
-  const cronHuman = cronExpr && scheduleKind ? describeCron(scheduleKind, cronExpr) : null
+  const cronHuman = cronExpr && scheduleKind ? describeCron(scheduleKind, cronExpr, channelSchedule?.night) : null
   const onToggleStarted = async () => {
     const next = !isStarted
     setActionError(null)

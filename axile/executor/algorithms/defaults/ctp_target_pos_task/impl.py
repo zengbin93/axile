@@ -365,25 +365,25 @@ def _smart_close_position(
     if close_volume <= 0:
         return orders, 0, True
 
-    executor.logger.info(f"🎯 开始智能平仓: {symbol} {direction} {close_volume}手, 优先级={offset_priority}")
+    executor.logger.info(f"开始智能平仓: {symbol} {direction} {close_volume}手, 优先级={offset_priority}")
 
     account_assets = executor.get_account_assets()
     position_detail = _extract_ctp_position_details(account_assets, [symbol]).get(symbol)
 
     if not position_detail:
-        executor.logger.warning(f"⚠️ 无法获取{symbol}的持仓详情")
+        executor.logger.warning(f"无法获取{symbol}的持仓详情")
         return orders, 0, False
 
     available_yesterday, available_today, direction_desc = _get_close_position_availability(position_detail, direction)
     total_available = available_yesterday + available_today
 
     executor.logger.info(
-        f"📊 {symbol} {direction_desc}持仓分析: "
+        f"{symbol} {direction_desc}持仓分析: "
         f"昨仓={available_yesterday}手, 今仓={available_today}手, 可平={total_available}手"
     )
 
     if total_available < close_volume:
-        executor.logger.warning(f"⚠️ 可平仓手数不足: 需要{close_volume}手, 可平{total_available}手")
+        executor.logger.warning(f"可平仓手数不足: 需要{close_volume}手, 可平{total_available}手")
         close_volume = total_available
 
     if close_volume <= 0:
@@ -393,7 +393,7 @@ def _smart_close_position(
     remaining_volume = close_volume
 
     close_sequence, priority_desc = _build_close_sequence(offset_priority, available_yesterday, available_today)
-    executor.logger.info(f"📋 平仓策略: {priority_desc}")
+    executor.logger.info(f"平仓策略: {priority_desc}")
 
     for offset_flag, available_volume, offset_name, action_prefix in close_sequence:
         if remaining_volume <= 0 or available_volume <= 0:
@@ -408,8 +408,8 @@ def _smart_close_position(
             limit_price=limit_price,
             offset_flag=offset_flag,
             start_message=f"{action_prefix} 执行{offset_name}: {leg_volume}手",
-            success_message=f"✅ {offset_name}订单提交成功: {leg_volume}手, 订单ID: {{order_id}}",
-            failure_message=f"❌ {offset_name}失败: {{error}}",
+            success_message=f"{offset_name}订单提交成功: {leg_volume}手, 订单ID: {{order_id}}",
+            failure_message=f"{offset_name}失败: {{error}}",
         )
         if not order:
             continue
@@ -429,9 +429,9 @@ def _smart_close_position(
             close_volume=fallback_volume,
             limit_price=limit_price,
             offset_flag=THOST_FTDC_OF_Close,
-            start_message=f"🔄 最后尝试通用平仓: {fallback_volume}手",
-            success_message="✅ 通用平仓订单提交成功: 订单ID: {order_id}",
-            failure_message="❌ 通用平仓也失败: {error}",
+            start_message=f"最后尝试通用平仓: {fallback_volume}手",
+            success_message="通用平仓订单提交成功: 订单ID: {order_id}",
+            failure_message="通用平仓也失败: {error}",
             failure_level="error",
         )
         if order:
@@ -441,9 +441,9 @@ def _smart_close_position(
 
     success = remaining_volume == 0
     if success:
-        executor.logger.info(f"🎉 智能平仓完成: {symbol} 成功平仓 {executed_volume}手")
+        executor.logger.info(f"智能平仓完成: {symbol} 成功平仓 {executed_volume}手")
     else:
-        executor.logger.warning(f"⚠️ 智能平仓部分成功: {symbol} 已平仓 {executed_volume}手, 剩余 {remaining_volume}手")
+        executor.logger.warning(f"智能平仓部分成功: {symbol} 已平仓 {executed_volume}手, 剩余 {remaining_volume}手")
 
     return orders, executed_volume, success
 
@@ -529,9 +529,9 @@ def _execute_position_adjustment(
                     trade_rule=trade_rule,
                 )
                 orders.append(order)
-                executor.logger.info(f"📈 开多仓: {symbol} {adjust_volume}手@{limit_price}, 订单ID: {order.order_id}")
+                executor.logger.info(f"开多仓: {symbol} {adjust_volume}手@{limit_price}, 订单ID: {order.order_id}")
             except Exception as e:
-                executor.logger.error(f"❌ 开多仓失败: {symbol} {adjust_volume}手@{limit_price}, 错误: {e}")
+                executor.logger.error(f"开多仓失败: {symbol} {adjust_volume}手@{limit_price}, 错误: {e}")
 
     else:  # 需要减少净持仓
         adjust_volume = abs(adjust_volume)
@@ -554,9 +554,9 @@ def _execute_position_adjustment(
                     trade_rule=trade_rule,
                 )
                 orders.append(order)
-                executor.logger.info(f"📉 开空仓: {symbol} {adjust_volume}手@{limit_price}, 订单ID: {order.order_id}")
+                executor.logger.info(f"开空仓: {symbol} {adjust_volume}手@{limit_price}, 订单ID: {order.order_id}")
             except Exception as e:
-                executor.logger.error(f"❌ 开空仓失败: {symbol} {adjust_volume}手@{limit_price}, 错误: {e}")
+                executor.logger.error(f"开空仓失败: {symbol} {adjust_volume}手@{limit_price}, 错误: {e}")
 
     return orders
 
@@ -593,8 +593,8 @@ def ctp_target_pos_task_algorithm(executor: ExecutorProtocol, algorithm_input: A
     """
     algorithm_name = "TARGET-POS-TASK"
 
-    executor.logger.info(f"🚀 开始{algorithm_name}算法执行")
-    executor.logger.info(f"📋 算法输入: symbol={algorithm_input.symbol}, target_volume={algorithm_input.target_volume}")
+    executor.logger.info(f"开始{algorithm_name}算法执行")
+    executor.logger.info(f"算法输入: symbol={algorithm_input.symbol}, target_volume={algorithm_input.target_volume}")
 
     params = algorithm_input.params
     if not isinstance(params, CTPTargetPosTaskParams):
@@ -609,14 +609,12 @@ def ctp_target_pos_task_algorithm(executor: ExecutorProtocol, algorithm_input: A
     market_data: Any | None = None
 
     account_assets = executor.get_account_assets()
-    executor.logger.info(
-        f"💰 账户总资产: {account_assets.total_asset:.2f}, 可用资金: {account_assets.available_cash:.2f}"
-    )
+    executor.logger.info(f"账户总资产: {account_assets.total_asset:.2f}, 可用资金: {account_assets.available_cash:.2f}")
 
     symbol = algorithm_input.symbol
     market_data = executor.get_market_data()
     if market_data:
-        executor.logger.info(f"📊 获取到 {symbol} 的市场数据")
+        executor.logger.info(f"获取到 {symbol} 的市场数据")
 
     # CTP 路径依赖回调驱动等待；先绑定 tracker 再开始下单，避免第一笔订单的
     # 订单/价格回调在注册前到达，导致后续等待态缺少状态来源。
@@ -638,17 +636,17 @@ def ctp_target_pos_task_algorithm(executor: ExecutorProtocol, algorithm_input: A
         target_volume = algorithm_input.target_volume
         first_tick = clone_price_data(market_data)
 
-        executor.logger.info(f"🎯 目标持仓数量: {{'{symbol}': {target_volume}}}")
+        executor.logger.info(f"目标持仓数量: {{'{symbol}': {target_volume}}}")
 
         trade_rule = algorithm_input.trade_rule
         price_type = str(trade_rule.get("price", params.price_strategy))
         offset_priority = str(trade_rule.get("offset_priority", params.offset_priority))
 
-        executor.logger.info(f"📈 {symbol}: 目标={target_volume}, 价格策略={price_type}, 平仓优先级={offset_priority}")
+        executor.logger.info(f"{symbol}: 目标={target_volume}, 价格策略={price_type}, 平仓优先级={offset_priority}")
 
         position_detail = position_details.get(symbol)
         if not position_detail:
-            executor.logger.warning(f"⚠️ 无法获取{symbol}持仓详情，跳过")
+            executor.logger.warning(f"无法获取{symbol}持仓详情，跳过")
         else:
             symbol_orders = _execute_position_adjustment(
                 executor,
@@ -673,7 +671,7 @@ def ctp_target_pos_task_algorithm(executor: ExecutorProtocol, algorithm_input: A
             }
 
         if tracker.get_pending_count() > 0:
-            executor.logger.info(f"⏳ 等待 {tracker.get_pending_count()} 个订单完成...")
+            executor.logger.info(f"等待 {tracker.get_pending_count()} 个订单完成...")
             tracker.wait_for_completion(timeout=max_wait_seconds)
 
         # 最终是否达标以重新拉取的账户资产为准，而不是依赖本地订单累计推断；
@@ -686,11 +684,11 @@ def ctp_target_pos_task_algorithm(executor: ExecutorProtocol, algorithm_input: A
 
         if not target_reached:
             executor.logger.warning(
-                f"⚠️ {symbol} 最终持仓未达目标: 当前{final_net_position} 目标{target_volume} 差值{target_gap}"
+                f"{symbol} 最终持仓未达目标: 当前{final_net_position} 目标{target_volume} 差值{target_gap}"
             )
 
         result_status = ExecutionStatus.SUCCEEDED if target_reached else ExecutionStatus.FAILED
-        executor.logger.info(f"✅ {algorithm_name}算法执行完成")
+        executor.logger.info(f"{algorithm_name}算法执行完成")
 
         orders = tracker.get_all_orders()
         trades = tracker.get_all_trades()
@@ -725,7 +723,7 @@ def ctp_target_pos_task_algorithm(executor: ExecutorProtocol, algorithm_input: A
 
     except Exception as e:
         error_msg = f"{algorithm_name}算法执行失败: {e}"
-        executor.logger.error(f"❌ {error_msg}")
+        executor.logger.error(f"{error_msg}")
         execution_memory["error"] = str(e)
 
         return AlgorithmResult(

@@ -18,6 +18,7 @@ from axile.channels.contracts import (
     ChannelDescriptor,
     ChannelEndpointConstraints,
     ChannelLeverage,
+    ChannelNightSchedule,
     ChannelNumberConstraints,
     ChannelPlugin,
     ChannelPortfolioPreset,
@@ -35,6 +36,13 @@ from axile.executor.models.unified_input_accounts import (
 
 _LEVERAGE = ChannelLeverage(min=0, max=125, step=0.1)
 _SINGLE_MAKER = AlgorithmReference(method="SINGLE-MAKER", params={})
+_CHINA_FUTURES_NIGHT = ChannelNightSchedule(
+    label="夜盘",
+    range_label="21:00–次日 02:30",
+    close=("02:30",),
+    m15=tuple(f"{(total // 60) % 24:02d}:{total % 60:02d}" for total in range(21 * 60 + 15, 26 * 60 + 31, 15)),
+    m60=("22:00", "23:00", "00:00", "01:00", "02:00", "02:30"),
+)
 
 
 def _contribution_target(config: dict[str, float], frame: pd.DataFrame) -> pd.DataFrame:
@@ -89,7 +97,7 @@ def _ctp_plugin() -> ChannelPlugin:
             description="通过期货公司柜台连接国内期货市场",
             icon="chart-candlestick",
             market="ctp",
-            schedule=ChannelSchedule(kind="cn_futures"),
+            schedule=ChannelSchedule(kind="cn_futures", night=_CHINA_FUTURES_NIGHT),
             currency="CNY",
             units=ChannelUnits(
                 quantity_kind="contract",
@@ -264,7 +272,7 @@ def _tq_plugin() -> ChannelPlugin:
             description="通过天勤连接国内期货、期权与组合市场",
             icon="radio-tower",
             market="ctp",
-            schedule=ChannelSchedule(kind="cn_futures"),
+            schedule=ChannelSchedule(kind="cn_futures", night=_CHINA_FUTURES_NIGHT),
             currency="CNY",
             units=ChannelUnits(
                 quantity_kind="contract",

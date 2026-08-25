@@ -5,14 +5,17 @@
 - https://github.com/MatthewScholefield/uvicorn-loguru-integration/blob/main/uvicorn_loguru_integration.py.
 """
 
+import json
 import logging
 import sys
+import traceback
 from types import FrameType
 from typing import Any, cast
 
 from loguru import logger
 
 from axile.common.config import settings
+from axile.common.logging import LogComponent
 from axile.common.trade_channel import TradeChannel
 
 
@@ -80,8 +83,44 @@ def setup_loguru_logging_intercept(level: int = logging.DEBUG) -> None:
         logging.getLogger(logger_name).setLevel(logger_level)
 
 
-#: ``{name}`` 列的固定宽度，用于让消息正文的起始位置对齐成一条竖线。
-_NAME_WIDTH = 22
+_CONTEXT_FIELDS = (
+    "account_id",
+    "account_name",
+    "channel",
+    "execution_id",
+    "symbol",
+    "algorithm",
+    "trigger_source",
+    "calendar_id",
+    "calendar_day",
+)
+
+# 规则按具体到宽泛排列。显式 ``component`` 始终优先于这里的源码归类。
+_COMPONENT_PREFIXES: tuple[tuple[str, LogComponent], ...] = (
+    ("axile.executor.algorithms.utils.order_", LogComponent.ORDER),
+    ("axile.executor.algorithms", LogComponent.ALGORITHM),
+    ("axile.executor.ctp", LogComponent.CTP),
+    ("axile.server.execution.ctp_channels", LogComponent.CTP),
+    ("axile.executor.gm", LogComponent.GM),
+    ("axile.executor.tq", LogComponent.TQ),
+    ("axile.server.api", LogComponent.API),
+    ("axile.server.execution.worker_backend", LogComponent.WORKER),
+    ("axile.server.execution.scheduler", LogComponent.SCHEDULER),
+    ("axile.server.trading_calendar", LogComponent.CALENDAR),
+    ("axile.server.execution_audit", LogComponent.AUDIT),
+    ("axile.server.error_notifications", LogComponent.NOTIFICATION),
+    ("axile.executor.feishu_notifications", LogComponent.NOTIFICATION),
+    ("axile.server.human", LogComponent.MANUAL),
+    ("axile.server.execution", LogComponent.EXECUTION),
+    ("axile.executor.abstract_executor", LogComponent.EXECUTION),
+    ("axile.executor.execution_", LogComponent.EXECUTION),
+    ("axile.server", LogComponent.SYSTEM),
+    ("axile.executor", LogComponent.EXECUTION),
+    ("sqlalchemy", LogComponent.DATABASE),
+    ("aiosqlite", LogComponent.DATABASE),
+    ("uvicorn", LogComponent.SERVICE),
+    ("starlette", LogComponent.SERVICE),
+)
 
 
 def execution_log_context(
@@ -90,6 +129,7 @@ def execution_log_context(
     account_name: str | None = None,
     channel: object | None = None,
     execution_id: str | None = None,
+    symbol: str | None = None,
 ) -> dict[str, object]:
     """
     构造执行链路日志使用的结构化上下文字段.
@@ -104,6 +144,8 @@ def execution_log_context(
         交易渠道；``TradeChannel`` 会被展开为 ``.value`` 字符串。
     execution_id : str | None, default=None
         本次执行的全局标识；填入后可 ``grep`` 出一次执行的全部日志。
+    symbol : str | None, default=None
+        当前单品种执行会话的交易标的。
 
     Returns
     -------
@@ -116,6 +158,7 @@ def execution_log_context(
         "account_name": account_name,
         "channel": channel_value,
         "execution_id": execution_id,
+        "symbol": symbol,
     }
 
 
@@ -123,42 +166,39 @@ def _level_label(level_name: str) -> str:
     return "WARN" if level_name == "WARNING" else level_name
 
 
-def _short_name(name: str | None) -> str:
-    """
-    将全限定 logger 名收窄为末两段，去掉喧宾夺主的 ``axile.`` 前缀.
+def _component_label(name: str | None, extra: dict[str, Any]) -> str:
+    """根据显式绑定或源码命名空间解析稳定业务组件."""
+    explicit = extra.get("component")
+    if explicit:
+        return str(explicit)
 
-    Parameters
-    ----------
-    name : str | None
-        Loguru record 中的 logger 名。脚本被动态执行（``compile(..., "<string>",
-        "exec")``）时，调用帧缺少 ``__name__``，Loguru 会填入 ``None``。
-
-    Returns
-    -------
-    str
-        收窄后的 logger 名；``name`` 为空或 ``None`` 时返回 ``"<unknown>"``。
-    """
-    if not name:
-        return "<unknown>"
-    parts = name.split(".")
-    tail = ".".join(parts[-2:]) if len(parts) > 2 else name
-    if len(tail) > _NAME_WIDTH:
-        tail = "…" + tail[-(_NAME_WIDTH - 1) :]
-    return tail
+    logger_name = name or ""
+    for prefix, component in _COMPONENT_PREFIXES:
+        if logger_name.startswith(prefix):
+            return component.value
+    if logger_name.startswith("axile."):
+        return LogComponent.SYSTEM.value
+    return LogComponent.EXTERNAL.value
 
 
 def _context_label(extra: dict[str, Any]) -> str:
-    """把结构化上下文渲染成紧凑前缀，如 ``[1 模拟账户 ctp 0e7a80e9] ``."""
+    """把结构化上下文渲染成紧凑的人类可读前缀."""
     parts: list[str] = []
     account_id = extra.get("account_id")
-    if account_id is not None:
-        parts.append(str(account_id))
     account_name = extra.get("account_name")
     if account_name:
-        parts.append(str(account_name))
+        account_label = str(account_name)
+        if account_id is not None:
+            account_label = f"{account_label}#{account_id}"
+        parts.append(account_label)
+    elif account_id is not None:
+        parts.append(f"账户#{account_id}")
     channel = extra.get("channel")
     if channel:
         parts.append(str(channel))
+    symbol = extra.get("symbol")
+    if symbol:
+        parts.append(str(symbol))
     execution_id = extra.get("execution_id")
     if execution_id:
         parts.append(str(execution_id)[:8])
@@ -168,18 +208,57 @@ def _context_label(extra: dict[str, Any]) -> str:
 
 
 def _format_record(record: dict[str, Any]) -> str:
+    """生成面向人工阅读的控制台日志模板."""
     extra = record["extra"]
     extra["_lvl"] = f"{_level_label(record['level'].name):<5}"
     name = record.get("name") or record.get("module")
-    extra["_name"] = f"{_short_name(name):<{_NAME_WIDTH}}"
+    extra["_component"] = _component_label(name, extra)
     extra["_ctx"] = _context_label(extra)
     return (
         "<green>{time:YYMMDD HH:mm:ss.SSS}</green> "
         "<level>{extra[_lvl]}</level> "
-        "<cyan>{extra[_name]}</cyan> "
+        "<cyan>[{extra[_component]}]</cyan> "
         "{extra[_ctx]}"
-        "<level>{message}</level>\n"
+        "<level>{message}</level>\n{exception}"
     )
+
+
+def _exception_payload(exception: Any) -> dict[str, str] | None:
+    """把 Loguru 异常记录转换为 JSON 可序列化结构."""
+    if exception is None:
+        return None
+    return {
+        "type": exception.type.__name__,
+        "message": str(exception.value),
+        "traceback": "".join(traceback.format_exception(exception.type, exception.value, exception.traceback)),
+    }
+
+
+def _json_format_record(record: dict[str, Any]) -> str:
+    """生成一行稳定、无冗余包裹的 JSONL 日志."""
+    extra = record["extra"]
+    name = record.get("name") or record.get("module")
+    component = _component_label(name, extra)
+    context = {field: extra[field] for field in _CONTEXT_FIELDS if extra.get(field) is not None}
+    payload = {
+        "schema_version": 1,
+        "timestamp": record["time"].isoformat(timespec="milliseconds"),
+        "level": record["level"].name,
+        "component": component,
+        "message": record["message"],
+        "context": context,
+        "source": {
+            "name": record.get("name"),
+            "file": record["file"].path,
+            "function": record["function"],
+            "line": record["line"],
+        },
+        "process": {"id": record["process"].id, "name": record["process"].name},
+        "thread": {"id": record["thread"].id, "name": record["thread"].name},
+        "exception": _exception_payload(record["exception"]),
+    }
+    extra["_json"] = json.dumps(payload, ensure_ascii=False, separators=(",", ":"), default=str)
+    return "{extra[_json]}\n"
 
 
 def _sink_filter(record: dict[str, Any]) -> bool:
@@ -221,11 +300,12 @@ def setup_logging() -> None:
     settings.app_log_dir.mkdir(parents=True, exist_ok=True)
     logger.info(f"目录已存在或创建完成：{settings.app_log_dir}")
 
-    # 添加文件日志, 日志级别会比控制台小一级
+    # 文件日志使用 JSON Lines，保留完整源码位置供诊断工具读取。
     logger.add(
-        settings.app_log_dir / "axile.log",
-        format=cast("Any", _format_record),
+        settings.app_log_dir / "axile.jsonl",
+        format=cast("Any", _json_format_record),
         rotation=settings.axile_log_rotation,
         level=console_level,
         filter=cast("Any", _sink_filter),
+        encoding="utf-8",
     )

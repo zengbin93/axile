@@ -372,7 +372,7 @@ def run_worker_backend_loop(connection: Connection, account_id: int) -> None:
         该 worker 绑定的账户标识。
     """
     state = _WorkerBackendState(account_id=account_id)
-    logger.info("[WORKER-BACKEND] worker 启动 | account_id={}", account_id)
+    logger.info("worker 启动 | account_id={}", account_id)
     current_request: WorkerBackendRequest | None = None
     try:
         while True:
@@ -394,7 +394,7 @@ def run_worker_backend_loop(connection: Connection, account_id: int) -> None:
     except BaseException as exc:  # noqa: BLE001 - IPC 最外层必须保留所有进程退出原因
         request_id = current_request.request_id if current_request is not None else "unknown"
         logger.opt(exception=exc).critical(
-            "[WORKER-BACKEND] 未捕获异常 | account_id={} request_id={} command={}",
+            "未捕获异常 | account_id={} request_id={} command={}",
             account_id,
             request_id,
             current_request.command if current_request is not None else "unknown",
@@ -413,7 +413,7 @@ def run_worker_backend_loop(connection: Connection, account_id: int) -> None:
             )
         except Exception as send_exc:  # noqa: BLE001 - 管道可能已经断开
             logger.opt(exception=send_exc).error(
-                "[WORKER-BACKEND] 未捕获异常响应发送失败 | account_id={} request_id={}",
+                "未捕获异常响应发送失败 | account_id={} request_id={}",
                 account_id,
                 request_id,
             )
@@ -422,14 +422,14 @@ def run_worker_backend_loop(connection: Connection, account_id: int) -> None:
             _close_executor(state.executor)
         except BaseException as close_exc:  # noqa: BLE001 - 清理异常也必须可见
             logger.opt(exception=close_exc).error(
-                "[WORKER-BACKEND] 执行器清理失败 | account_id={}",
+                "执行器清理失败 | account_id={}",
                 account_id,
             )
         try:
             connection.close()
         except OSError as close_exc:
             logger.opt(exception=close_exc).error(
-                "[WORKER-BACKEND] 管道关闭失败 | account_id={}",
+                "管道关闭失败 | account_id={}",
                 account_id,
             )
-        logger.info("[WORKER-BACKEND] worker 退出 | account_id={}", account_id)
+        logger.info("worker 退出 | account_id={}", account_id)

@@ -20,6 +20,7 @@ from typing import Any, cast
 
 from pydantic import BaseModel
 
+from axile.common.logging import LogComponent, bind_log_context
 from axile.domain.execution import ExecutionEventStatus, ExecutionEventType, ExecutionReasonFamily
 from axile.executor.algorithms.core.base import ExecutorProtocol
 from axile.executor.algorithms.exceptions import RECOVERABLE_ALGORITHM_EXCEPTIONS, format_exception_message
@@ -164,6 +165,11 @@ class OrderTracker:
     _chasing_order_id: str | None = field(default=None, init=False)
     _early_order_updates: dict[str, list[UnifiedOrder]] = field(default_factory=dict)
     _early_trade_records: dict[str, list[TradeRecord]] = field(default_factory=dict)
+    _logger: Any = field(init=False, repr=False)
+
+    def __post_init__(self) -> None:
+        """绑定订单组件，同时保留执行会话已有的账户与品种上下文."""
+        self._logger = bind_log_context(self.executor.logger, component=LogComponent.ORDER)
 
     def add_order(
         self,
@@ -337,15 +343,11 @@ class OrderTracker:
         try:
             refreshed = self.executor.get_market_data()
         except RECOVERABLE_ALGORITHM_EXCEPTIONS as exc:
-            self.executor.logger.warning(
-                f"[OrderTracker] 盘口陈旧，REST 兜底刷新 {symbol} 失败: {format_exception_message(exc)}"
-            )
+            self._logger.warning(f"盘口陈旧，REST 兜底刷新 {symbol} 失败: {format_exception_message(exc)}")
             return None
         if refreshed is None or not refreshed.is_valid():
             return None
-        self.executor.logger.info(
-            f"[OrderTracker] 盘口陈旧超 {self.price_stale_after}s，已用 REST 现价兜底刷新 {symbol}"
-        )
+        self._logger.info(f"盘口陈旧超 {self.price_stale_after}s，已用 REST 现价兜底刷新 {symbol}")
         return refreshed
 
     def _usable_price(self, symbol: str) -> UnifiedPriceData | None:
@@ -416,7 +418,7 @@ class OrderTracker:
         with self.lock:
             nothing_to_wait = not self.pending_orders and self._chasing_order_id is None
         if nothing_to_wait:
-            self.executor.logger.info("[OrderTracker] 无待完成订单（全部跳过或无挂单），直接结束等待")
+            self._logger.info("无待完成订单（全部跳过或无挂单），直接结束等待")
             return True
 
         start_time = self.clock.time()
@@ -428,8 +430,8 @@ class OrderTracker:
         last_query_elapsed = 0.0
 
         query_interval_desc = "disabled" if effective_query_interval == float("inf") else f"{effective_query_interval}s"
-        self.executor.logger.info(
-            f"[OrderTracker] 开始等待订单完成: pending={last_pending_count}, "
+        self._logger.info(
+            f"开始等待订单完成: pending={last_pending_count}, "
             f"timeout={timeout}s, chase={self.chase_config is not None}, "
             f"query_interval={query_interval_desc}"
         )
@@ -441,9 +443,8 @@ class OrderTracker:
 
             if self.clock.event_wait(self.all_done_event, check_interval):
                 summary = self.get_status_summary()
-                self.executor.logger.info(
-                    f"[OrderTracker] 订单等待结束: result=completed, "
-                    f"elapsed={elapsed:.1f}s, {self._format_status_summary(summary)}"
+                self._logger.info(
+                    f"订单等待结束: result=completed, elapsed={elapsed:.1f}s, {self._format_status_summary(summary)}"
                 )
                 return True
             self.executor.handle_termination_checkpoint()
@@ -466,17 +467,15 @@ class OrderTracker:
             # 的策略退化成无保护的立即扫单。
             if not fallback_triggered and remaining_time <= fallback_threshold and self.chase_config:
                 fallback_triggered = True
-                self.executor.logger.info(
-                    f"[OrderTracker] 距离超时还有 {remaining_time:.1f} 秒，对达到最大追单次数的订单使用市价单兜底"
-                )
+                self._logger.info(f"距离超时还有 {remaining_time:.1f} 秒，对达到最大追单次数的订单使用市价单兜底")
                 self.executor.handle_termination_checkpoint()
                 self._fallback_to_market_order()
 
             pending_count = self.get_pending_count()
             if pending_count != last_pending_count:
                 summary = self.get_status_summary()
-                self.executor.logger.debug(
-                    f"[OrderTracker] 订单进度变化: pending={last_pending_count}->{pending_count}, "
+                self._logger.debug(
+                    f"订单进度变化: pending={last_pending_count}->{pending_count}, "
                     f"elapsed={elapsed:.1f}s, {self._format_status_summary(summary)}"
                 )
                 last_pending_count = pending_count
@@ -484,18 +483,18 @@ class OrderTracker:
         summary = self.get_status_summary()
         refreshed_assets = self._refresh_timeout_account_assets()
         timeout_summary = self._build_timeout_summary(refreshed_assets)
-        self.executor.logger.warning(
-            f"[OrderTracker] 等待订单完成超时: elapsed={timeout:.1f}s, "
+        self._logger.warning(
+            f"等待订单完成超时: elapsed={timeout:.1f}s, "
             f"{self._format_status_summary(summary)}, timeout_summary={timeout_summary}"
         )
         if self.chase_config:
-            self.executor.logger.info("[OrderTracker] 超时前最后一次尝试市价单兜底")
+            self._logger.info("超时前最后一次尝试市价单兜底")
             self.executor.handle_termination_checkpoint()
             self._fallback_to_market_order()
 
         # 超时后仍要显式 query 再 cancel，一方面给下游一次最后的状态收敛机会，
         # 另一方面避免只清 tracker 内存态却把真实挂单留在交易通道里。
-        self.executor.logger.info(f"[OrderTracker] 正在撤销所有未成交订单: pending={self.get_pending_count()}")
+        self._logger.info(f"正在撤销所有未成交订单: pending={self.get_pending_count()}")
         self.executor.handle_termination_checkpoint()
         failed_order_ids = cancel_pending_orders_via_query(self.executor)
         if failed_order_ids:
@@ -525,7 +524,7 @@ class OrderTracker:
         try:
             return cast("OrderChannelHealth", getter())
         except Exception as exc:  # noqa: BLE001
-            self.executor.logger.debug(f"[OrderTracker] 查询订单通道健康度失败: {format_exception_message(exc)}")
+            self._logger.debug(f"查询订单通道健康度失败: {format_exception_message(exc)}")
             return OrderChannelHealth.UNKNOWN
 
     def _current_query_interval(self, timeout: float, check_interval: float) -> float:
@@ -568,12 +567,12 @@ class OrderTracker:
         if pending_before <= 0:
             return
 
-        self.executor.logger.info(f"[OrderTracker] 定时查询挂单状态: pending={pending_before}")
+        self._logger.info(f"定时查询挂单状态: pending={pending_before}")
 
         try:
             pending_orders = self.executor.get_pending_orders()
         except Exception as exc:
-            self.executor.logger.warning(f"[OrderTracker] 定时查询挂单状态失败: {format_exception_message(exc)}")
+            self._logger.warning(f"定时查询挂单状态失败: {format_exception_message(exc)}")
             return
 
         queried_count = 0
@@ -585,9 +584,7 @@ class OrderTracker:
         self._reconcile_missing_pending(pending_orders)
 
         summary = self.get_status_summary()
-        self.executor.logger.info(
-            f"[OrderTracker] 定时查询完成: queried={queried_count}, {self._format_status_summary(summary)}"
-        )
+        self._logger.info(f"定时查询完成: queried={queried_count}, {self._format_status_summary(summary)}")
 
     def _reconcile_missing_pending(self, open_orders: list[UnifiedOrder]) -> None:
         """
@@ -616,9 +613,7 @@ class OrderTracker:
             try:
                 terminal_order = cast("UnifiedOrder | None", reconcile(symbol, order_id))
             except Exception as exc:  # noqa: BLE001
-                self.executor.logger.warning(
-                    f"[OrderTracker] 订单 {order_id} 对账失败: {format_exception_message(exc)}"
-                )
+                self._logger.warning(f"订单 {order_id} 对账失败: {format_exception_message(exc)}")
                 continue
             if terminal_order is not None and terminal_order.is_completed():
                 # WS 未启用（UNKNOWN）时是设计内的纯 REST 路径，并非丢帧；WS 启用时才可能是回报缺失。
@@ -627,7 +622,7 @@ class OrderTracker:
                     if self._order_channel_health() == OrderChannelHealth.UNKNOWN
                     else "WS 回报缺失"
                 )
-                self.executor.logger.info(f"[OrderTracker] 对账发现订单 {order_id} 已终态（{cause}），收敛并补发终态")
+                self._logger.info(f"对账发现订单 {order_id} 已终态（{cause}），收敛并补发终态")
                 self.on_order_update(terminal_order)
 
     def _refresh_timeout_account_assets(self) -> UnifiedAccountAssets | None:
@@ -635,7 +630,7 @@ class OrderTracker:
         try:
             return self.executor.get_account_assets()
         except Exception as exc:  # noqa: BLE001
-            self.executor.logger.warning(f"[OrderTracker] 超时后刷新账户资产失败: {format_exception_message(exc)}")
+            self._logger.warning(f"超时后刷新账户资产失败: {format_exception_message(exc)}")
             return None
 
     def _build_timeout_summary(self, refreshed_assets: UnifiedAccountAssets | None) -> dict[str, object]:
@@ -710,8 +705,8 @@ class OrderTracker:
             if new_price <= 0 or new_price == order.price:
                 continue
 
-            self.executor.logger.info(
-                f"[OrderTracker] 追单 {symbol}: "
+            self._logger.info(
+                f"追单 {symbol}: "
                 f"价格 {order.price} -> {new_price}, "
                 f"追单次数 {chase_info['chase_count'] + 1}/{self.chase_config.max_count}"
             )
@@ -729,8 +724,8 @@ class OrderTracker:
                 # 「撤单请求已投递到 bridge」；在撤单尚未
                 # 生效时就下新单，会出现新旧单同时在场的双份敞口。
                 if not self._await_cancel_confirmed(order_id):
-                    self.executor.logger.warning(
-                        f"[OrderTracker] 追单放弃 {symbol}: 撤单未在 "
+                    self._logger.warning(
+                        f"追单放弃 {symbol}: 撤单未在 "
                         f"{self.chase_config.cancel_confirm_timeout}s 内确认，保留旧单不换单"
                     )
                     self.executor.emit_audit_event(
@@ -805,7 +800,7 @@ class OrderTracker:
                     self._chasing_order_id = None
                 raise
             except RECOVERABLE_ALGORITHM_EXCEPTIONS as e:
-                self.executor.logger.error(f"[OrderTracker] 追单失败 {symbol}: {e}")
+                self._logger.error(f"追单失败 {symbol}: {e}")
                 with self.lock:
                     self._chasing_order_id = None
 
@@ -977,8 +972,8 @@ class OrderTracker:
                         del self._chase_info[order_id]
                 continue
 
-            self.executor.logger.warning(
-                f"[OrderTracker] 订单 {order_id} ({symbol}) 已达到最大追单次数 "
+            self._logger.warning(
+                f"订单 {order_id} ({symbol}) 已达到最大追单次数 "
                 f"({chase_info['chase_count']}/{self.chase_config.max_count})，"
                 f"准备请求撤单后对剩余 {remaining_volume} 执行市价单兜底"
             )
@@ -992,13 +987,11 @@ class OrderTracker:
                     if order_id in self._chase_info:
                         self._chase_info[order_id]["market_order_fallback_pending_cancel"] = True
 
-                self.executor.logger.info(
-                    f"[OrderTracker] 已请求撤销限价单，等待终态后再执行市价单兜底: {symbol} 订单ID {order_id}"
-                )
+                self._logger.info(f"已请求撤销限价单，等待终态后再执行市价单兜底: {symbol} 订单ID {order_id}")
             except MemoryError:
                 raise
             except RECOVERABLE_ALGORITHM_EXCEPTIONS as e:
-                self.executor.logger.error(f"[OrderTracker] 市价单兜底前撤单失败 {symbol}: {e}")
+                self._logger.error(f"市价单兜底前撤单失败 {symbol}: {e}")
                 self._mark_market_fallback_failed(
                     order_id,
                     reason_code="COMMON.MARKET_FALLBACK_CANCEL_FAILED",
@@ -1025,7 +1018,7 @@ class OrderTracker:
             remaining_volume = self._get_effective_remaining_volume(order_id, completed_order)
 
         if remaining_volume <= 0:
-            self.executor.logger.info(f"[OrderTracker] 订单 {order_id} ({symbol}) 已完成，无需市价单兜底")
+            self._logger.info(f"订单 {order_id} ({symbol}) 已完成，无需市价单兜底")
             return
 
         if not self._is_market_fallback_price_safe(completed_order, chase_info):
@@ -1069,7 +1062,7 @@ class OrderTracker:
             )
             raise
         except RECOVERABLE_ALGORITHM_EXCEPTIONS as exc:
-            self.executor.logger.error(f"[OrderTracker] 市价单兜底失败 {symbol}: {exc}")
+            self._logger.error(f"市价单兜底失败 {symbol}: {exc}")
             self._mark_market_fallback_failed(
                 order_id,
                 reason_code="COMMON.MARKET_FALLBACK_ORDER_FAILED",
@@ -1087,9 +1080,8 @@ class OrderTracker:
             self.pending_orders[market_order.order_id] = market_order
             self.all_done_event.clear()
 
-        self.executor.logger.info(
-            f"[OrderTracker] 市价单兜底已提交: {symbol} {direction.value} "
-            f"{remaining_volume}, 订单ID: {market_order.order_id}"
+        self._logger.info(
+            f"市价单兜底已提交: {symbol} {direction.value} {remaining_volume}, 订单ID: {market_order.order_id}"
         )
         self.executor.emit_audit_event(
             event_type=ExecutionEventType.ORDER_SUBMITTED,

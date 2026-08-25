@@ -8,6 +8,14 @@
 
 export type ScheduleKind = 'continuous' | 'cn_stock' | 'cn_futures'
 
+export interface NightSchedule {
+  label: string
+  range_label: string
+  close: string[]
+  m15: string[]
+  m60: string[]
+}
+
 /** 自定义节奏可选频率。 */
 export type CustomFreq = 'm15' | 'm60' | 'm120' | 'm240' | 'd1'
 
@@ -110,14 +118,19 @@ export function buildCronList(
   presetIds: string[],
   supN: number,
   supM: number,
+  night?: NightSchedule | null,
+  nightOn = false,
 ): string[] {
   const offs = supOffsets(supN, supM)
   let out: string[] = []
   for (const id of presetIds) {
     const p = PRESETS[market].find((x) => x.id === id)
     if (p) out = out.concat(p.build(offs))
+    if (nightOn && night && (id === 'close' || id === 'm15' || id === 'm60')) {
+      out = out.concat(timesToCron(night[id], '*', offs))
+    }
   }
-  return out
+  return [...new Set(out)]
 }
 
 /**
@@ -354,6 +367,7 @@ export function compileScheduleRules(
  */
 export interface TimerIntent {
   presetIds: string[]
+  nightOn?: boolean
   supN: number
   supM: number
   rawCron: string
@@ -389,7 +403,7 @@ export interface TimerIntent {
  * string[]
  *     crontab 规则列表；均为空时返回空数组。
  */
-export function resolveCronList(market: ScheduleKind, t: TimerIntent): string[] {
+export function resolveCronList(market: ScheduleKind, t: TimerIntent, night?: NightSchedule | null): string[] {
   const raw = t.rawCron.trim()
   // 自定义模式开，或以「无 tab / 无高级规则」的裸表达式路径（账户编辑页）。
   if (raw && (t.customCronOn || (t.timerTab == null && !t.scheduleRules?.length && !t.customOn))) {
@@ -410,7 +424,7 @@ export function resolveCronList(market: ScheduleKind, t: TimerIntent): string[] 
       .map((s) => s.trim())
       .filter(Boolean)
   }
-  return buildCronList(market, t.presetIds, t.supN, t.supM)
+  return buildCronList(market, t.presetIds, t.supN, t.supM, night, Boolean(t.nightOn))
 }
 
 /**
@@ -596,15 +610,22 @@ function describeCommonCron(expr: string): string | null {
  * @param cronExpr 存储的 crontab（多条以 `|` 或换行分隔）。
  * @returns 人话短语；无法归类时为 ``null``。
  */
-export function describeCron(market: ScheduleKind, cronExpr: string): string | null {
+export function describeCron(
+  market: ScheduleKind,
+  cronExpr: string,
+  night?: NightSchedule | null,
+): string | null {
   const target = normCronSet(cronExpr)
   if (!target) return null
   for (const p of PRESETS[market]) {
     for (const n of SUP_N) {
       for (const m of SUP_M) {
-        if (normCronSet(buildCronList(market, [p.id], n, m).join(' | ')) !== target) continue
-        const time = p.sub && /^\d{1,2}:\d{2}$/.test(p.sub) ? ` ${p.sub}` : ''
-        return n > 0 ? `${p.label}${time} · 补发 ${n} 次` : `${p.label}${time}`
+        for (const nightOn of night ? [false, true] : [false]) {
+          if (normCronSet(buildCronList(market, [p.id], n, m, night, nightOn).join(' | ')) !== target) continue
+          const time = p.sub && /^\d{1,2}:\d{2}$/.test(p.sub) ? ` ${p.sub}` : ''
+          const nightText = nightOn ? ` · ${night?.label ?? '夜盘'}` : ''
+          return n > 0 ? `${p.label}${time}${nightText} · 补发 ${n} 次` : `${p.label}${time}${nightText}`
+        }
       }
     }
   }
@@ -621,6 +642,7 @@ export function describeCron(market: ScheduleKind, cronExpr: string): string | n
  */
 export interface TimerEditorState extends TimerIntent {
   autoOn: boolean
+  nightOn: boolean
   timerTab: TimerTab
   scheduleRules: ScheduleRule[]
   selectedRuleId: string
@@ -633,6 +655,7 @@ export function defaultTimerEditorState(market: ScheduleKind): TimerEditorState 
   return {
     autoOn: false,
     presetIds: [DEFAULT_PRESET[market]],
+    nightOn: false,
     supN: 0,
     supM: 1,
     rawCron: '',
@@ -694,12 +717,15 @@ function tryParseDailyRules(cronExpr: string): ScheduleRule[] | null {
 function tryMatchPreset(
   market: ScheduleKind,
   target: string,
-): Pick<TimerEditorState, 'presetIds' | 'supN' | 'supM'> | null {
+  night?: NightSchedule | null,
+): Pick<TimerEditorState, 'presetIds' | 'nightOn' | 'supN' | 'supM'> | null {
   for (const p of PRESETS[market]) {
     for (const n of SUP_N) {
       for (const m of SUP_M) {
-        if (normCronSet(buildCronList(market, [p.id], n, m).join(' | ')) === target) {
-          return { presetIds: [p.id], supN: n, supM: m }
+        for (const nightOn of night ? [false, true] : [false]) {
+          if (normCronSet(buildCronList(market, [p.id], n, m, night, nightOn).join(' | ')) === target) {
+            return { presetIds: [p.id], nightOn, supN: n, supM: m }
+          }
         }
       }
     }
@@ -724,12 +750,16 @@ function tryMatchPreset(
  * TimerEditorState
  *     可直接喂给 :component:`TimerEditor` 的完整状态。
  */
-export function parseTimerIntent(market: ScheduleKind, cronExpr: string): TimerEditorState {
+export function parseTimerIntent(
+  market: ScheduleKind,
+  cronExpr: string,
+  night?: NightSchedule | null,
+): TimerEditorState {
   const trimmed = (cronExpr ?? '').trim()
   if (!trimmed) return defaultTimerEditorState(market)
 
   const target = normCronSet(trimmed)
-  const hit = tryMatchPreset(market, target)
+  const hit = tryMatchPreset(market, target, night)
   if (hit) {
     const rule = ruleFromPreset(market, hit.presetIds[0]!)
     return {
@@ -748,6 +778,7 @@ export function parseTimerIntent(market: ScheduleKind, cronExpr: string): TimerE
     return {
       autoOn: true,
       presetIds: [DEFAULT_PRESET[market]],
+      nightOn: false,
       supN: 0,
       supM: 1,
       rawCron: '',
@@ -768,6 +799,7 @@ export function parseTimerIntent(market: ScheduleKind, cronExpr: string): TimerE
   return {
     autoOn: true,
     presetIds: [DEFAULT_PRESET[market]],
+    nightOn: false,
     supN: 0,
     supM: 1,
     rawCron: raw,
@@ -781,9 +813,13 @@ export function parseTimerIntent(market: ScheduleKind, cronExpr: string): TimerE
 /**
  * 将编辑器状态编译为后端 ``cron_expr``；关自动返回空串。
  */
-export function timerStateToCronExpr(market: ScheduleKind, state: TimerEditorState): string {
+export function timerStateToCronExpr(
+  market: ScheduleKind,
+  state: TimerEditorState,
+  night?: NightSchedule | null,
+): string {
   if (!state.autoOn) return ''
-  return cronToExpr(resolveCronList(market, state))
+  return cronToExpr(resolveCronList(market, state, night))
 }
 
 /**

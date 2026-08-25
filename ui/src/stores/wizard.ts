@@ -39,6 +39,8 @@ export interface AccountDraft {
   autoOn: boolean
   /** 快捷 tab 选中的预设 id（可多选，高级组合后较少使用）。 */
   presetIds: string[]
+  /** 是否把渠道声明的夜盘时点并入快捷节奏。 */
+  nightOn: boolean
   supN: number
   supM: number
   rawCron: string
@@ -84,6 +86,7 @@ export function initialTimerForSchedule(schedule: ScheduleKind) {
   return {
     autoOn: true,
     presetIds: [DEFAULT_PRESET[schedule]] as string[],
+    nightOn: false,
     supN: 2,
     supM: 1,
     rawCron: '',
@@ -104,6 +107,7 @@ const initialAcct: AccountDraft = {
   executionTimeout: defaultExecutionTimeoutForChannel(''),
   autoOn: true,
   presetIds: [],
+  nightOn: false,
   supN: 2,
   supM: 1,
   rawCron: '',

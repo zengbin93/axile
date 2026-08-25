@@ -81,7 +81,7 @@ class AbstractExecutorExecutionLifecycleMixin(AbstractExecutorExecutionRuntimeFa
 
             standard_input = executor._normalize_standard_input(standard_input)
 
-            executor.logger.debug(f"[{executor.channel_type.value}] 开始执行交易")
+            executor.logger.debug("开始执行交易")
             executor._ensure_connection()
             standard_input = executor._normalize_connected_standard_input(standard_input)
             # 总超时的计时零点：连接已就绪、planning 尚未开始，因此执行器构造与登录耗时
@@ -90,7 +90,7 @@ class AbstractExecutorExecutionLifecycleMixin(AbstractExecutorExecutionRuntimeFa
 
             # 非交易时间直接在入口层返回阻断结果，避免继续进入规划和下单阶段。
             if not executor._check_trading_time():
-                executor.logger.warning(f"[{executor.channel_type.value}] 当前不在交易时间")
+                executor.logger.warning("当前不在交易时间")
                 output = executor._create_non_trading_output(standard_input)
             else:
                 executor._validate_input(standard_input)
@@ -100,21 +100,21 @@ class AbstractExecutorExecutionLifecycleMixin(AbstractExecutorExecutionRuntimeFa
             # 通知是尾部副作用，不影响主执行结果的返回；投递到有界后台队列，
             # 统一经有界后台队列发送，隔离飞书网络延迟且避免线程随执行次数增长。
             if standard_input.feishu_key:
-                executor.logger.info(f"[{executor.channel_type.value}] 异步发送飞书通知")
+                executor.logger.info("异步发送飞书通知")
                 enqueue_execute_results_to_feishu(
                     cast("FeishuNotificationSource", executor),
                     output,
                     standard_input.feishu_key,
                 )
 
-            executor.logger.debug(f"[{executor.channel_type.value}] 交易执行完成 - 成功: {output.success}")
+            executor.logger.debug(f"交易执行完成 - 成功: {output.success}")
             return output
 
         except ExecutionTerminated:
-            executor.logger.info(f"[{executor.channel_type.value}] 执行在检查点终止")
+            executor.logger.info("执行在检查点终止")
             raise
         except Exception as exc:
-            executor.logger.error(f"[{executor.channel_type.value}] 执行失败: {exc}")
+            executor.logger.error(f"执行失败: {exc}")
             raise
         finally:
             # cleanup 与 runtime 生命周期分开控制，便于长连接或排障场景单独保留 runtime。

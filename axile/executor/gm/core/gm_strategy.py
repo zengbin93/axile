@@ -224,7 +224,7 @@ def init(_context: Context) -> None:
     if subscribe_symbols:
         for symbol in subscribe_symbols:
             subscribe(symbols=symbol, frequency="tick")  # noqa: F405
-            _emit_runtime_log("info", f"[GM Bridge] 订阅行情: {symbol}")
+            _emit_runtime_log("info", f"订阅行情: {symbol}")
     _update_startup_phase("subscriptions_ready", subscribed_count=len(subscribe_symbols or []))
 
     # 通知主线程策略已就绪
@@ -234,7 +234,7 @@ def init(_context: Context) -> None:
         _update_startup_phase("ready_signaled")
 
     # 记录初始化
-    _emit_runtime_log("info", "[GM Bridge] 策略初始化完成，开始监听回调事件")
+    _emit_runtime_log("info", "策略初始化完成，开始监听回调事件")
 
 
 def on_tick(_context: Context, tick: TickLikeDict2) -> None:
@@ -259,7 +259,7 @@ def on_tick(_context: Context, tick: TickLikeDict2) -> None:
             dispatcher.dispatch_price_data(unified_price)
 
     except Exception as e:
-        _emit_runtime_log("error", f"[GM Bridge] 处理 tick 回调出错: {e}")
+        _emit_runtime_log("error", f"处理 tick 回调出错: {e}")
         stats = _get_bridge_stats()
         if stats:
             stats["errors"] += 1
@@ -287,7 +287,7 @@ def on_order_status(_context: Context, order: DictLikeOrder) -> None:
             dispatcher.dispatch_order_update(unified_order)
 
     except Exception as e:
-        _emit_runtime_log("error", f"[GM Bridge] 处理订单状态回调出错: {e}")
+        _emit_runtime_log("error", f"处理订单状态回调出错: {e}")
         stats = _get_bridge_stats()
         if stats:
             stats["errors"] += 1
@@ -315,7 +315,7 @@ def on_execution_report(_context: Context, execrpt: DictLikeExecRpt) -> None:
             dispatcher.dispatch_trade_record(trade_record)
 
     except Exception as e:
-        _emit_runtime_log("error", f"[GM Bridge] 处理成交回报出错: {e}")
+        _emit_runtime_log("error", f"处理成交回报出错: {e}")
         stats = _get_bridge_stats()
         if stats:
             stats["errors"] += 1
@@ -325,14 +325,14 @@ def on_account_status(_context: Context, account: DictLikeAccountStatus) -> None
     """交易账户状态更新事件."""
     if _is_stopped():
         return
-    _emit_runtime_log("info", f"[GM Bridge] 账户状态更新: {account}")
+    _emit_runtime_log("info", f"账户状态更新: {account}")
 
 
 def on_error(_context: Context, code: str, info: str | bytes) -> None:
     """错误事件."""
     if _is_stopped():
         return
-    _emit_runtime_log("error", f"[GM Bridge] 错误: code={code}, info={info}")
+    _emit_runtime_log("error", f"错误: code={code}, info={info}")
     stats = _get_bridge_stats()
     if stats:
         stats["errors"] += 1
@@ -343,14 +343,14 @@ def on_trade_data_connected(_context: Context) -> None:
     if _is_stopped():
         return
     _update_startup_phase("trade_connected")
-    _emit_runtime_log("info", "[GM Bridge] 交易通道已连接")
+    _emit_runtime_log("info", "交易通道已连接")
 
 
 def on_trade_data_disconnected(_context: Context) -> None:
     """交易通道网络连接断开事件."""
     if _is_stopped():
         return
-    _emit_runtime_log("warning", "[GM Bridge] 交易通道已断开")
+    _emit_runtime_log("warning", "交易通道已断开")
 
 
 def _process_bridge_requests(_context: Context) -> None:
@@ -415,7 +415,7 @@ def _subscribe_runtime_symbols(symbols: list[str]) -> list[str]:
 
     for symbol in new_symbols:
         subscribe(symbols=symbol, frequency="tick")  # noqa: F405
-        _emit_runtime_log("info", f"[GM Bridge] 动态订阅行情: {symbol}")
+        _emit_runtime_log("info", f"动态订阅行情: {symbol}")
 
     context.subscribe_symbols[:] = existing_symbols + new_symbols
     return new_symbols

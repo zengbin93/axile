@@ -8,7 +8,7 @@ import io
 import json
 import re
 from collections.abc import Sequence
-from datetime import date, timedelta
+from datetime import date, datetime, time, timedelta
 from enum import Enum
 from pathlib import Path
 from typing import Any, Literal, cast
@@ -22,6 +22,7 @@ from sqlmodel import col, delete, func, select
 from axile.channels import get_channel
 from axile.common.config import CONFIG_TOML_PATH
 from axile.common.trade_channel import TradeChannel
+from axile.executor.china_futures_session import is_regular_night_session_transition
 from axile.server.core.db import SessionLocal
 from axile.server.core.scheduler import Scheduler
 from axile.server.db.models import TradingCalendarConfig, TradingCalendarOverride, TradingCalendarRecord
@@ -35,6 +36,7 @@ CALENDAR_INITIAL_HISTORY_DAYS = 365
 CALENDAR_JOB_ID = "ensure-trading-calendar"
 
 type CalendarRefreshKind = Literal["csv", "python"]
+type CalendarSkipReason = Literal["CALENDAR.CLOSED", "CALENDAR.NO_NIGHT_SESSION"]
 _CALENDAR_ID_PATTERN = re.compile(r"^[a-z][a-z0-9_-]*$")
 _SYNC_LOCKS: dict[str, asyncio.Lock] = {}
 PENDING_CALENDAR_PATH = CONFIG_TOML_PATH.with_name(f"{CONFIG_TOML_PATH.stem}.trading-calendar.json")
@@ -107,6 +109,7 @@ class CalendarDayDecision(BaseModel):
     base_is_open: bool | None = None
     override_is_open: bool | None = None
     effective_is_open: bool | None = None
+    reason_code: CalendarSkipReason | None = None
 
 
 class CalendarAvailability(str, Enum):
@@ -298,6 +301,72 @@ async def evaluate_channel_calendar_day(
 ) -> CalendarDayDecision:
     """判断一个渠道在单个自然日上的日历可用性。"""
     return (await evaluate_channel_calendar_days(session, channel, [day]))[day]
+
+
+def _china_futures_night_start(current: datetime) -> date | None:
+    """返回期货夜盘所属的起始自然日，日盘时段返回 ``None``。"""
+    local_time = current.timetz().replace(tzinfo=None)
+    if local_time >= time(21):
+        return current.date()
+    if local_time <= time(2, 30):
+        return current.date() - timedelta(days=1)
+    return None
+
+
+async def evaluate_channel_calendar_moment(
+    session: AsyncSession,
+    channel: TradeChannel | str,
+    current: datetime,
+) -> CalendarDayDecision:
+    """按渠道时段把一次触发映射到交易日并判断是否执行。"""
+    channel_name = str(channel)
+    descriptor = get_channel(channel_name).descriptor
+    session_start = (
+        _china_futures_night_start(current)
+        if descriptor.schedule.kind == "cn_futures" and descriptor.schedule.night is not None
+        else None
+    )
+    if session_start is None:
+        decision = await evaluate_channel_calendar_day(session, channel, current.date())
+        if decision.status is CalendarDecisionStatus.AVAILABLE_CLOSED:
+            return decision.model_copy(update={"reason_code": "CALENDAR.CLOSED"})
+        return decision
+
+    nominal_day = session_start + timedelta(days=1)
+    days = [session_start + timedelta(days=offset) for offset in range(15)]
+    decisions = await evaluate_channel_calendar_days(session, channel, days)
+    start_decision = decisions[session_start]
+    if start_decision.status is CalendarDecisionStatus.NOT_REQUIRED:
+        return start_decision.model_copy(update={"day": nominal_day})
+    if start_decision.status is CalendarDecisionStatus.UNAVAILABLE:
+        return start_decision.model_copy(update={"day": nominal_day})
+    if start_decision.status is CalendarDecisionStatus.AVAILABLE_CLOSED:
+        return start_decision.model_copy(update={"reason_code": "CALENDAR.NO_NIGHT_SESSION"})
+
+    for day in days[1:]:
+        candidate = decisions[day]
+        if candidate.status is CalendarDecisionStatus.UNAVAILABLE:
+            return candidate
+        if candidate.status is not CalendarDecisionStatus.AVAILABLE_OPEN:
+            continue
+        if is_regular_night_session_transition(session_start, day):
+            return candidate
+        return candidate.model_copy(
+            update={
+                "status": CalendarDecisionStatus.AVAILABLE_CLOSED,
+                "effective_is_open": False,
+                "reason_code": "CALENDAR.NO_NIGHT_SESSION",
+            }
+        )
+
+    return start_decision.model_copy(
+        update={
+            "day": nominal_day,
+            "status": CalendarDecisionStatus.AVAILABLE_CLOSED,
+            "effective_is_open": False,
+            "reason_code": "CALENDAR.NO_NIGHT_SESSION",
+        }
+    )
 
 
 async def list_calendar_entries(
@@ -777,6 +846,7 @@ __all__ = [
     "ensure_trading_calendar_coverage",
     "evaluate_channel_calendar_day",
     "evaluate_channel_calendar_days",
+    "evaluate_channel_calendar_moment",
     "get_calendar_status",
     "import_calendar_csv",
     "list_calendar_diagnostics",

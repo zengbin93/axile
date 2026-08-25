@@ -310,7 +310,8 @@ export function AccountEditPage() {
   const cronExpr = acc.cron_expr ?? ''
   const timerSummary = !cronExpr.trim()
     ? '已关 · 仅手动'
-    : (scheduleKind ? describeCron(scheduleKind, cronExpr) : null) ?? '自定义执行节奏'
+    : (scheduleKind ? describeCron(scheduleKind, cronExpr, channelDescriptor?.schedule.night) : null)
+      ?? '自定义执行节奏'
 
   const tradeSum = describeAlgorithmRef(refOf(acc.algorithm as Record<string, unknown> | null))
   const emptySum = describeAlgorithmRef(refOf(acc.empty_positions_algorithm as Record<string, unknown> | null))

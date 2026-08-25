@@ -127,16 +127,16 @@ def single_maker_callback(
     max_wait_seconds = params.max_wait_seconds
     chase_config = ChaseConfig.from_params(params)
 
-    executor.logger.info(f"[{algorithm_name}] 追单配置: {chase_config is not None}")
+    executor.logger.info(f"追单配置: {chase_config is not None}")
 
     account_assets = executor.get_account_assets()
     log_debug = getattr(executor.logger, "debug", executor.logger.info)
-    log_debug(f"[{algorithm_name}] 账户总资产: {account_assets.total_asset:.2f}")
+    log_debug(f"账户总资产: {account_assets.total_asset:.2f}")
 
     symbol = algorithm_input.symbol
     market_data = executor.get_market_data()
     if market_data:
-        log_debug(f"[{algorithm_name}] 获取到 {symbol} 的价格数据")
+        log_debug(f"获取到 {symbol} 的价格数据")
 
     target_volume = algorithm_input.target_volume
     first_tick = clone_price_data(market_data)
@@ -147,7 +147,7 @@ def single_maker_callback(
     execution_memory: dict[str, Any] = {}
 
     try:
-        executor.logger.info(f"[{algorithm_name}] 开始执行 {symbol} 的交易")
+        executor.logger.info(f"开始执行 {symbol} 的交易")
 
         # 执行调仓
         current_volume = executor.get_current_volume(account_assets)
@@ -158,7 +158,7 @@ def single_maker_callback(
             pricing = _resolve_pricing_on_book(direction, market_data, params)
             if pricing is None:
                 # 盘口无效 + on_missing_book=skip：本轮跳过该品种（欠量，下轮 rebalance 重挂），永不 taker
-                executor.logger.warning(f"[{algorithm_name}] {symbol} 盘口买卖一无效（假盘口），本轮跳过（skip）")
+                executor.logger.warning(f"{symbol} 盘口买卖一无效（假盘口），本轮跳过（skip）")
                 execution_memory[f"{symbol}_skipped"] = "missing_book"
                 return AlgorithmResult(
                     orders=[],
@@ -184,8 +184,7 @@ def single_maker_callback(
             position_side_kwargs = determine_position_side(executor, direction, account_assets)
 
             executor.logger.info(
-                f"[{algorithm_name}] {symbol} {direction.value} {needed_volume}, "
-                f"当前={current_volume}, 目标={target_volume}"
+                f"{symbol} {direction.value} {needed_volume}, 当前={current_volume}, 目标={target_volume}"
             )
 
             try:
@@ -213,11 +212,11 @@ def single_maker_callback(
                         "order_id": order.order_id,
                     }
             except MemoryError:
-                executor.logger.exception(f"[{algorithm_name}] {symbol} 下单遇到不可恢复异常")
+                executor.logger.exception(f"{symbol} 下单遇到不可恢复异常")
                 raise
             except RECOVERABLE_ALGORITHM_EXCEPTIONS as e:
                 error_message = format_exception_message(e)
-                executor.logger.error(f"[{algorithm_name}] {symbol} 下单失败: {error_message}")
+                executor.logger.error(f"{symbol} 下单失败: {error_message}")
                 execution_memory[f"{symbol}_error"] = error_message
 
             # 等待订单完成
