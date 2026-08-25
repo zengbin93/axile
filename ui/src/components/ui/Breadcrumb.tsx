@@ -21,7 +21,10 @@ export function Breadcrumb({ trail }: { trail: Crumb[] }) {
   const items: Crumb[] = [{ label: '总览', to: '/' }, ...trail]
   const lastIndex = items.length - 1
   return (
-    <nav aria-label="面包屑" className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[13px]">
+    <nav
+      aria-label="面包屑"
+      className="app-breadcrumb flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[13px]"
+    >
       {items.map((c, i) => {
         const isCurrent = i === lastIndex
         const content = (

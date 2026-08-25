@@ -12,6 +12,7 @@ import { Chip } from '@/components/ui/Card'
 import { ErrorNotice } from '@/components/ui/ErrorNotice'
 import { Skeleton } from '@/components/ui/Skeleton'
 import { Select } from '@/components/ui/Select'
+import { SymbolTagInput } from '@/components/ui/SymbolTagInput'
 import { ExecutionTimeoutInput } from '@/features/account/ExecutionTimeoutInput'
 import { executionTimeoutError } from '@/features/account/executionTimeout'
 import { LeverageInput } from '@/features/account/LeverageInput'
@@ -46,20 +47,13 @@ interface Draft {
   longLev: string
   shortLev: string
   portfolioId: number | null
-  forbidden: string
-  risk: string
+  forbidden: string[]
+  risk: string[]
   weightPrecision: string
   executionTimeout: string
   writeEmpty: boolean
   tradeRules: string
   newConfig: string
-}
-
-function parseList(s: string): string[] {
-  return s
-    .split(/[\n,，\s]+/)
-    .map((x) => x.trim())
-    .filter(Boolean)
 }
 
 /**
@@ -103,8 +97,8 @@ function draftOf(acc: Account): Draft {
     longLev: String(acc.long_leverage ?? ''),
     shortLev: String(acc.short_leverage ?? ''),
     portfolioId: acc.portfolio_id,
-    forbidden: (acc.forbidden_symbols ?? []).join('\n'),
-    risk: (acc.risk_symbols ?? []).join('\n'),
+    forbidden: acc.forbidden_symbols ?? [],
+    risk: acc.risk_symbols ?? [],
     weightPrecision: String(acc.weight_precision ?? ''),
     executionTimeout: String(acc.execution_timeout ?? ''),
     writeEmpty: Boolean(acc.write_empty_record),
@@ -136,9 +130,9 @@ function buildPatch(draft: Draft, acc: Account, showShortLeverage: boolean): Par
 
   if (draft.portfolioId !== acc.portfolio_id) patch.portfolio_id = draft.portfolioId
 
-  const fb = parseList(draft.forbidden)
+  const fb = draft.forbidden
   if (!sameList(fb, acc.forbidden_symbols ?? [])) patch.forbidden_symbols = fb.length ? fb : null
-  const rk = parseList(draft.risk)
+  const rk = draft.risk
   if (!sameList(rk, acc.risk_symbols ?? [])) patch.risk_symbols = rk.length ? rk : null
 
   if (draft.weightPrecision.trim() !== '') {
@@ -355,8 +349,7 @@ export function AccountEditPage({ section = 'basic' }: { section?: EditSection }
       </div>
 
       <div className="mt-3 border-l-2 border-warn/60 bg-warn-tint/50 py-2 pl-3 pr-2 text-[13px] text-ink-2">
-        <b className="text-ink-1">影响半径</b> · 此账户{acc.is_started ? '自动执行中' : '已暂停'}
-        {item && ` · 持仓 ${item.holdings_count} 只`} · 改动不会立刻下单，下次调仓生效。渠道与市场不可更改。
+        修改不会立即下单，从下次调仓开始生效。
       </div>
 
       {section === 'basic' && (
@@ -458,24 +451,40 @@ export function AccountEditPage({ section = 'basic' }: { section?: EditSection }
 
       {section === 'symbols' && (
         <Section label="品种控制">
-          <Row label="禁投" hint="永不建仓" top>
-          <textarea
-            className={`${AREA} min-h-[52px]`}
-            rows={2}
+          <Row label="禁投" hint="永不建仓" top span>
+          <SymbolTagInput
+            id="edit-forbidden-symbols"
             value={d.forbidden}
-            spellCheck={false}
-            placeholder="逗号或换行分隔"
-            onChange={(e) => set({ forbidden: e.target.value })}
+            otherValue={d.risk}
+            variant="forbidden"
+            placeholder="输入禁投品种…"
+            otherLabel="风险品种"
+            onChange={(forbidden) => set({ forbidden })}
+            onMoveFromOther={(symbols) => {
+              const moving = new Set(symbols)
+              set({
+                forbidden: [...d.forbidden, ...symbols.filter((symbol) => !d.forbidden.includes(symbol))],
+                risk: d.risk.filter((symbol) => !moving.has(symbol)),
+              })
+            }}
           />
         </Row>
-        <Row label="风险品种" hint="仅减不加" top>
-          <textarea
-            className={`${AREA} min-h-[52px]`}
-            rows={2}
+        <Row label="风险品种" hint="仅减不加" top span>
+          <SymbolTagInput
+            id="edit-risk-symbols"
             value={d.risk}
-            spellCheck={false}
-            placeholder="可选"
-            onChange={(e) => set({ risk: e.target.value })}
+            otherValue={d.forbidden}
+            variant="risk"
+            placeholder="输入风险品种…"
+            otherLabel="禁投"
+            onChange={(risk) => set({ risk })}
+            onMoveFromOther={(symbols) => {
+              const moving = new Set(symbols)
+              set({
+                forbidden: d.forbidden.filter((symbol) => !moving.has(symbol)),
+                risk: [...d.risk, ...symbols.filter((symbol) => !d.risk.includes(symbol))],
+              })
+            }}
           />
           </Row>
         </Section>

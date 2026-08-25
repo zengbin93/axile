@@ -12,6 +12,12 @@ function renderBreadcrumb(trail: Parameters<typeof Breadcrumb>[0]['trail']): str
 }
 
 describe('Breadcrumb', () => {
+  it('renders as a stable route anchor outside the workspace crossfade', () => {
+    const html = renderBreadcrumb([{ label: '组合' }])
+
+    expect(html).toContain('class="app-breadcrumb ')
+  })
+
   it('renders an ancestor annotation inside the same link', () => {
     const html = renderBreadcrumb([
       { label: 'test', to: '/accounts/1', annotation: 'CTP' },

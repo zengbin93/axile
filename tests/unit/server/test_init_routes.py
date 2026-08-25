@@ -120,6 +120,85 @@ def test_test_feishu_rejects_empty_key(client: TestClient) -> None:
     assert response.json()["ok"] is False
 
 
+def test_update_execution_alert_persists_and_updates_runtime_settings(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    toml_path = tmp_path / "config.toml"
+    toml_path.write_text(
+        '# managed\nsqlalchemy_database_uri = "sqlite+aiosqlite:///./keep.db"\nexe_err_feishu_key = "old-key"\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(cfg, "CONFIG_TOML_PATH", toml_path)
+    monkeypatch.setattr(cfg.settings, "exe_err_feishu_key", "old-key")
+    monkeypatch.setattr(init_module, "_restart_process", lambda: pytest.fail("热更新不应触发重启"))
+
+    response = client.patch(
+        "/api/v1/init/execution-alert",
+        json={"exe_err_feishu_key": "new-key"},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"ok": True, "message": "执行告警配置已保存并立即生效。"}
+    written = toml_path.read_text(encoding="utf-8")
+    assert "# managed" in written
+    assert 'sqlalchemy_database_uri = "sqlite+aiosqlite:///./keep.db"' in written
+    assert 'exe_err_feishu_key = "new-key"' in written
+    assert cfg.settings.exe_err_feishu_key == "new-key"
+
+
+def test_update_execution_alert_accepts_empty_key(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    toml_path = tmp_path / "config.toml"
+    toml_path.write_text('exe_err_feishu_key = "old-key"\n', encoding="utf-8")
+    monkeypatch.setattr(cfg, "CONFIG_TOML_PATH", toml_path)
+    monkeypatch.setattr(cfg.settings, "exe_err_feishu_key", "old-key")
+
+    response = client.patch(
+        "/api/v1/init/execution-alert",
+        json={"exe_err_feishu_key": ""},
+    )
+
+    assert response.status_code == 200
+    assert 'exe_err_feishu_key = ""' in toml_path.read_text(encoding="utf-8")
+    assert cfg.settings.exe_err_feishu_key == ""
+
+
+def test_update_execution_alert_write_failure_keeps_runtime_value(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    toml_path = tmp_path / "config.toml"
+    toml_path.write_text('exe_err_feishu_key = "old-key"\n', encoding="utf-8")
+    monkeypatch.setattr(cfg, "CONFIG_TOML_PATH", toml_path)
+    monkeypatch.setattr(cfg.settings, "exe_err_feishu_key", "old-key")
+
+    def _raise_write_error(_key: str, _value: object) -> None:
+        raise OSError("disk full")
+
+    monkeypatch.setattr(init_module, "update_config_toml_value", _raise_write_error)
+
+    response = client.patch(
+        "/api/v1/init/execution-alert",
+        json={"exe_err_feishu_key": "new-key"},
+    )
+
+    assert response.status_code == 500
+    assert cfg.settings.exe_err_feishu_key == "old-key"
+
+
+def test_update_execution_alert_requires_initialized_config(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(cfg, "CONFIG_TOML_PATH", tmp_path / "missing.toml")
+
+    response = client.patch(
+        "/api/v1/init/execution-alert",
+        json={"exe_err_feishu_key": "new-key"},
+    )
+
+    assert response.status_code == 409
+
+
 def test_init_save_rejects_bad_dsn(client: TestClient) -> None:
     response = client.post(
         "/api/v1/init/save",

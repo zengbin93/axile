@@ -3,7 +3,7 @@ import { ThemeToggle } from '@/components/ThemeToggle'
 import { Link, useNavigate } from '@/components/ui/nav'
 
 const SETTINGS_NAV = [
-  { to: '/settings', label: '系统配置', exact: true },
+  { to: '/settings', label: '飞书告警', exact: true },
   { to: '/settings/trading-calendar', label: '交易日历', exact: false },
 ] as const
 

@@ -8,10 +8,10 @@ import { initStatus, peekInitValues, type InitValues } from '@/lib/api/init'
  *
  * 已配置用户从顶栏齿轮进入，以「编辑」模式复用 :func:`InitWizard`。预填值优先
  * 取启动时已拉取的缓存（:func:`peekInitValues`），从而首帧即渲染向导、与 `/setup`
- * 一样无加载闪屏；仅当缓存缺失（启动探测失败）时才回退到即时拉取。保存 → 后端写
- * config.toml 并重启 → 向导内部轮询就绪后自动刷新。
+ * 一样无加载闪屏；仅当缓存缺失（启动探测失败）时才回退到即时拉取。执行告警保存后
+ * 立即热生效；高级系统设置仍由后端写入 config.toml 并重启。
  */
-export function SystemConfigPage() {
+export function SystemConfigPage({ section = 'alert' }: { section?: 'alert' | 'advanced' }) {
   const navigate = useNavigate()
   const [values, setValues] = useState<InitValues | null>(() => peekInitValues())
 
@@ -39,5 +39,5 @@ export function SystemConfigPage() {
     )
   }
 
-  return <InitWizard initial={values} mode="edit" />
+  return <InitWizard initial={values} mode="edit" editSection={section} />
 }

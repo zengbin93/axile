@@ -1,17 +1,27 @@
+import { FolderOpen } from 'lucide-react'
 import { useState } from 'react'
 import { ThemeToggle } from '@/components/ThemeToggle'
 import { Toast } from '@/components/Toast'
 import { ConfirmModal, type ConfirmSpec } from '@/components/ui/ConfirmModal'
+import { DirectoryPicker } from '@/components/ui/DirectoryPicker'
 import { OverflowText } from '@/components/ui/OverflowText'
-import { Segmented } from '@/components/ui/Segmented'
 import { Select } from '@/components/ui/Select'
+import { SettingsSaveBar } from '@/components/ui/SettingsSaveBar'
+import { StringTagInput } from '@/components/ui/StringTagInput'
+import {
+  appendUniqueStrings,
+  normalizeStringList,
+} from '@/components/ui/stringList'
 import { ErrorNotice } from '@/components/ui/ErrorNotice'
+import { Row, Section, TEXT } from '@/features/account/editUi'
 import { CalendarSetupStep } from '@/features/init/CalendarSetupStep'
 import type { CalendarSetupSnapshot } from '@/features/init/calendarSetupState'
+import { advancedConfigChanges } from '@/features/init/advancedConfig'
 import { WizardPage } from '@/features/setup/WizardNav'
 import { ApiError } from '@/lib/api/client'
 import {
   initStatus,
+  saveExecutionAlert,
   saveInit,
   testDb,
   testFeishu,
@@ -60,7 +70,7 @@ const COPY: Record<WizardMode, Copy> = {
     brand: '系统配置',
     kicker: '系统配置',
     confirmTitle: '确认并保存',
-    confirmLead: '确认无误后保存；axile 会写入配置并重启服务以生效，期间会中断进行中的执行。',
+    confirmLead: '确认无误后保存。',
     saveLabel: '保存并重启',
     savingLabel: '重启中…',
     savedToast: '配置已保存，axile 正在重启…',
@@ -80,6 +90,36 @@ interface Draft {
   axile_log_rotation: string
   algorithm_modules: string
   algorithm_directories: string
+}
+
+/** 把后端配置归一成可直接比较的表单草稿。 */
+function draftFromInitial(initial: InitValues): Draft {
+  return {
+    sqlalchemy_database_uri: initial.sqlalchemy_database_uri || DEFAULT_DB_URI,
+    exe_err_feishu_key: initial.exe_err_feishu_key ?? '',
+    environment: initial.environment || 'local',
+    app_log_dir: initial.app_log_dir || './logs',
+    axile_log_rotation: initial.axile_log_rotation || '1 day',
+    algorithm_modules: (initial.algorithm_modules ?? []).join('\n'),
+    algorithm_directories: (initial.algorithm_directories ?? []).join('\n'),
+  }
+}
+
+function splitLines(value: string): string[] {
+  return normalizeStringList(value.split('\n'))
+}
+
+function advancedValues(draft: Draft, initial: InitValues): InitValues {
+  return {
+    ...initial,
+    sqlalchemy_database_uri: draft.sqlalchemy_database_uri,
+    exe_err_feishu_key: draft.exe_err_feishu_key,
+    environment: draft.environment,
+    app_log_dir: draft.app_log_dir,
+    axile_log_rotation: draft.axile_log_rotation,
+    algorithm_modules: splitLines(draft.algorithm_modules),
+    algorithm_directories: splitLines(draft.algorithm_directories),
+  }
 }
 
 type TestState = { ok: boolean; message: string } | 'busy' | null
@@ -118,7 +158,9 @@ function TestRow({
         {state === 'busy' ? '测试中…' : idleLabel}
       </button>
       {state && state !== 'busy' && (
-        <span className={`text-[13px] ${state.ok ? 'text-accent' : 'text-warn'}`}>
+        <span
+          className={`text-[13px] ${state.ok ? 'text-accent' : 'text-warn'}`}
+        >
           {state.ok ? '✓ ' : '✗ '}
           {state.message}
         </span>
@@ -145,7 +187,9 @@ function Rail({
 }) {
   return (
     <aside className="flex w-full flex-none overflow-x-auto border-b border-line bg-surface px-3 py-2 sm:block sm:w-[248px] sm:overflow-y-auto sm:border-b-0 sm:border-r sm:px-[18px] sm:py-7">
-      <div className="hidden px-2.5 pb-3.5 text-xs font-semibold tracking-wide text-ink-3 sm:block">{title}</div>
+      <div className="hidden px-2.5 pb-3.5 text-xs font-semibold tracking-wide text-ink-3 sm:block">
+        {title}
+      </div>
       {steps.map((label, i) => {
         const done = i < step
         const cur = i === step
@@ -183,7 +227,7 @@ function Rail({
  * 两种模式共用一套表单，但**导航范式不同**：
  * - `init`=首启初始化（由 `AppRoot` 在未配置时整屏渲染）：线性向导，逐级「下一步」推进，Rail 仅回跳已过步骤。
  * - `edit`=已配置后从齿轮进入的系统配置（由 `SystemConfigPage` 承载）：**设置页**，
- *   页内分段可任意切换，页脚常驻「保存并重启」——系统早已配好，无须逐级点按。
+ *   页内分段可任意切换；执行告警热保存，高级系统设置保存后重启。
  *
  * 采集数据库地址与可选外部集成配置，保存后后端写入 config.toml 并自重启；
  * 期间轮询 `/init/status`，就绪后刷新页面进入正常应用。编辑态保存前先弹确认（重启会中断执行）。
@@ -191,14 +235,20 @@ function Rail({
 export function InitWizard({
   initial,
   mode = 'init',
+  editSection = 'alert',
 }: {
   initial: InitValues
   /** 运行模式，默认首启初始化。 */
   mode?: WizardMode
+  /** 已配置后的独立设置页；首启向导忽略此项。 */
+  editSection?: 'alert' | 'advanced'
 }) {
   const isEdit = mode === 'edit'
   const copy = COPY[mode]
-  const steps = [...(isEdit ? EDIT_STEP_LABELS : INIT_STEP_LABELS), copy.confirmTitle]
+  const steps = [
+    ...(isEdit ? EDIT_STEP_LABELS : INIT_STEP_LABELS),
+    copy.confirmTitle,
+  ]
 
   const toast = useToastStore((s) => s.toast)
   const [step, setStep] = useState(0)
@@ -211,18 +261,20 @@ export function InitWizard({
   const [feishuTest, setFeishuTest] = useState<TestState>(null)
   const [confirm, setConfirm] = useState<ConfirmSpec | null>(null)
   const [saveError, setSaveError] = useState<Error | null>(null)
-
-  const [draft, setDraft] = useState<Draft>({
-    sqlalchemy_database_uri: initial.sqlalchemy_database_uri || DEFAULT_DB_URI,
-    exe_err_feishu_key: initial.exe_err_feishu_key ?? '',
-    environment: initial.environment || 'local',
-    app_log_dir: initial.app_log_dir || './logs',
-    axile_log_rotation: initial.axile_log_rotation || '1 day',
-    algorithm_modules: (initial.algorithm_modules ?? []).join('\n'),
-    algorithm_directories: (initial.algorithm_directories ?? []).join('\n'),
-  })
+  const [directoryPickerTarget, setDirectoryPickerTarget] = useState<
+    'log' | 'algorithm' | null
+  >(null)
+  const [savedAlertKey, setSavedAlertKey] = useState(
+    initial.exe_err_feishu_key ?? '',
+  )
+  const [draft, setDraft] = useState<Draft>(() => draftFromInitial(initial))
+  const initialDraft = draftFromInitial(initial)
+  const currentAdvancedValues = advancedValues(draft, initial)
+  const advancedChanges = advancedConfigChanges(initial, currentAdvancedValues)
+  const alertDirty = draft.exe_err_feishu_key !== savedAlertKey
   const set = (patch: Partial<Draft>) => {
     setSaveError(null)
+    if (patch.exe_err_feishu_key !== undefined) setFeishuTest(null)
     setDraft((d) => ({ ...d, ...patch }))
   }
 
@@ -263,11 +315,13 @@ export function InitWizard({
     setSaving(true)
     setSaveError(null)
     try {
-      const splitLines = (s: string) =>
-        s
-          .split('\n')
-          .map((m) => m.trim())
-          .filter(Boolean)
+      if (isEdit && editSection === 'alert') {
+        const result = await saveExecutionAlert(draft.exe_err_feishu_key)
+        setSavedAlertKey(draft.exe_err_feishu_key)
+        toast(result.message)
+        setSaving(false)
+        return
+      }
       await saveInit({
         ...draft,
         ...(!isEdit ? { trading_calendars: calendarSetup.calendars } : {}),
@@ -282,9 +336,9 @@ export function InitWizard({
     }
   }
 
-  /** 编辑态保存前先弹确认（重启会中断进行中的执行）；首启态直接保存。 */
+  /** 执行告警直接热保存；高级设置保存前确认重启；首启态直接保存。 */
   const onSave = () => {
-    if (isEdit) {
+    if (isEdit && editSection === 'advanced') {
       setConfirm({
         title: '保存并重启服务',
         body: '保存后 axile 会写入配置并重启服务以生效，正在进行中的执行会被中断。确认继续?',
@@ -300,11 +354,19 @@ export function InitWizard({
   const confirmStep = steps.length - 1
   const calendarStep = 0
   const alertStep = isEdit ? 0 : 1
-  const nextDisabled = step === confirmStep && !draft.sqlalchemy_database_uri.trim()
+  const nextDisabled =
+    step === confirmStep && !draft.sqlalchemy_database_uri.trim()
   const saveDisabled = saving || !draft.sqlalchemy_database_uri.trim()
 
+  const resetAdvancedDraft = () => {
+    setDraft(initialDraft)
+    setDbTest(null)
+    setSaveError(null)
+  }
+
   // edit 态是设置页而非向导：kicker 去掉「n / N」序号，只留分节标签。
-  const kickerOf = (n: number) => (isEdit ? copy.kicker : `${copy.kicker} · ${n} / ${steps.length}`)
+  const kickerOf = (n: number) =>
+    isEdit ? copy.kicker : `${copy.kicker} · ${n} / ${steps.length}`
 
   const onNext = () => {
     if (step < steps.length - 1) setStep(step + 1)
@@ -323,22 +385,13 @@ export function InitWizard({
       )}
 
       <div className="flex flex-1 flex-col overflow-hidden sm:flex-row">
-        {!isEdit && <Rail step={step} steps={steps} title={copy.brand} onJump={setStep} />}
-        <div className="flex flex-1 flex-col overflow-hidden">
-          <div className="flex-1 overflow-y-auto [scrollbar-gutter:stable]">
-            {isEdit && (
-              <div className="mx-auto max-w-[820px] px-5 pt-6 sm:px-12">
-                <Segmented
-                  size="sm"
-                  value={step === alertStep ? 'alert' : 'confirm'}
-                  options={[
-                    { value: 'alert', label: '执行告警' },
-                    { value: 'confirm', label: '确认并保存' },
-                  ]}
-                  onChange={(value) => setStep(value === 'alert' ? alertStep : confirmStep)}
-                />
-              </div>
-            )}
+        {!isEdit && (
+          <Rail step={step} steps={steps} title={copy.brand} onJump={setStep} />
+        )}
+        <div className="relative flex flex-1 flex-col overflow-hidden">
+          <div
+            className={`flex-1 overflow-y-auto [scrollbar-gutter:stable] ${isEdit && editSection === 'advanced' ? 'pb-24' : ''}`}
+          >
             {!isEdit && step === calendarStep && (
               <WizardPage
                 kicker={kickerOf(1)}
@@ -349,31 +402,74 @@ export function InitWizard({
               </WizardPage>
             )}
 
-            {step === alertStep && (
+            {step === alertStep && (!isEdit || editSection === 'alert') && (
               <WizardPage
                 kicker={kickerOf(2)}
                 title="执行错误告警（选填）"
-                lead="任一账户执行异常时，axile 会把错误卡片推送到此飞书机器人；系统级，区别于各账户自己的「飞书通知」。留空则不推送，可先「测试推送」发一张示例卡片确认联通。"
+                lead="任一账户执行异常时，axile 会把错误卡片推送到此飞书机器人；系统级，区别于各账户自己的「飞书通知」。留空则不推送。保存后立即生效；「测试推送」使用当前输入，不会保存配置。"
               >
                 <div className="max-w-[560px]">
                   <label className={labelCls}>飞书机器人 key</label>
                   <input
                     className={inputCls}
                     value={draft.exe_err_feishu_key}
-                    onChange={(e) => set({ exe_err_feishu_key: e.target.value })}
+                    onChange={(e) =>
+                      set({ exe_err_feishu_key: e.target.value })
+                    }
                     placeholder="留空则不推送"
                   />
-                  <TestRow
-                    state={feishuTest}
-                    onTest={runFeishuTest}
-                    idleLabel="测试推送"
-                    disabled={!draft.exe_err_feishu_key.trim()}
-                  />
+                  {isEdit ? (
+                    <>
+                      <div className="mt-4 flex flex-wrap items-center gap-3">
+                        <button
+                          className="cursor-pointer rounded-[11px] border border-line bg-surface px-4 py-2.5 text-[14px] text-ink-2 disabled:opacity-45"
+                          onClick={runFeishuTest}
+                          disabled={
+                            !draft.exe_err_feishu_key.trim() ||
+                            saving ||
+                            feishuTest === 'busy'
+                          }
+                        >
+                          {feishuTest === 'busy' ? '测试中…' : '测试推送'}
+                        </button>
+                        <button
+                          className="cursor-pointer rounded-[11px] border border-ink-1 bg-ink-1 px-[22px] py-2.5 text-[14px] font-[550] text-surface disabled:opacity-45"
+                          onClick={onSave}
+                          disabled={
+                            !alertDirty || saving || feishuTest === 'busy'
+                          }
+                        >
+                          {saving ? '保存中…' : '保存'}
+                        </button>
+                        {feishuTest && feishuTest !== 'busy' && (
+                          <span
+                            className={`text-[13px] ${feishuTest.ok ? 'text-accent' : 'text-warn'}`}
+                          >
+                            {feishuTest.ok ? '✓ ' : '✗ '}
+                            {feishuTest.message}
+                          </span>
+                        )}
+                      </div>
+                      <ErrorNotice
+                        title="保存执行告警失败"
+                        error={saveError}
+                        variant="mutation"
+                        onRetry={doSave}
+                      />
+                    </>
+                  ) : (
+                    <TestRow
+                      state={feishuTest}
+                      onTest={runFeishuTest}
+                      idleLabel="测试推送"
+                      disabled={!draft.exe_err_feishu_key.trim()}
+                    />
+                  )}
                 </div>
               </WizardPage>
             )}
 
-            {step === confirmStep && (
+            {step === confirmStep && !isEdit && (
               <WizardPage
                 kicker={kickerOf(steps.length)}
                 title={copy.confirmTitle}
@@ -383,13 +479,24 @@ export function InitWizard({
                   <dl className="rounded-[14px] border border-line bg-surface px-4 py-2 text-[14px]">
                     {[
                       ...(!isEdit
-                        ? (calendarSetup.summary.length > 0
-                            ? calendarSetup.summary.map((value, index) => [`交易日历 ${index + 1}`, value])
-                            : [['交易日历', '未配置，自动排程继续执行']])
+                        ? calendarSetup.summary.length > 0
+                          ? calendarSetup.summary.map((value, index) => [
+                              `交易日历 ${index + 1}`,
+                              value,
+                            ])
+                          : [['交易日历', '未配置，自动排程继续执行']]
                         : []),
-                      ['执行告警', draft.exe_err_feishu_key ? '已配置飞书推送' : '（未配置 · 不推送）'],
+                      [
+                        '执行告警',
+                        draft.exe_err_feishu_key
+                          ? '已配置飞书推送'
+                          : '（未配置 · 不推送）',
+                      ],
                     ].map(([k, v]) => (
-                      <div key={k} className="flex justify-between gap-4 border-b border-line py-2.5 last:border-0">
+                      <div
+                        key={k}
+                        className="flex justify-between gap-4 border-b border-line py-2.5 last:border-0"
+                      >
                         <dt className="text-ink-3">{k}</dt>
                         <dd className="min-w-0">
                           <OverflowText className="text-ink-1" text={v} />
@@ -399,12 +506,16 @@ export function InitWizard({
                   </dl>
 
                   <details className="mt-4 rounded-[14px] border border-line bg-surface px-4 py-3">
-                    <summary className="cursor-pointer text-[14px] text-ink-2">高级选项（一般保持默认）</summary>
+                    <summary className="cursor-pointer text-[14px] text-ink-2">
+                      高级选项（一般保持默认）
+                    </summary>
                     <label className={labelCls}>数据库地址</label>
                     <input
                       className={inputCls}
                       value={draft.sqlalchemy_database_uri}
-                      onChange={(e) => set({ sqlalchemy_database_uri: e.target.value })}
+                      onChange={(e) =>
+                        set({ sqlalchemy_database_uri: e.target.value })
+                      }
                       placeholder={DEFAULT_DB_URI}
                     />
                     <TestRow state={dbTest} onTest={runDbTest} />
@@ -423,7 +534,9 @@ export function InitWizard({
                     <p className="mt-1.5 text-[12px] leading-relaxed text-ink-3">
                       仅影响日志详细程度：「本地开发」打印较详细日志（INFO
                       及以上），「预发布 / 生产」更安静（仅警告及以上）。
-                      <span className="text-ink-2">不改变交易行为，与实盘 / 模拟无关。</span>
+                      <span className="text-ink-2">
+                        不改变交易行为，与实盘 / 模拟无关。
+                      </span>
                     </p>
                     <label className={labelCls}>日志目录</label>
                     <input
@@ -435,51 +548,214 @@ export function InitWizard({
                     <input
                       className={inputCls}
                       value={draft.axile_log_rotation}
-                      onChange={(e) => set({ axile_log_rotation: e.target.value })}
+                      onChange={(e) =>
+                        set({ axile_log_rotation: e.target.value })
+                      }
                     />
                     <label className={labelCls}>用户算法目录（每行一个）</label>
                     <textarea
                       className={`${inputCls} min-h-[72px] font-mono`}
                       value={draft.algorithm_directories}
-                      onChange={(e) => set({ algorithm_directories: e.target.value })}
+                      onChange={(e) =>
+                        set({ algorithm_directories: e.target.value })
+                      }
                       placeholder="./my_algorithms"
                     />
                     <p className="mt-1.5 text-[12px] leading-relaxed text-ink-3">
-                      指向存放自定义算法的目录，启动时扫描其中的 <span className="num">.py</span> 并加载注册的算法；
+                      指向存放自定义算法的目录，启动时扫描其中的{' '}
+                      <span className="num">.py</span> 并加载注册的算法；
                       保存后服务重启生效，随后在账户「怎么交易」里可选。
                     </p>
-                    <label className={labelCls}>算法模块（每行一个 · 进阶）</label>
+                    <label className={labelCls}>
+                      算法模块（每行一个 · 进阶）
+                    </label>
                     <textarea
                       className={`${inputCls} min-h-[72px] font-mono`}
                       value={draft.algorithm_modules}
-                      onChange={(e) => set({ algorithm_modules: e.target.value })}
+                      onChange={(e) =>
+                        set({ algorithm_modules: e.target.value })
+                      }
                       placeholder="package.module"
                     />
                   </details>
                 </div>
               </WizardPage>
             )}
+
+            {isEdit && editSection === 'advanced' && (
+              <div className="mx-auto max-w-[820px] px-5 pt-8 pb-6 sm:px-12">
+                <div className="text-[22px] font-[680] tracking-tight">
+                  高级
+                </div>
+                <div className="mt-3 border-l-2 border-warn/60 bg-warn-tint/50 py-2 pl-3 pr-2 text-[13px] text-ink-2">
+                  保存后将重启服务，并中断正在进行中的执行。
+                </div>
+
+                <Section label="存储">
+                  <Row label="数据库地址" hint="持久化" top span>
+                    <div className="flex items-center gap-2">
+                      <input
+                        className={`${TEXT} min-w-0 flex-1 font-mono`}
+                        value={draft.sqlalchemy_database_uri}
+                        onChange={(event) => {
+                          setDbTest(null)
+                          set({ sqlalchemy_database_uri: event.target.value })
+                        }}
+                        placeholder={DEFAULT_DB_URI}
+                      />
+                      <button
+                        type="button"
+                        className="flex-none cursor-pointer rounded-[9px] border border-line bg-surface px-4 py-2 text-[14px] text-ink-2 transition-[border-color] hover:border-ink-3/40 disabled:opacity-45"
+                        onClick={runDbTest}
+                        disabled={
+                          !draft.sqlalchemy_database_uri.trim() ||
+                          dbTest === 'busy'
+                        }
+                      >
+                        {dbTest === 'busy' ? '测试中…' : '测试连接'}
+                      </button>
+                    </div>
+                    <div
+                      className="mt-1.5 min-h-4 text-[12px]"
+                      aria-live="polite"
+                    >
+                      {dbTest && dbTest !== 'busy' ? (
+                        <span
+                          className={dbTest.ok ? 'text-accent' : 'text-warn'}
+                        >
+                          {dbTest.ok ? '✓ ' : '✗ '}
+                          {dbTest.message}
+                        </span>
+                      ) : (
+                        <span className="text-ink-3">
+                          服务数据的持久化地址；更换前请确认目标数据库已准备完成。
+                        </span>
+                      )}
+                    </div>
+                  </Row>
+                </Section>
+
+                <Section label="运行与日志">
+                  <Row label="运行环境" hint="日志级别" top>
+                    <Select<string>
+                      ariaLabel="运行环境"
+                      className="w-full justify-between px-3 py-2 text-[14px]"
+                      value={draft.environment}
+                      onChange={(value) => set({ environment: value })}
+                      options={[
+                        { value: 'local', label: '本地开发（local）' },
+                        { value: 'staging', label: '预发布（staging）' },
+                        { value: 'production', label: '生产（production）' },
+                      ]}
+                    />
+                    <p className="mt-1.5 text-[11px] leading-5 text-ink-3">
+                      {draft.environment === 'local'
+                        ? '打印 INFO 及以上详细日志。'
+                        : '仅记录警告及以上日志。'}
+                      不改变交易行为。
+                    </p>
+                  </Row>
+                  <Row label="日志滚动" hint="轮换规则" top>
+                    <input
+                      className={`${TEXT} font-mono`}
+                      value={draft.axile_log_rotation}
+                      onChange={(event) =>
+                        set({ axile_log_rotation: event.target.value })
+                      }
+                      placeholder="1 day"
+                    />
+                    <p className="mt-1.5 text-[11px] leading-5 text-ink-3">
+                      例如 1 day、100 MB 或 00:00。
+                    </p>
+                  </Row>
+                  <Row label="日志目录" hint="写入位置" top span>
+                    <div className="flex items-center gap-2">
+                      <input
+                        className={`${TEXT} min-w-0 flex-1 font-mono`}
+                        value={draft.app_log_dir}
+                        onChange={(event) =>
+                          set({ app_log_dir: event.target.value })
+                        }
+                      />
+                      <button
+                        type="button"
+                        className="inline-flex flex-none cursor-pointer items-center gap-1.5 rounded-[9px] border border-line bg-surface px-4 py-2 text-[14px] text-ink-2 transition-[border-color] hover:border-ink-3/40"
+                        onClick={() => setDirectoryPickerTarget('log')}
+                      >
+                        <FolderOpen size={15} />
+                        选择目录
+                      </button>
+                    </div>
+                    <p className="mt-1.5 text-[11px] leading-5 text-ink-3">
+                      服务运行日志的写入目录，可直接输入或浏览服务所在机器。
+                    </p>
+                  </Row>
+                </Section>
+
+                <Section label="算法扩展">
+                  <Row label="用户算法目录" hint="扫描 .py" top span>
+                    <StringTagInput
+                      id="advanced-algorithm-directories"
+                      value={splitLines(draft.algorithm_directories)}
+                      mode="directory"
+                      placeholder="输入目录路径…"
+                      help="Enter 确认；启动时扫描目录中的 .py 文件并加载注册算法。"
+                      onChange={(values) =>
+                        set({ algorithm_directories: values.join('\n') })
+                      }
+                      action={
+                        <button
+                          type="button"
+                          className="inline-flex flex-none cursor-pointer items-center gap-1.5 rounded-[9px] border border-line bg-surface px-3 py-1.5 text-[12px] text-ink-2"
+                          onMouseDown={(event) => event.preventDefault()}
+                          onClick={() => setDirectoryPickerTarget('algorithm')}
+                        >
+                          <FolderOpen size={14} />
+                          浏览目录
+                        </button>
+                      }
+                    />
+                  </Row>
+                  <Row label="算法模块" hint="进阶" top span>
+                    <StringTagInput
+                      id="advanced-algorithm-modules"
+                      value={splitLines(draft.algorithm_modules)}
+                      mode="module"
+                      placeholder="package.module"
+                      help="Enter、Tab、逗号或空格确认；按 Python 模块路径加载。"
+                      onChange={(values) =>
+                        set({ algorithm_modules: values.join('\n') })
+                      }
+                    />
+                  </Row>
+                </Section>
+              </div>
+            )}
           </div>
 
-          <div className="border-t border-line bg-surface px-5 sm:px-12">
-            <ErrorNotice title="保存系统配置失败" error={saveError} variant="mutation" onRetry={doSave} />
-          </div>
-          <div className="flex gap-3 bg-surface px-5 py-3.5 sm:px-12">
-            {isEdit ? (
-              // edit=设置页：右侧常驻「保存并重启」，可从任意节直接保存（经确认弹窗）。
-              <>
-                <span className="flex-1" />
-                <button
-                  className="shrink-0 cursor-pointer whitespace-nowrap rounded-[11px] border border-ink-1 bg-ink-1 px-[22px] py-2.5 text-[14px] font-[550] text-surface disabled:opacity-45"
-                  onClick={onSave}
-                  disabled={saveDisabled}
-                >
-                  {saving ? copy.savingLabel : copy.saveLabel}
-                </button>
-              </>
-            ) : (
-              // init=向导：上一步 + 下一步 / 保存，逐级推进。
-              <>
+          {isEdit && editSection === 'advanced' && (
+            <SettingsSaveBar
+              changes={advancedChanges}
+              blocked={saveDisabled && !saving}
+              saving={saving}
+              onCancel={resetAdvancedDraft}
+              onSave={onSave}
+              error={saveError}
+            />
+          )}
+
+          {!isEdit && (
+            <>
+              <div className="border-t border-line bg-surface px-5 sm:px-12">
+                <ErrorNotice
+                  title="保存系统配置失败"
+                  error={saveError}
+                  variant="mutation"
+                  onRetry={doSave}
+                />
+              </div>
+              <div className="flex gap-3 bg-surface px-5 py-3.5 sm:px-12">
+                {/* init=向导：上一步 + 下一步 / 保存，逐级推进。 */}
                 {step > 0 && (
                   <button
                     className="cursor-pointer rounded-[11px] border border-line bg-surface px-[22px] py-2.5 text-[14px] text-ink-2"
@@ -494,13 +770,37 @@ export function InitWizard({
                   onClick={onNext}
                   disabled={nextDisabled || saving}
                 >
-                  {saving ? copy.savingLabel : step === steps.length - 1 ? copy.saveLabel : '下一步'}
+                  {saving
+                    ? copy.savingLabel
+                    : step === steps.length - 1
+                      ? copy.saveLabel
+                      : '下一步'}
                 </button>
-              </>
-            )}
-          </div>
+              </div>
+            </>
+          )}
         </div>
       </div>
+      <DirectoryPicker
+        open={directoryPickerTarget !== null}
+        initialPath={
+          directoryPickerTarget === 'log'
+            ? draft.app_log_dir
+            : splitLines(draft.algorithm_directories).at(-1)
+        }
+        onClose={() => setDirectoryPickerTarget(null)}
+        onSelect={(path) => {
+          if (directoryPickerTarget === 'log') {
+            set({ app_log_dir: path })
+            return
+          }
+          const directories = appendUniqueStrings(
+            splitLines(draft.algorithm_directories),
+            [path],
+          )
+          set({ algorithm_directories: directories.join('\n') })
+        }}
+      />
       <ConfirmModal spec={confirm} onClose={() => setConfirm(null)} />
       <Toast />
     </div>

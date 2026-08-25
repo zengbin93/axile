@@ -2,6 +2,7 @@ import { useEffect, type ComponentType, type CSSProperties, type ReactNode } fro
 import { useLocation } from 'react-router'
 import {
   Ban,
+  BellRing,
   Boxes,
   CalendarDays,
   ChartNoAxesCombined,
@@ -39,9 +40,9 @@ function accountIdFromPath(pathname: string): number | null {
 
 function NavSection({ label, children }: { label: string; children: ReactNode }) {
   return (
-    <section className="mt-2 first:mt-0">
+    <section>
       <div className="mb-0.5 px-2.5 text-[11px] font-semibold tracking-wide text-ink-3">{label}</div>
-      <div>{children}</div>
+      <div className="ml-3">{children}</div>
     </section>
   )
 }
@@ -135,35 +136,38 @@ export function AppSidebar() {
       style={{ left: 'max(20px, calc(50% - 430px - 24px - 224px))' }}
       aria-label="主导航"
     >
-      <div>
-        <NavItem item={{ label: '账户', icon: CircleGauge, to: '/', active: (pathname) => pathname === '/' }} />
-        <NavItem item={{ label: '组合', icon: Boxes, to: '/portfolios', active: (pathname) => pathname.startsWith('/portfolios') }} />
-      </div>
+      <nav className="flex flex-1 flex-col justify-between pb-2" aria-label="功能导航">
+        <div>
+          <NavItem item={{ label: '账户', icon: CircleGauge, to: '/', active: (pathname) => pathname === '/' }} />
+          <NavItem item={{ label: '组合', icon: Boxes, to: '/portfolios', active: (pathname) => pathname.startsWith('/portfolios') }} />
+        </div>
 
-      <NavSection label="当前账户">
-        {accountOverview.map((item) => <NavItem key={item.label} item={item} />)}
-      </NavSection>
+        <NavSection label="当前账户">
+          {accountOverview.map((item) => <NavItem key={item.label} item={item} />)}
+        </NavSection>
 
-      <NavSection label="账户参数">
-        {accountParameters.map((item) => <NavItem key={item.label} item={item} />)}
-      </NavSection>
+        <NavSection label="账户参数">
+          {accountParameters.map((item) => <NavItem key={item.label} item={item} />)}
+        </NavSection>
 
-      <NavSection label="自动执行">
-        {accountExecution.map((item) => <NavItem key={item.label} item={item} />)}
-      </NavSection>
+        <NavSection label="自动执行">
+          {accountExecution.map((item) => <NavItem key={item.label} item={item} />)}
+        </NavSection>
 
-      <NavSection label="系统">
-        <NavItem item={{ label: '交易日历', icon: CalendarDays, to: '/settings/trading-calendar', active: exact('/settings/trading-calendar') }} />
-        <NavItem item={{ label: '系统配置', icon: Settings2, to: '/settings', active: exact('/settings') }} />
-      </NavSection>
+        <NavSection label="系统">
+          <NavItem item={{ label: '交易日历', icon: CalendarDays, to: '/settings/trading-calendar', active: exact('/settings/trading-calendar') }} />
+          <NavItem item={{ label: '飞书告警', icon: BellRing, to: '/settings', active: exact('/settings') }} />
+          <NavItem item={{ label: '高级', icon: Settings2, to: '/settings/advanced', active: exact('/settings/advanced') }} />
+        </NavSection>
+      </nav>
 
       <div className="mt-auto border-t border-line pt-2">
         <div className="grid grid-cols-2 gap-1.5">
           <Link to="/setup/acct/channel" className="flex items-center justify-center gap-1.5 rounded-[9px] border border-line px-2 py-1.5 text-[12px] text-ink-2 hover:border-ink-3/40 hover:text-ink-1">
-            <Plus size={14} aria-hidden />账户
+            <Plus size={14} aria-hidden />新建账户
           </Link>
           <Link to="/setup/pf/name" className="flex items-center justify-center gap-1.5 rounded-[9px] border border-line px-2 py-1.5 text-[12px] text-ink-2 hover:border-ink-3/40 hover:text-ink-1">
-            <Plus size={14} aria-hidden />组合
+            <Plus size={14} aria-hidden />新建组合
           </Link>
         </div>
       </div>

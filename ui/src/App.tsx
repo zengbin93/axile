@@ -112,6 +112,7 @@ const router = createBrowserRouter([
           { path: 'portfolios/:id', element: <PortfolioDetailPage /> },
           { path: 'portfolios/:id/edit', element: <PortfolioEditPage /> },
           { path: 'settings', element: <SystemConfigPage /> },
+          { path: 'settings/advanced', element: <SystemConfigPage section="advanced" /> },
           { path: 'settings/trading-calendar', element: <TradingCalendarPage /> },
           { path: '*', element: <Placeholder title="页面不存在" milestone="—" /> },
         ],

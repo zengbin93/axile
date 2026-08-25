@@ -24,6 +24,7 @@ from axile.common.config import (
     SqliteDsn,
     is_configured,
     settings,
+    update_config_toml_value,
     write_config_toml,
 )
 from axile.server.error_notifications import build_test_card
@@ -76,6 +77,14 @@ class FeishuTestRequest(BaseModel):
     """执行告警飞书机器人连通性测试载荷."""
 
     key: str
+
+
+class ExecutionAlertUpdateRequest(BaseModel):
+    """系统级执行错误告警配置更新载荷."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    exe_err_feishu_key: str = ""
 
 
 class TestResult(BaseModel):
@@ -251,6 +260,50 @@ async def test_feishu(payload: FeishuTestRequest) -> TestResult:
         str(result.get("msg") or result.get("StatusMessage") or result) if isinstance(result, dict) else str(result)
     )
     return TestResult(ok=False, message=f"飞书返回失败：{detail[:200]}")
+
+
+@router.patch("/execution-alert")
+def update_execution_alert(payload: ExecutionAlertUpdateRequest) -> TestResult:
+    """
+    保存系统级执行错误告警配置并立即生效.
+
+    Parameters
+    ----------
+    payload : ExecutionAlertUpdateRequest
+        新的飞书机器人 key；空串表示关闭推送。
+
+    Returns
+    -------
+    TestResult
+        保存成功时返回立即生效提示。
+
+    Raises
+    ------
+    HTTPException
+        系统尚未完成初始化时返回 409；配置落盘失败时返回 500。
+
+    Notes
+    -----
+    先持久化再更新进程内配置，确保写盘失败时当前告警行为不发生变化。执行失败链路
+    在发送告警时读取同一个 ``settings`` 实例，因此无需重启服务。
+    """
+    if not is_configured():
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="系统尚未完成初始化，请先完成初始化配置",
+        )
+
+    try:
+        update_config_toml_value("exe_err_feishu_key", payload.exe_err_feishu_key)
+    except OSError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"写入配置文件失败：{exc}",
+        ) from exc
+
+    settings.exe_err_feishu_key = payload.exe_err_feishu_key
+    logger.info("执行错误告警配置已更新并立即生效。")
+    return TestResult(ok=True, message="执行告警配置已保存并立即生效。")
 
 
 def _restart_process() -> None:

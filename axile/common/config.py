@@ -156,3 +156,24 @@ def write_config_toml(values: dict[str, Any]) -> None:
     for key, value in values.items():
         document[key] = value
     CONFIG_TOML_PATH.write_text(tomlkit.dumps(document), encoding="utf-8")
+
+
+def update_config_toml_value(key: str, value: Any) -> None:
+    """
+    更新 ``config.toml`` 中的单个配置值.
+
+    Parameters
+    ----------
+    key : str
+        需要更新的配置键。
+    value : Any
+        TOML 可序列化的新值。
+
+    Notes
+    -----
+    该函数用于无需重启即可生效的运行期配置。它保留配置文件中的其他字段与注释，
+    避免窄接口通过整份配置覆写启动期设置。
+    """
+    document = tomlkit.parse(CONFIG_TOML_PATH.read_text(encoding="utf-8"))
+    document[key] = value
+    CONFIG_TOML_PATH.write_text(tomlkit.dumps(document), encoding="utf-8")

@@ -51,9 +51,8 @@ export interface TestResult {
 /**
  * 最近一次成功的 `/init/status` 预填值缓存。
  *
- * 运行期配置只会被系统配置向导自身修改（且改后必重启重读），因此启动时
- * 拉到的值恒等于当前 `config.toml`。缓存供系统配置页同步取用，免去二次
- * fetch 造成的加载闪屏。
+ * 启动时拉到的值与当前 `config.toml` 一致。缓存供系统配置页同步取用，免去二次
+ * fetch 造成的加载闪屏；热更新配置成功后须同步维护这份缓存。
  */
 let cachedInitValues: InitValues | null = null
 
@@ -78,6 +77,18 @@ export function testDb(uri: string): Promise<TestResult> {
 /** 测试执行告警飞书机器人连通性（向其推送一张联通测试卡片）。 */
 export function testFeishu(key: string): Promise<TestResult> {
   return apiSend<TestResult>('POST', '/init/test-feishu', { key })
+}
+
+/** 保存系统级执行错误告警配置；成功后当前服务进程立即使用新值。 */
+export function saveExecutionAlert(exeErrFeishuKey: string): Promise<TestResult> {
+  return apiSend<TestResult>('PATCH', '/init/execution-alert', {
+    exe_err_feishu_key: exeErrFeishuKey,
+  }).then((result) => {
+    if (result.ok && cachedInitValues) {
+      cachedInitValues = { ...cachedInitValues, exe_err_feishu_key: exeErrFeishuKey }
+    }
+    return result
+  })
 }
 
 export function previewInitCalendarCsv(calendarId: string, file: File): Promise<InitCalendarPreview> {

@@ -225,6 +225,10 @@
   view-transition-name: app-workspace;
 }
 
+.app-breadcrumb {
+  view-transition-name: app-breadcrumb;
+}
+
 @keyframes app-workspace-old {
   to {
     opacity: 0;
@@ -238,7 +242,7 @@
 }
 
 /*
- * 路由切换只替换右侧工作区；顶栏和悬浮导航属于稳定骨架，不参与整页淡入。
+ * 路由切换只替换右侧工作区；顶栏、面包屑和悬浮导航属于稳定锚点，不参与整页淡入。
  * 导航选中标记是同一个“当前位置”对象，跨二级入口用共享元素位移。
  */
 @media (prefers-reduced-motion: no-preference) {
@@ -254,6 +258,13 @@
   }
   ::view-transition-new(app-workspace) {
     animation: app-workspace-new 180ms cubic-bezier(0.4, 0, 0.2, 1) both;
+  }
+  /*
+   * 面包屑只借命名从工作区快照中挖空，自身快照不参与合成；透明区域直接露出
+   * 新页面的真实 DOM，避免过渡结束时从栅格快照切回字体造成亮度闪烁。
+   */
+  ::view-transition-group(app-breadcrumb) {
+    display: none;
   }
   /* 共享元素 FLIP 的时长/缓动（L3）。 */
   ::view-transition-group(*) {
