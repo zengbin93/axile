@@ -84,6 +84,25 @@ export function Section({ label, children }: { label: string; children: ReactNod
   )
 }
 
+/**
+ * 编辑页当前配置摘要：承接草稿的人话表达，不重复页面身份，也不使用卡片壳抢层级。
+ */
+export function EditSynopsis({
+  children,
+  note,
+}: {
+  children: ReactNode
+  note?: string
+}) {
+  return (
+    <div className="mt-4">
+      <div className="text-[11px] font-semibold tracking-wide text-ink-3">当前配置</div>
+      <div className="mt-1 text-[14px] font-medium leading-6 text-ink-1">{children}</div>
+      {note && <p className="mt-1 text-[13px] leading-5 text-ink-2">{note}</p>}
+    </div>
+  )
+}
+
 /** 设置行：左标签 / 右控件。 */
 export function Row({
   label,

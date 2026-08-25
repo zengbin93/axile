@@ -7,12 +7,11 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useParams } from 'react-router'
 import { useNavigate } from '@/components/ui/nav'
-import { Chip } from '@/components/ui/Card'
 import { getAccount, updateAccount } from '@/lib/api/accounts'
 import { usePolling } from '@/lib/hooks/usePolling'
 import { useDomainStore } from '@/stores/domain'
 import { useToastStore } from '@/stores/ui'
-import { channelLabel } from '@/features/dashboard/display'
+import { AccountPageTitle } from '@/features/account/pageHead'
 import {
   cronExprEqual,
   describeCron,
@@ -26,8 +25,7 @@ import {
   EditError,
   EditLoading,
   EditSaveBar,
-  EditWorktopBar,
-  editShellVtName,
+  EditSynopsis,
 } from '@/features/account/editUi'
 
 export function AccountEditTimerPage() {
@@ -35,13 +33,26 @@ export function AccountEditTimerPage() {
   const accountId = Number(id)
   const navigate = useNavigate()
   const toast = useToastStore((s) => s.toast)
+  const accounts = useDomainStore((s) => s.accounts)
   const refreshAccounts = useDomainStore((s) => s.refreshAccounts)
   const account = usePolling(useCallback((s: AbortSignal) => getAccount(accountId, s), [accountId]), {
     queryKey: `account:${accountId}`,
     intervalMs: 0,
   })
   const acc = account.data
+  const cachedAccount = accounts?.find((item) => item.account_id === accountId) ?? null
   const descriptor = useChannelDescriptor(acc?.trade_channel)
+  const title = (
+    <div className="flex flex-wrap items-baseline gap-3">
+      <AccountPageTitle
+        accountId={accountId}
+        page="定时节奏"
+        name={acc?.name ?? cachedAccount?.name}
+        channel={acc?.trade_channel ?? cachedAccount?.trade_channel}
+        market={acc?.market ?? cachedAccount?.market}
+      />
+    </div>
+  )
 
   const [ready, setReady] = useState(false)
   const [timer, setTimer] = useState<TimerEditorState | null>(null)
@@ -58,7 +69,12 @@ export function AccountEditTimerPage() {
     return <EditError error={account.error} onRetry={account.refresh} />
 
   if (account.loading || !ready || !acc || !timer || !descriptor)
-    return <EditLoading />
+    return (
+      <section className="pb-24">
+        {title}
+        <EditLoading bare />
+      </section>
+    )
 
   const scheduleKind = descriptor.schedule.kind
   const cronNext = timerStateToCronExpr(scheduleKind, timer, descriptor.schedule.night)
@@ -92,14 +108,10 @@ export function AccountEditTimerPage() {
 
   return (
     <section className="pb-24">
-      <EditWorktopBar
-        label="定时"
-        hint="自动调仓"
-        summary={timerSummary}
-        trailing={<Chip>{channelLabel(acc.trade_channel, acc.market)}</Chip>}
-        shellVtName={editShellVtName(accountId, 'timer')}
-        lead={`${acc.name} · 完整快捷 / 高级配置 · 时间均为北京时间。保存只更新自动执行计划，不改启停状态。`}
-      />
+      {title}
+      <EditSynopsis note="时间均为北京时间；保存只更新自动执行计划，不改启停状态。">
+        {timerSummary}
+      </EditSynopsis>
 
       <div className="mt-6">
         <TimerEditor

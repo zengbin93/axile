@@ -7,12 +7,11 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useParams } from 'react-router'
 import { useNavigate } from '@/components/ui/nav'
-import { Chip } from '@/components/ui/Card'
 import { getAccount, updateAccount } from '@/lib/api/accounts'
 import { usePolling } from '@/lib/hooks/usePolling'
 import { useDomainStore } from '@/stores/domain'
 import { useToastStore } from '@/stores/ui'
-import { channelLabel } from '@/features/dashboard/display'
+import { AccountPageTitle } from '@/features/account/pageHead'
 import { useChannelDescriptor } from '@/stores/channels'
 import {
   describeAlgorithmRef,
@@ -24,10 +23,9 @@ import {
   EditError,
   EditLoading,
   EditSaveBar,
-  EditWorktopBar,
+  EditSynopsis,
   Row,
   Section,
-  editShellVtName,
 } from '@/features/account/editUi'
 import type { Account, AlgorithmSlot } from '@/types/api'
 
@@ -52,13 +50,26 @@ export function AccountEditAlgorithmPage() {
   const accountId = Number(id)
   const navigate = useNavigate()
   const toast = useToastStore((s) => s.toast)
+  const accounts = useDomainStore((s) => s.accounts)
   const refreshAccounts = useDomainStore((s) => s.refreshAccounts)
   const account = usePolling(useCallback((s: AbortSignal) => getAccount(accountId, s), [accountId]), {
     queryKey: `account:${accountId}`,
     intervalMs: 0,
   })
   const acc = account.data
+  const cachedAccount = accounts?.find((item) => item.account_id === accountId) ?? null
   const descriptor = useChannelDescriptor(acc?.trade_channel)
+  const title = (
+    <div className="flex flex-wrap items-baseline gap-3">
+      <AccountPageTitle
+        accountId={accountId}
+        page="执行算法"
+        name={acc?.name ?? cachedAccount?.name}
+        channel={acc?.trade_channel ?? cachedAccount?.trade_channel}
+        market={acc?.market ?? cachedAccount?.market}
+      />
+    </div>
+  )
 
   const [ready, setReady] = useState(false)
   const [trade, setTrade] = useState<AlgorithmRef | null>(null)
@@ -77,7 +88,12 @@ export function AccountEditAlgorithmPage() {
     return <EditError error={account.error} onRetry={account.refresh} />
 
   if (account.loading || !ready || !acc || !trade || !descriptor)
-    return <EditLoading />
+    return (
+      <section className="pb-24">
+        {title}
+        <EditLoading bare />
+      </section>
+    )
 
   const origTrade = refFromAccount(acc.algorithm) ?? descriptor.defaults.trade_algorithm
   const origEmpty = refFromAccount(acc.empty_positions_algorithm)
@@ -91,10 +107,9 @@ export function AccountEditAlgorithmPage() {
   if (tradeChanged) changes.push('下单算法已改')
   if (emptyChanged) changes.push(empty ? '清仓算法已改' : '清仓算法已清除')
 
-  // 与总览入口同构摘要（随草稿变，FLIP 中列语义连续）。
+  // 摘要随草稿更新；下单与清仓分行，避免两个配置槽挤成一个长句。
   const tradeSum = describeAlgorithmRef(trade)
   const emptySum = describeAlgorithmRef(empty)
-  const algoSummary = emptySum === '未设置' ? tradeSum : `${tradeSum} · 清仓 ${emptySum}`
 
   const save = async () => {
     if (err) return toast(`算法参数非法：${err}`)
@@ -140,14 +155,15 @@ export function AccountEditAlgorithmPage() {
 
   return (
     <section className="pb-24">
-      <EditWorktopBar
-        label="执行算法"
-        hint="下单 / 清仓"
-        summary={algoSummary}
-        trailing={<Chip>{channelLabel(acc.trade_channel, acc.market)}</Chip>}
-        shellVtName={editShellVtName(accountId, 'algorithm')}
-        lead={`${acc.name} · 主交易与清仓分槽配置。保存只更新算法引用，不影响定时与启停。`}
-      />
+      {title}
+      <EditSynopsis note="保存只更新算法引用，不影响定时与启停。">
+        <div className="grid grid-cols-[3rem_minmax(0,1fr)] gap-x-3 gap-y-0.5">
+          <span className="font-normal text-ink-3">下单</span>
+          <span>{tradeSum}</span>
+          <span className="font-normal text-ink-3">清仓</span>
+          <span>{emptySum}</span>
+        </div>
+      </EditSynopsis>
 
       <Section label="主交易">
         {slotRow('trade', '下单算法', trade, (v) => { setSaveError(null); setTrade(v ?? descriptor.defaults.trade_algorithm) })}

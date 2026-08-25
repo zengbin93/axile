@@ -3,18 +3,16 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useParams } from 'react-router'
 import { useNavigate } from '@/components/ui/nav'
-import { Chip } from '@/components/ui/Card'
 import { ErrorNotice } from '@/components/ui/ErrorNotice'
 import { Select } from '@/components/ui/Select'
 import {
   EditError,
   EditLoading,
   EditSaveBar,
-  EditWorktopBar,
+  EditSynopsis,
   Section,
-  editShellVtName,
 } from '@/features/account/editUi'
-import { channelLabel } from '@/features/dashboard/display'
+import { AccountPageTitle } from '@/features/account/pageHead'
 import { getAccount, getAccountControlPolicy, updateAccount } from '@/lib/api/accounts'
 import { usePolling } from '@/lib/hooks/usePolling'
 import { useDomainStore } from '@/stores/domain'
@@ -288,6 +286,7 @@ export function AccountEditControlPage() {
   const accountId = Number(id)
   const navigate = useNavigate()
   const toast = useToastStore((state) => state.toast)
+  const accounts = useDomainStore((state) => state.accounts)
   const refreshAccounts = useDomainStore((state) => state.refreshAccounts)
   const account = usePolling(useCallback((signal: AbortSignal) => getAccount(accountId, signal), [accountId]), {
     queryKey: `account:${accountId}`,
@@ -322,6 +321,18 @@ export function AccountEditControlPage() {
   }, [loadPolicy, model])
 
   const acc = account.data
+  const cachedAccount = accounts?.find((item) => item.account_id === accountId) ?? null
+  const title = (
+    <div className="flex flex-wrap items-baseline gap-3">
+      <AccountPageTitle
+        accountId={accountId}
+        page="执行流控"
+        name={acc?.name ?? cachedAccount?.name}
+        channel={acc?.trade_channel ?? cachedAccount?.trade_channel}
+        market={acc?.market ?? cachedAccount?.market}
+      />
+    </div>
+  )
   const normalized = normalizedOverride(override)
   const effective = useMemo(() => model ? resolvePolicy(model.preset_policy, override) : null, [model, override])
   const overrideCount = countOverrides(normalized)
@@ -342,7 +353,12 @@ export function AccountEditControlPage() {
       />
     )
   if (!acc || !model || !effective)
-    return <EditLoading />
+    return (
+      <section className="pb-24">
+        {title}
+        <EditLoading bare />
+      </section>
+    )
 
   const switchPreset = async (nextKey: string) => {
     if (nextKey === presetKey) return
@@ -413,14 +429,10 @@ export function AccountEditControlPage() {
 
   return (
     <section className="pb-24">
-      <EditWorktopBar
-        label="流控"
-        hint="请求节奏"
-        summary={`${model.preset_display_name} · ${overrideCount ? `${overrideCount} 处自定义` : '全部使用预设值'}`}
-        trailing={<Chip>{channelLabel(acc.trade_channel, acc.market)}</Chip>}
-        shellVtName={editShellVtName(accountId, 'control')}
-        lead="控制交易请求的频率与间隔。保存后从下一次执行开始生效。"
-      />
+      {title}
+      <EditSynopsis note="控制交易请求的频率与间隔；保存后从下一次执行开始生效。">
+        {model.preset_display_name} · {overrideCount ? `${overrideCount} 处自定义` : '全部使用预设值'}
+      </EditSynopsis>
 
       <Section label="预设方案">
         <div className="rounded-[12px] border border-line bg-surface px-4 py-3.5 md:col-span-2">
