@@ -25,14 +25,23 @@ class _Calendar:
 def _executor() -> CTPExecutor:
     executor = CTPExecutor.__new__(CTPExecutor)
     executor._instruments = {
-        "ag2612": SimpleNamespace(ExchangeID="SHFE", ProductID="ag"),
-        "IF2609": SimpleNamespace(ExchangeID="CFFEX", ProductID="IF"),
+        "ag2612": SimpleNamespace(
+            ExchangeID="SHFE",
+            ProductID="ag",
+            ProductClass=td.THOST_FTDC_PC_Futures,
+        ),
+        "IF2609": SimpleNamespace(
+            ExchangeID="CFFEX",
+            ProductID="IF",
+            ProductClass=td.THOST_FTDC_PC_Futures,
+        ),
         "ag2609C5000": SimpleNamespace(
             ExchangeID="SHFE",
             ProductID="ag",
             ProductClass=td.THOST_FTDC_PC_Options,
         ),
         "unknown2612": SimpleNamespace(ExchangeID="SHFE", ProductID="unknown"),
+        "missingclass2612": SimpleNamespace(ExchangeID="SHFE", ProductID="ag"),
     }
     executor._trading_calendar = _Calendar({date(2026, 8, 24): True, date(2026, 8, 25): True})
     return executor
@@ -58,7 +67,7 @@ def test_precheck_uses_static_contract_exchange_and_product(monkeypatch) -> None
 def test_precheck_blocks_unknown_product_and_options_without_session_table() -> None:
     executor = _executor()
 
-    for symbol in ("unknown2612", "ag2609C5000"):
+    for symbol in ("unknown2612", "ag2609C5000", "missingclass2612"):
         allowed, reason_code = executor._precheck_symbol(symbol)
         assert (allowed, reason_code) == (False, "CTP.SESSION.NO_SESSION_TABLE")
 
