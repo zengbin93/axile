@@ -23,6 +23,7 @@ class FakeApi:
             "price_tick": 1,
             "volume_multiple": 10,
             "datetime": 1_700_000_000_000_000_000,
+            "trading_time": {"day": [["00:00:00", "24:00:00"]], "night": []},
         }
         self.order = {
             "order_id": "o1",
@@ -64,6 +65,9 @@ class FakeApi:
 
     def get_quote(self, _symbol: str) -> dict[str, object]:
         return self.quote
+
+    def get_trading_calendar(self, start: object, _end: object) -> object:
+        return SimpleNamespace(to_dict=lambda _orient: [{"date": start, "trading": True}])
 
     def get_account(self) -> dict[str, object]:
         return {"available": 900_000, "balance": 1_000_000}

@@ -3,11 +3,16 @@
 from __future__ import annotations
 
 import threading
-from typing import Any, override
+from dataclasses import dataclass
+from datetime import date, datetime, timedelta
+from enum import StrEnum
+from typing import Any, Protocol, cast, override
 from uuid import uuid4
+from zoneinfo import ZoneInfo
 
 from axile.common.trade_channel import TradeChannel
 from axile.executor.abstract_executor.base import AbstractExecutor
+from axile.executor.account_control.exceptions import AccountControlBlockedError
 from axile.executor.models.unified_account_assets import UnifiedAccountAssets
 from axile.executor.models.unified_callback import OrderUpdateCallback, PriceDataCallback, TradeRecordCallback
 from axile.executor.models.unified_input import AccountConfig, TQAccountConfig, UnifiedStandardInput
@@ -17,6 +22,27 @@ from axile.executor.tq.converters import account_to_unified, order_to_unified, q
 from axile.executor.tq.runtime import TQRuntime, snapshot_entity
 
 _OFFSET_MAP = {"0": "OPEN", "1": "CLOSE", "3": "CLOSETODAY", "4": "CLOSE"}
+_SHANGHAI = ZoneInfo("Asia/Shanghai")
+
+
+class _CalendarFrame(Protocol):
+    def to_dict(self, orient: str) -> object: ...
+
+
+class TQTradingTimeStatus(StrEnum):
+    OPEN = "OPEN"
+    CLOSED = "CLOSED"
+    QUOTE_TRADING_TIME_UNAVAILABLE = "QUOTE_TRADING_TIME_UNAVAILABLE"
+    CALENDAR_UNAVAILABLE = "CALENDAR_UNAVAILABLE"
+
+
+@dataclass(frozen=True, slots=True)
+class TQTradingTimeCheck:
+    status: TQTradingTimeStatus
+
+    @property
+    def error(self) -> str | None:
+        return None if self.status is TQTradingTimeStatus.OPEN else self.status.value
 
 
 class TQExecutor(AbstractExecutor):
@@ -70,7 +96,159 @@ class TQExecutor(AbstractExecutor):
 
     @override
     def _check_trading_time(self) -> bool:
-        return self._is_china_futures_session_open()
+        # TQ 的交易时段必须按 symbol 判定，不能在这里用渠道级窗口提前阻断整批订单。
+        return True
+
+    @staticmethod
+    def _parse_trading_time(value: object) -> int:
+        if not isinstance(value, str):
+            raise ValueError("交易时段不是字符串")
+        parts = value.split(":")
+        if len(parts) != 3:
+            raise ValueError("交易时段格式无效")
+        hour, minute, second = (int(part) for part in parts)
+        if hour < 0 or minute not in range(60) or second not in range(60):
+            raise ValueError("交易时段超出范围")
+        return hour * 3600 + minute * 60 + second
+
+    @classmethod
+    def _parse_trading_time_ranges(cls, trading_time: object) -> tuple[list[tuple[int, int]], list[tuple[int, int]]]:
+        day = getattr(trading_time, "day", None)
+        night = getattr(trading_time, "night", None)
+        if isinstance(trading_time, dict):
+            day = trading_time.get("day")
+            night = trading_time.get("night")
+        if not isinstance(day, list) or not isinstance(night, list):
+            raise ValueError("交易时段缺少 day/night")
+
+        def parse_ranges(raw_ranges: list[object], *, night_session: bool) -> list[tuple[int, int]]:
+            ranges: list[tuple[int, int]] = []
+            for item in raw_ranges:
+                if not isinstance(item, list | tuple) or len(item) != 2:
+                    raise ValueError("交易时段区间无效")
+                begin = cls._parse_trading_time(item[0])
+                end = cls._parse_trading_time(item[1])
+                if end <= begin:
+                    if night_session and end < 24 * 3600:
+                        end += 24 * 3600
+                    else:
+                        raise ValueError("交易时段结束时间无效")
+                ranges.append((begin, end))
+            return ranges
+
+        return parse_ranges(day, night_session=False), parse_ranges(night, night_session=True)
+
+    @staticmethod
+    def _session_trading_date(
+        day_ranges: list[tuple[int, int]],
+        night_ranges: list[tuple[int, int]],
+        now: datetime,
+    ) -> date | None:
+        seconds = now.hour * 3600 + now.minute * 60 + now.second
+        if any(begin <= seconds < end for begin, end in day_ranges):
+            return now.date()
+        if any(begin <= seconds < end for begin, end in night_ranges):
+            return now.date() + timedelta(days=1)
+        overnight_seconds = seconds + 24 * 3600
+        if any(begin <= overnight_seconds < end for begin, end in night_ranges):
+            return now.date()
+        return None
+
+    @staticmethod
+    def _calendar_trading_dates(calendar: object) -> dict[date, bool]:
+        frame = cast(_CalendarFrame, calendar)
+        rows = frame.to_dict("records")
+        if not isinstance(rows, list):
+            raise ValueError("交易日历不可读取")
+        trading_dates: dict[date, bool] = {}
+        for row in rows:
+            if not isinstance(row, dict) or "date" not in row or "trading" not in row:
+                raise ValueError("交易日历缺少字段")
+            raw_date = row["date"]
+            if isinstance(raw_date, datetime):
+                calendar_date = raw_date.date()
+            elif isinstance(raw_date, date):
+                calendar_date = raw_date
+            elif isinstance(raw_date, str):
+                calendar_date = date.fromisoformat(raw_date[:10])
+            else:
+                raise ValueError("交易日历日期无效")
+            if not isinstance(row["trading"], bool):
+                raise ValueError("交易日历 trading 无效")
+            trading_dates[calendar_date] = row["trading"]
+        return trading_dates
+
+    @staticmethod
+    def _quote_trading_time(quote: object) -> object:
+        if isinstance(quote, dict):
+            return quote.get("trading_time")
+        return getattr(quote, "trading_time")
+
+    def _check_tq_symbol_trading_time(
+        self,
+        api: object,
+        tq_symbol: str,
+        now: datetime,
+    ) -> TQTradingTimeCheck:
+        try:
+            day_ranges, night_ranges = self._parse_trading_time_ranges(
+                self._quote_trading_time(getattr(api, "get_quote")(tq_symbol))
+            )
+        except Exception:
+            return TQTradingTimeCheck(TQTradingTimeStatus.QUOTE_TRADING_TIME_UNAVAILABLE)
+
+        trading_date = self._session_trading_date(day_ranges, night_ranges, now)
+        if trading_date is None:
+            return TQTradingTimeCheck(TQTradingTimeStatus.CLOSED)
+        try:
+            calendar = self._calendar_trading_dates(
+                getattr(api, "get_trading_calendar")(trading_date, trading_date)
+            )
+        except Exception:
+            return TQTradingTimeCheck(TQTradingTimeStatus.CALENDAR_UNAVAILABLE)
+        if trading_date not in calendar:
+            return TQTradingTimeCheck(TQTradingTimeStatus.CALENDAR_UNAVAILABLE)
+        return TQTradingTimeCheck(TQTradingTimeStatus.OPEN if calendar[trading_date] else TQTradingTimeStatus.CLOSED)
+
+    def _check_symbol_trading_times(
+        self,
+        symbols: list[str],
+        now: datetime,
+    ) -> dict[str, TQTradingTimeCheck]:
+        runtime = self._require_runtime()
+        pending: dict[str, str] = {}
+        results: dict[str, TQTradingTimeCheck] = {}
+        for symbol in dict.fromkeys(symbols):
+            try:
+                pending[symbol] = runtime.resolver.to_tq(symbol, for_trade=True)
+            except Exception:
+                results[symbol] = TQTradingTimeCheck(TQTradingTimeStatus.QUOTE_TRADING_TIME_UNAVAILABLE)
+        if not pending:
+            return results
+
+        try:
+            results.update(
+                runtime.call(
+                    lambda api: {
+                        symbol: self._check_tq_symbol_trading_time(api, tq_symbol, now)
+                        for symbol, tq_symbol in pending.items()
+                    }
+                )
+            )
+        except Exception:
+            results.update({symbol: TQTradingTimeCheck(TQTradingTimeStatus.CALENDAR_UNAVAILABLE) for symbol in pending})
+        return results
+
+    def _check_symbol_trading_time(self, symbol: str, now: datetime | None = None) -> TQTradingTimeCheck:
+        local_now = now or datetime.now(_SHANGHAI)
+        if local_now.tzinfo is None:
+            local_now = local_now.replace(tzinfo=_SHANGHAI)
+        return self._check_symbol_trading_times([symbol], local_now.astimezone(_SHANGHAI))[symbol]
+
+    @override
+    def _get_symbol_trading_time_blocks(self, symbols: list[str]) -> dict[str, str]:
+        checks = self._check_symbol_trading_times(list(dict.fromkeys(symbols)), datetime.now(_SHANGHAI))
+        return {symbol: check.error for symbol, check in checks.items() if check.error is not None}
 
     @override
     def _normalize_connected_standard_input(self, standard_input: UnifiedStandardInput) -> UnifiedStandardInput:
@@ -150,7 +328,10 @@ class TQExecutor(AbstractExecutor):
 
         order_id = uuid4().hex
 
-        def submit(api: object) -> dict[str, object]:
+        def submit(api: object) -> TQTradingTimeCheck | dict[str, object]:
+            check = self._check_tq_symbol_trading_time(api, tq_symbol, datetime.now(_SHANGHAI))
+            if check.error is not None:
+                return check
             insert_order = getattr(api, "insert_order")
             arguments: dict[str, object] = {
                 "symbol": tq_symbol,
@@ -165,8 +346,17 @@ class TQExecutor(AbstractExecutor):
             row["order_id"] = order_id
             return row
 
-        row = runtime.call(submit)
-        return order_to_unified(row, runtime.resolver)
+        result = runtime.call(submit)
+        if isinstance(result, TQTradingTimeCheck):
+            raise AccountControlBlockedError(
+                result.error or "CLOSED",
+                account_id=None,
+                execution_id=None,
+                channel=TradeChannel.TQ,
+                operation="place_order",
+                symbol=symbol,
+            )
+        return order_to_unified(result, runtime.resolver)
 
     @override
     def _cancel_order_impl(self, symbol: str, order_id: str) -> bool:

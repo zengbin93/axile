@@ -88,6 +88,11 @@ class AbstractExecutorCapabilityMixin:
             inputs=standard_input,
         )
 
+    def _get_symbol_trading_time_blocks(self, symbols: list[str]) -> dict[str, str]:
+        """返回本次 planning 中不可交易 symbol 的原因；默认不额外拦截。"""
+        del symbols
+        return {}
+
     def _supports_parallel_symbol_dispatch(self) -> bool:
         """
         返回当前执行器是否支持安全的按品种并行调度.

@@ -64,6 +64,7 @@ class _TestExecutor(AbstractExecutor):
         self.checkpoint_calls = 0
         self.account_assets_calls = 0
         self.market_data_requests: list[list[str]] = []
+        self.symbol_trading_time_blocks: dict[str, str] = {}
         self._account_assets_snapshots = account_assets_snapshots or []
         self.shared_state = shared_state or _SharedState()
         self.shared_state.executor_ids.append(id(self))
@@ -90,6 +91,9 @@ class _TestExecutor(AbstractExecutor):
 
     def _check_trading_time(self) -> bool:
         return True
+
+    def _get_symbol_trading_time_blocks(self, symbols: list[str]) -> dict[str, str]:
+        return {symbol: self.symbol_trading_time_blocks[symbol] for symbol in symbols if symbol in self.symbol_trading_time_blocks}
 
     def get_account_assets(self) -> UnifiedAccountAssets:
         self.account_assets_calls += 1
@@ -1824,3 +1828,122 @@ def test_parallel_operator_terminate_reports_every_symbol_cancel_failure(
 
     assert exc_info.value.trigger == "operator"
     assert sorted(exc_info.value.cancel_failed_order_ids) == sorted(f"order-fail-{symbol}" for symbol in symbols)
+
+
+def test_planning_time_symbol_block_does_not_stop_other_symbol(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """品种级预检只跳过当前 symbol，且全拒绝时不撤账户挂单。"""
+    from axile.executor import execution_engine as execution_engine_module
+
+    executor = _TestExecutor()
+    executor.symbol_trading_time_blocks = {"rb2610": "CLOSED"}
+    calls: list[str] = []
+    cancel_calls = 0
+
+    def fake_cancel_all_orders() -> None:
+        nonlocal cancel_calls
+        cancel_calls += 1
+
+    def fake_resolve_algorithm(_name: str, _executor: AbstractExecutor) -> Any:
+        def algorithm(_session: object, algorithm_input: AlgorithmInput) -> AlgorithmResult:
+            calls.append(algorithm_input.symbol)
+            return _trivial_algorithm_result(algorithm_input.symbol)
+
+        return algorithm
+
+    monkeypatch.setattr(executor, "cancel_all_orders", fake_cancel_all_orders)
+    monkeypatch.setattr(execution_engine_module, "resolve_algorithm", fake_resolve_algorithm)
+    output = executor.execute(
+        UnifiedStandardInput.from_dict(
+            {
+                "channel_type": TradeChannel.CTP.value,
+                "account_config": {
+                    "broker_id": "b",
+                    "investor_id": "i",
+                    "password": "p",
+                    "td_front": "tcp://td:1",
+                    "md_front": "tcp://md:2",
+                    "app_id": "app",
+                    "auth_code": "auth",
+                },
+                "curr_target": {"rb2610": 0.1, "ag2612": 0.2},
+                "algorithm": {"method": "DEFAULT-ALGO"},
+            }
+        )
+    )
+
+    assert calls == ["ag2612"]
+    assert cancel_calls == 1
+    assert output.symbol_results["rb2610"].status is ExecutionStatus.BLOCKED
+    assert output.symbol_results["rb2610"].error == "CLOSED"
+    assert output.symbol_results["ag2612"].success is True
+
+    executor.symbol_trading_time_blocks = {"rb2610": "CLOSED", "ag2612": "CLOSED"}
+    calls.clear()
+    output = executor.execute(
+        UnifiedStandardInput.from_dict(
+            {
+                "channel_type": TradeChannel.CTP.value,
+                "account_config": {
+                    "broker_id": "b",
+                    "investor_id": "i",
+                    "password": "p",
+                    "td_front": "tcp://td:1",
+                    "md_front": "tcp://md:2",
+                    "app_id": "app",
+                    "auth_code": "auth",
+                },
+                "curr_target": {"rb2610": 0.1, "ag2612": 0.2},
+                "algorithm": {"method": "DEFAULT-ALGO"},
+            }
+        )
+    )
+
+    assert calls == []
+    assert cancel_calls == 1
+    assert output.status is ExecutionStatus.BLOCKED
+
+
+def test_planning_time_symbol_block_does_not_block_second_phase(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """预检拒绝不是第一阶段失败，不能阻断其他 symbol 的第二阶段。"""
+    from axile.executor import execution_engine as execution_engine_module
+
+    executor = _TestExecutor(
+        account_assets_snapshots=[_assets(positions=[("rb2610", 5.0, PositionDirection.LONG)]), _assets()]
+    )
+    executor.symbol_trading_time_blocks = {"au2612": "CLOSED"}
+    calls: list[tuple[str, int | float]] = []
+
+    def fake_resolve_algorithm(_name: str, _executor: AbstractExecutor) -> Any:
+        def algorithm(_session: object, algorithm_input: AlgorithmInput) -> AlgorithmResult:
+            calls.append((algorithm_input.symbol, algorithm_input.target_volume))
+            return _trivial_algorithm_result(algorithm_input.symbol)
+
+        return algorithm
+
+    monkeypatch.setattr(execution_engine_module, "resolve_algorithm", fake_resolve_algorithm)
+    output = executor.execute(
+        UnifiedStandardInput.from_dict(
+            {
+                "channel_type": TradeChannel.CTP.value,
+                "account_config": {
+                    "broker_id": "b",
+                    "investor_id": "i",
+                    "password": "p",
+                    "td_front": "tcp://td:1",
+                    "md_front": "tcp://md:2",
+                    "app_id": "app",
+                    "auth_code": "auth",
+                },
+                "curr_target": {"rb2610": -0.1, "ag2612": 0.2, "au2612": 0.3},
+                "algorithm": {"method": "DEFAULT-ALGO"},
+            }
+        )
+    )
+
+    assert calls == [("rb2610", 0), ("rb2610", -1.0), ("ag2612", 2.0)]
+    assert output.symbol_results["au2612"].status is ExecutionStatus.BLOCKED
+    assert output.symbol_results["ag2612"].success is True
