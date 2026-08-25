@@ -6,12 +6,14 @@ import { Toast } from '@/components/Toast'
 /** 应用外壳：稳定顶栏、悬浮常驻导航与独立滚动工作区。 */
 export function AppShell() {
   return (
-    <div className="flex h-screen min-w-[1400px] flex-col overflow-hidden bg-bg">
+    <div className="flex h-screen flex-col overflow-hidden bg-bg">
       <TopBar />
       <div className="relative min-h-0 flex-1">
         <AppSidebar />
-        <main className="app-workspace h-full overflow-y-auto [scrollbar-gutter:stable]">
-          <div className="relative left-24 mx-auto h-full w-full max-w-[860px] px-6 pt-2 pb-16">
+        {/* 内容列左缘为侧边栏让位（20+224+24），其余空间内居中；不设全局最小宽，
+            窄视口（高 zoom）下内容自然收缩，只留纵向滚动。 */}
+        <main className="app-workspace h-full overflow-y-auto pr-6 pl-[268px] [scrollbar-gutter:stable]">
+          <div className="mx-auto h-full w-full max-w-[860px] pt-2 pb-16">
             <Outlet />
           </div>
         </main>

@@ -262,7 +262,9 @@ export function TimerEditor({ tradeChannel, scheduleKind, nightSchedule, value, 
         }`}
       >
         <div className="overflow-hidden">
-          <div className={`space-y-5 ${v.autoOn && bodyFade.current ? 'panel-fade-in' : ''}`}>
+          {/* 收放（grid-fr + opacity）已是全部连续性，不再叠 panel-fade-in：
+              一个对象只跑一套范式；且该类若在挂载后的无关重渲染补挂，会重播入场闪一下。 */}
+          <div className="space-y-5">
             <div className="flex items-center justify-between gap-3">
               <Segmented<'quick' | 'advanced'>
                 size="sm"

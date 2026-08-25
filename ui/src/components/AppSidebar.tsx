@@ -198,8 +198,7 @@ export function AppSidebar() {
 
   return (
     <aside
-      className="absolute top-5 bottom-5 z-10 flex w-[224px] flex-col rounded-card bg-surface p-2.5 shadow-card"
-      style={{ left: 'max(20px, calc(50% - 430px - 24px - 224px))' }}
+      className="absolute top-5 bottom-5 left-5 z-10 flex w-[224px] flex-col rounded-card bg-surface p-2.5 shadow-card"
       aria-label="主导航"
     >
       <div className="relative flex min-h-0 flex-1 flex-col">
