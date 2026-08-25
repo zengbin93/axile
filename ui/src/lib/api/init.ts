@@ -30,6 +30,10 @@ export interface InitValues {
   environment: string
   app_log_dir: string
   axile_log_rotation: string
+  /** 只表示是否已配置；Token 本身永不经 API 返回。 */
+  tushare_configured?: boolean
+  /** 仅提交给保存接口；状态接口不会返回该字段。 */
+  tushare_token?: string
   algorithm_modules: string[]
   algorithm_directories: string[]
   trading_calendars?: InitTradingCalendar[]

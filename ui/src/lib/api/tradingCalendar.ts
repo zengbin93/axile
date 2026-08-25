@@ -1,6 +1,6 @@
 import { apiGet, apiSend, apiUpload } from '@/lib/api/client'
 
-export type CalendarRefreshKind = 'csv' | 'python'
+export type CalendarRefreshKind = 'csv' | 'python' | 'tushare'
 export type CalendarAvailability = 'available' | 'unavailable'
 export type CalendarUnavailableReason = 'not_configured' | 'uncovered' | 'read_failed'
 
@@ -71,6 +71,8 @@ export const validateCalendarFunction = (calendarId: string, functionCode: strin
   })
 export const saveCalendarFunction = (calendarId: string, functionCode: string) =>
   apiSend<CalendarStatus>('PUT', '/market/trading-calendar/python', { calendarId, functionCode })
+export const saveTushareCalendar = (calendarId = 'china') =>
+  apiSend<CalendarStatus>('PUT', `/market/trading-calendar/tushare?${query(calendarId)}`)
 export const refreshCalendar = (calendarId = 'china') =>
   apiSend<{ ok: boolean; message: string }>('POST', `/market/trading-calendar/refresh?${query(calendarId)}`)
 export const saveCalendarOverrides = (calendarId: string, entries: { calDate: string; isOpen: boolean }[]) =>
