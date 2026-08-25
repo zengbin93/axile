@@ -101,13 +101,13 @@ class TQExecutor(AbstractExecutor):
 
     @staticmethod
     def _parse_trading_time(value: object) -> int:
-        if not isinstance(value, str):
-            raise ValueError("交易时段不是字符串")
-        parts = value.split(":")
-        if len(parts) != 3:
+        if not isinstance(value, str) or len(value) != 8 or value[2] != ":" or value[5] != ":":
             raise ValueError("交易时段格式无效")
-        hour, minute, second = (int(part) for part in parts)
-        if hour < 0 or minute not in range(60) or second not in range(60):
+        hour_text, minute_text, second_text = value.split(":")
+        if not (hour_text.isdigit() and minute_text.isdigit() and second_text.isdigit()):
+            raise ValueError("交易时段格式无效")
+        hour, minute, second = int(hour_text), int(minute_text), int(second_text)
+        if hour not in range(48) or minute not in range(60) or second not in range(60):
             raise ValueError("交易时段超出范围")
         return hour * 3600 + minute * 60 + second
 
@@ -139,19 +139,19 @@ class TQExecutor(AbstractExecutor):
         return parse_ranges(day, night_session=False), parse_ranges(night, night_session=True)
 
     @staticmethod
-    def _session_trading_date(
+    def _matched_trading_session(
         day_ranges: list[tuple[int, int]],
         night_ranges: list[tuple[int, int]],
         now: datetime,
-    ) -> date | None:
+    ) -> tuple[date, bool] | None:
         seconds = now.hour * 3600 + now.minute * 60 + now.second
         if any(begin <= seconds < end for begin, end in day_ranges):
-            return now.date()
+            return now.date(), False
         if any(begin <= seconds < end for begin, end in night_ranges):
-            return now.date() + timedelta(days=1)
+            return now.date(), True
         overnight_seconds = seconds + 24 * 3600
         if any(begin <= overnight_seconds < end for begin, end in night_ranges):
-            return now.date()
+            return now.date() - timedelta(days=1), True
         return None
 
     @staticmethod
@@ -197,18 +197,29 @@ class TQExecutor(AbstractExecutor):
         except Exception:
             return TQTradingTimeCheck(TQTradingTimeStatus.QUOTE_TRADING_TIME_UNAVAILABLE)
 
-        trading_date = self._session_trading_date(day_ranges, night_ranges, now)
-        if trading_date is None:
+        if not day_ranges and not night_ranges:
+            return TQTradingTimeCheck(TQTradingTimeStatus.QUOTE_TRADING_TIME_UNAVAILABLE)
+        matched_session = self._matched_trading_session(day_ranges, night_ranges, now)
+        if matched_session is None:
             return TQTradingTimeCheck(TQTradingTimeStatus.CLOSED)
+        session_day, is_night = matched_session
+        calendar_end = session_day + timedelta(days=1 if is_night else 0)
         try:
             calendar = self._calendar_trading_dates(
-                getattr(api, "get_trading_calendar")(trading_date, trading_date)
+                getattr(api, "get_trading_calendar")(session_day, calendar_end)
             )
         except Exception:
             return TQTradingTimeCheck(TQTradingTimeStatus.CALENDAR_UNAVAILABLE)
-        if trading_date not in calendar:
+        if session_day not in calendar or calendar_end not in calendar:
             return TQTradingTimeCheck(TQTradingTimeStatus.CALENDAR_UNAVAILABLE)
-        return TQTradingTimeCheck(TQTradingTimeStatus.OPEN if calendar[trading_date] else TQTradingTimeStatus.CLOSED)
+        if not is_night:
+            return TQTradingTimeCheck(TQTradingTimeStatus.OPEN if calendar[session_day] else TQTradingTimeStatus.CLOSED)
+        next_day = session_day + timedelta(days=1)
+        return TQTradingTimeCheck(
+            TQTradingTimeStatus.OPEN
+            if calendar[next_day] and (session_day.weekday() == 6 or calendar[session_day])
+            else TQTradingTimeStatus.CLOSED
+        )
 
     def _check_symbol_trading_times(
         self,

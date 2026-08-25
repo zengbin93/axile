@@ -108,7 +108,7 @@ def _at(value: str) -> datetime:
 def _set_calendar(api: FakeApi, *trading_dates: str) -> None:
     api.calendar_rows = [
         {"date": value, "trading": value in trading_dates}
-        for value in ("2026-08-21", "2026-08-22", "2026-08-24", "2026-08-25")
+        for value in ("2026-08-21", "2026-08-22", "2026-08-23", "2026-08-24", "2026-08-25")
     ]
 
 
@@ -139,11 +139,28 @@ def test_symbol_trading_time_respects_product_sessions(
 
 def test_night_session_requires_its_next_trading_day(executor: tuple[TQExecutor, FakeApi]) -> None:
     instance, api = executor
-    _set_calendar(api, "2026-08-21")
+    _set_calendar(api, "2026-08-21", "2026-08-24")
 
     assert instance._check_symbol_trading_time("rb2610", _at("2026-08-21T21:30:00")).status is TQTradingTimeStatus.CLOSED
-    _set_calendar(api, "2026-08-21", "2026-08-22")
-    assert instance._check_symbol_trading_time("rb2610", _at("2026-08-22T00:30:00")).status is TQTradingTimeStatus.OPEN
+    assert instance._check_symbol_trading_time("rb2610", _at("2026-08-22T00:30:00")).status is TQTradingTimeStatus.CLOSED
+
+
+def test_sunday_night_session_uses_monday_trading_day(executor: tuple[TQExecutor, FakeApi]) -> None:
+    instance, api = executor
+    _set_calendar(api, "2026-08-24")
+
+    assert instance._check_symbol_trading_time("rb2610", _at("2026-08-23T21:00:00")).status is TQTradingTimeStatus.OPEN
+    assert instance._check_symbol_trading_time("rb2610", _at("2026-08-24T00:30:00")).status is TQTradingTimeStatus.OPEN
+
+
+def test_night_session_before_holiday_is_closed(executor: tuple[TQExecutor, FakeApi]) -> None:
+    instance, api = executor
+    api.calendar_rows = [
+        {"date": "2026-08-20", "trading": True},
+        {"date": "2026-08-21", "trading": False},
+    ]
+
+    assert instance._check_symbol_trading_time("rb2610", _at("2026-08-20T21:30:00")).status is TQTradingTimeStatus.CLOSED
 
 
 def test_unavailable_quote_and_calendar_fail_closed(executor: tuple[TQExecutor, FakeApi]) -> None:
@@ -166,13 +183,21 @@ def test_unavailable_quote_and_calendar_fail_closed(executor: tuple[TQExecutor, 
         TQTradingTimeStatus.CALENDAR_UNAVAILABLE
     )
 
+    api.quotes["SHFE.rb2610"].trading_time = {
+        "day": [["09:00:00", "15:00:00"], ["invalid", "15:00:00"]],
+        "night": [],
+    }
+    assert instance._check_symbol_trading_time("rb2610", _at("2026-08-24T09:30:00")).status is (
+        TQTradingTimeStatus.QUOTE_TRADING_TIME_UNAVAILABLE
+    )
+
 
 def test_place_order_rechecks_current_symbol_before_submitting(executor: tuple[TQExecutor, FakeApi]) -> None:
     instance, api = executor
     _set_calendar(api, "2026-08-24")
     api.quotes["SHFE.rb2610"].trading_time = {"day": [], "night": []}
 
-    with pytest.raises(Exception, match="CLOSED"):
+    with pytest.raises(Exception, match="QUOTE_TRADING_TIME_UNAVAILABLE"):
         instance._place_order_impl("rb2610", OrderDirection.BUY, OrderType.LIMIT, 1, 3200)
 
     assert api.insert_calls == 0
