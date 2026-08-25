@@ -1,4 +1,4 @@
-import { useEffect, type ComponentType, type CSSProperties, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ComponentType, type CSSProperties, type ReactNode, type RefObject } from 'react'
 import { useLocation } from 'react-router'
 import {
   Ban,
@@ -6,6 +6,8 @@ import {
   Boxes,
   CalendarDays,
   ChartNoAxesCombined,
+  ChevronDown,
+  ChevronUp,
   CircleGauge,
   Layers3,
   ListChecks,
@@ -45,6 +47,65 @@ function NavSection({ label, children }: { label: string; children: ReactNode })
       <div className="mb-0.5 px-2.5 text-[11px] font-semibold tracking-wide text-ink-3">{label}</div>
       <div className="ml-3">{children}</div>
     </section>
+  )
+}
+
+/** 跟踪滚动容器两端是否还有被裁掉的内容，用于驱动边缘渐隐提示。 */
+function useScrollEdges(ref: RefObject<HTMLElement | null>): { up: boolean; down: boolean } {
+  const [edges, setEdges] = useState({ up: false, down: false })
+  useEffect(() => {
+    const el = ref.current
+    if (!el) return
+    const content = el.firstElementChild
+    const update = () => {
+      const remaining = el.scrollHeight - el.clientHeight - el.scrollTop
+      const next = { up: el.scrollTop > 1, down: remaining > 1 }
+      setEdges((prev) => (prev.up === next.up && prev.down === next.down ? prev : next))
+    }
+    update()
+    el.addEventListener('scroll', update, { passive: true })
+    const observer = new ResizeObserver(update)
+    observer.observe(el)
+    if (content) observer.observe(content)
+    return () => {
+      el.removeEventListener('scroll', update)
+      observer.disconnect()
+    }
+  }, [ref])
+  return edges
+}
+
+/** 溢出端的方向提示：渐隐带 + 可点击箭头，点击按接近一屏的步长朝该端滚动。 */
+function EdgeScrollHint({ edge, visible, target }: { edge: 'up' | 'down'; visible: boolean; target: RefObject<HTMLElement | null> }) {
+  const Icon = edge === 'up' ? ChevronUp : ChevronDown
+  const nudge = () => {
+    const el = target.current
+    if (!el) return
+    const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    el.scrollBy({
+      top: (edge === 'up' ? -1 : 1) * el.clientHeight * 0.8,
+      behavior: reduced ? 'auto' : 'smooth',
+    })
+  }
+  return (
+    <div
+      aria-hidden={!visible}
+      className={`pointer-events-none absolute inset-x-0 z-[2] flex h-10 from-surface via-surface/80 to-transparent transition-opacity duration-200 motion-reduce:transition-none ${
+        edge === 'up' ? 'top-0 items-start bg-gradient-to-b' : 'bottom-0 items-end bg-gradient-to-t'
+      } ${visible ? 'opacity-100' : 'opacity-0'}`}
+    >
+      <button
+        type="button"
+        aria-label={edge === 'up' ? '向上滚动导航' : '向下滚动导航'}
+        tabIndex={visible ? 0 : -1}
+        onClick={nudge}
+        className={`mx-auto px-3 text-ink-3 transition-colors duration-150 hover:text-ink-1 ${edge === 'up' ? 'pt-1' : 'pb-1'} ${
+          visible ? 'pointer-events-auto' : 'pointer-events-none'
+        }`}
+      >
+        <Icon size={14} aria-hidden />
+      </button>
+    </div>
   )
 }
 
@@ -108,6 +169,9 @@ export function AppSidebar() {
   const accountPath = (suffix = '') => accountId == null ? null : `/accounts/${accountId}${suffix}`
   const exact = (to: string | null) => (pathname: string) => to != null && pathname === to
 
+  const navRef = useRef<HTMLElement>(null)
+  const scrollEdges = useScrollEdges(navRef)
+
   const accountOverview: NavItemSpec[] = [
     { label: '账户概览', icon: CircleGauge, to: accountPath(), active: exact(accountPath()) },
     { label: '持仓明细', icon: WalletCards, to: accountPath('/holdings'), active: exact(accountPath('/holdings')) },
@@ -134,36 +198,43 @@ export function AppSidebar() {
 
   return (
     <aside
-      className="quiet-scrollbar absolute top-5 bottom-5 z-10 flex w-[224px] flex-col overflow-y-auto rounded-card bg-surface p-2.5 shadow-card"
+      className="absolute top-5 bottom-5 z-10 flex w-[224px] flex-col rounded-card bg-surface p-2.5 shadow-card"
       style={{ left: 'max(20px, calc(50% - 430px - 24px - 224px))' }}
       aria-label="主导航"
     >
-      <nav className="flex flex-1 flex-col justify-between pb-2" aria-label="功能导航">
-        <div>
-          <NavItem item={{ label: '账户', icon: CircleGauge, to: '/', active: (pathname) => pathname === '/' }} />
-          <NavItem item={{ label: '组合', icon: Boxes, to: '/portfolios', active: (pathname) => pathname.startsWith('/portfolios') }} />
-        </div>
+      <div className="relative flex min-h-0 flex-1 flex-col">
+        <nav ref={navRef} className="quiet-scrollbar min-h-0 flex-1 overflow-y-auto pb-2" aria-label="功能导航">
+          <div className="flex min-h-full flex-col justify-between">
+            <div>
+              <NavItem item={{ label: '账户', icon: CircleGauge, to: '/', active: (pathname) => pathname === '/' }} />
+              <NavItem item={{ label: '组合', icon: Boxes, to: '/portfolios', active: (pathname) => pathname.startsWith('/portfolios') }} />
+            </div>
 
-        <NavSection label="当前账户">
-          {accountOverview.map((item) => <NavItem key={item.label} item={item} />)}
-        </NavSection>
+            <NavSection label="当前账户">
+              {accountOverview.map((item) => <NavItem key={item.label} item={item} />)}
+            </NavSection>
 
-        <NavSection label="账户参数">
-          {accountParameters.map((item) => <NavItem key={item.label} item={item} />)}
-        </NavSection>
+            <NavSection label="账户参数">
+              {accountParameters.map((item) => <NavItem key={item.label} item={item} />)}
+            </NavSection>
 
-        <NavSection label="自动执行">
-          {accountExecution.map((item) => <NavItem key={item.label} item={item} />)}
-        </NavSection>
+            <NavSection label="自动执行">
+              {accountExecution.map((item) => <NavItem key={item.label} item={item} />)}
+            </NavSection>
 
-        <NavSection label="系统">
-          <NavItem item={{ label: '交易日历', icon: CalendarDays, to: '/settings/trading-calendar', active: exact('/settings/trading-calendar') }} />
-          <NavItem item={{ label: '飞书告警', icon: BellRing, to: '/settings', active: exact('/settings') }} />
-          <NavItem item={{ label: '高级', icon: Settings2, to: '/settings/advanced', active: exact('/settings/advanced') }} />
-        </NavSection>
-      </nav>
+            <NavSection label="系统">
+              <NavItem item={{ label: '交易日历', icon: CalendarDays, to: '/settings/trading-calendar', active: exact('/settings/trading-calendar') }} />
+              <NavItem item={{ label: '飞书告警', icon: BellRing, to: '/settings', active: exact('/settings') }} />
+              <NavItem item={{ label: '高级', icon: Settings2, to: '/settings/advanced', active: exact('/settings/advanced') }} />
+            </NavSection>
+          </div>
+        </nav>
+        {/* 溢出揭示：被裁掉的一端用渐隐 + 方向箭头暗示「还有下文」，滚到顶/底即消失。常挂 + 透明度切换，不条件挂载。 */}
+        <EdgeScrollHint edge="up" visible={scrollEdges.up} target={navRef} />
+        <EdgeScrollHint edge="down" visible={scrollEdges.down} target={navRef} />
+      </div>
 
-      <div className="mt-auto border-t border-line pt-2">
+      <div className="border-t border-line pt-2">
         <div className="grid grid-cols-2 gap-1.5">
           <Link to="/setup/acct/channel" className="flex items-center justify-center gap-1.5 rounded-[9px] border border-line px-2 py-1.5 text-[12px] text-ink-2 hover:border-ink-3/40 hover:text-ink-1">
             <Plus size={14} aria-hidden />新建账户
