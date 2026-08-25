@@ -7,13 +7,15 @@ import { Skeleton, SkeletonLines } from '@/components/ui/Skeleton'
 import { ExposureBar } from '@/components/viz/ExposureBar'
 import { ConfirmModal, type ConfirmSpec } from '@/components/ui/ConfirmModal'
 import { OverflowText } from '@/components/ui/OverflowText'
-import { getPortfolio, getLatestWeights } from '@/lib/api/portfolios'
+import { getPortfolio, getPortfolioTargetSnapshot, refreshPortfolioTargetSnapshot } from '@/lib/api/portfolios'
 import { useDomainStore } from '@/stores/domain'
 import { triggerExecute } from '@/lib/api/executions'
 import { usePolling } from '@/lib/hooks/usePolling'
+import { useTargetSnapshot } from '@/lib/hooks/useTargetSnapshot'
 import { useToastStore } from '@/stores/ui'
 import { channelLabel } from '@/features/dashboard/display'
-import type { LatestWeights } from '@/types/api'
+import { TargetSnapshotControl } from '@/features/portfolio/TargetSnapshotControl'
+import { useRunning } from '@/stores/liveExec'
 
 export function PortfolioDetailPage() {
   const { id } = useParams()
@@ -35,21 +37,17 @@ export function PortfolioDetailPage() {
   const lite = portfolios?.find((p) => p.id === portfolioId) ?? null
   const head = pf ?? lite
   const boundAccount = accounts?.find((a) => a.portfolio_id === portfolioId) ?? null
+  const boundAccountRun = useRunning(boundAccount?.account_id ?? -1)
 
   // 共享元素 FLIP：组合名与列表卡配对（A）；绑定账户名与账户详情头配对（B，复用 account-name）。
   const pfNameVt = useViewTransitionState(`/portfolios/${portfolioId}`)
   const acctNameVt = useViewTransitionState(boundAccount ? `/accounts/${boundAccount.account_id}` : '__none__')
 
-  const weights = usePolling<LatestWeights>(
-    useCallback(
-      (s: AbortSignal) => getLatestWeights(portfolioId, s),
-      [portfolioId],
-    ),
-    {
-      queryKey: `portfolio:${portfolioId}:latest-weights`,
-      intervalMs: 0,
-      enabled: pf !== null,
-    },
+  const weights = useTargetSnapshot(
+    useCallback((s: AbortSignal) => getPortfolioTargetSnapshot(portfolioId, s), [portfolioId]),
+    useCallback(() => refreshPortfolioTargetSnapshot(portfolioId), [portfolioId]),
+    `portfolio:${portfolioId}:target-snapshot`,
+    pf !== null,
   )
 
   if (portfolio.error && !pf)
@@ -65,7 +63,7 @@ export function PortfolioDetailPage() {
       </section>
     )
 
-  const target = weights.data ?? {}
+  const target = weights.data?.weights ?? {}
   const targetRows = Object.entries(target)
     .filter(([, w]) => Math.abs(w) > 1e-9)
     .sort((a, b) => Math.abs(b[1]) - Math.abs(a[1]))
@@ -146,11 +144,29 @@ export function PortfolioDetailPage() {
       {/* 原始目标 */}
       <SectionLabel>组合原始目标 · 各账户再套自己的风控/杠杆</SectionLabel>
       <Card className="px-6 py-4">
+        {pf && (
+          <div className="mb-3 border-b border-line pb-3">
+            <TargetSnapshotControl
+              snapshot={weights.data}
+              loading={weights.loading}
+              recalculating={weights.recalculating}
+              error={weights.recalculateError}
+              disabled={!!boundAccountRun}
+              disabledReason={boundAccountRun ? '账户正在执行，结束后可重新计算' : undefined}
+              contextName={accounts?.find((a) => a.account_id === weights.data?.context_account_id)?.name
+                ?? (weights.data?.context_account_id != null ? `#${weights.data.context_account_id}` : null)}
+              onRecalculate={() => void weights.recalculate()}
+            />
+          </div>
+        )}
         {!pf && <SkeletonLines rows={3} />}
         {pf && !weights.data && weights.loading && <SkeletonLines rows={3} />}
-        {pf && weights.error && <p className="text-[13px] text-warn">目标权重暂不可用：{weights.error.message} <button className="font-semibold underline" onClick={() => void weights.refresh()}>重试</button></p>}
-        {pf && !weights.loading && !weights.error && targetRows.length === 0 && (
-          <p className="text-[13px] text-ink-3">当前无目标持仓。</p>
+        {pf && weights.error && <p className="text-[13px] text-warn">目标权重快照暂不可用：{weights.error.message} <button className="font-semibold underline" onClick={() => void weights.reloadSnapshot()}>重试</button></p>}
+        {pf && !weights.loading && !weights.error && !weights.data?.calculated_at && (
+          <p className="text-[13px] text-ink-3">尚无目标权重，点击刷新按钮计算。</p>
+        )}
+        {pf && !weights.loading && !weights.error && weights.data?.calculated_at && targetRows.length === 0 && (
+          <p className="text-[13px] text-ink-3">当前目标为空仓。</p>
         )}
         {targetRows.length > 0 && (
           <>

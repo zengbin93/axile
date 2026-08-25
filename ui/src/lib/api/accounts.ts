@@ -11,6 +11,7 @@ import type {
   LatestWeights,
   Message,
   PortfolioAccountList,
+  TargetWeightSnapshot,
 } from '@/types/api'
 
 export type ScheduleCalendarStatus = 'not_required' | 'available_open' | 'available_closed' | 'unavailable'
@@ -131,14 +132,23 @@ export function getAccountActivity(
 }
 
 /**
- * 账户当前的「执行器口径」目标权重（symbol → weight，可负=空头）。
+ * 兼容读取账户最近一次成功计算的「执行器口径」目标权重。
  *
  * 与组合级 `getLatestWeights` 的区别：后端已按账户多空杠杆与 `weight_precision`
- * 缩放，展示口径与实际下单口径一致——持仓明细据此对照真实持仓（含杠杆）判定「到位」
- * 时不会因杠杆而误判。未绑定组合时返回空映射。
+ * 后端已按账户多空杠杆与 `weight_precision` 缩放；该 GET 只读快照，不执行组合函数。
  */
 export function getAccountTargetWeights(id: number, signal?: AbortSignal): Promise<LatestWeights> {
   return apiGet<LatestWeights>(`/account/${id}/target_weights`, signal)
+}
+
+/** 只读账户当前组合下最近一次成功计算的执行器口径目标快照。 */
+export function getAccountTargetSnapshot(id: number, signal?: AbortSignal): Promise<TargetWeightSnapshot> {
+  return apiGet<TargetWeightSnapshot>(`/account/${id}/target_snapshot`, signal)
+}
+
+/** 使用真实账户上下文主动重新计算并保存目标快照。 */
+export function refreshAccountTargetSnapshot(id: number): Promise<TargetWeightSnapshot> {
+  return apiSend<TargetWeightSnapshot>('POST', `/account/${id}/target_snapshot/refresh`)
 }
 
 /**

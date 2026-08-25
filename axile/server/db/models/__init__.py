@@ -75,6 +75,11 @@ from axile.server.db.models.schedule import (
     ScheduleSkip,
     ScheduleSkipActivity,
 )
+from axile.server.db.models.target_weight_snapshot import (
+    TargetWeightSnapshot,
+    TargetWeightSnapshotPublic,
+    TargetWeightSnapshotSource,
+)
 from axile.server.db.models.trading_calendar import (
     TradingCalendarConfig,
     TradingCalendarOverride,
@@ -100,6 +105,9 @@ __all__ = [
     "PortfolioPublic",
     "PortfolioLitePublic",
     "PortfolioListPublic",
+    "TargetWeightSnapshot",
+    "TargetWeightSnapshotPublic",
+    "TargetWeightSnapshotSource",
     "ValidateCustomCalcRequest",
     "ValidateCustomCalcResponse",
     "AccountBase",

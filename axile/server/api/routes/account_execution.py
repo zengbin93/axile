@@ -17,6 +17,7 @@ from axile.server.api.deps import SchedDep, SessionDep
 from axile.server.api.routes.account_support import _get_account_or_404
 from axile.server.api.routes.portfolio import resolve_portfolio_target
 from axile.server.context import Context
+from axile.server.core.db import SessionLocal
 from axile.server.db.models import (
     ExecutionArtifact,
     ExecutionArtifactListPublic,
@@ -29,6 +30,7 @@ from axile.server.db.models import (
     ExecutionTerminateResponse,
     ExecutionTriggerResponse,
     Portfolio,
+    TargetWeightSnapshotPublic,
 )
 from axile.server.execution.lifecycle import enqueue_empty_positions, enqueue_execute_trade
 from axile.server.execution.live import live_hub
@@ -41,6 +43,11 @@ from axile.server.execution.registry import (
 )
 from axile.server.execution.scheduler import delete_job
 from axile.server.repositories import get_latest_portfolio_id_by_account_id
+from axile.server.target_weight_snapshots import (
+    append_target_weight_snapshot,
+    get_latest_account_target_snapshot,
+    target_snapshot_public,
+)
 
 router = APIRouter()
 
@@ -103,19 +110,53 @@ async def account_target_weights(session: SessionDep, account_id: int) -> dict[s
 
     Notes
     -----
-    组合函数使用当前账户的真实上下文执行，随后再叠加账户杠杆和精度，口径与调仓一致。
+    本兼容接口只读取最近一次成功计算的账户归一化快照，不执行组合函数。
     """
-    account = await _get_account_or_404(session, account_id)
-
+    await _get_account_or_404(session, account_id)
     portfolio_id = await get_latest_portfolio_id_by_account_id(session, account_id)
     if portfolio_id is None:
         return {}
+    snapshot = await get_latest_account_target_snapshot(session, account_id, portfolio_id)
+    return snapshot.normalized_weights if snapshot and snapshot.normalized_weights is not None else {}
+
+
+@router.get("/{account_id}/target_snapshot", response_model=TargetWeightSnapshotPublic)
+async def account_target_snapshot(session: SessionDep, account_id: int) -> TargetWeightSnapshotPublic:
+    """只读账户当前绑定组合下最近成功计算的目标快照."""
+    await _get_account_or_404(session, account_id)
+    portfolio_id = await get_latest_portfolio_id_by_account_id(session, account_id)
+    if portfolio_id is None:
+        return TargetWeightSnapshotPublic()
+    snapshot = await get_latest_account_target_snapshot(session, account_id, portfolio_id)
+    return target_snapshot_public(snapshot, weight_kind="normalized")
+
+
+@router.post("/{account_id}/target_snapshot/refresh", response_model=TargetWeightSnapshotPublic)
+async def refresh_account_target_snapshot(session: SessionDep, account_id: int) -> TargetWeightSnapshotPublic:
+    """按用户请求使用真实账户上下文重新计算并保存目标权重."""
+    account = await _get_account_or_404(session, account_id)
+    portfolio_id = await get_latest_portfolio_id_by_account_id(session, account_id)
+    if portfolio_id is None:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="账户未绑定组合")
     portfolio = await session.get(Portfolio, portfolio_id)
     if portfolio is None:
-        return {}
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="账户绑定的组合不存在")
 
-    raw_target = await resolve_portfolio_target(portfolio, Context(session=session, account_id=account_id))
-    return _normalize_rebalance_target(account, raw_target)
+    async with SessionLocal() as context_session:
+        raw_target = await resolve_portfolio_target(
+            portfolio,
+            Context(session=context_session, account_id=account_id),
+        )
+    normalized_target = _normalize_rebalance_target(account, raw_target)
+    snapshot = await append_target_weight_snapshot(
+        session,
+        portfolio_id=portfolio_id,
+        account_id=account_id,
+        raw_weights=raw_target,
+        normalized_weights=normalized_target,
+        source="manual",
+    )
+    return target_snapshot_public(snapshot, weight_kind="normalized")
 
 
 # 心跳间隔（秒）：无事件时也定期发注释帧，避免中间层因空闲断连。

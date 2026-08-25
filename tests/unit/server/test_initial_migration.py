@@ -32,11 +32,13 @@ def test_migration_history_is_linear() -> None:
         "0002_trading_calendar.py",
         "0003_plugin_network.py",
         "0004_account_asset_snapshot.py",
+        "0005_target_weight_snapshot.py",
     ]
     initial = _load_migration(migration_paths[0])
     calendar = _load_migration(migration_paths[1])
     plugin_network = _load_migration(migration_paths[2])
     account_asset_snapshot = _load_migration(migration_paths[3])
+    target_weight_snapshot = _load_migration(migration_paths[4])
     assert initial.revision == "0001"
     assert initial.down_revision is None
     assert calendar.revision == "0002"
@@ -45,6 +47,8 @@ def test_migration_history_is_linear() -> None:
     assert plugin_network.down_revision == "0002"
     assert account_asset_snapshot.revision == "0004"
     assert account_asset_snapshot.down_revision == "0003"
+    assert target_weight_snapshot.revision == "0005"
+    assert target_weight_snapshot.down_revision == "0004"
 
 
 def test_account_asset_snapshot_migration_backfills_execution_assets() -> None:
@@ -94,6 +98,125 @@ def test_account_asset_snapshot_migration_backfills_execution_assets() -> None:
         assert rows[0]["account_id"] == 1
         assert rows[0]["execution_id"] == "exec-1"
         assert rows[0]["source"] == "execution"
+
+
+def test_target_weight_snapshot_migration_backfills_latest_account_target() -> None:
+    migration = _load_migration(_MIGRATIONS_DIR / "0005_target_weight_snapshot.py")
+    engine = sa.create_engine("sqlite://")
+    metadata = sa.MetaData()
+    sa.Table("portfolio", metadata, sa.Column("id", sa.Integer(), primary_key=True))
+    sa.Table("account", metadata, sa.Column("id", sa.Integer(), primary_key=True))
+    bindings = sa.Table(
+        "portfolioaccount",
+        metadata,
+        sa.Column("id", sa.Integer(), primary_key=True),
+        sa.Column("account_id", sa.Integer(), nullable=False),
+        sa.Column("portfolio_id", sa.Integer(), nullable=True),
+        sa.Column("created_at", sa.Text(), nullable=False),
+    )
+    records = sa.Table(
+        "executerecord",
+        metadata,
+        sa.Column("id", sa.Integer(), primary_key=True),
+        sa.Column("account_id", sa.Integer(), nullable=False),
+        sa.Column("execution_id", sa.Text(), nullable=True),
+        sa.Column("raw_input", sa.JSON(), nullable=False),
+        sa.Column("is_success", sa.Integer(), nullable=False),
+        sa.Column("created_at", sa.Text(), nullable=False),
+    )
+
+    with engine.begin() as connection:
+        metadata.create_all(connection)
+        connection.execute(sa.text("INSERT INTO portfolio (id) VALUES (7)"))
+        connection.execute(sa.text("INSERT INTO account (id) VALUES (1)"))
+        connection.execute(
+            bindings.insert(),
+            {"id": 1, "account_id": 1, "portfolio_id": 7, "created_at": "2026-08-24T09:00:00"},
+        )
+        connection.execute(
+            records.insert(),
+            [
+                {
+                    "id": 1,
+                    "account_id": 1,
+                    "execution_id": "exec-old",
+                    "raw_input": {"curr_target": {"rb2610": 0.5}},
+                    "is_success": 1,
+                    "created_at": "2026-08-24T09:30:00",
+                },
+                {
+                    "id": 2,
+                    "account_id": 1,
+                    "execution_id": "exec-new",
+                    "raw_input": {"curr_target": {"rb2610": 1.5}},
+                    "is_success": 1,
+                    "created_at": "2026-08-24T10:30:00",
+                },
+            ],
+        )
+        migration.op = Operations(MigrationContext.configure(connection))
+        migration.upgrade()
+
+        rows = connection.execute(sa.text("SELECT * FROM target_weight_snapshot")).mappings().all()
+        assert len(rows) == 1
+        assert rows[0]["portfolio_id"] == 7
+        assert rows[0]["account_id"] == 1
+        assert rows[0]["raw_weights"] in (None, "null")
+        assert rows[0]["normalized_weights"] == '{"rb2610": 1.5}'
+        assert rows[0]["execution_id"] == "exec-new"
+
+
+def test_target_weight_snapshot_migration_adopts_existing_model_table() -> None:
+    """表被 SQLModel 提前创建时，迁移应补索引并保持回填幂等."""
+    migration = _load_migration(_MIGRATIONS_DIR / "0005_target_weight_snapshot.py")
+    engine = sa.create_engine("sqlite://")
+    metadata = sa.MetaData()
+    sa.Table("portfolio", metadata, sa.Column("id", sa.Integer(), primary_key=True))
+    sa.Table("account", metadata, sa.Column("id", sa.Integer(), primary_key=True))
+    sa.Table(
+        "portfolioaccount",
+        metadata,
+        sa.Column("id", sa.Integer(), primary_key=True),
+        sa.Column("account_id", sa.Integer(), nullable=False),
+        sa.Column("portfolio_id", sa.Integer(), nullable=True),
+        sa.Column("created_at", sa.Text(), nullable=False),
+    )
+    sa.Table(
+        "executerecord",
+        metadata,
+        sa.Column("id", sa.Integer(), primary_key=True),
+        sa.Column("account_id", sa.Integer(), nullable=False),
+        sa.Column("execution_id", sa.Text(), nullable=True),
+        sa.Column("raw_input", sa.JSON(), nullable=False),
+        sa.Column("is_success", sa.Integer(), nullable=False),
+        sa.Column("created_at", sa.Text(), nullable=False),
+    )
+    sa.Table(
+        "target_weight_snapshot",
+        metadata,
+        sa.Column("id", sa.Integer(), primary_key=True),
+        sa.Column("portfolio_id", sa.Integer(), nullable=False),
+        sa.Column("account_id", sa.Integer(), nullable=True),
+        sa.Column("raw_weights", sa.JSON(), nullable=True),
+        sa.Column("normalized_weights", sa.JSON(), nullable=True),
+        sa.Column("source", sa.Text(), nullable=False),
+        sa.Column("execution_id", sa.Text(), nullable=True),
+        sa.Column("calculated_at", sa.Text(), nullable=False),
+    )
+
+    with engine.begin() as connection:
+        metadata.create_all(connection)
+        migration.op = Operations(MigrationContext.configure(connection))
+
+        migration.upgrade()
+        migration.upgrade()
+
+        inspector = sa.inspect(connection)
+        assert {
+            "ix_target_weight_snapshot_portfolio_id_id",
+            "ix_target_weight_snapshot_account_id_id",
+            "ix_target_weight_snapshot_execution_id",
+        } == _index_names(inspector, "target_weight_snapshot")
 
 
 def test_initial_baseline_creates_the_current_schema() -> None:

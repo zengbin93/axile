@@ -135,9 +135,13 @@ async def add_record_portfolio_account(
 
 
 async def get_latest_account_id_by_portfolio_id(session: AsyncSession, portfolio_id: int) -> Optional[int]:
-    """获取组合的当前的账户id."""
+    """获取最近绑定且当前仍指向该组合的账户 ID."""
+    latest_binding_ids = (
+        select(func.max(PortfolioAccount.id).label("max_id")).group_by(col(PortfolioAccount.account_id)).subquery()
+    )
     return await session.scalar(
         select(PortfolioAccount.account_id)
+        .join(latest_binding_ids, col(PortfolioAccount.id) == latest_binding_ids.c.max_id)
         .where(PortfolioAccount.portfolio_id == portfolio_id)
         .order_by(desc(PortfolioAccount.id))
         .limit(1)

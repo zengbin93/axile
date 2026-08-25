@@ -17,7 +17,7 @@ import {
   normalizeMoneyValue,
   type ConnectionValidationContext,
 } from '@/components/ui/connectionFieldValue'
-import { getLatestWeights } from '@/lib/api/portfolios'
+import { refreshPortfolioTargetSnapshot } from '@/lib/api/portfolios'
 import { createAccount } from '@/lib/api/accounts'
 import { useDomainStore } from '@/stores/domain'
 import { useChannelCatalogStore, useChannelDescriptor } from '@/stores/channels'
@@ -685,7 +685,7 @@ export function AcctConfirm() {
     }
     try {
       setPreviewState({ status: 'loading' })
-      const w = await getLatestWeights(acct.portfolioId)
+      const w = (await refreshPortfolioTargetSnapshot(acct.portfolioId)).weights
       setPreviewState({ status: 'success', rows: Object.entries(w).filter(([, v]) => Math.abs(v) > 1e-9).sort((a, b) => Math.abs(b[1]) - Math.abs(a[1])) })
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e)

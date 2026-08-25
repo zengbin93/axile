@@ -5,6 +5,7 @@ import type {
   Message,
   Portfolio,
   PortfolioList,
+  TargetWeightSnapshot,
   ValidateCustomCalcResult,
 } from '@/types/api'
 
@@ -18,12 +19,22 @@ export function getPortfolio(id: number, signal?: AbortSignal): Promise<Portfoli
   return apiGet<Portfolio>(`/portfolio/${id}`, signal)
 }
 
-/** 组合当前目标权重（symbol → weight，可负=空头）。 */
+/** 兼容读取组合最近一次成功计算的原始权重；不会执行组合函数。 */
 export function getLatestWeights(
   id: number,
   signal?: AbortSignal,
 ): Promise<LatestWeights> {
   return apiGet<LatestWeights>(`/portfolio/latest_weights/${id}`, signal)
+}
+
+/** 只读组合最近一次成功计算的原始目标快照。 */
+export function getPortfolioTargetSnapshot(id: number, signal?: AbortSignal): Promise<TargetWeightSnapshot> {
+  return apiGet<TargetWeightSnapshot>(`/portfolio/${id}/target_snapshot`, signal)
+}
+
+/** 主动执行组合函数并保存原始目标快照。 */
+export function refreshPortfolioTargetSnapshot(id: number): Promise<TargetWeightSnapshot> {
+  return apiSend<TargetWeightSnapshot>('POST', `/portfolio/${id}/target_snapshot/refresh`)
 }
 
 /**

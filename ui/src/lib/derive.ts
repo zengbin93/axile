@@ -152,7 +152,7 @@ export function holdingText(count: number, weights: number[]): string {
 /**
  * 持仓 vs 目标的收敛判定（原子详情用）。
  *
- * `positions` 取自最近执行记录快照，`target` 取自 latest_weights。仅当两边都
+ * `positions` 取自最近执行记录快照，`target` 取自最近目标计算快照。仅当两边都
  * 拿得到时才给结论；否则返回 null（交给上层降级）。
  */
 /**

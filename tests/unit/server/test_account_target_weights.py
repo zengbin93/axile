@@ -11,7 +11,7 @@ from axile.common.trade_channel import TradeChannel
 from axile.server.api.deps import get_db
 from axile.server.api.routes import account as account_routes
 from axile.server.api.routes import account_execution as account_execution_routes
-from axile.server.db.models import Account, Portfolio
+from axile.server.db.models import Account, Portfolio, TargetWeightSnapshot
 
 
 class _RouteSession:
@@ -90,7 +90,7 @@ def _patch_resolution(
     *,
     portfolio_id: int | None,
     raw_target: dict[str, float],
-) -> None:
+) -> list[TargetWeightSnapshot]:
     """桩掉绑定组合解析与裸目标合成，把测试聚焦在杠杆缩放这一层。"""
 
     async def fake_get_latest_portfolio_id_by_account_id(_session: object, _account_id: int) -> int | None:
@@ -99,23 +99,45 @@ def _patch_resolution(
     async def fake_resolve_portfolio_target(_portfolio: Portfolio, _context: object) -> dict[str, float]:
         return dict(raw_target)
 
+    class _ContextSession:
+        async def __aenter__(self) -> object:
+            return object()
+
+        async def __aexit__(self, *_args: object) -> None:
+            return None
+
+    saved: list[TargetWeightSnapshot] = []
+
+    async def fake_append_target_weight_snapshot(_session: object, **kwargs: object) -> TargetWeightSnapshot:
+        snapshot = TargetWeightSnapshot(id=1, calculated_at="2026-08-25T10:30:00", **kwargs)
+        saved.append(snapshot)
+        return snapshot
+
     monkeypatch.setattr(
         account_execution_routes,
         "get_latest_portfolio_id_by_account_id",
         fake_get_latest_portfolio_id_by_account_id,
     )
     monkeypatch.setattr(account_execution_routes, "resolve_portfolio_target", fake_resolve_portfolio_target)
+    monkeypatch.setattr(account_execution_routes, "SessionLocal", _ContextSession)
+    monkeypatch.setattr(
+        account_execution_routes,
+        "append_target_weight_snapshot",
+        fake_append_target_weight_snapshot,
+    )
+    return saved
 
 
 def test_account_target_weights_applies_long_leverage(monkeypatch) -> None:
     """多头目标应按 ``long_leverage`` 放大：策略净 50% × 3x → 展示 150%。"""
     session = _RouteSession(_build_account(long_leverage=3.0), _build_portfolio())
-    _patch_resolution(monkeypatch, portfolio_id=7, raw_target={"rb2610": 0.5, "ag2612": 0.5})
+    saved = _patch_resolution(monkeypatch, portfolio_id=7, raw_target={"rb2610": 0.5, "ag2612": 0.5})
 
-    response = TestClient(_build_app(session)).get("/account/1/target_weights")
+    response = TestClient(_build_app(session)).post("/account/1/target_snapshot/refresh")
 
     assert response.status_code == 200
-    assert response.json() == {"rb2610": 1.5, "ag2612": 1.5}
+    assert response.json()["weights"] == {"rb2610": 1.5, "ag2612": 1.5}
+    assert saved[0].source == "manual"
 
 
 def test_account_target_weights_applies_short_leverage(monkeypatch) -> None:
@@ -123,10 +145,10 @@ def test_account_target_weights_applies_short_leverage(monkeypatch) -> None:
     session = _RouteSession(_build_account(long_leverage=1.0, short_leverage=2.0), _build_portfolio())
     _patch_resolution(monkeypatch, portfolio_id=7, raw_target={"rb2610": 0.5, "ag2612": -0.5})
 
-    response = TestClient(_build_app(session)).get("/account/1/target_weights")
+    response = TestClient(_build_app(session)).post("/account/1/target_snapshot/refresh")
 
     assert response.status_code == 200
-    assert response.json() == {"rb2610": 0.5, "ag2612": -1.0}
+    assert response.json()["weights"] == {"rb2610": 0.5, "ag2612": -1.0}
 
 
 def test_account_target_weights_falls_back_to_channel_default_leverage(monkeypatch) -> None:
@@ -134,6 +156,30 @@ def test_account_target_weights_falls_back_to_channel_default_leverage(monkeypat
     session = _RouteSession(_build_account(long_leverage=None, short_leverage=None), _build_portfolio())
     _patch_resolution(monkeypatch, portfolio_id=7, raw_target={"rb2610": 0.5})
 
+    response = TestClient(_build_app(session)).post("/account/1/target_snapshot/refresh")
+
+    assert response.status_code == 200
+    assert response.json()["weights"] == {"rb2610": 1.5}
+
+
+def test_account_target_weights_get_only_reads_snapshot(monkeypatch) -> None:
+    """兼容 GET 只读既有快照，不执行组合函数。"""
+    session = _RouteSession(_build_account(), _build_portfolio())
+    _patch_resolution(monkeypatch, portfolio_id=7, raw_target={"should_not_run": 1.0})
+
+    async def fake_latest(_session: object, _account_id: int, _portfolio_id: int) -> TargetWeightSnapshot:
+        return TargetWeightSnapshot(
+            id=2,
+            portfolio_id=7,
+            account_id=1,
+            raw_weights={"rb2610": 0.5},
+            normalized_weights={"rb2610": 1.5},
+            source="execution",
+            execution_id="exec-1",
+            calculated_at="2026-08-25T10:00:00",
+        )
+
+    monkeypatch.setattr(account_execution_routes, "get_latest_account_target_snapshot", fake_latest)
     response = TestClient(_build_app(session)).get("/account/1/target_weights")
 
     assert response.status_code == 200

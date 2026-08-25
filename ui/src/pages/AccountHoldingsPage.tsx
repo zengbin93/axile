@@ -5,11 +5,13 @@ import { Card } from '@/components/ui/Card'
 import { Skeleton, SkeletonLines } from '@/components/ui/Skeleton'
 import { HoldingsView } from '@/features/account/HoldingsView'
 import { accountAssetTerms } from '@/features/dashboard/display'
-import { getAccount, getAccountAssetSnapshots, getAccountTargetWeights } from '@/lib/api/accounts'
+import { TargetSnapshotControl } from '@/features/portfolio/TargetSnapshotControl'
+import { getAccount, getAccountAssetSnapshots, getAccountTargetSnapshot, refreshAccountTargetSnapshot } from '@/lib/api/accounts'
 import { usePolling } from '@/lib/hooks/usePolling'
+import { useTargetSnapshot } from '@/lib/hooks/useTargetSnapshot'
 import { currencyOf, positionsOfAssets } from '@/lib/derive'
 import { useDomainStore } from '@/stores/domain'
-import type { LatestWeights } from '@/types/api'
+import { useRunning } from '@/stores/liveExec'
 
 /**
  * 持仓明细路由页 /accounts/:id/holdings。
@@ -23,6 +25,7 @@ export function AccountHoldingsPage() {
   const accounts = useDomainStore((s) => s.accounts)
   const item = accounts?.find((a) => a.account_id === accountId) ?? null
   const assetTerms = accountAssetTerms(item?.trade_channel)
+  const running = useRunning(accountId)
 
   const account = usePolling(useCallback((s: AbortSignal) => getAccount(accountId, s), [accountId]), {
     queryKey: `account:${accountId}`,
@@ -33,17 +36,19 @@ export function AccountHoldingsPage() {
     { queryKey: `account:${accountId}:asset-snapshots:1`, intervalMs: 10000 },
   )
   // 目标改取账户级「执行器口径」权重（后端已叠加杠杆与精度），与含杠杆的真实持仓同尺。
-  const weights = usePolling<LatestWeights>(
-    useCallback((s: AbortSignal) => getAccountTargetWeights(accountId, s), [accountId]),
-    { queryKey: `account:${accountId}:target-weights`, intervalMs: 60000 },
+  const weights = useTargetSnapshot(
+    useCallback((s: AbortSignal) => getAccountTargetSnapshot(accountId, s), [accountId]),
+    useCallback(() => refreshAccountTargetSnapshot(accountId), [accountId]),
+    `account:${accountId}:target-snapshot`,
   )
 
   const latestAssets = snapshots.data?.data[0]?.assets
   const positions = positionsOfAssets(latestAssets)
-  const target = weights.data ?? {}
+  const target = weights.data?.weights ?? {}
   const recEquity = Number(latestAssets?.total_asset) || 0
   const equity = item?.total_asset ?? recEquity
   const name = item?.name ?? account.data?.name ?? `账户 #${accountId}`
+  const portfolioId = item?.portfolio_id ?? account.data?.portfolio_id ?? null
   // 快照缺失但实时口径（dashboard.holdings_count）显示有持仓：资产观测未返回有效持仓明细，
   // 逐只对照会把「实际持有」误判为空仓并给出「买入建仓」的危险建议。此时降级为「待刷新」，
   // 不展示可能翻倍的调仓计划（对齐 derive.ts 头部「不能确定的不编」原则）。
@@ -61,6 +66,17 @@ export function AccountHoldingsPage() {
       <div className="mt-3 text-[18px] font-[640]">{name}</div>
 
       <Card className="mt-4 max-w-[760px] px-6 py-5">
+        <div className="mb-3 border-b border-line pb-3">
+          <TargetSnapshotControl
+            snapshot={weights.data}
+            loading={weights.loading}
+            recalculating={weights.recalculating}
+            error={weights.recalculateError}
+            disabled={!!running || portfolioId == null}
+            disabledReason={running ? '账户正在执行，结束后可重新计算' : portfolioId == null ? '账户未绑定组合' : undefined}
+            onRecalculate={() => void weights.recalculate()}
+          />
+        </div>
         {(!snapshots.data || !weights.data) && (snapshots.loading || weights.loading) ? (
           <div aria-label="正在加载持仓与目标" aria-busy="true">
             <div className="flex items-center justify-between border-b border-line pb-3">
@@ -74,11 +90,13 @@ export function AccountHoldingsPage() {
             持仓对照暂不可用：{snapshots.error?.message ?? weights.error?.message}
             <button
               className="ml-3 cursor-pointer border-0 bg-transparent font-semibold text-warn underline"
-              onClick={() => void (snapshots.error ? snapshots.refresh() : weights.refresh())}
+              onClick={() => void (snapshots.error ? snapshots.refresh() : weights.reloadSnapshot())}
             >
               重试
             </button>
           </div>
+        ) : !weights.data?.calculated_at ? (
+          <div className="text-[14px] text-ink-3">尚无目标权重，点击刷新按钮计算后再查看持仓对照。</div>
         ) : holdingsStale ? (
           <div className="text-[14px] leading-relaxed text-warn">
             持仓数据待刷新 —— 实时口径显示当前持有 {holdingsCount} 个品种，但最近的资产观测未返回持仓明细。

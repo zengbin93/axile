@@ -21,12 +21,19 @@ from axile.server.db.models import (
     PortfolioLitePublic,
     PortfolioPublic,
     PortfolioUpdate,
+    TargetWeightSnapshotPublic,
     ValidateCustomCalcRequest,
     ValidateCustomCalcResponse,
 )
+from axile.server.execution.rebalance import _normalize_rebalance_target
 from axile.server.portfolio_targets import calculate_portfolio_target
 from axile.server.repositories import get_latest_account_id_by_portfolio_id, get_portfolios_every_account
 from axile.server.sandbox import ScriptExecutionError
+from axile.server.target_weight_snapshots import (
+    append_target_weight_snapshot,
+    get_latest_portfolio_target_snapshot,
+    target_snapshot_public,
+)
 
 router = APIRouter(prefix="/portfolio", tags=["portfolio"])
 
@@ -134,18 +141,53 @@ async def resolve_portfolio_target(portfolio: Portfolio, context: object) -> dic
 
 @router.get("/latest_weights/{portfolio_id}")
 async def portfolio_latest_weights(session: SessionDep, portfolio_id: int) -> dict[str, float]:
-    """使用绑定账户上下文或样例上下文计算组合当前目标权重."""
+    """兼容接口：只读组合最近成功计算的原始权重."""
+    if await session.get(Portfolio, portfolio_id) is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="组合不存在")
+    snapshot = await get_latest_portfolio_target_snapshot(session, portfolio_id)
+    return snapshot.raw_weights if snapshot and snapshot.raw_weights is not None else {}
+
+
+@router.get("/{portfolio_id:int}/target_snapshot", response_model=TargetWeightSnapshotPublic)
+async def portfolio_target_snapshot(session: SessionDep, portfolio_id: int) -> TargetWeightSnapshotPublic:
+    """只读组合最近成功计算的原始目标快照."""
+    if await session.get(Portfolio, portfolio_id) is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="组合不存在")
+    snapshot = await get_latest_portfolio_target_snapshot(session, portfolio_id)
+    return target_snapshot_public(snapshot, weight_kind="raw")
+
+
+@router.post("/{portfolio_id:int}/target_snapshot/refresh", response_model=TargetWeightSnapshotPublic)
+async def refresh_portfolio_target_snapshot(session: SessionDep, portfolio_id: int) -> TargetWeightSnapshotPublic:
+    """按用户请求执行一次组合函数并持久化当前目标."""
     portfolio = await session.get(Portfolio, portfolio_id)
     if portfolio is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="组合不存在")
 
     account_id = await get_latest_account_id_by_portfolio_id(session, portfolio_id)
     if account_id is None:
-        return await resolve_portfolio_target(portfolio, build_sample_context())
+        raw_target = await resolve_portfolio_target(portfolio, build_sample_context())
+        normalized_target = None
+    else:
+        account = await session.get(Account, account_id)
+        if account is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="绑定账户不存在")
+        async with SessionLocal() as context_session:
+            raw_target = await resolve_portfolio_target(
+                portfolio,
+                Context(session=context_session, account_id=account_id),
+            )
+        normalized_target = _normalize_rebalance_target(account, raw_target)
 
-    async with SessionLocal() as context_session:
-        context = Context(session=context_session, account_id=account_id)
-        return await resolve_portfolio_target(portfolio, context)
+    snapshot = await append_target_weight_snapshot(
+        session,
+        portfolio_id=portfolio_id,
+        account_id=account_id,
+        raw_weights=raw_target,
+        normalized_weights=normalized_target,
+        source="manual",
+    )
+    return target_snapshot_public(snapshot, weight_kind="raw")
 
 
 def _extract_user_code_error(exc: BaseException) -> tuple[int | None, int | None, str, str]:

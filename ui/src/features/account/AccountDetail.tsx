@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { useViewTransitionState } from 'react-router'
 import { RefreshCw } from 'lucide-react'
 import { Link, useNavigate } from '@/components/ui/nav'
@@ -22,14 +22,16 @@ import {
   getAccount,
   getAccountAssetSnapshots,
   getAccountActivity,
-  getAccountTargetWeights,
+  getAccountTargetSnapshot,
   getNextRun,
   prefetchExecuteRecords,
   refreshAccountAssets,
+  refreshAccountTargetSnapshot,
   updateAccount,
   deleteAccount,
 } from '@/lib/api/accounts'
 import { usePolling } from '@/lib/hooks/usePolling'
+import { useTargetSnapshot } from '@/lib/hooks/useTargetSnapshot'
 import { stateVerdict, gateOf, rebalancePlan, positionsOf, positionsOfAssets, type StatusLevel } from '@/lib/derive'
 import { displayCurrencyUnit } from '@/lib/format'
 import { describeCron } from '@/features/setup/cron'
@@ -37,7 +39,8 @@ import { TimerQuickModal } from '@/features/setup/TimerQuickModal'
 import { useToastStore } from '@/stores/ui'
 import { useChannelDescriptor } from '@/stores/channels'
 import { useDomainStore } from '@/stores/domain'
-import type { AccountDashboardItem, LatestWeights } from '@/types/api'
+import type { AccountDashboardItem } from '@/types/api'
+import { TargetSnapshotControl } from '@/features/portfolio/TargetSnapshotControl'
 
 interface AccountDetailProps {
   accountId: number
@@ -93,17 +96,25 @@ export function AccountDetail({ accountId, item, onDashboardRefresh }: AccountDe
 
   const portfolioId = account.data?.portfolio_id ?? item.portfolio_id ?? null
   // 目标改取账户级「执行器口径」权重（后端已叠加杠杆与精度），与含杠杆的真实持仓同尺。
-  const weights = usePolling<LatestWeights>(
-    useCallback((s: AbortSignal) => getAccountTargetWeights(accountId, s), [accountId]),
-    { queryKey: `account:${accountId}:target-weights`, intervalMs: 60000 },
+  const weights = useTargetSnapshot(
+    useCallback((s: AbortSignal) => getAccountTargetSnapshot(accountId, s), [accountId]),
+    useCallback(() => refreshAccountTargetSnapshot(accountId), [accountId]),
+    `account:${accountId}:target-snapshot`,
   )
 
   const runner = useExecutionRunner(accountId, () => {
     activity.refresh()
+    void weights.reloadSnapshot()
     onDashboardRefresh?.()
   })
   // 服务端真源的在途执行（SSE/轮询汇入 liveExec store）：任何来源发起的执行都可见。
   const live = useRunning(accountId)
+  const reloadTargetSnapshot = weights.reloadSnapshot
+  const previousLiveRef = useRef(live)
+  useEffect(() => {
+    if (previousLiveRef.current && !live) void reloadTargetSnapshot()
+    previousLiveRef.current = live
+  }, [live, reloadTargetSnapshot])
   // 当前在途执行 id：优先服务端真源，退回本地 runner（首帧前）。用于「一行可点跳详情」。
   const runningExecId = live?.executionId ?? runner.executionId
 
@@ -111,15 +122,15 @@ export function AccountDetail({ accountId, item, onDashboardRefresh }: AccountDe
   const latestAssets = assetSnapshots.data?.data[0]?.assets
   const snapshotPositions = positionsOfAssets(latestAssets)
   const positions = latestAssets ? snapshotPositions : positionsOf(recordList)
-  const target = weights.data ?? {}
+  const target = weights.data?.weights ?? {}
   const positionsLoading = latestAssets === undefined && activity.data === null
     && (assetSnapshots.loading || activity.loading)
   const positionsError = latestAssets === undefined && activity.data === null && !positionsLoading
     ? (assetSnapshots.error ?? activity.error)
     : null
-  const comparisonLoading = weights.loading || positionsLoading
+  const comparisonLoading = (weights.data === null && weights.loading) || positionsLoading
   const comparisonError = weights.data === null ? (weights.error ?? positionsError) : positionsError
-  const comparisonReady = weights.data !== null && !positionsLoading && !positionsError
+  const comparisonReady = weights.data?.calculated_at != null && !positionsLoading && !positionsError
   // 背离摘要：与明细抽屉同口径（均出自 rebalancePlan）。文案讲「几只要动 · 卖几买几」，
   // 条画各品种的要成交幅度；到位/空仓退成静态一句。
   const plan = rebalancePlan(positions, target, item.total_asset)
@@ -389,7 +400,18 @@ export function AccountDetail({ accountId, item, onDashboardRefresh }: AccountDe
         </Card>
 
         <Card className="px-6 py-4">
-          <h3 className="mb-3 text-[13px] font-semibold text-ink-2">持仓 vs 目标</h3>
+          <h3 className="text-[13px] font-semibold text-ink-2">持仓 vs 目标</h3>
+          <div className="mt-1.5 mb-3">
+            <TargetSnapshotControl
+              snapshot={weights.data}
+              loading={weights.loading}
+              recalculating={weights.recalculating}
+              error={weights.recalculateError}
+              disabled={isRunning || portfolioId == null}
+              disabledReason={isRunning ? '账户正在执行，结束后可重新计算' : portfolioId == null ? '账户未绑定组合' : undefined}
+              onRecalculate={() => void weights.recalculate()}
+            />
+          </div>
           <Kv k="当前持仓" v={item.holdings_count === 0 ? '空仓' : `${item.holdings_count} 只`} />
           {comparisonLoading ? (
             <>
@@ -404,6 +426,13 @@ export function AccountDetail({ accountId, item, onDashboardRefresh }: AccountDe
               <Kv k="目标品种" v={<span className="text-warn">暂不可用</span>} />
               <div className="mt-2.5 min-h-7 text-[13px] leading-relaxed text-warn">
                 持仓与目标对照暂不可用
+              </div>
+            </>
+          ) : !weights.data?.calculated_at ? (
+            <>
+              <Kv k="目标品种" v="尚未计算" />
+              <div className="mt-2.5 min-h-7 text-[13px] leading-relaxed text-ink-3">
+                点击刷新按钮计算后再生成持仓对照
               </div>
             </>
           ) : comparisonReady ? (

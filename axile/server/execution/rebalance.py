@@ -38,6 +38,7 @@ from axile.server.repositories import (
     get_latest_portfolio_id_by_account_id,
     get_latest_success_execute_record_by_account_id,
 )
+from axile.server.target_weight_snapshots import append_target_weight_snapshot
 from axile.server.utils import trade_channel_check
 
 
@@ -45,6 +46,7 @@ from axile.server.utils import trade_channel_check
 class _ResolvedRebalanceRequest:
     """承载调仓准备阶段解析出的目标权重."""
 
+    portfolio_id: int
     curr_target: dict[str, float]
 
 
@@ -188,7 +190,7 @@ async def _resolve_rebalance_request(
     """解析本次调仓实际要执行的目标权重."""
     portfolio = await _load_bound_portfolio(account, cast("int", account.id), execution_id)
     curr_target = await _execute_portfolio_function(account, portfolio, execution_id, logger)
-    return _ResolvedRebalanceRequest(curr_target=curr_target)
+    return _ResolvedRebalanceRequest(portfolio_id=cast("int", portfolio.id), curr_target=curr_target)
 
 
 def _normalize_rebalance_target(
@@ -306,6 +308,7 @@ async def _build_rebalance_backend_request(
     trigger_source: str,
     logger: "loguru.Logger",
     cleanup: bool,
+    normalized_target: dict[str, float] | None = None,
 ) -> execution_backend.RebalanceBackendRequest:
     """
     组装后端执行调仓所需的请求对象.
@@ -330,7 +333,8 @@ async def _build_rebalance_backend_request(
     execution_backend.RebalanceBackendRequest
         可直接交给 backend 执行层的请求对象。
     """
-    normalized_target = _normalize_rebalance_target(account, curr_target)
+    if normalized_target is None:
+        normalized_target = _normalize_rebalance_target(account, curr_target)
     last_target = await _load_last_target_snapshot(account)
     # 审计输入、执行器输入与回传给调用方的 curr_target 必须共享同一份
     # 规范化结果，避免回放执行时出现“显示目标”和“实际下单目标”不一致。
@@ -388,12 +392,25 @@ async def _run_account_rebalance(
     await trade_channel_check(account)
     request = await _resolve_rebalance_request(account, execution_id, logger)
 
+    normalized_target = _normalize_rebalance_target(account, request.curr_target)
+    async with SessionLocal() as session:
+        await append_target_weight_snapshot(
+            session,
+            portfolio_id=request.portfolio_id,
+            account_id=cast("int", account.id),
+            raw_weights=request.curr_target,
+            normalized_weights=normalized_target,
+            source="execution",
+            execution_id=execution_id,
+        )
+
     return await trade(
         account,
         request.curr_target,
         execution_id=execution_id,
         trigger_source=trigger_source,
         logger=logger,
+        normalized_target=normalized_target,
     )
 
 
@@ -404,6 +421,7 @@ async def trade(
     trigger_source: str = "scheduler",
     logger: "loguru.Logger | None" = None,
     cleanup: bool = True,
+    normalized_target: dict[str, float] | None = None,
 ) -> ExecuteRecord:
     """
     为账户执行一次调仓任务，并持久化结果.
@@ -438,6 +456,7 @@ async def trade(
         trigger_source=trigger_source,
         logger=logger,
         cleanup=cleanup,
+        normalized_target=normalized_target,
     )
     return await execution_backend.run_rebalance_via_backend(request=request)
 

@@ -537,6 +537,47 @@ def test_execute_trade_rejects_overlapping_runs(
             execution_registry._running_account_executions.pop(1, None)
 
 
+def test_account_rebalance_persists_same_normalized_target_used_by_trade(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """真实调仓在下单前保存快照，且复用执行器收到的归一化目标对象。"""
+    account = build_account(long_leverage=2.0, short_leverage=3.0)
+    raw_target = {"rb2610": 0.5, "ag2612": -0.5}
+    captured: dict[str, object] = {}
+
+    async def fake_load(_account_id: int, _logger: object) -> Account:
+        return account
+
+    async def fake_check(_account: Account) -> None:
+        return None
+
+    async def fake_resolve(_account: Account, _execution_id: str | None, _logger: object):
+        return rebalance_execution._ResolvedRebalanceRequest(portfolio_id=7, curr_target=raw_target)
+
+    async def fake_append(_session: object, **kwargs: object) -> SimpleNamespace:
+        captured.update(kwargs)
+        return SimpleNamespace(id=1)
+
+    async def fake_trade(_account: Account, _target: dict[str, float], **kwargs: object) -> SimpleNamespace:
+        captured["trade_normalized_target"] = kwargs["normalized_target"]
+        return SimpleNamespace(id=10, is_success=1)
+
+    monkeypatch.setattr(rebalance_execution, "_load_rebalance_account", fake_load)
+    monkeypatch.setattr(rebalance_execution, "trade_channel_check", fake_check)
+    monkeypatch.setattr(rebalance_execution, "_resolve_rebalance_request", fake_resolve)
+    monkeypatch.setattr(rebalance_execution, "append_target_weight_snapshot", fake_append)
+    monkeypatch.setattr(rebalance_execution, "trade", fake_trade)
+    monkeypatch.setattr(rebalance_execution, "SessionLocal", lambda: FakeSession())
+
+    result = asyncio.run(rebalance_execution._run_account_rebalance(1, execution_id="exec-target-1"))
+
+    assert result.is_success == 1
+    assert captured["raw_weights"] == raw_target
+    assert captured["normalized_weights"] == {"rb2610": 1.0, "ag2612": -1.5}
+    assert captured["normalized_weights"] is captured["trade_normalized_target"]
+    assert captured["source"] == "execution"
+
+
 def test_trade_passes_execution_id_to_persisted_record(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

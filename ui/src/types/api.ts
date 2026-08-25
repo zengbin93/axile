@@ -331,6 +331,15 @@ export interface PortfolioList {
 /** `GET /portfolio/latest_weights/{id}` 响应：symbol → 目标权重（可负=空头）。 */
 export type LatestWeights = Record<string, number>
 
+/** 最近一次成功计算的目标权重快照；`calculated_at=null` 表示从未计算。 */
+export interface TargetWeightSnapshot {
+  weights: LatestWeights
+  calculated_at: string | null
+  source: 'manual' | 'execution' | null
+  execution_id: string | null
+  context_account_id: number | null
+}
+
 /** 自定义组合脚本校验结果，对应后端 `ValidateCustomCalcResponse`。 */
 export interface ValidateCustomCalcResult {
   /** 脚本是否成功执行并返回合法权重。 */
