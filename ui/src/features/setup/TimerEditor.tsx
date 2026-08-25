@@ -356,12 +356,15 @@ export function TimerEditor({ tradeChannel, scheduleKind, nightSchedule, value, 
                 <div className="space-y-1.5">
                   {schedulePreview.items.map((item) => {
                     const tradingDay = item.calendar_day.slice(5)
+                    const legacy = item.using_legacy_fallback
+                      ? `${item.label ?? '中国交易日历'} · 存量兼容闭市保护中（A 股日历未覆盖） · `
+                      : ''
                     const text = item.reason_code === 'CALENDAR.NO_NIGHT_SESSION'
                       ? '无对应夜盘，已跳过'
                       : item.calendar_status === 'available_open'
-                      ? `${tradingDay} 交易日，执行`
+                      ? `${legacy}${tradingDay} 交易日，执行`
                       : item.calendar_status === 'available_closed'
-                        ? '休市，已跳过'
+                        ? `${legacy}休市，已跳过`
                         : item.calendar_status === 'unavailable'
                           ? '日历不可用，按排程执行'
                           : '按排程执行'

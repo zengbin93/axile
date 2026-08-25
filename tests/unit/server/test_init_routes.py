@@ -54,19 +54,26 @@ def _patch_aiohttp_response(monkeypatch: pytest.MonkeyPatch, payload: Any) -> No
     )
 
 
-def test_init_status_returns_prefill_keys(client: TestClient) -> None:
+def test_init_status_returns_prefill_keys(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(init_module.settings, "tushare_token", "tushare-token-123")
+
     response = client.get("/api/v1/init/status")
 
     assert response.status_code == 200
-    assert set(response.json()["values"]) == {
+    values = response.json()["values"]
+    assert set(values) == {
         "sqlalchemy_database_uri",
         "exe_err_feishu_key",
         "environment",
         "app_log_dir",
         "axile_log_rotation",
+        "tushare_configured",
         "algorithm_modules",
         "algorithm_directories",
     }
+    assert values["tushare_configured"] is True
+    assert "tushare_token" not in values
+    assert "tushare-token-123" not in response.text
 
 
 def test_test_db_success(client: TestClient, tmp_path: Path) -> None:
@@ -221,6 +228,7 @@ def test_init_save_writes_config_and_schedules_restart(
         json={
             "sqlalchemy_database_uri": "sqlite+aiosqlite:///./axile.db",
             "exe_err_feishu_key": "bot-key-123",
+            "tushare_token": "tushare-token-123",
             "algorithm_modules": ["pkg.a"],
             "algorithm_directories": ["./my_algos"],
         },
@@ -230,6 +238,7 @@ def test_init_save_writes_config_and_schedules_restart(
     assert response.json()["ok"] is True
     written = toml_path.read_text(encoding="utf-8")
     assert 'exe_err_feishu_key = "bot-key-123"' in written
+    assert 'tushare_token = "tushare-token-123"' in written
     assert "./my_algos" in written
     assert restarted.get("done") is True
 

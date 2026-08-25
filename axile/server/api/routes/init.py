@@ -113,6 +113,7 @@ class InitSaveRequest(BaseModel):
     environment: Literal["local", "staging", "production"] = "local"
     app_log_dir: str = "./logs"
     axile_log_rotation: str = "1 day"
+    tushare_token: str | None = None
     algorithm_modules: list[str] = []
     algorithm_directories: list[str] = []
 
@@ -157,6 +158,7 @@ def _prefill_values() -> dict[str, Any]:
         "environment": settings.environment,
         "app_log_dir": str(settings.app_log_dir),
         "axile_log_rotation": settings.axile_log_rotation,
+        "tushare_configured": bool(settings.tushare_token),
         "algorithm_modules": settings.algorithm_modules,
         "algorithm_directories": settings.algorithm_directories,
     }
@@ -371,6 +373,10 @@ def init_save(payload: InitSaveRequest, background_tasks: BackgroundTasks) -> Te
         "algorithm_modules": payload.algorithm_modules,
         "algorithm_directories": payload.algorithm_directories,
     }
+    if payload.tushare_token is not None:
+        values["tushare_token"] = payload.tushare_token
+    else:
+        values["tushare_token"] = settings.tushare_token
     try:
         stage_initial_calendars(staged)
         write_config_toml(values)

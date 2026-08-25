@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import sqlite3
 from collections.abc import AsyncGenerator
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
@@ -412,6 +412,67 @@ def test_unconfigured_calendar_and_channel_without_calendar_are_fail_open(
     assert decision.calendar_id is None
 
 
+def test_gm_uses_china_only_when_ashare_is_uncovered_and_preserves_override(tmp_path: Path) -> None:
+    session_factory = asyncio.run(_create_database(tmp_path / "gm-fallback.db"))
+    fallback_day = date(2026, 9, 1)
+    primary_override_day = date(2026, 9, 2)
+
+    async def exercise() -> tuple[calendar_service.CalendarDayDecision, calendar_service.CalendarDayDecision]:
+        async with session_factory() as session:
+            session.add_all(
+                [
+                    TradingCalendarConfig(calendar_id="china", refresh_kind="shinny"),
+                    TradingCalendarRecord(calendar_id="china", cal_date=fallback_day, is_open=True),
+                    TradingCalendarOverride(calendar_id="china", cal_date=fallback_day, is_open=False),
+                    TradingCalendarOverride(calendar_id="ashare", cal_date=primary_override_day, is_open=True),
+                ]
+            )
+            await session.commit()
+            decisions = await calendar_service.evaluate_channel_calendar_days(
+                session, "gm", [fallback_day, primary_override_day]
+            )
+            china_record = await session.get(TradingCalendarRecord, ("china", fallback_day))
+            china_override = await session.get(TradingCalendarOverride, ("china", fallback_day))
+            china_config = await session.get(TradingCalendarConfig, "china")
+            assert china_record is not None and china_record.is_open is True
+            assert china_override is not None and china_override.is_open is False
+            assert china_config is not None and china_config.refresh_kind == "shinny"
+            return decisions[fallback_day], decisions[primary_override_day]
+
+    fallback, primary = asyncio.run(exercise())
+    assert fallback.status is calendar_service.CalendarDecisionStatus.AVAILABLE_CLOSED
+    assert fallback.calendar_id == "china"
+    assert fallback.label == "中国交易日历"
+    assert fallback.base_is_open is True
+    assert fallback.override_is_open is False
+    assert fallback.effective_is_open is False
+    assert fallback.using_legacy_fallback is True
+    assert primary.status is calendar_service.CalendarDecisionStatus.AVAILABLE_OPEN
+    assert primary.calendar_id == "ashare"
+    assert primary.using_legacy_fallback is False
+
+
+def test_gm_primary_read_failure_does_not_read_legacy_calendar(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[str] = []
+
+    class _Session:
+        async def get(self, *_args: object) -> None:
+            return None
+
+    async def diagnostics(
+        _session: object, *, calendar_id: str, **_kwargs: object
+    ) -> list[calendar_service.CalendarDiagnosticEntry]:
+        calls.append(calendar_id)
+        raise OSError("database unavailable")
+
+    monkeypatch.setattr(calendar_service, "list_calendar_diagnostics", diagnostics)
+    decision = asyncio.run(calendar_service.evaluate_channel_calendar_day(_Session(), "gm", date(2026, 9, 1)))
+
+    assert decision.status is calendar_service.CalendarDecisionStatus.UNAVAILABLE
+    assert decision.unavailable_reason is calendar_service.CalendarUnavailableReason.READ_FAILED
+    assert calls == ["ashare"]
+
+
 @pytest.mark.parametrize(
     ("triggered_at", "open_days", "expected_day", "expected_status", "expected_reason"),
     [
@@ -481,6 +542,385 @@ def test_futures_night_trigger_maps_to_trading_day(
     assert decision.day == expected_day
     assert decision.status is expected_status
     assert decision.reason_code == expected_reason
+
+
+def test_shinny_calendar_materializes_records_using_midnight(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Shinny 日历固定以自然日 00:00 判定并写入执行器读取的表。"""
+    session_factory = asyncio.run(_create_database(tmp_path / "shinny-save.db"))
+    seen: list[datetime] = []
+
+    class FakeCalendarUtility:
+        def trading_day(self, value: datetime) -> date:
+            seen.append(value)
+            return value.date()
+
+    monkeypatch.setattr(calendar_service, "CalendarUtility", FakeCalendarUtility)
+
+    async def exercise() -> None:
+        async with session_factory() as session:
+            await calendar_service.save_shinny_calendar(
+                session,
+                calendar_id="china",
+                start=date(2026, 8, 20),
+                end=date(2026, 8, 21),
+            )
+            rows = await calendar_service.list_calendar_entries(
+                session, calendar_id="china", start=date(2026, 8, 20), end=date(2026, 8, 21)
+            )
+            config = await session.get(TradingCalendarConfig, "china")
+            assert [item.is_open for item in rows] == [True, True]
+            assert config is not None and config.refresh_kind == "shinny"
+
+    asyncio.run(exercise())
+    assert seen == [datetime(2026, 8, 20), datetime(2026, 8, 21)]
+
+
+def test_shinny_calendar_does_not_materialize_beyond_2026(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """内置节假日止于 2026，超出范围必须保持未覆盖而非伪造工作日。"""
+    session_factory = asyncio.run(_create_database(tmp_path / "shinny-boundary.db"))
+
+    class FakeCalendarUtility:
+        def trading_day(self, value: datetime) -> date:
+            return value.date()
+
+    monkeypatch.setattr(calendar_service, "CalendarUtility", FakeCalendarUtility)
+
+    async def exercise() -> None:
+        async with session_factory() as session:
+            await calendar_service.save_shinny_calendar(
+                session,
+                calendar_id="china",
+                start=date(2026, 9, 30),
+                end=date(2027, 1, 2),
+            )
+            entries = await calendar_service.list_calendar_entries(
+                session, calendar_id="china", start=date(2026, 9, 30), end=date(2027, 1, 2)
+            )
+            diagnostics = await calendar_service.list_calendar_diagnostics(
+                session, calendar_id="china", start=date(2027, 1, 1), end=date(2027, 1, 2)
+            )
+            config = await session.get(TradingCalendarConfig, "china")
+            assert entries[-1].cal_date == date(2026, 12, 31)
+            assert diagnostics == [
+                calendar_service.CalendarDiagnosticEntry(calendarId="china", calDate=date(2027, 1, 1)),
+                calendar_service.CalendarDiagnosticEntry(calendarId="china", calDate=date(2027, 1, 2)),
+            ]
+            assert config is not None and config.refresh_kind == "shinny"
+
+    asyncio.run(exercise())
+
+
+def test_shinny_calendar_service_preserves_calendar_after_supported_year(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """共享保存入口在 2027 年也必须拒绝，避免旁路路由清空人工调整。"""
+    session_factory = asyncio.run(_create_database(tmp_path / "shinny-service-future.db"))
+    calendar_day = date(2026, 12, 31)
+
+    class FutureDate(date):
+        @classmethod
+        def today(cls) -> date:
+            return cls(2027, 1, 1)
+
+    async def exercise() -> None:
+        async with session_factory() as session:
+            session.add(TradingCalendarRecord(calendar_id="china", cal_date=calendar_day, is_open=False))
+            session.add(TradingCalendarOverride(calendar_id="china", cal_date=calendar_day, is_open=True))
+            await session.commit()
+            with pytest.raises(ValueError, match="2026-12-31"):
+                await calendar_service.save_shinny_calendar(
+                    session, calendar_id="china", start=calendar_day, end=date(2027, 1, 2)
+                )
+            record = await session.get(TradingCalendarRecord, ("china", calendar_day))
+            override = await session.get(TradingCalendarOverride, ("china", calendar_day))
+            assert record is not None and record.is_open is False
+            assert override is not None and override.is_open is True
+
+    monkeypatch.setattr(calendar_service, "date", FutureDate)
+    asyncio.run(exercise())
+
+
+def test_shinny_calendar_rejects_non_china_calendar(tmp_path: Path) -> None:
+    """Shinny 仅作中国期货和通用节假日兜底。"""
+    session_factory = asyncio.run(_create_database(tmp_path / "shinny-calendar-id.db"))
+
+    async def exercise() -> None:
+        async with session_factory() as session:
+            with pytest.raises(ValueError, match="china"):
+                await calendar_service.save_shinny_calendar(
+                    session,
+                    calendar_id="vendor",
+                    start=date(2026, 1, 1),
+                    end=date(2026, 1, 1),
+                )
+
+    asyncio.run(exercise())
+
+
+def test_shinny_calendar_marks_builtin_holiday_closed(tmp_path: Path) -> None:
+    """Shinny 的内置国庆节必须物化为休市。"""
+    session_factory = asyncio.run(_create_database(tmp_path / "shinny-holiday.db"))
+
+    async def exercise() -> None:
+        async with session_factory() as session:
+            await calendar_service.save_shinny_calendar(
+                session, calendar_id="china", start=date(2026, 10, 1), end=date(2026, 10, 1)
+            )
+            entries = await calendar_service.list_calendar_entries(
+                session, calendar_id="china", start=date(2026, 10, 1), end=date(2026, 10, 1)
+            )
+            assert [entry.is_open for entry in entries] == [False]
+
+    asyncio.run(exercise())
+
+
+def test_shinny_calendar_requires_optional_dependency(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """缺少可选依赖时不得把工作日规则静默写入日历。"""
+    session_factory = asyncio.run(_create_database(tmp_path / "shinny-dependency.db"))
+    monkeypatch.setattr(calendar_service, "CalendarUtility", None)
+
+    async def exercise() -> None:
+        async with session_factory() as session:
+            with pytest.raises(ValueError, match="axile\\[shinny\\]"):
+                await calendar_service.save_shinny_calendar(
+                    session, calendar_id="china", start=date(2026, 1, 1), end=date(2026, 1, 1)
+                )
+
+    asyncio.run(exercise())
+
+
+def test_shinny_refresh_skips_covered_year_end_calendar(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """年末只检查 Shinny 实际支持的范围，避免重复替换并清空人工调整。"""
+    session_factory = asyncio.run(_create_database(tmp_path / "shinny-covered.db"))
+
+    class YearEndDate(date):
+        @classmethod
+        def today(cls) -> date:
+            return cls(2026, 12, 18)
+
+    monkeypatch.setattr(calendar_service, "SessionLocal", session_factory)
+    monkeypatch.setattr(calendar_service, "date", YearEndDate)
+    save = AsyncMock()
+    monkeypatch.setattr(calendar_service, "_save_shinny_calendar", save)
+
+    async def exercise() -> bool:
+        async with session_factory() as session:
+            session.add(TradingCalendarConfig(calendar_id="china", refresh_kind="shinny"))
+            session.add_all(
+                TradingCalendarRecord(
+                    calendar_id="china", cal_date=date(2026, 12, 18) + timedelta(days=offset), is_open=True
+                )
+                for offset in range(14)
+            )
+            session.add(TradingCalendarOverride(calendar_id="china", cal_date=date(2026, 12, 18), is_open=False))
+            await session.commit()
+        refreshed = await calendar_service.sync_calendar_shinny(calendar_id="china")
+        async with session_factory() as session:
+            override = await session.get(TradingCalendarOverride, ("china", date(2026, 12, 18)))
+            assert override is not None and override.is_open is False
+        return refreshed
+
+    assert asyncio.run(exercise()) is False
+    save.assert_not_awaited()
+
+
+def test_shinny_refresh_stops_after_supported_year(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """2027 年后自动刷新保留未覆盖状态，不得退化成纯工作日。"""
+    session_factory = asyncio.run(_create_database(tmp_path / "shinny-refresh-boundary.db"))
+
+    class FutureDate(date):
+        @classmethod
+        def today(cls) -> date:
+            return cls(2027, 1, 1)
+
+    monkeypatch.setattr(calendar_service, "SessionLocal", session_factory)
+    monkeypatch.setattr(calendar_service, "date", FutureDate)
+    save = AsyncMock()
+    monkeypatch.setattr(calendar_service, "_save_shinny_calendar", save)
+
+    async def exercise() -> bool:
+        async with session_factory() as session:
+            session.add(TradingCalendarConfig(calendar_id="china", refresh_kind="shinny"))
+            await session.commit()
+        return await calendar_service.sync_calendar_shinny(calendar_id="china", force=True)
+
+    assert asyncio.run(exercise()) is False
+    save.assert_not_awaited()
+
+
+def test_tushare_calendar_maps_all_natural_days(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Tushare 的 trade_cal 返回完整自然日，保存时不需补齐日期。"""
+    session_factory = asyncio.run(_create_database(tmp_path / "tushare-save.db"))
+
+    async def fake_fetch(start: date, end: date) -> list[dict[str, str]]:
+        assert (start, end) == (date(2026, 1, 1), date(2026, 1, 3))
+        return [
+            {"cal_date": "20260101", "is_open": "0"},
+            {"cal_date": "20260102", "is_open": "1"},
+            {"cal_date": "20260103", "is_open": "0"},
+        ]
+
+    monkeypatch.setattr(calendar_service, "fetch_tushare_trade_cal", fake_fetch)
+
+    async def exercise() -> None:
+        async with session_factory() as session:
+            await calendar_service.save_tushare_calendar(
+                session,
+                calendar_id="ashare",
+                start=date(2026, 1, 1),
+                end=date(2026, 1, 3),
+            )
+            rows = await calendar_service.list_calendar_entries(
+                session, calendar_id="ashare", start=date(2026, 1, 1), end=date(2026, 1, 3)
+            )
+            config = await session.get(TradingCalendarConfig, "ashare")
+            status = await calendar_service.get_calendar_status(session, "ashare")
+            assert [item.is_open for item in rows] == [False, True, False]
+            assert config is not None and config.refresh_kind == "tushare"
+            assert config.function_code == ""
+            assert status.function_code == ""
+
+    asyncio.run(exercise())
+
+
+def test_tushare_calendar_rejects_non_ashare_calendar(tmp_path: Path) -> None:
+    """SSE trade_cal 不得被写入期货共用日历。"""
+    session_factory = asyncio.run(_create_database(tmp_path / "tushare-calendar-id.db"))
+
+    async def exercise() -> None:
+        async with session_factory() as session:
+            with pytest.raises(ValueError, match="ashare"):
+                await calendar_service.save_tushare_calendar(
+                    session, calendar_id="china", start=date(2026, 1, 1), end=date(2026, 1, 1)
+                )
+
+    asyncio.run(exercise())
+
+
+def test_tushare_refresh_skips_covered_calendar(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    session_factory = asyncio.run(_create_database(tmp_path / "tushare-covered.db"))
+    today = date.today()
+
+    async def fail_if_called(_start: date, _end: date) -> list[dict[str, str]]:
+        raise AssertionError("covered calendar must not fetch")
+
+    monkeypatch.setattr(calendar_service, "SessionLocal", session_factory)
+    monkeypatch.setattr(calendar_service, "fetch_tushare_trade_cal", fail_if_called)
+
+    async def exercise() -> bool:
+        async with session_factory() as session:
+            session.add(TradingCalendarConfig(calendar_id="ashare", refresh_kind="tushare"))
+            session.add_all(
+                TradingCalendarRecord(calendar_id="ashare", cal_date=today + timedelta(days=offset), is_open=True)
+                for offset in range(calendar_service.CALENDAR_MIN_FUTURE_DAYS + 1)
+            )
+            session.add(TradingCalendarOverride(calendar_id="ashare", cal_date=today, is_open=False))
+            await session.commit()
+        refreshed = await calendar_service.sync_calendar_tushare(calendar_id="ashare")
+        async with session_factory() as session:
+            override = await session.get(TradingCalendarOverride, ("ashare", today))
+            assert override is not None and override.is_open is False
+        return refreshed
+
+    assert asyncio.run(exercise()) is False
+
+
+def test_shinny_route_rejects_unsupported_calendar(tmp_path: Path) -> None:
+    """Shinny 路由不得为不支持的日历写入伪造数据。"""
+    session_factory = asyncio.run(_create_database(tmp_path / "shinny-route.db"))
+
+    with TestClient(_calendar_app(session_factory)) as client:
+        response = client.put("/api/v1/market/trading-calendar/shinny?calendarId=vendor")
+
+    assert response.status_code == 422
+    assert response.json()["detail"] == "Shinny 兜底仅支持 china 日历"
+
+
+def test_shinny_route_preserves_calendar_after_supported_year(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """2027 年拒绝刷新，不得清除已有基础日历或人工调整。"""
+    session_factory = asyncio.run(_create_database(tmp_path / "shinny-route-future.db"))
+    calendar_day = date(2026, 12, 31)
+
+    async def seed() -> None:
+        async with session_factory() as session:
+            session.add(TradingCalendarRecord(calendar_id="china", cal_date=calendar_day, is_open=False))
+            session.add(TradingCalendarOverride(calendar_id="china", cal_date=calendar_day, is_open=True))
+            await session.commit()
+
+    async def verify() -> None:
+        async with session_factory() as session:
+            record = await session.get(TradingCalendarRecord, ("china", calendar_day))
+            override = await session.get(TradingCalendarOverride, ("china", calendar_day))
+            assert record is not None and record.is_open is False
+            assert override is not None and override.is_open is True
+
+    asyncio.run(seed())
+    monkeypatch.setattr("axile.server.api.routes.trading_calendar._today", lambda: date(2027, 1, 1))
+
+    with TestClient(_calendar_app(session_factory)) as client:
+        response = client.put("/api/v1/market/trading-calendar/shinny?calendarId=china")
+
+    assert response.status_code == 422
+    assert response.json()["detail"] == "Shinny 内置节假日仅覆盖至 2026-12-31"
+    asyncio.run(verify())
+
+
+def test_tushare_route_rejects_futures_calendar(tmp_path: Path) -> None:
+    """Tushare 路由不得把 SSE 数据替换到期货日历。"""
+    session_factory = asyncio.run(_create_database(tmp_path / "tushare-route-calendar-id.db"))
+
+    with TestClient(_calendar_app(session_factory)) as client:
+        response = client.put("/api/v1/market/trading-calendar/tushare?calendarId=china")
+
+    assert response.status_code == 422
+    assert response.json()["detail"] == "Tushare 交易日历配置或数据无效"
+
+
+def test_tushare_route_sanitizes_upstream_errors(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    session_factory = asyncio.run(_create_database(tmp_path / "tushare-route.db"))
+    token = "tushare-token-123"
+
+    async def failed_fetch(_start: date, _end: date) -> list[dict[str, str]]:
+        raise RuntimeError(f"upstream rejected {token}")
+
+    monkeypatch.setattr(calendar_service, "fetch_tushare_trade_cal", failed_fetch)
+
+    with TestClient(_calendar_app(session_factory)) as client:
+        response = client.put("/api/v1/market/trading-calendar/tushare?calendarId=ashare")
+
+    assert response.status_code == 502
+    assert response.json()["detail"] == "Tushare 交易日历拉取失败"
+    assert token not in response.text
+
+
+def test_failed_tushare_refresh_preserves_existing_calendar(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Tushare 不可用时保留已有数据与人工调整。"""
+    session_factory = asyncio.run(_create_database(tmp_path / "tushare-failure.db"))
+    calendar_day = date(2026, 1, 1)
+
+    async def failed_fetch(_start: date, _end: date) -> list[dict[str, str]]:
+        raise ValueError("Tushare trade_cal 不可用")
+
+    monkeypatch.setattr(calendar_service, "fetch_tushare_trade_cal", failed_fetch)
+
+    async def exercise() -> None:
+        async with session_factory() as session:
+            session.add(TradingCalendarRecord(calendar_id="ashare", cal_date=calendar_day, is_open=False))
+            session.add(TradingCalendarOverride(calendar_id="ashare", cal_date=calendar_day, is_open=True))
+            session.add(TradingCalendarConfig(calendar_id="ashare", refresh_kind="tushare"))
+            await session.commit()
+            with pytest.raises(ValueError, match="Tushare trade_cal 不可用"):
+                await calendar_service.save_tushare_calendar(
+                    session, calendar_id="ashare", start=calendar_day, end=calendar_day
+                )
+            base = await session.get(TradingCalendarRecord, ("ashare", calendar_day))
+            override = await session.get(TradingCalendarOverride, ("ashare", calendar_day))
+            config = await session.get(TradingCalendarConfig, "ashare")
+            assert base is not None and base.is_open is False
+            assert override is not None and override.is_open is True
+            assert config is not None and config.refresh_kind == "tushare"
+
+    asyncio.run(exercise())
 
 
 def test_calendar_function_contract_runs_in_sandbox() -> None:

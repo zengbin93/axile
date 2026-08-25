@@ -34,6 +34,9 @@ export interface SchedulePreview {
     calendar_status: ScheduleCalendarStatus
     action: 'execute' | 'skip'
     unavailable_reason: ScheduleUnavailableReason | null
+    calendar_id: string | null
+    label: string | null
+    using_legacy_fallback: boolean
     reason_code: 'CALENDAR.CLOSED' | 'CALENDAR.NO_NIGHT_SESSION' | null
   }>
 }

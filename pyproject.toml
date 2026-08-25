@@ -31,7 +31,9 @@ dependencies = [
 ctp = ["openctp-ctp==6.7.7.*"]
 gm = ["gm>=3.0.183; sys_platform != 'darwin'"]
 tqsdk = ["tqsdk>=3.10.2,<3.11"]
-all = ["axile[ctp]", "axile[gm]", "axile[tqsdk]"]
+tushare = ["tushare>=1.4.24"]
+shinny = ["shinny-calendar==1.0.2026"]
+all = ["axile[ctp]", "axile[gm]", "axile[tqsdk]", "axile[tushare]", "axile[shinny]"]
 
 [dependency-groups]
 dev = [

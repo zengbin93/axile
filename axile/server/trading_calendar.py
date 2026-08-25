@@ -29,13 +29,22 @@ from axile.server.db.models import TradingCalendarConfig, TradingCalendarOverrid
 from axile.server.db.models.base import now_str
 from axile.server.sandbox import ScriptExecutionError, run_calendar_script
 
+try:
+    from shinny_calendar import CalendarUtility
+except ImportError:
+    CalendarUtility = None  # type: ignore[assignment,misc]
+
 CALENDAR_ID = "china"
+ASHARE_CALENDAR_ID = "ashare"
 CALENDAR_MIN_FUTURE_DAYS = 14
 CALENDAR_TARGET_FUTURE_DAYS = 365
 CALENDAR_INITIAL_HISTORY_DAYS = 365
 CALENDAR_JOB_ID = "ensure-trading-calendar"
+SHINNY_CALENDAR_REFRESH_KIND = "shinny"
+TUSHARE_CALENDAR_REFRESH_KIND = "tushare"
+SHINNY_CALENDAR_LAST_YEAR = 2026
 
-type CalendarRefreshKind = Literal["csv", "python"]
+type CalendarRefreshKind = Literal["csv", "python", "shinny", "tushare"]
 type CalendarSkipReason = Literal["CALENDAR.CLOSED", "CALENDAR.NO_NIGHT_SESSION"]
 _CALENDAR_ID_PATTERN = re.compile(r"^[a-z][a-z0-9_-]*$")
 _SYNC_LOCKS: dict[str, asyncio.Lock] = {}
@@ -109,6 +118,7 @@ class CalendarDayDecision(BaseModel):
     base_is_open: bool | None = None
     override_is_open: bool | None = None
     effective_is_open: bool | None = None
+    using_legacy_fallback: bool = False
     reason_code: CalendarSkipReason | None = None
 
 
@@ -288,12 +298,42 @@ async def evaluate_channel_calendar_days(
             for day in unique_days
         }
     by_day = {row.cal_date: row for row in diagnostics}
-    return {
+    decisions = {
         day: _decision_from_diagnostic(
             channel=channel_name, label=calendar.label, row=by_day[day], configured=configured
         )
         for day in unique_days
     }
+    fallback_days = [
+        day
+        for day, decision in decisions.items()
+        if decision.unavailable_reason
+        in (CalendarUnavailableReason.NOT_CONFIGURED, CalendarUnavailableReason.UNCOVERED)
+    ]
+    if calendar.fallback_calendar_id is None or not fallback_days:
+        return decisions
+    try:
+        fallback_configured = await session.get(TradingCalendarConfig, calendar.fallback_calendar_id) is not None
+        fallback_diagnostics = await list_calendar_diagnostics(
+            session,
+            calendar_id=calendar.fallback_calendar_id,
+            start=fallback_days[0],
+            end=fallback_days[-1],
+        )
+    except Exception as exc:  # noqa: BLE001 - 回退读取失败仍按主日历 fail-open
+        logger.warning("读取 {} 存量交易日历失败，按排程执行: {}", calendar.fallback_calendar_id, exc)
+        return decisions
+    fallback_by_day = {row.cal_date: row for row in fallback_diagnostics}
+    for day in fallback_days:
+        fallback = _decision_from_diagnostic(
+            channel=channel_name,
+            label=cast(str, calendar.fallback_label),
+            row=fallback_by_day[day],
+            configured=fallback_configured,
+        )
+        if fallback.status is not CalendarDecisionStatus.UNAVAILABLE:
+            decisions[day] = fallback.model_copy(update={"using_legacy_fallback": True})
+    return decisions
 
 
 async def evaluate_channel_calendar_day(
@@ -382,15 +422,14 @@ async def list_calendar_entries(
     if start is None or end is None:
         bounds: list[tuple[date | None, date | None]] = []
         for model in (TradingCalendarRecord, TradingCalendarOverride):
-            bounds.append(
-                (
-                    await session.execute(
-                        select(func.min(col(model.cal_date)), func.max(col(model.cal_date))).where(
-                            col(model.calendar_id) == calendar_id
-                        )
+            row = (
+                await session.execute(
+                    select(func.min(col(model.cal_date)), func.max(col(model.cal_date))).where(
+                        col(model.calendar_id) == calendar_id
                     )
-                ).one()
-            )
+                )
+            ).one()
+            bounds.append(cast("tuple[date | None, date | None]", row))
         minima = [cast(date, lower) for lower, _ in bounds if lower is not None]
         maxima = [cast(date, upper) for _, upper in bounds if upper is not None]
         if not minima or not maxima:
@@ -594,6 +633,102 @@ async def import_calendar_csv(
     return preview
 
 
+def _build_shinny_calendar_entries(calendar_id: str, start: date, end: date) -> list[CalendarInputEntry]:
+    """将 shinny 的中国期货/节假日判断物化为可供执行器读取的自然日日历。"""
+    if calendar_id != CALENDAR_ID:
+        raise ValueError("Shinny 兜底仅支持 china 日历")
+    if CalendarUtility is None:
+        raise ValueError("未安装 shinny-calendar，请安装 axile[shinny]")
+    last_supported_day = min(end, date(SHINNY_CALENDAR_LAST_YEAR, 12, 31))
+    if start > last_supported_day:
+        raise ValueError(f"Shinny 内置节假日仅覆盖至 {SHINNY_CALENDAR_LAST_YEAR}-12-31")
+    calendar = CalendarUtility()
+    return [
+        CalendarInputEntry(
+            calendar_id=calendar_id,
+            cal_date=day,
+            is_open=calendar.trading_day(datetime.combine(day, time.min)) == day,
+        )
+        for day in (start + timedelta(days=offset) for offset in range((last_supported_day - start).days + 1))
+    ]
+
+
+async def _save_shinny_calendar(session: AsyncSession, *, calendar_id: str, start: date, end: date) -> None:
+    """在已持有日历锁时物化 Shinny 本地兜底日历。"""
+    entries = await asyncio.to_thread(_build_shinny_calendar_entries, calendar_id, start, end)
+    await _replace_calendar(session, entries, refresh_kind=SHINNY_CALENDAR_REFRESH_KIND)
+
+
+async def save_shinny_calendar(
+    session: AsyncSession,
+    *,
+    calendar_id: str = CALENDAR_ID,
+    start: date,
+    end: date,
+) -> None:
+    """用 Shinny 物化中国期货/通用节假日日历，2026 年后不再生成数据。"""
+    calendar_id = normalize_calendar_id(calendar_id)
+    last_supported_day = date(SHINNY_CALENDAR_LAST_YEAR, 12, 31)
+    if date.today() > last_supported_day or start > last_supported_day:
+        raise ValueError(f"Shinny 内置节假日仅覆盖至 {SHINNY_CALENDAR_LAST_YEAR}-12-31")
+    if start > end:
+        raise ValueError("start 必须 <= end")
+    lock = _SYNC_LOCKS.setdefault(calendar_id, asyncio.Lock())
+    async with lock:
+        await _save_shinny_calendar(session, calendar_id=calendar_id, start=start, end=end)
+
+
+async def fetch_tushare_trade_cal(start: date, end: date) -> list[dict[str, str]]:
+    """从 config.toml 读取凭据并拉取 Tushare A 股交易日历。"""
+    from axile.common.config import settings
+
+    token = settings.tushare_token.strip()
+    if not token:
+        raise ValueError("未配置 Tushare Token")
+
+    def fetch() -> list[dict[str, str]]:
+        import tushare as ts
+
+        client = ts.pro_api(token)
+        frame = client.trade_cal(exchange="SSE", start_date=start.strftime("%Y%m%d"), end_date=end.strftime("%Y%m%d"))
+        return cast("list[dict[str, str]]", frame.to_dict("records"))
+
+    return await asyncio.to_thread(fetch)
+
+
+async def _save_tushare_calendar(session: AsyncSession, *, calendar_id: str, start: date, end: date) -> None:
+    """在已持有日历锁时拉取并替换 Tushare 日历。"""
+    rows = await fetch_tushare_trade_cal(start, end)
+    entries = [
+        CalendarInputEntry(
+            calendar_id=calendar_id,
+            cal_date=datetime.strptime(str(row["cal_date"]), "%Y%m%d").date(),
+            is_open=str(row["is_open"]) == "1",
+        )
+        for row in rows
+    ]
+    validate_calendar_entries(entries, calendar_id=calendar_id, start=start, end=end)
+    await _replace_calendar(session, entries, refresh_kind=TUSHARE_CALENDAR_REFRESH_KIND)
+
+
+async def save_tushare_calendar(
+    session: AsyncSession,
+    *,
+    calendar_id: str = ASHARE_CALENDAR_ID,
+    start: date,
+    end: date,
+) -> None:
+    """用 Tushare trade_cal 原子替换 A 股日历；凭据不入库。"""
+    calendar_id = normalize_calendar_id(calendar_id)
+    if calendar_id != ASHARE_CALENDAR_ID:
+        raise ValueError("Tushare 兜底仅支持 ashare 日历")
+    if start > end:
+        raise ValueError("start 必须 <= end")
+    lock = _SYNC_LOCKS.setdefault(calendar_id, asyncio.Lock())
+    async with lock:
+        await _save_tushare_calendar(session, calendar_id=calendar_id, start=start, end=end)
+
+
 def _calendar_script_error(error: ScriptExecutionError) -> CalendarFunctionResult:
     return CalendarFunctionResult(
         valid=False,
@@ -758,6 +893,79 @@ async def get_calendar_status(session: AsyncSession, calendar_id: str = CALENDAR
     )
 
 
+async def _sync_one_shinny(calendar_id: str, *, force: bool) -> bool:
+    lock = _SYNC_LOCKS.setdefault(calendar_id, asyncio.Lock())
+    if lock.locked():
+        return False
+    async with lock, SessionLocal() as session:
+        config = await session.get(TradingCalendarConfig, calendar_id)
+        if config is None or config.refresh_kind != SHINNY_CALENDAR_REFRESH_KIND:
+            return False
+        today = date.today()
+        last_supported_day = date(SHINNY_CALENDAR_LAST_YEAR, 12, 31)
+        if today > last_supported_day:
+            logger.warning("Shinny 交易日历仅覆盖至 {}，不再刷新 {}", last_supported_day, calendar_id)
+            return False
+        covered_end = min(today + timedelta(days=CALENDAR_MIN_FUTURE_DAYS), last_supported_day)
+        covered = await session.scalar(
+            select(func.count())
+            .select_from(TradingCalendarRecord)
+            .where(
+                col(TradingCalendarRecord.calendar_id) == calendar_id,
+                col(TradingCalendarRecord.cal_date) >= today,
+                col(TradingCalendarRecord.cal_date) <= covered_end,
+            )
+        )
+        if not force and int(covered or 0) == (covered_end - today).days + 1:
+            return False
+        try:
+            await _save_shinny_calendar(
+                session,
+                calendar_id=calendar_id,
+                start=today - timedelta(days=CALENDAR_INITIAL_HISTORY_DAYS),
+                end=today + timedelta(days=CALENDAR_TARGET_FUTURE_DAYS),
+            )
+        except Exception as exc:  # noqa: BLE001 - 刷新失败保留旧日历
+            logger.error("刷新 {} Shinny 交易日历失败，保留现有数据: {}", calendar_id, type(exc).__name__)
+            return False
+        logger.info("已刷新 {} Shinny 交易日历", calendar_id)
+        return True
+
+
+async def _sync_one_tushare(calendar_id: str, *, force: bool) -> bool:
+    lock = _SYNC_LOCKS.setdefault(calendar_id, asyncio.Lock())
+    if lock.locked():
+        return False
+    async with lock, SessionLocal() as session:
+        config = await session.get(TradingCalendarConfig, calendar_id)
+        if config is None or config.refresh_kind != TUSHARE_CALENDAR_REFRESH_KIND:
+            return False
+        today = date.today()
+        covered = await session.scalar(
+            select(func.count())
+            .select_from(TradingCalendarRecord)
+            .where(
+                col(TradingCalendarRecord.calendar_id) == calendar_id,
+                col(TradingCalendarRecord.cal_date) >= today,
+                col(TradingCalendarRecord.cal_date) <= today + timedelta(days=CALENDAR_MIN_FUTURE_DAYS),
+            )
+        )
+        if not force and int(covered or 0) == CALENDAR_MIN_FUTURE_DAYS + 1:
+            return False
+        try:
+            await _save_tushare_calendar(
+                session,
+                calendar_id=calendar_id,
+                start=today - timedelta(days=CALENDAR_INITIAL_HISTORY_DAYS),
+                end=today + timedelta(days=CALENDAR_TARGET_FUTURE_DAYS),
+            )
+        except Exception as exc:  # noqa: BLE001 - 刷新失败保留旧日历
+            logger.error("刷新 {} Tushare 交易日历失败，保留现有数据: {}", calendar_id, type(exc).__name__)
+            return False
+        logger.info("已刷新 {} Tushare 交易日历", calendar_id)
+        return True
+
+
 async def _sync_one_python(calendar_id: str, *, force: bool) -> bool:
     lock = _SYNC_LOCKS.setdefault(calendar_id, asyncio.Lock())
     if lock.locked():
@@ -793,6 +1001,40 @@ async def _sync_one_python(calendar_id: str, *, force: bool) -> bool:
         return True
 
 
+async def sync_calendar_shinny(*, calendar_id: str | None = None, force: bool = False) -> bool:
+    """刷新一个或全部配置为 Shinny 的中国期货兜底日历。"""
+    if calendar_id is not None:
+        return await _sync_one_shinny(normalize_calendar_id(calendar_id), force=force)
+    async with SessionLocal() as session:
+        rows = await session.execute(
+            select(TradingCalendarConfig.calendar_id).where(
+                col(TradingCalendarConfig.refresh_kind) == SHINNY_CALENDAR_REFRESH_KIND
+            )
+        )
+        calendar_ids = list(rows.scalars().all())
+    results = await asyncio.gather(*(_sync_one_shinny(item, force=force) for item in calendar_ids))
+    return any(results)
+
+
+async def sync_calendar_tushare(*, calendar_id: str | None = None, force: bool = False) -> bool:
+    """刷新一个或全部配置为 Tushare 的 A 股日历。"""
+    if calendar_id is not None:
+        calendar_id = normalize_calendar_id(calendar_id)
+        if calendar_id != ASHARE_CALENDAR_ID:
+            return False
+        return await _sync_one_tushare(calendar_id, force=force)
+    async with SessionLocal() as session:
+        rows = await session.execute(
+            select(TradingCalendarConfig.calendar_id).where(
+                col(TradingCalendarConfig.refresh_kind) == TUSHARE_CALENDAR_REFRESH_KIND,
+                col(TradingCalendarConfig.calendar_id) == ASHARE_CALENDAR_ID,
+            )
+        )
+        calendar_ids = list(rows.scalars().all())
+    results = await asyncio.gather(*(_sync_one_tushare(item, force=force) for item in calendar_ids))
+    return any(results)
+
+
 async def sync_calendar_python(*, calendar_id: str | None = None, force: bool = False) -> bool:
     """刷新一个或全部配置为 Python 的日历。"""
     if calendar_id is not None:
@@ -810,8 +1052,12 @@ async def sync_calendar_python(*, calendar_id: str | None = None, force: bool = 
 
 
 async def ensure_trading_calendar_coverage() -> None:
-    """定时检查全部 Python 日历的未来覆盖。"""
-    await sync_calendar_python(force=False)
+    """定时检查全部自动刷新日历的未来覆盖。"""
+    await asyncio.gather(
+        sync_calendar_python(force=False),
+        sync_calendar_shinny(force=False),
+        sync_calendar_tushare(force=False),
+    )
 
 
 def register_trading_calendar_job(scheduler: Scheduler) -> None:
@@ -827,6 +1073,7 @@ def register_trading_calendar_job(scheduler: Scheduler) -> None:
 
 
 __all__ = [
+    "ASHARE_CALENDAR_ID",
     "CALENDAR_ID",
     "CalendarAvailability",
     "CalendarDayDecision",
@@ -857,8 +1104,12 @@ __all__ = [
     "register_trading_calendar_job",
     "run_calendar_function",
     "save_calendar_function",
+    "save_shinny_calendar",
+    "save_tushare_calendar",
     "set_calendar_overrides",
     "stage_initial_calendars",
     "sync_calendar_python",
+    "sync_calendar_shinny",
+    "sync_calendar_tushare",
     "validate_calendar_entries",
 ]
