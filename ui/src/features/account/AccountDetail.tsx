@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useViewTransitionState } from 'react-router'
 import { RefreshCw } from 'lucide-react'
 import { Link, useNavigate } from '@/components/ui/nav'
@@ -14,8 +14,9 @@ import { AccountActions } from '@/features/account/AccountActions'
 import { useExecutionRunner } from '@/features/account/useExecutionRunner'
 import { useTerminateAction } from '@/features/account/useTerminateAction'
 import { buildRecentActivity } from '@/features/account/recent'
+import { rebalanceTurnover, topHoldingAdjustments } from '@/features/account/holdingPreview'
 import { ScheduleTimeline, ScheduleTimelineSkeleton } from '@/features/account/ScheduleTimeline'
-import { accountAssetTerms, INTEGRITY_ICON, INTEGRITY_TEXT_CLASS, STATUS_ICON, STATUS_TEXT_CLASS, channelLabel } from '@/features/dashboard/display'
+import { accountAssetTerms, INTEGRITY_ICON, INTEGRITY_TEXT_CLASS, STATUS_TEXT_CLASS, channelLabel } from '@/features/dashboard/display'
 import { phaseLabel, runVerb } from '@/features/dashboard/execProgress'
 import { useRunning } from '@/stores/liveExec'
 import {
@@ -33,12 +34,11 @@ import {
 import { usePolling } from '@/lib/hooks/usePolling'
 import { useTargetSnapshot } from '@/lib/hooks/useTargetSnapshot'
 import { stateVerdict, gateOf, rebalancePlan, positionsOf, positionsOfAssets, type StatusLevel } from '@/lib/derive'
-import { displayCurrencyUnit } from '@/lib/format'
+import { displayCurrencyUnit, fmtMoney, withCurrency } from '@/lib/format'
 import { describeCron } from '@/features/setup/cron'
 import { TimerQuickModal } from '@/features/setup/TimerQuickModal'
 import { useToastStore } from '@/stores/ui'
 import { useChannelDescriptor } from '@/stores/channels'
-import { useDomainStore } from '@/stores/domain'
 import type { AccountDashboardItem } from '@/types/api'
 import { TargetSnapshotControl } from '@/features/portfolio/TargetSnapshotControl'
 
@@ -53,7 +53,6 @@ interface AccountDetailProps {
 export function AccountDetail({ accountId, item, onDashboardRefresh }: AccountDetailProps) {
   const navigate = useNavigate()
   const toast = useToastStore((s) => s.toast)
-  const accountsError = useDomainStore((s) => s.accountsError)
   const [timerOpen, setTimerOpen] = useState(false)
   const [refreshingAssets, setRefreshingAssets] = useState(false)
   // 启停乐观态：确认后立刻翻转，驱动按钮/状态句日记式换字；与 item 对齐后清除。
@@ -135,12 +134,15 @@ export function AccountDetail({ accountId, item, onDashboardRefresh }: AccountDe
   // 条画各品种的要成交幅度；到位/空仓退成静态一句。
   const plan = rebalancePlan(positions, target, item.total_asset)
   const driftLevel: StatusLevel = plan.off > 0 ? 'warn' : 'ok'
-  const driftText =
+  const driftHeadline =
     plan.rows.length === 0
       ? '空仓 · 与目标一致'
       : plan.off === 0
         ? '已调仓到位'
-        : `${plan.off} 只待调整 · 卖 ${plan.sells} 买 ${plan.buys}${plan.flips > 0 ? ` · 翻向 ${plan.flips}` : ''}`
+        : `${plan.off} 只待调整`
+  const targetCount = Object.values(target).filter((weight) => Math.abs(weight) > 1e-9).length
+  const turnover = rebalanceTurnover(plan)
+  const topAdjustments = topHoldingAdjustments(plan, item.total_asset)
   // 在位性（风险轴）只由执行结果派生、不看 is_started；档位（模式）随乐观 is_started 变，便于启停后立刻日记式重写。
   // 四象限判词：模式给风险改台词（暂停+偏离＝不会自愈，措辞最重）。
   const state = stateVerdict({ ...item, is_started: isStarted })
@@ -386,22 +388,9 @@ export function AccountDetail({ accountId, item, onDashboardRefresh }: AccountDe
       {/* Vitals */}
       <SectionLabel>状态</SectionLabel>
       <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-        <Card className="px-6 py-4">
-          <h3 className="mb-3 text-[13px] font-semibold text-ink-2">系统健康</h3>
-          <Kv k="axile 服务" v={accountsError ? '连接异常' : '在线'} ok={!accountsError} />
-          {nextRun.loading ? (
-            <Kv k="自动调度" v={<SkeletonText className="w-14" />} />
-          ) : nextRun.error && nextRun.data === null ? (
-            <Kv k="自动调度" v={<span className="text-warn">暂不可用</span>} />
-          ) : (
-            <Kv k="自动调度" v={nextRun.data?.is_scheduled ? '已排程' : '未排程'} ok={nextRun.data?.is_scheduled ?? false} />
-          )}
-          <Kv k="自动执行" v={isStarted ? '已启动' : '已暂停'} ok={isStarted} />
-        </Card>
-
-        <Card className="px-6 py-4">
-          <h3 className="text-[13px] font-semibold text-ink-2">持仓 vs 目标</h3>
-          <div className="mt-1.5 mb-3">
+        <Card className="px-6 py-4 md:col-span-2">
+          <div className="mb-3 flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1.5">
+            <h3 className="mr-auto text-[13px] font-semibold text-ink-2">持仓 vs 目标</h3>
             <TargetSnapshotControl
               snapshot={weights.data}
               loading={weights.loading}
@@ -409,47 +398,75 @@ export function AccountDetail({ accountId, item, onDashboardRefresh }: AccountDe
               error={weights.recalculateError}
               disabled={isRunning || portfolioId == null}
               disabledReason={isRunning ? '账户正在执行，结束后可重新计算' : portfolioId == null ? '账户未绑定组合' : undefined}
+              variant="compact"
               onRecalculate={() => void weights.recalculate()}
             />
+            <Link
+              to={`/accounts/${accountId}/holdings`}
+              className="flex-none text-[12.5px] font-semibold text-accent hover:underline"
+            >
+              持仓明细 →
+            </Link>
           </div>
-          <Kv k="当前持仓" v={item.holdings_count === 0 ? '空仓' : `${item.holdings_count} 只`} />
           {comparisonLoading ? (
-            <>
-              <Kv k="目标品种" v={<SkeletonText className="w-12" />} />
-              <SkeletonGroup label="正在加载持仓与目标对照" className="mt-2.5 space-y-2.5">
+            <SkeletonGroup label="正在加载持仓与目标对照" className="grid min-h-40 gap-5 lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
+              <div className="space-y-3 border-t border-line pt-3">
+                <Skeleton className="h-7 w-32" />
                 <Skeleton className="h-4 w-44" />
                 <Skeleton className="h-2 w-full" />
-              </SkeletonGroup>
-            </>
+              </div>
+              <div className="space-y-3 border-t border-line pt-3 lg:border-t-0 lg:border-l lg:pt-0 lg:pl-5">
+                {Array.from({ length: 3 }, (_, index) => <Skeleton key={index} className="h-10 w-full" />)}
+              </div>
+            </SkeletonGroup>
           ) : comparisonError ? (
-            <>
-              <Kv k="目标品种" v={<span className="text-warn">暂不可用</span>} />
-              <div className="mt-2.5 min-h-7 text-[13px] leading-relaxed text-warn">
-                持仓与目标对照暂不可用
-              </div>
-            </>
+            <div className="border-t border-line py-3 text-[13px] leading-relaxed text-warn">
+              持仓与目标对照暂不可用
+            </div>
           ) : !weights.data?.calculated_at ? (
-            <>
-              <Kv k="目标品种" v="尚未计算" />
-              <div className="mt-2.5 min-h-7 text-[13px] leading-relaxed text-ink-3">
-                点击刷新按钮计算后再生成持仓对照
-              </div>
-            </>
+            <div className="border-t border-line py-3 text-[13px] leading-relaxed text-ink-3">
+              尚无目标权重，刷新后生成持仓对照
+            </div>
           ) : comparisonReady ? (
-            <>
-              <Kv k="目标品种" v={`${Object.keys(target).filter((s) => Math.abs(target[s]) > 1e-9).length} 只`} />
-              <div className={`mt-2.5 flex items-center gap-1.5 text-[13px] font-semibold ${STATUS_TEXT_CLASS[driftLevel]}`}>
-                {STATUS_ICON[driftLevel]} {driftText}
+            <div className="grid min-h-40 gap-5 lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
+              <div className="border-t border-line pt-3">
+                <div className={`text-[22px] font-[640] ${STATUS_TEXT_CLASS[driftLevel]}`}>
+                  {driftHeadline}
+                </div>
+                <div className="mt-1.5 text-[13px] text-ink-2">
+                  当前 {item.holdings_count === 0 ? '空仓' : `${item.holdings_count} 只`} · 目标 {targetCount} 只
+                </div>
+                {plan.off > 0 && (
+                  <>
+                    <div className="mt-1 text-[13px] text-ink-2">
+                      卖 {plan.sells} · 买 {plan.buys}{plan.flips > 0 ? ` · 翻向 ${plan.flips}` : ''}
+                    </div>
+                    <div className="mt-4 flex items-baseline justify-between gap-3 text-[12.5px]">
+                      <span className="text-ink-2">预计换手</span>
+                      <span className="num font-medium text-ink-1">{turnover.toFixed(1)}%</span>
+                    </div>
+                    <DriftBar rows={plan.rows} />
+                  </>
+                )}
               </div>
-              {plan.off > 0 && <DriftBar rows={plan.rows} />}
-            </>
+              {topAdjustments.length > 0 && (
+                <div className="border-t border-line lg:border-t-0 lg:border-l lg:pl-5">
+                  {topAdjustments.map(({ row, value }) => (
+                    <div key={row.symbol} className="grid min-h-12 grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-3 border-t border-line text-[13px] first:border-t-0">
+                      <OverflowText className="font-mono font-medium text-ink-1" text={row.symbol} />
+                      <span className="num whitespace-nowrap text-ink-2">
+                        {row.side === 'buy' ? '买入' : '卖出'} {row.amount.toFixed(1)}%
+                        {row.action === 'flip' && <span className="ml-1.5 text-warn">翻向</span>}
+                      </span>
+                      <span className="num min-w-20 whitespace-nowrap text-right font-medium text-ink-1">
+                        {value == null ? '—' : withCurrency(fmtMoney(value), item.currency)}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           ) : null}
-          <Link
-            to={`/accounts/${accountId}/holdings`}
-            className="mt-2.5 inline-block text-[12.5px] font-semibold text-accent hover:underline"
-          >
-            持仓明细 →
-          </Link>
         </Card>
 
         <Card className="px-6 py-4">
@@ -614,22 +631,6 @@ export function AccountDetail({ accountId, item, onDashboardRefresh }: AccountDe
   )
 }
 
-/** 状态卡里的键值行。 */
-function Kv({ k, v, ok, mono }: { k: string; v: ReactNode; ok?: boolean; mono?: boolean }) {
-  return (
-    <div className="flex items-center justify-between border-t border-line py-1.5 text-[14px] first:border-t-0">
-      <span className="text-ink-2">{k}</span>
-      <span className={`inline-flex items-center gap-1.5 font-medium text-ink-1 ${mono ? 'font-mono text-[12px]' : ''}`}>
-        {/* 状态离开红绿：正常=中性 ✓（安静即好），异常=琥珀 ⚠。红绿只留给行情涨跌。 */}
-        {ok != null && (
-          <span className={`flex-none text-[11px] ${ok ? 'text-ink-3' : 'text-warn'}`}>{ok ? '✓' : '⚠'}</span>
-        )}
-        {v}
-      </span>
-    </div>
-  )
-}
-
 /** 仪表盘与账户路由共用的冷拉骨架。 */
 export function AccountDetailSkeleton() {
   return (
@@ -646,16 +647,27 @@ export function AccountDetailSkeleton() {
       </Card>
       <SectionLabel>状态</SectionLabel>
       <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-        {Array.from({ length: 3 }, (_, index) => (
-          <Card key={index} className="min-h-[190px] px-6 py-4">
-            <Skeleton className="h-4 w-24" />
-            <div className="mt-4 space-y-3 border-t border-line pt-3">
-              <Skeleton className="h-4 w-full" />
-              <Skeleton className="h-4 w-full" />
-              <Skeleton className="h-4 w-4/5" />
+        <Card className="min-h-[190px] px-6 py-4 md:col-span-2">
+          <Skeleton className="h-4 w-24" />
+          <div className="mt-4 grid gap-5 lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
+            <div className="space-y-3 border-t border-line pt-3">
+              <Skeleton className="h-7 w-32" />
+              <Skeleton className="h-4 w-44" />
+              <Skeleton className="h-2 w-full" />
             </div>
-          </Card>
-        ))}
+            <div className="space-y-3 border-t border-line pt-3 lg:border-t-0 lg:border-l lg:pt-0 lg:pl-5">
+              {Array.from({ length: 3 }, (_, index) => <Skeleton key={index} className="h-10 w-full" />)}
+            </div>
+          </div>
+        </Card>
+        <Card className="min-h-[190px] px-6 py-4">
+          <Skeleton className="h-4 w-24" />
+          <div className="mt-4 space-y-3 border-t border-line pt-3">
+            <Skeleton className="h-4 w-full" />
+            <Skeleton className="h-4 w-full" />
+            <Skeleton className="h-4 w-4/5" />
+          </div>
+        </Card>
       </div>
       <div className="mt-6 mb-3"><Skeleton className="h-3 w-20" /></div>
       <Card className="px-6 py-4"><Skeleton className="h-4 w-full" /></Card>

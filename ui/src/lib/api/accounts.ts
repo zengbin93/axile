@@ -8,7 +8,6 @@ import type {
   AccountAssetSnapshot,
   AccountAssetSnapshotList,
   ExecuteRecordList,
-  LatestWeights,
   Message,
   PortfolioAccountList,
   TargetWeightSnapshot,
@@ -129,16 +128,6 @@ export function getAccountActivity(
   if (params.limit != null) query.set('limit', String(params.limit))
   const suffix = query.size ? `?${query}` : ''
   return apiGet<AccountActivityList>(`/account/${id}/activity${suffix}`, signal)
-}
-
-/**
- * 兼容读取账户最近一次成功计算的「执行器口径」目标权重。
- *
- * 与组合级 `getLatestWeights` 的区别：后端已按账户多空杠杆与 `weight_precision`
- * 后端已按账户多空杠杆与 `weight_precision` 缩放；该 GET 只读快照，不执行组合函数。
- */
-export function getAccountTargetWeights(id: number, signal?: AbortSignal): Promise<LatestWeights> {
-  return apiGet<LatestWeights>(`/account/${id}/target_weights`, signal)
 }
 
 /** 只读账户当前组合下最近一次成功计算的执行器口径目标快照。 */

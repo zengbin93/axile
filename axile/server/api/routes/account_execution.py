@@ -37,9 +37,11 @@ from axile.server.execution.live import live_hub
 from axile.server.execution.rebalance import _normalize_rebalance_target
 from axile.server.execution.registry import (
     AccountExecutionAlreadyRunningError,
+    clear_target_refresh,
     get_execution_status,
     get_running_execution_id,
     terminate_running_account_execution,
+    try_register_target_refresh,
 )
 from axile.server.execution.scheduler import delete_job
 from axile.server.repositories import get_latest_portfolio_id_by_account_id
@@ -85,41 +87,6 @@ async def execute(session: SessionDep, account_id: int) -> ExecutionTriggerRespo
     )
 
 
-@router.get("/{account_id}/target_weights")
-async def account_target_weights(session: SessionDep, account_id: int) -> dict[str, float]:
-    """
-    返回账户当前的**执行器口径**目标持仓权重.
-
-    与组合级 ``/portfolio/latest_weights`` 的区别: 这里叠加了账户的多空杠杆与
-    ``weight_precision`` 精度, 复用执行器真正使用的 :func:`_normalize_rebalance_target`,
-    因此展示口径与实际下单口径完全一致——持仓明细据此判定「到位/待调整」时不再因杠杆
-    缩放而误判。绑定组合的解析同样走执行器的 :func:`get_latest_portfolio_id_by_account_id`,
-    未绑定组合时返回空映射交由前端降级。
-
-    Parameters
-    ----------
-    session : SessionDep
-        数据库会话。
-    account_id : int
-        账户 ID。
-
-    Returns
-    -------
-    dict[str, float]
-        ``symbol -> 目标权重``（已含杠杆与精度）; 未绑定组合时为空字典。
-
-    Notes
-    -----
-    本兼容接口只读取最近一次成功计算的账户归一化快照，不执行组合函数。
-    """
-    await _get_account_or_404(session, account_id)
-    portfolio_id = await get_latest_portfolio_id_by_account_id(session, account_id)
-    if portfolio_id is None:
-        return {}
-    snapshot = await get_latest_account_target_snapshot(session, account_id, portfolio_id)
-    return snapshot.normalized_weights if snapshot and snapshot.normalized_weights is not None else {}
-
-
 @router.get("/{account_id}/target_snapshot", response_model=TargetWeightSnapshotPublic)
 async def account_target_snapshot(session: SessionDep, account_id: int) -> TargetWeightSnapshotPublic:
     """只读账户当前绑定组合下最近成功计算的目标快照."""
@@ -141,22 +108,27 @@ async def refresh_account_target_snapshot(session: SessionDep, account_id: int) 
     portfolio = await session.get(Portfolio, portfolio_id)
     if portfolio is None:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="账户绑定的组合不存在")
+    if not try_register_target_refresh(portfolio_id, account_id):
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="账户正在执行或刷新，请稍后再试")
 
-    async with SessionLocal() as context_session:
-        raw_target = await resolve_portfolio_target(
-            portfolio,
-            Context(session=context_session, account_id=account_id),
+    try:
+        async with SessionLocal() as context_session:
+            raw_target = await resolve_portfolio_target(
+                portfolio,
+                Context(session=context_session, account_id=account_id),
+            )
+        normalized_target = _normalize_rebalance_target(account, raw_target)
+        snapshot = await append_target_weight_snapshot(
+            session,
+            portfolio_id=portfolio_id,
+            account_id=account_id,
+            raw_weights=raw_target,
+            normalized_weights=normalized_target,
+            source="manual",
         )
-    normalized_target = _normalize_rebalance_target(account, raw_target)
-    snapshot = await append_target_weight_snapshot(
-        session,
-        portfolio_id=portfolio_id,
-        account_id=account_id,
-        raw_weights=raw_target,
-        normalized_weights=normalized_target,
-        source="manual",
-    )
-    return target_snapshot_public(snapshot, weight_kind="normalized")
+        return target_snapshot_public(snapshot, weight_kind="normalized")
+    finally:
+        clear_target_refresh(portfolio_id, account_id)
 
 
 # 心跳间隔（秒）：无事件时也定期发注释帧，避免中间层因空闲断连。

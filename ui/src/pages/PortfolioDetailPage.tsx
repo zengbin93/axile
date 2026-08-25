@@ -15,7 +15,7 @@ import { useTargetSnapshot } from '@/lib/hooks/useTargetSnapshot'
 import { useToastStore } from '@/stores/ui'
 import { channelLabel } from '@/features/dashboard/display'
 import { TargetSnapshotControl } from '@/features/portfolio/TargetSnapshotControl'
-import { useRunning } from '@/stores/liveExec'
+import { useLiveExecStore } from '@/stores/liveExec'
 
 export function PortfolioDetailPage() {
   const { id } = useParams()
@@ -37,7 +37,9 @@ export function PortfolioDetailPage() {
   const lite = portfolios?.find((p) => p.id === portfolioId) ?? null
   const head = pf ?? lite
   const boundAccount = accounts?.find((a) => a.portfolio_id === portfolioId) ?? null
-  const boundAccountRun = useRunning(boundAccount?.account_id ?? -1)
+  const boundAccountRun = useLiveExecStore((state) =>
+    accounts?.some((account) => account.portfolio_id === portfolioId && state.running.has(account.account_id)) ?? false,
+  )
 
   // 共享元素 FLIP：组合名与列表卡配对（A）；绑定账户名与账户详情头配对（B，复用 account-name）。
   const pfNameVt = useViewTransitionState(`/portfolios/${portfolioId}`)

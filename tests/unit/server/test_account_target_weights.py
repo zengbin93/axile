@@ -162,8 +162,8 @@ def test_account_target_weights_falls_back_to_channel_default_leverage(monkeypat
     assert response.json()["weights"] == {"rb2610": 1.5}
 
 
-def test_account_target_weights_get_only_reads_snapshot(monkeypatch) -> None:
-    """兼容 GET 只读既有快照，不执行组合函数。"""
+def test_account_target_snapshot_get_only_reads_snapshot(monkeypatch) -> None:
+    """快照 GET 只读既有快照，不执行组合函数。"""
     session = _RouteSession(_build_account(), _build_portfolio())
     _patch_resolution(monkeypatch, portfolio_id=7, raw_target={"should_not_run": 1.0})
 
@@ -180,28 +180,40 @@ def test_account_target_weights_get_only_reads_snapshot(monkeypatch) -> None:
         )
 
     monkeypatch.setattr(account_execution_routes, "get_latest_account_target_snapshot", fake_latest)
-    response = TestClient(_build_app(session)).get("/account/1/target_weights")
+    response = TestClient(_build_app(session)).get("/account/1/target_snapshot")
 
     assert response.status_code == 200
-    assert response.json() == {"rb2610": 1.5}
+    assert response.json()["weights"] == {"rb2610": 1.5}
+    assert response.json()["source"] == "execution"
 
 
-def test_account_target_weights_returns_empty_without_bound_portfolio(monkeypatch) -> None:
-    """账户未绑定组合时返回空映射，交由前端降级。"""
+def test_account_target_snapshot_returns_uncalculated_without_bound_portfolio(monkeypatch) -> None:
+    """账户未绑定组合时返回结构化未计算态。"""
     session = _RouteSession(_build_account(), _build_portfolio())
     _patch_resolution(monkeypatch, portfolio_id=None, raw_target={"rb2610": 0.5})
 
-    response = TestClient(_build_app(session)).get("/account/1/target_weights")
+    response = TestClient(_build_app(session)).get("/account/1/target_snapshot")
 
     assert response.status_code == 200
-    assert response.json() == {}
+    assert response.json()["weights"] == {}
+    assert response.json()["calculated_at"] is None
 
 
-def test_account_target_weights_returns_404_for_unknown_account(monkeypatch) -> None:
+def test_account_target_snapshot_returns_404_for_unknown_account(monkeypatch) -> None:
     """账户不存在时返回 404。"""
     session = _RouteSession(None, _build_portfolio())
     _patch_resolution(monkeypatch, portfolio_id=7, raw_target={"rb2610": 0.5})
 
-    response = TestClient(_build_app(session)).get("/account/999/target_weights")
+    response = TestClient(_build_app(session)).get("/account/999/target_snapshot")
 
     assert response.status_code == 404
+
+
+def test_account_target_refresh_rejects_operation_conflict(monkeypatch) -> None:
+    session = _RouteSession(_build_account(), _build_portfolio())
+    _patch_resolution(monkeypatch, portfolio_id=7, raw_target={"rb2610": 0.5})
+    monkeypatch.setattr(account_execution_routes, "try_register_target_refresh", lambda *_args: False)
+
+    response = TestClient(_build_app(session)).post("/account/1/target_snapshot/refresh")
+
+    assert response.status_code == 409

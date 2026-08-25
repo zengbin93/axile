@@ -47,8 +47,8 @@ def _build_app(session: _RouteSession) -> FastAPI:
     return app
 
 
-def test_portfolio_latest_weights_get_only_reads_snapshot(monkeypatch) -> None:
-    """兼容 GET 只读已有快照，不执行自定义组合函数。"""
+def test_portfolio_target_snapshot_get_only_reads_snapshot(monkeypatch) -> None:
+    """快照 GET 只读已有快照，不执行自定义组合函数。"""
     session = _RouteSession(_build_portfolio())
 
     async def fake_latest(_session: object, _portfolio_id: int) -> TargetWeightSnapshot:
@@ -66,10 +66,10 @@ def test_portfolio_latest_weights_get_only_reads_snapshot(monkeypatch) -> None:
     monkeypatch.setattr(portfolio_routes, "get_latest_portfolio_target_snapshot", fake_latest)
     monkeypatch.setattr(portfolio_routes, "resolve_portfolio_target", fail_if_resolved)
 
-    response = TestClient(_build_app(session)).get("/portfolio/latest_weights/7")
+    response = TestClient(_build_app(session)).get("/portfolio/7/target_snapshot")
 
     assert response.status_code == 200
-    assert response.json() == {"BTCUSDT": 0.6}
+    assert response.json()["weights"] == {"BTCUSDT": 0.6}
 
 
 def test_refresh_portfolio_target_snapshot_calculates_and_persists(monkeypatch) -> None:
@@ -104,3 +104,17 @@ def test_refresh_portfolio_target_snapshot_calculates_and_persists(monkeypatch) 
             "source": "manual",
         }
     ]
+
+
+def test_refresh_portfolio_target_snapshot_rejects_operation_conflict(monkeypatch) -> None:
+    session = _RouteSession(_build_portfolio())
+
+    async def fake_account_id(_session: object, _portfolio_id: int) -> None:
+        return None
+
+    monkeypatch.setattr(portfolio_routes, "get_latest_account_id_by_portfolio_id", fake_account_id)
+    monkeypatch.setattr(portfolio_routes, "try_register_target_refresh", lambda *_args: False)
+
+    response = TestClient(_build_app(session)).post("/portfolio/7/target_snapshot/refresh")
+
+    assert response.status_code == 409

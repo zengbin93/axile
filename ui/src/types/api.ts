@@ -328,7 +328,7 @@ export interface PortfolioList {
   data: PortfolioLite[]
 }
 
-/** `GET /portfolio/latest_weights/{id}` 响应：symbol → 目标权重（可负=空头）。 */
+/** 目标权重映射：symbol → weight（可负=空头）。 */
 export type LatestWeights = Record<string, number>
 
 /** 最近一次成功计算的目标权重快照；`calculated_at=null` 表示从未计算。 */

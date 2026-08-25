@@ -1,7 +1,6 @@
 /** 组合相关接口。 */
 import { apiGet, apiSend } from '@/lib/api/client'
 import type {
-  LatestWeights,
   Message,
   Portfolio,
   PortfolioList,
@@ -17,14 +16,6 @@ export function getPortfolios(signal?: AbortSignal): Promise<PortfolioList> {
 /** 组合详情（含当前策略与绑定账户）。 */
 export function getPortfolio(id: number, signal?: AbortSignal): Promise<Portfolio> {
   return apiGet<Portfolio>(`/portfolio/${id}`, signal)
-}
-
-/** 兼容读取组合最近一次成功计算的原始权重；不会执行组合函数。 */
-export function getLatestWeights(
-  id: number,
-  signal?: AbortSignal,
-): Promise<LatestWeights> {
-  return apiGet<LatestWeights>(`/portfolio/latest_weights/${id}`, signal)
 }
 
 /** 只读组合最近一次成功计算的原始目标快照。 */
