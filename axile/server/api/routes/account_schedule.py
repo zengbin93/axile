@@ -108,13 +108,19 @@ def _next_schedule_times(
 async def _calendar_summary(
     session: SessionDep,
     channel: TradeChannel,
+    *,
+    current_day: date,
 ) -> SchedulePreviewCalendar:
     plugin = get_channel(str(channel))
     declaration = plugin.descriptor.calendar
     if declaration is None:
         return SchedulePreviewCalendar(requirement="not_required", availability="not_required")
     try:
-        calendar_status = await get_calendar_status(session, declaration.calendar_id)
+        calendar_status = await get_calendar_status(
+            session,
+            declaration.calendar_id,
+            current_day=current_day,
+        )
     except Exception:  # noqa: BLE001 - 预览按 fail-open 契约降级为不可用
         return SchedulePreviewCalendar(
             requirement="required",
@@ -143,7 +149,11 @@ async def schedule_preview(session: SessionDep, payload: SchedulePreviewRequest)
         raise _field_error("trade_channel", str(exc)) from exc
 
     evaluated_at = datetime.now(SCHEDULER_TIMEZONE)
-    calendar = await _calendar_summary(session, payload.trade_channel)
+    calendar = await _calendar_summary(
+        session,
+        payload.trade_channel,
+        current_day=evaluated_at.date(),
+    )
     if is_blank_cron_expr(payload.cron_expr):
         return SchedulePreviewResponse(evaluated_at=evaluated_at, calendar=calendar, items=[])
     try:
