@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import sqlite3
 from collections.abc import AsyncGenerator
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
@@ -738,10 +738,36 @@ def test_shinny_refresh_stops_after_supported_year(tmp_path: Path, monkeypatch: 
     save.assert_not_awaited()
 
 
+def test_calendar_status_defaults_to_beijing_current_day(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """状态摘要默认按排程时区的自然日查询，而非宿主 UTC 日期。"""
+    session_factory = asyncio.run(_create_database(tmp_path / "status-timezone.db"))
+    utc_now = datetime(2026, 8, 23, 16, 30, tzinfo=timezone.utc)
+
+    class FrozenDateTime(datetime):
+        @classmethod
+        def now(cls, tz: object | None = None) -> datetime:
+            return utc_now.astimezone(tz)
+
+    monkeypatch.setattr(calendar_service, "datetime", FrozenDateTime)
+
+    async def exercise() -> calendar_service.CalendarStatus:
+        async with session_factory() as session:
+            session.add_all(
+                [
+                    TradingCalendarConfig(calendar_id="china", refresh_kind="tushare"),
+                    TradingCalendarRecord(calendar_id="china", cal_date=date(2026, 8, 24), is_open=True),
+                ]
+            )
+            await session.commit()
+            return await calendar_service.get_calendar_status(session)
+
+    status = asyncio.run(exercise())
+    assert status.availability is calendar_service.CalendarAvailability.AVAILABLE
+    assert status.refresh_kind is None
+
+
 @pytest.mark.parametrize("refresh_kind", ["tushare", "legacy"])
-def test_legacy_refresh_kind_is_hidden_without_changing_existing_calendar(
-    tmp_path: Path, refresh_kind: str
-) -> None:
+def test_legacy_refresh_kind_is_hidden_without_changing_existing_calendar(tmp_path: Path, refresh_kind: str) -> None:
     """遗留或未知刷新方式只在状态读边界归一，不修改持久化日历。"""
     session_factory = asyncio.run(_create_database(tmp_path / f"legacy-{refresh_kind}.db"))
     calendar_day = date.today()
@@ -792,9 +818,7 @@ def test_legacy_refresh_kind_status_route_returns_null(tmp_path: Path) -> None:
     assert response.json()["refreshKind"] is None
 
 
-def test_legacy_refresh_kind_is_skipped_by_scheduled_coverage(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_legacy_refresh_kind_is_skipped_by_scheduled_coverage(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """定时覆盖检查不触碰遗留配置、基础记录或人工覆盖。"""
     session_factory = asyncio.run(_create_database(tmp_path / "legacy-scheduled.db"))
     calendar_day = date.today()

@@ -26,6 +26,7 @@ from axile.common.trade_channel import TradeChannel
 from axile.executor.china_futures_session import is_regular_night_session_transition
 from axile.server.core.db import SessionLocal
 from axile.server.core.scheduler import Scheduler
+from axile.server.cron import SCHEDULER_TIMEZONE
 from axile.server.db.models import TradingCalendarConfig, TradingCalendarOverride, TradingCalendarRecord
 from axile.server.db.models.base import now_str
 from axile.server.sandbox import ScriptExecutionError, run_calendar_script
@@ -797,7 +798,12 @@ async def list_calendar_overrides(
     ]
 
 
-async def get_calendar_status(session: AsyncSession, calendar_id: str = CALENDAR_ID) -> CalendarStatus:
+async def get_calendar_status(
+    session: AsyncSession,
+    calendar_id: str = CALENDAR_ID,
+    *,
+    current_day: date | None = None,
+) -> CalendarStatus:
     """汇总一份日历的覆盖与同步状态。"""
     calendar_id = normalize_calendar_id(calendar_id)
     config = await session.get(TradingCalendarConfig, calendar_id)
@@ -810,8 +816,13 @@ async def get_calendar_status(session: AsyncSession, calendar_id: str = CALENDAR
             ).where(col(TradingCalendarRecord.calendar_id) == calendar_id)
         )
     ).one()
-    today = date.today()
-    diagnostics = await list_calendar_diagnostics(session, calendar_id=calendar_id, start=today, end=today)
+    current_day = current_day or datetime.now(SCHEDULER_TIMEZONE).date()
+    diagnostics = await list_calendar_diagnostics(
+        session,
+        calendar_id=calendar_id,
+        start=current_day,
+        end=current_day,
+    )
     override_count = await session.scalar(
         select(func.count())
         .select_from(TradingCalendarOverride)

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -236,7 +236,7 @@ def test_schedule_preview_maps_only_closed_to_skip(monkeypatch: pytest.MonkeyPat
     unavailable_at = datetime(2026, 8, 25, 9, 30, tzinfo=SCHEDULER_TIMEZONE)
     monkeypatch.setattr(account_schedule, "_next_schedule_times", lambda *_args, **_kwargs: [closed_at, unavailable_at])
 
-    async def summary(*_args: object) -> account_schedule.SchedulePreviewCalendar:
+    async def summary(*_args: object, **_kwargs: object) -> account_schedule.SchedulePreviewCalendar:
         return account_schedule.SchedulePreviewCalendar(
             requirement="required",
             availability="unavailable",
@@ -272,10 +272,20 @@ def test_schedule_preview_maps_only_closed_to_skip(monkeypatch: pytest.MonkeyPat
     assert response.items[1].unavailable_reason is CalendarUnavailableReason.UNCOVERED
 
 
-def test_schedule_preview_reads_legacy_refresh_kind_without_error(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """旧刷新方式不会阻断排程预览，仍按既有基础记录决策。"""
+def test_schedule_preview_uses_its_beijing_date_for_calendar_summary(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """跨 UTC/北京时间日界时，摘要与预览决策应查询同一自然日。"""
     session_factory = asyncio.run(_create_database(tmp_path / "legacy-preview.db"))
-    scheduled_at = datetime.now(SCHEDULER_TIMEZONE).replace(hour=9, minute=30, second=0, microsecond=0)
+    utc_now = datetime(2026, 8, 23, 16, 30, tzinfo=timezone.utc)
+    scheduled_at = datetime(2026, 8, 24, 9, 30, tzinfo=SCHEDULER_TIMEZONE)
+
+    class FrozenDateTime(datetime):
+        @classmethod
+        def now(cls, tz: object | None = None) -> datetime:
+            return utc_now.astimezone(tz)
+
+    monkeypatch.setattr(account_schedule, "datetime", FrozenDateTime)
     monkeypatch.setattr(account_schedule, "_next_schedule_times", lambda *_args, **_kwargs: [scheduled_at])
 
     async def exercise() -> account_schedule.SchedulePreviewResponse:
@@ -297,6 +307,7 @@ def test_schedule_preview_reads_legacy_refresh_kind_without_error(tmp_path: Path
             )
 
     response = asyncio.run(exercise())
+    assert response.evaluated_at.date() == date(2026, 8, 24)
     assert response.calendar.availability == "available"
     assert response.items[0].action == "skip"
     assert response.items[0].calendar_status is CalendarDecisionStatus.AVAILABLE_CLOSED
@@ -306,7 +317,7 @@ def test_schedule_preview_exposes_legacy_fallback_source(monkeypatch: pytest.Mon
     scheduled_at = datetime(2026, 8, 24, 9, 30, tzinfo=SCHEDULER_TIMEZONE)
     monkeypatch.setattr(account_schedule, "_next_schedule_times", lambda *_args, **_kwargs: [scheduled_at])
 
-    async def summary(*_args: object) -> account_schedule.SchedulePreviewCalendar:
+    async def summary(*_args: object, **_kwargs: object) -> account_schedule.SchedulePreviewCalendar:
         return account_schedule.SchedulePreviewCalendar(
             requirement="required",
             availability="unavailable",
