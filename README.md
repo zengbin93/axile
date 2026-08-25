@@ -4,7 +4,7 @@ Axile 是一个通过 Web UI 配置和运行的多渠道交易执行服务。
 
 ## 使用
 
-需要 Python 3.12、[uv](https://docs.astral.sh/uv/) 和 [Bun](https://bun.sh/)。
+需要 Python 3.12+、[uv](https://docs.astral.sh/uv/) 和 [Bun](https://bun.sh/)。
 
 ```bash
 uv sync

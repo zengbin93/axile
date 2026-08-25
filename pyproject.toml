@@ -3,7 +3,7 @@ name = "axile"
 version = "0.2.3"
 description = "通过 Web UI 配置和运行的多渠道交易执行服务"
 readme = "README.md"
-requires-python = "==3.12.*"
+requires-python = ">=3.12"
 dependencies = [
     "aiohttp>=3.10.11",
     "aiosqlite>=0.21.0",
