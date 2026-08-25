@@ -5,6 +5,8 @@ import { ConfirmModal, type ConfirmSpec } from '@/components/ui/ConfirmModal'
 import { PythonFunctionEditor } from '@/components/ui/PythonFunctionEditor'
 import { Segmented } from '@/components/ui/Segmented'
 import { Select } from '@/components/ui/Select'
+import { Skeleton } from '@/components/ui/Skeleton'
+import { usePolling } from '@/lib/hooks/usePolling'
 import {
   getCalendarDiagnostics,
   getCalendarOverrides,
@@ -21,7 +23,6 @@ import {
   type CalendarOverride,
   type CalendarPreview,
   type CalendarRefreshKind,
-  type CalendarStatus,
 } from '@/lib/api/tradingCalendar'
 import { getCalendarRequirements } from '@/lib/api/system'
 import { useToastStore } from '@/stores/ui'
@@ -52,9 +53,9 @@ const stateText = (value: boolean | null) => value == null ? '缺失' : value ? 
 export function TradingCalendarPage() {
   const toast = useToastStore((state) => state.toast)
   const today = useMemo(() => dateIso(new Date()), [])
-  const [calendarId, setCalendarId] = useState('china')
+  const [calendarId, setCalendarId] = useState('')
   const [calendarOptions, setCalendarOptions] = useState<Array<{ value: string; label: string }>>([])
-  const [status, setStatus] = useState<CalendarStatus | null>(null)
+  const [requirementsError, setRequirementsError] = useState<string | null>(null)
   const [mode, setMode] = useState<CalendarRefreshKind>('csv')
   const [code, setCode] = useState(TEMPLATE)
   const [functionResult, setFunctionResult] = useState<CalendarFunctionResult | null>(null)
@@ -64,27 +65,34 @@ export function TradingCalendarPage() {
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
   const [preview, setPreview] = useState<CalendarPreview | null>(null)
   const [uploading, setUploading] = useState(false)
+  const [replacing, setReplacing] = useState(false)
   const [uploadError, setUploadError] = useState<string | null>(null)
   const [dragging, setDragging] = useState(false)
   const [start, setStart] = useState(today)
   const [end, setEnd] = useState(addDays(today, 14))
   const [rows, setRows] = useState<CalendarDiagnostic[]>([])
+  const [rangeLoading, setRangeLoading] = useState(false)
+  const [rangeLoaded, setRangeLoaded] = useState(false)
+  const [rangeError, setRangeError] = useState<string | null>(null)
+  const [mutating, setMutating] = useState(false)
   const [edits, setEdits] = useState<Record<string, boolean>>({})
   const [overrides, setOverrides] = useState<CalendarOverride[]>([])
   const [confirm, setConfirm] = useState<ConfirmSpec | null>(null)
   const fileInput = useRef<HTMLInputElement>(null)
   const previewRequest = useRef(0)
+  const rangeRequest = useRef(0)
 
-  const refresh = useCallback(async () => {
-    const [nextStatus, nextOverrides] = await Promise.all([
-      getCalendarStatus(calendarId),
-      getCalendarOverrides(calendarId),
-    ])
-    setStatus(nextStatus)
-    setOverrides(nextOverrides)
-    setMode(nextStatus.refreshKind ?? 'csv')
-    setCode(nextStatus.functionCode || TEMPLATE)
-  }, [calendarId])
+  const calendar = usePolling(
+    useCallback(async (signal: AbortSignal) => {
+      const [nextStatus, nextOverrides] = await Promise.all([
+        getCalendarStatus(calendarId, signal),
+        getCalendarOverrides(calendarId, signal),
+      ])
+      return { status: nextStatus, overrides: nextOverrides }
+    }, [calendarId]),
+    { queryKey: `trading-calendar:${calendarId}`, intervalMs: 0, enabled: calendarId !== '' },
+  )
+  const status = calendar.data?.status ?? null
 
   useEffect(() => {
     void getCalendarRequirements().then((requirements) => {
@@ -94,20 +102,43 @@ export function TradingCalendarPage() {
       }))
       setCalendarOptions(options.length > 0 ? options : [{ value: 'china', label: '中国交易日历' }])
       setCalendarId((current) => options.some((item) => item.value === current) ? current : options[0]?.value ?? current)
-    })
+    }).catch((error) => setRequirementsError(error instanceof Error ? error.message : String(error)))
   }, [])
-  useEffect(() => { void refresh() }, [refresh])
+  useEffect(() => {
+    if (!calendar.data) return
+    setOverrides(calendar.data.overrides)
+    setMode(calendar.data.status.refreshKind ?? 'csv')
+    setCode(calendar.data.status.functionCode || TEMPLATE)
+  }, [calendar.data])
+  useEffect(() => {
+    setRows([])
+    setEdits({})
+    setRangeLoaded(false)
+    setRangeError(null)
+    rangeRequest.current += 1
+  }, [calendarId])
   useEffect(() => {
     setFunctionResult(null)
     setSaveError(null)
   }, [code])
 
   const loadRange = useCallback(async () => {
+    const request = ++rangeRequest.current
+    setRangeLoading(true)
+    setRangeError(null)
     try {
-      setRows(await getCalendarDiagnostics(calendarId, start, end))
+      const nextRows = await getCalendarDiagnostics(calendarId, start, end)
+      if (request !== rangeRequest.current) return
+      setRows(nextRows)
       setEdits({})
+      setRangeLoaded(true)
     } catch (error) {
-      toast(`加载失败：${error instanceof Error ? error.message : String(error)}`)
+      if (request !== rangeRequest.current) return
+      const message = error instanceof Error ? error.message : String(error)
+      setRangeError(message)
+      toast(`加载失败：${message}`)
+    } finally {
+      if (request === rangeRequest.current) setRangeLoading(false)
     }
   }, [calendarId, end, start, toast])
 
@@ -115,7 +146,7 @@ export function TradingCalendarPage() {
     setSelectedFile(null)
     setPreview(null)
     setUploadError(null)
-    await refresh()
+    await calendar.refresh()
     if (rows.length > 0) await loadRange()
   }
 
@@ -154,12 +185,15 @@ export function TradingCalendarPage() {
   const importCsv = () => {
     if (!selectedFile) return
     replaceWithConfirmation('CSV', async () => {
+      setReplacing(true)
       try {
         await importCalendarCsv(calendarId, selectedFile)
         toast('CSV 日历已替换')
         await afterReplacement()
       } catch (error) {
         toast(`导入失败：${error instanceof Error ? error.message : String(error)}`)
+      } finally {
+        setReplacing(false)
       }
     })
   }
@@ -198,23 +232,25 @@ export function TradingCalendarPage() {
 
   const saveEdits = async () => {
     const entries = Object.entries(edits).map(([calDate, isOpen]) => ({ calDate, isOpen }))
+    setMutating(true)
     try {
       await saveCalendarOverrides(calendarId, entries)
       toast(`已保存 ${entries.length} 条人工调整`)
-      await Promise.all([loadRange(), refresh()])
+      await Promise.all([loadRange(), calendar.refresh()])
     } catch (error) {
       toast(`保存失败：${error instanceof Error ? error.message : String(error)}`)
-    }
+    } finally { setMutating(false) }
   }
 
   const restoreDates = async (dates: string[]) => {
+    setMutating(true)
     try {
       await restoreCalendarOverrides(calendarId, dates)
       toast(`已恢复 ${dates.length} 个日期`)
-      await Promise.all([loadRange(), refresh()])
+      await Promise.all([loadRange(), calendar.refresh()])
     } catch (error) {
       toast(`恢复失败：${error instanceof Error ? error.message : String(error)}`)
-    }
+    } finally { setMutating(false) }
   }
 
   const unavailableDetail = status?.unavailableReason === 'read_failed'
@@ -237,10 +273,15 @@ export function TradingCalendarPage() {
             value={calendarId}
             onChange={setCalendarId}
             options={calendarOptions}
+            disabled={calendarOptions.length === 0}
           />
         </div>
 
+        {requirementsError && <p className="mt-5 text-[13px] text-warn">日历目录暂不可用：{requirementsError}</p>}
+        {calendar.error && !calendar.data && <p className="mt-5 text-[13px] text-warn">日历数据暂不可用：{calendar.error.message} <button className="font-semibold underline" onClick={() => void calendar.refresh()}>重试</button></p>}
+
         <div className="mt-5 border-b border-line pb-5" role="status">
+          {!status ? <><Skeleton className="h-4 w-40" /><Skeleton className="mt-2 h-3 w-72 max-w-full" /></> : <>
           <div className="flex items-center gap-2 text-[14px] font-[620]">
             <span aria-hidden="true" className={`h-2 w-2 rounded-full ${status?.availability === 'available' ? 'bg-accent' : 'bg-warn'}`} />
             {status?.availability === 'available' ? '交易日历可用' : '交易日历不可用'}
@@ -248,10 +289,13 @@ export function TradingCalendarPage() {
           <div className="mt-1 pl-4 text-[12.5px] text-ink-2">
             {status?.availability === 'available' ? '今天的开闭市状态可以确定。' : unavailableDetail}
           </div>
+          </>}
         </div>
 
         <section className="mt-6 grid grid-cols-2 gap-px overflow-hidden rounded-[8px] border border-line bg-line text-[13px] sm:grid-cols-4">
-          {[
+          {!status ? Array.from({ length: 4 }, (_, index) => (
+            <div key={index} className="min-h-[66px] bg-surface px-4 py-3"><Skeleton className="h-3 w-16" /><Skeleton className="mt-2 h-4 w-28" /></div>
+          )) : [
             ['刷新方式', status?.refreshKind === 'python' ? '自定义函数' : status?.refreshKind === 'csv' ? 'CSV' : '未配置'],
             ['有效覆盖', status?.coverageStart ? `${status.coverageStart} 至 ${status.coverageEnd}` : '暂无'],
             ['同步状态', status?.lastSyncAt ? status.lastSyncAt.replace('T', ' ') : '尚未同步'],
@@ -262,7 +306,7 @@ export function TradingCalendarPage() {
             </div>
           ))}
         </section>
-        <section className="mt-8">
+        <section className="mt-8" inert={!status}>
           <div className="flex items-center justify-between gap-4">
             <h2 className="text-[15px] font-[620]">基础日历</h2>
             <Segmented
@@ -303,7 +347,7 @@ export function TradingCalendarPage() {
                           <div className="mt-4 flex flex-wrap items-center gap-3 border-t border-line pt-4 text-[13px]">
                             <span className="text-ink-2">新增 {preview.added} · 变化 {preview.changed} · 不变 {preview.unchanged}</span>
                             <span className="flex-1" />
-                            <button className="rounded-[8px] bg-ink-1 px-4 py-2 text-surface" onClick={importCsv}>确认替换</button>
+                            <button disabled={replacing} className="rounded-[8px] bg-ink-1 px-4 py-2 text-surface disabled:opacity-45" onClick={importCsv}>{replacing ? '替换中…' : '确认替换'}</button>
                           </div>
                         )}
                       </>
@@ -316,7 +360,7 @@ export function TradingCalendarPage() {
                             {saving ? '正在生成并保存…' : '保存并刷新'}
                           </button>
                           {status?.refreshKind === 'python' && (
-                            <button className="inline-flex items-center gap-1.5 rounded-[8px] border border-line px-4 py-2 text-[13px] text-ink-2" onClick={async () => { const result = await refreshCalendar(calendarId); toast(result.message); await refresh() }}><RefreshCw size={14} /> 立即刷新</button>
+                            <button disabled={mutating} className="inline-flex items-center gap-1.5 rounded-[8px] border border-line px-4 py-2 text-[13px] text-ink-2 disabled:opacity-45" onClick={async () => { setMutating(true); try { const result = await refreshCalendar(calendarId); toast(result.message); await calendar.refresh() } finally { setMutating(false) } }}>{mutating ? <LoaderCircle size={14} className="animate-spin motion-reduce:animate-none" /> : <RefreshCw size={14} />} {mutating ? '刷新中…' : '立即刷新'}</button>
                           )}
                         </div>
                         {saveError && <p className="mt-2 text-[12.5px] text-warn" role="alert">保存失败：{saveError}</p>}
@@ -336,9 +380,11 @@ export function TradingCalendarPage() {
               <input type="date" value={start} onChange={(event) => setStart(event.target.value)} className="rounded-[8px] border border-line bg-surface px-3 py-2 text-[13px]" />
               <span className="text-ink-3">至</span>
               <input type="date" value={end} onChange={(event) => setEnd(event.target.value)} className="rounded-[8px] border border-line bg-surface px-3 py-2 text-[13px]" />
-              <button className="rounded-[8px] border border-line px-3 py-2 text-[13px]" onClick={() => void loadRange()}>加载</button>
+              <button disabled={rangeLoading || !status} className="inline-flex items-center gap-1.5 rounded-[8px] border border-line px-3 py-2 text-[13px] disabled:opacity-45" onClick={() => void loadRange()}>{rangeLoading && rangeLoaded && <LoaderCircle size={14} className="animate-spin motion-reduce:animate-none" />}{rangeLoading ? '加载中…' : '加载'}</button>
             </div>
           </div>
+          {rangeLoading && !rangeLoaded && <div className="mt-4 border-y border-line px-3 py-2" aria-busy="true">{Array.from({ length: 5 }, (_, index) => <Skeleton key={index} className="my-3 h-5 w-full" />)}</div>}
+          {rangeError && <p className="mt-4 text-[13px] text-warn">区间数据暂不可用：{rangeError} <button className="font-semibold underline" onClick={() => void loadRange()}>重试</button></p>}
           {rows.length > 0 && (
             <div className="mt-4 overflow-x-auto border-y border-line">
               <div className="grid min-w-[650px] grid-cols-[130px_1fr_1fr_auto] gap-4 border-b border-line px-3 py-2 text-[12px] text-ink-3"><span>日期</span><span>基础状态</span><span>人工状态</span><span>最终状态</span></div>
@@ -356,8 +402,8 @@ export function TradingCalendarPage() {
                 )
               })}
               <div className="flex justify-end gap-2 border-t border-line px-3 py-3">
-                <button className="inline-flex items-center gap-1.5 rounded-[8px] border border-line px-3 py-2 text-[13px] text-ink-2 disabled:opacity-45" disabled={!rows.some((row) => row.overrideIsOpen != null)} onClick={() => void restoreDates(rows.filter((row) => row.overrideIsOpen != null).map((row) => row.calDate))}><Undo2 size={14} /> 恢复区间</button>
-                <button className="inline-flex items-center gap-1.5 rounded-[8px] bg-ink-1 px-4 py-2 text-[13px] text-surface disabled:opacity-45" disabled={Object.keys(edits).length === 0} onClick={() => void saveEdits()}><Save size={14} /> 保存 {Object.keys(edits).length} 项</button>
+                <button className="inline-flex items-center gap-1.5 rounded-[8px] border border-line px-3 py-2 text-[13px] text-ink-2 disabled:opacity-45" disabled={mutating || !rows.some((row) => row.overrideIsOpen != null)} onClick={() => void restoreDates(rows.filter((row) => row.overrideIsOpen != null).map((row) => row.calDate))}><Undo2 size={14} /> 恢复区间</button>
+                <button className="inline-flex items-center gap-1.5 rounded-[8px] bg-ink-1 px-4 py-2 text-[13px] text-surface disabled:opacity-45" disabled={mutating || Object.keys(edits).length === 0} onClick={() => void saveEdits()}><Save size={14} /> 保存 {Object.keys(edits).length} 项</button>
               </div>
             </div>
           )}
@@ -365,13 +411,13 @@ export function TradingCalendarPage() {
 
         <section className="mt-10 border-t border-line pt-6">
           <h2 className="text-[15px] font-[620]">当前人工调整</h2>
-          {overrides.length === 0 ? <p className="mt-4 text-[13px] text-ink-3">暂无人工调整</p> : (
+          {!calendar.data ? <div className="mt-4"><Skeleton className="h-4 w-48" /><Skeleton className="mt-3 h-4 w-64" /></div> : overrides.length === 0 ? <p className="mt-4 text-[13px] text-ink-3">暂无人工调整</p> : (
             <div className="mt-4 divide-y divide-line border-y border-line">
               {overrides.map((entry) => (
                 <div key={entry.calDate} className="grid grid-cols-[1fr_auto_auto] items-center gap-4 py-3 text-[13px]">
                   <span className="num">{entry.calDate}</span>
                   <span className="text-ink-2">{stateText(entry.baseIsOpen)} → {entry.isOpen ? '人工开市' : '人工休市'}</span>
-                  <button className="inline-flex items-center gap-1.5 rounded-[8px] border border-line px-3 py-1.5 text-ink-2" onClick={() => void restoreDates([entry.calDate])}><Undo2 size={14} /> 恢复</button>
+                  <button disabled={mutating} className="inline-flex items-center gap-1.5 rounded-[8px] border border-line px-3 py-1.5 text-ink-2 disabled:opacity-45" onClick={() => void restoreDates([entry.calDate])}><Undo2 size={14} /> 恢复</button>
                 </div>
               ))}
             </div>

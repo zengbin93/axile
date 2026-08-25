@@ -23,6 +23,8 @@ interface DomainState {
   accountsUpdatedAt: number | null
   /** 账户数据最近一次刷新的错误；有值即视为「失联」，但保留旧数据降级展示。 */
   accountsError: Error | null
+  /** 组合列表最近一次加载错误；保留旧数据，冷拉失败时供页面重试。 */
+  portfoliosError: Error | null
   refreshAccounts: () => Promise<void>
   refreshPortfolios: () => Promise<void>
 }
@@ -36,6 +38,7 @@ export const useDomainStore = create<DomainState>((set) => ({
   portfolios: null,
   accountsUpdatedAt: null,
   accountsError: null,
+  portfoliosError: null,
 
   refreshAccounts: async () => {
     accountsCtrl?.abort()
@@ -59,9 +62,10 @@ export const useDomainStore = create<DomainState>((set) => ({
     try {
       const res = await getPortfolios(ctrl.signal)
       if (ctrl.signal.aborted) return
-      set({ portfolios: res.data })
-    } catch {
-      // 保留旧值，静默。
+      set({ portfolios: res.data, portfoliosError: null })
+    } catch (error) {
+      if (ctrl.signal.aborted) return
+      set({ portfoliosError: error instanceof Error ? error : new Error(String(error)) })
     }
   },
 }))

@@ -3,6 +3,7 @@ import { useViewTransitionState } from 'react-router'
 import { Link, useNavigate } from '@/components/ui/nav'
 import { Breadcrumb } from '@/components/ui/Breadcrumb'
 import { Card, Chip } from '@/components/ui/Card'
+import { Skeleton } from '@/components/ui/Skeleton'
 import { ConfirmModal, type ConfirmSpec } from '@/components/ui/ConfirmModal'
 import { deletePortfolio } from '@/lib/api/portfolios'
 import { useDomainStore } from '@/stores/domain'
@@ -17,6 +18,8 @@ export function PortfoliosPage() {
 
   const portfolios = useDomainStore((s) => s.portfolios)
   const accounts = useDomainStore((s) => s.accounts)
+  const portfoliosError = useDomainStore((s) => s.portfoliosError)
+  const accountsError = useDomainStore((s) => s.accountsError)
   const refreshPortfolios = useDomainStore((s) => s.refreshPortfolios)
 
   const followersOf = (pid: number | null): AccountDashboardItem[] =>
@@ -67,7 +70,15 @@ export function PortfoliosPage() {
         </Link>
       </div>
 
-      {portfolios == null && <p className="text-[14px] text-ink-2">加载中…</p>}
+      {portfolios == null && !portfoliosError && Array.from({ length: 3 }, (_, index) => (
+        <Card key={index} className="mb-3 flex min-h-[76px] items-center gap-4 px-6 py-4" aria-busy="true">
+          <div className="flex-1"><Skeleton className="h-4 w-36" /><Skeleton className="mt-2 h-3 w-64 max-w-full" /></div>
+          <Skeleton className="h-8 w-32" />
+        </Card>
+      ))}
+      {portfolios == null && portfoliosError && (
+        <p className="text-[14px] text-warn">组合暂不可用：{portfoliosError.message}</p>
+      )}
 
       {portfolios != null && list.length === 0 && (
         <Card className="p-8 text-center">
@@ -80,7 +91,7 @@ export function PortfoliosPage() {
       )}
 
       {list.map((p) => (
-        <PortfolioCard key={p.id} p={p} followers={followersOf(p.id)} onDelete={askDelete} />
+        <PortfolioCard key={p.id} p={p} followers={followersOf(p.id)} accountsReady={accounts != null} accountsError={accountsError} onDelete={askDelete} />
       ))}
 
       <ConfirmModal spec={confirm} onClose={() => setConfirm(null)} />
@@ -92,10 +103,14 @@ export function PortfoliosPage() {
 function PortfolioCard({
   p,
   followers,
+  accountsReady,
+  accountsError,
   onDelete,
 }: {
   p: PortfolioLite
   followers: AccountDashboardItem[]
+  accountsReady: boolean
+  accountsError: Error | null
   onDelete: (p: PortfolioLite) => void
 }) {
   const navigate = useNavigate()
@@ -119,7 +134,11 @@ function PortfolioCard({
           <Chip>自定义函数</Chip>
         </div>
         <div className="mt-1 text-[12.5px] text-ink-3">
-          {followers.length > 0 ? (
+          {accountsError ? (
+            <span className="text-warn">绑定关系暂不可用</span>
+          ) : !accountsReady ? (
+            <Skeleton className="inline-block h-3 w-40 align-middle" />
+          ) : followers.length > 0 ? (
             <span className="text-ink-2">跟随 · {followers.map((f) => f.name).join('、')}</span>
           ) : (
             '未绑定账户'
@@ -136,7 +155,8 @@ function PortfolioCard({
           编辑
         </button>
         <button
-          className="cursor-pointer rounded-lg border border-line px-3 py-1.5 text-[12.5px] text-ink-2 hover:border-bad/40 hover:text-bad"
+          className="cursor-pointer rounded-lg border border-line px-3 py-1.5 text-[12.5px] text-ink-2 hover:border-warn/40 hover:text-warn disabled:cursor-not-allowed disabled:opacity-45"
+          disabled={!accountsReady || Boolean(accountsError)}
           onClick={() => onDelete(p)}
         >
           删除

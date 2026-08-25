@@ -15,7 +15,8 @@ export function TopBar() {
   const updatedAt = useDomainStore((s) => s.accountsUpdatedAt)
   const error = useDomainStore((s) => s.accountsError)
   const accounts = useDomainStore((s) => s.accounts)
-  const online = error == null && updatedAt != null
+  const connecting = accounts == null && error == null
+  const online = accounts != null && error == null && updatedAt != null
   // 全舰队「偏离」计数（风险轴）：常驻顶栏、跟着翻页；随 5s 轮询自动增减，账户对回目标即清零。
   // 只由 integrity 派生，不看档位——暂停的账户照样计入（暂停+偏离最坏，绝不因暂停漏计）。
   const offCount = (accounts ?? []).filter((a) => integrityOf(a).integrity === 'off').length
@@ -27,7 +28,9 @@ export function TopBar() {
     return () => clearInterval(t)
   }, [])
 
-  const statusText = online
+  const statusText = connecting
+    ? '正在连接'
+    : online
     ? `数据 ${timeAgo(updatedAt)} · 服务正常`
     : '与服务器失联'
 
@@ -40,7 +43,9 @@ export function TopBar() {
         {/* 活性点离开红绿（红绿专供行情涨跌）：连通=中性点(安静即好)，失联=琥珀点。 */}
         <span
           className={`h-2 w-2 flex-none rounded-full ${
-            online
+            connecting
+              ? 'animate-pulse bg-ink-3 shadow-[0_0_0_3px_var(--color-fill)] motion-reduce:animate-none'
+              : online
               ? 'bg-ink-3 shadow-[0_0_0_3px_var(--color-fill)]'
               : 'bg-warn shadow-[0_0_0_3px_var(--color-warn-soft)]'
           }`}
@@ -48,7 +53,7 @@ export function TopBar() {
         {statusText}
       </span>
       {/* 偏离计数：风险从单页抬到全局。琥珀（偏离色）、仅 N>0 才现身（安静即好），点击回舰队。 */}
-      {offCount > 0 && (
+      {accounts != null && offCount > 0 && (
         <Link
           to="/"
           title={`${offCount} 个账户偏离目标 · 需要看看`}

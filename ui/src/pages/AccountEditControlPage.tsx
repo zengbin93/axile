@@ -289,7 +289,10 @@ export function AccountEditControlPage() {
   const navigate = useNavigate()
   const toast = useToastStore((state) => state.toast)
   const refreshAccounts = useDomainStore((state) => state.refreshAccounts)
-  const account = usePolling(useCallback((signal: AbortSignal) => getAccount(accountId, signal), [accountId]), 0)
+  const account = usePolling(useCallback((signal: AbortSignal) => getAccount(accountId, signal), [accountId]), {
+    queryKey: `account:${accountId}`,
+    intervalMs: 0,
+  })
   const [model, setModel] = useState<AccountControlPolicyEditorModel | null>(null)
   const [presetKey, setPresetKey] = useState('')
   const [override, setOverride] = useState<AccountControlOverride>({ operations: {}, groups: {} })

@@ -16,8 +16,12 @@ export function PortfolioEditPage() {
   const portfolioId = Number(id)
   const navigate = useNavigate()
   const toast = useToastStore((state) => state.toast)
-  const portfolio = usePolling(useCallback((signal: AbortSignal) => getPortfolio(portfolioId, signal), [portfolioId]), 0)
+  const portfolio = usePolling(useCallback((signal: AbortSignal) => getPortfolio(portfolioId, signal), [portfolioId]), {
+    queryKey: `portfolio:${portfolioId}`,
+    intervalMs: 0,
+  })
   const accounts = useDomainStore((state) => state.accounts)
+  const accountsError = useDomainStore((state) => state.accountsError)
   const refreshPortfolios = useDomainStore((state) => state.refreshPortfolios)
   const [ready, setReady] = useState(false)
   const [name, setName] = useState('')
@@ -41,7 +45,7 @@ export function PortfolioEditPage() {
   const dirty = name.trim() !== original.name || code !== original.code
 
   const publish = async () => {
-    if (!name.trim() || !code.trim() || saving) return
+    if (!name.trim() || !code.trim() || saving || accounts == null || accountsError) return
     setSaving(true)
     try {
       await updatePortfolio(portfolioId, { name: name.trim(), custom_calc_py_code: code })
@@ -54,7 +58,7 @@ export function PortfolioEditPage() {
     }
   }
 
-  if (portfolio.error || !pf) {
+  if (portfolio.loading || (!pf && !portfolio.error) || (pf && !ready)) {
     return (
       <section>
         <EditCrumb id={portfolioId} name={pf?.name} />
@@ -62,7 +66,7 @@ export function PortfolioEditPage() {
       </section>
     )
   }
-  if (portfolio.loading || !ready) {
+  if (portfolio.error || !pf) {
     return (
       <section>
         <EditCrumb id={portfolioId} name={pf?.name} />
@@ -79,8 +83,13 @@ export function PortfolioEditPage() {
       <EditCrumb id={portfolioId} name={pf.name} />
       <Card className="mt-3 border border-warn/30 bg-warn-tint px-6 py-4">
         <div className="text-[14px]">
-          <b>影响范围</b> · 此组合被 <b>{followers.length}</b> 个账户使用
-          {followers.length > 0 && `：${followers.map((account) => account.name).join('、')}`}
+          <b>影响范围</b> · {accountsError ? (
+            <span className="text-warn">绑定关系暂不可用</span>
+          ) : accounts == null ? (
+            <Skeleton className="inline-block h-4 w-36 align-middle" />
+          ) : (
+            <>此组合被 <b>{followers.length}</b> 个账户使用{followers.length > 0 && `：${followers.map((account) => account.name).join('、')}`}</>
+          )}
         </div>
         <div className="mt-1 text-[13px] text-ink-2">保存后，这些账户会在下次调仓时执行新函数。</div>
       </Card>
@@ -101,7 +110,7 @@ export function PortfolioEditPage() {
         <span className="mr-auto text-[13px] text-ink-3">{dirty ? '有未保存修改' : '没有修改'}</span>
         <button
           className="cursor-pointer rounded-[8px] border-0 bg-ink-1 px-5 py-2.5 text-[14px] font-[550] text-surface disabled:opacity-45"
-          disabled={!dirty || !name.trim() || !code.trim() || saving}
+          disabled={!dirty || !name.trim() || !code.trim() || saving || accounts == null || Boolean(accountsError)}
           onClick={publish}
         >
           {saving ? '保存中…' : '保存修改'}

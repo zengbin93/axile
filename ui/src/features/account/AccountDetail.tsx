@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useState, type ReactNode } from 'react'
 import { useViewTransitionState } from 'react-router'
 import { RefreshCw } from 'lucide-react'
 import { Link, useNavigate } from '@/components/ui/nav'
@@ -9,11 +9,12 @@ import { InkRewrite } from '@/components/ui/InkRewrite'
 import { NumberTicker } from '@/components/ui/NumberTicker'
 import { OverflowText } from '@/components/ui/OverflowText'
 import { Tooltip } from '@/components/ui/Tooltip'
+import { Skeleton, SkeletonGroup, SkeletonText } from '@/components/ui/Skeleton'
 import { AccountActions } from '@/features/account/AccountActions'
 import { useExecutionRunner } from '@/features/account/useExecutionRunner'
 import { useTerminateAction } from '@/features/account/useTerminateAction'
 import { buildRecentActivity } from '@/features/account/recent'
-import { ScheduleTimeline } from '@/features/account/ScheduleTimeline'
+import { ScheduleTimeline, ScheduleTimelineSkeleton } from '@/features/account/ScheduleTimeline'
 import { accountAssetTerms, INTEGRITY_ICON, INTEGRITY_TEXT_CLASS, STATUS_ICON, STATUS_TEXT_CLASS, channelLabel } from '@/features/dashboard/display'
 import { phaseLabel, runVerb } from '@/features/dashboard/execProgress'
 import { useRunning } from '@/stores/liveExec'
@@ -35,6 +36,7 @@ import { describeCron } from '@/features/setup/cron'
 import { TimerQuickModal } from '@/features/setup/TimerQuickModal'
 import { useToastStore } from '@/stores/ui'
 import { useChannelDescriptor } from '@/stores/channels'
+import { useDomainStore } from '@/stores/domain'
 import type { AccountDashboardItem, LatestWeights } from '@/types/api'
 
 interface AccountDetailProps {
@@ -48,6 +50,7 @@ interface AccountDetailProps {
 export function AccountDetail({ accountId, item, onDashboardRefresh }: AccountDetailProps) {
   const navigate = useNavigate()
   const toast = useToastStore((s) => s.toast)
+  const accountsError = useDomainStore((s) => s.accountsError)
   const [timerOpen, setTimerOpen] = useState(false)
   const [refreshingAssets, setRefreshingAssets] = useState(false)
   // 启停乐观态：确认后立刻翻转，驱动按钮/状态句日记式换字；与 item 对齐后清除。
@@ -70,24 +73,29 @@ export function AccountDetail({ accountId, item, onDashboardRefresh }: AccountDe
     }
   }, [item.is_started, startedOverride])
 
-  const account = usePolling(useCallback((s: AbortSignal) => getAccount(accountId, s), [accountId]), 15000)
+  const account = usePolling(useCallback((s: AbortSignal) => getAccount(accountId, s), [accountId]), {
+    queryKey: `account:${accountId}`,
+    intervalMs: 15000,
+  })
   const RECENT_LIMIT = 50
   const activity = usePolling(
     useCallback((s: AbortSignal) => getAccountActivity(accountId, { limit: RECENT_LIMIT }, s), [accountId]),
-    10000,
+    { queryKey: `account:${accountId}:activity:${RECENT_LIMIT}`, intervalMs: 10000 },
   )
-  const nextRun = usePolling(useCallback((s: AbortSignal) => getNextRun(accountId, s), [accountId]), 30000)
+  const nextRun = usePolling(useCallback((s: AbortSignal) => getNextRun(accountId, s), [accountId]), {
+    queryKey: `account:${accountId}:next-run`,
+    intervalMs: 30000,
+  })
   const assetSnapshots = usePolling(
     useCallback((s: AbortSignal) => getAccountAssetSnapshots(accountId, { limit: 1 }, s), [accountId]),
-    10000,
+    { queryKey: `account:${accountId}:asset-snapshots:1`, intervalMs: 10000 },
   )
 
-  const portfolioId = account.data?.portfolio_id ?? null
+  const portfolioId = account.data?.portfolio_id ?? item.portfolio_id ?? null
   // 目标改取账户级「执行器口径」权重（后端已叠加杠杆与精度），与含杠杆的真实持仓同尺。
   const weights = usePolling<LatestWeights>(
     useCallback((s: AbortSignal) => getAccountTargetWeights(accountId, s), [accountId]),
-    60000,
-    accountId,
+    { queryKey: `account:${accountId}:target-weights`, intervalMs: 60000 },
   )
 
   const runner = useExecutionRunner(accountId, () => {
@@ -104,6 +112,14 @@ export function AccountDetail({ accountId, item, onDashboardRefresh }: AccountDe
   const snapshotPositions = positionsOfAssets(latestAssets)
   const positions = latestAssets ? snapshotPositions : positionsOf(recordList)
   const target = weights.data ?? {}
+  const positionsLoading = latestAssets === undefined && activity.data === null
+    && (assetSnapshots.loading || activity.loading)
+  const positionsError = latestAssets === undefined && activity.data === null && !positionsLoading
+    ? (assetSnapshots.error ?? activity.error)
+    : null
+  const comparisonLoading = weights.loading || positionsLoading
+  const comparisonError = weights.data === null ? (weights.error ?? positionsError) : positionsError
+  const comparisonReady = weights.data !== null && !positionsLoading && !positionsError
   // 背离摘要：与明细抽屉同口径（均出自 rebalancePlan）。文案讲「几只要动 · 卖几买几」，
   // 条画各品种的要成交幅度；到位/空仓退成静态一句。
   const plan = rebalancePlan(positions, target, item.total_asset)
@@ -361,20 +377,44 @@ export function AccountDetail({ accountId, item, onDashboardRefresh }: AccountDe
       <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
         <Card className="px-6 py-4">
           <h3 className="mb-3 text-[13px] font-semibold text-ink-2">系统健康</h3>
-          <Kv k="axile 服务" v="在线" ok />
-          <Kv k="自动调度" v={nextRun.data?.is_scheduled ? '已排程' : '未排程'} ok={nextRun.data?.is_scheduled ?? false} />
+          <Kv k="axile 服务" v={accountsError ? '连接异常' : '在线'} ok={!accountsError} />
+          {nextRun.loading ? (
+            <Kv k="自动调度" v={<SkeletonText className="w-14" />} />
+          ) : nextRun.error && nextRun.data === null ? (
+            <Kv k="自动调度" v={<span className="text-warn">暂不可用</span>} />
+          ) : (
+            <Kv k="自动调度" v={nextRun.data?.is_scheduled ? '已排程' : '未排程'} ok={nextRun.data?.is_scheduled ?? false} />
+          )}
           <Kv k="自动执行" v={isStarted ? '已启动' : '已暂停'} ok={isStarted} />
         </Card>
 
         <Card className="px-6 py-4">
           <h3 className="mb-3 text-[13px] font-semibold text-ink-2">持仓 vs 目标</h3>
           <Kv k="当前持仓" v={item.holdings_count === 0 ? '空仓' : `${item.holdings_count} 只`} />
-          <Kv k="目标品种" v={`${Object.keys(target).filter((s) => Math.abs(target[s]) > 1e-9).length} 只`} />
-          <div className={`mt-2.5 flex items-center gap-1.5 text-[13px] font-semibold ${STATUS_TEXT_CLASS[driftLevel]}`}>
-            {STATUS_ICON[driftLevel]} {driftText}
-          </div>
-          {weights.error && <div className="mt-2 text-xs text-ink-3">目标权重暂不可用</div>}
-          {plan.off > 0 && <DriftBar rows={plan.rows} />}
+          {comparisonLoading ? (
+            <>
+              <Kv k="目标品种" v={<SkeletonText className="w-12" />} />
+              <SkeletonGroup label="正在加载持仓与目标对照" className="mt-2.5 space-y-2.5">
+                <Skeleton className="h-4 w-44" />
+                <Skeleton className="h-2 w-full" />
+              </SkeletonGroup>
+            </>
+          ) : comparisonError ? (
+            <>
+              <Kv k="目标品种" v={<span className="text-warn">暂不可用</span>} />
+              <div className="mt-2.5 min-h-7 text-[13px] leading-relaxed text-warn">
+                持仓与目标对照暂不可用
+              </div>
+            </>
+          ) : comparisonReady ? (
+            <>
+              <Kv k="目标品种" v={`${Object.keys(target).filter((s) => Math.abs(target[s]) > 1e-9).length} 只`} />
+              <div className={`mt-2.5 flex items-center gap-1.5 text-[13px] font-semibold ${STATUS_TEXT_CLASS[driftLevel]}`}>
+                {STATUS_ICON[driftLevel]} {driftText}
+              </div>
+              {plan.off > 0 && <DriftBar rows={plan.rows} />}
+            </>
+          ) : null}
           <Link
             to={`/accounts/${accountId}/holdings`}
             className="mt-2.5 inline-block text-[12.5px] font-semibold text-accent hover:underline"
@@ -388,7 +428,9 @@ export function AccountDetail({ accountId, item, onDashboardRefresh }: AccountDe
             <h3 className="text-[13px] font-semibold text-ink-2">自动执行</h3>
             <button
               type="button"
-              className="cursor-pointer text-[12.5px] font-semibold text-accent hover:underline"
+              disabled={!scheduleKind}
+              title={!scheduleKind ? '渠道能力加载中' : undefined}
+              className="cursor-pointer text-[12.5px] font-semibold text-accent hover:underline disabled:cursor-default disabled:text-ink-3 disabled:no-underline"
               onClick={() => setTimerOpen(true)}
             >
               调整
@@ -396,24 +438,38 @@ export function AccountDetail({ accountId, item, onDashboardRefresh }: AccountDe
           </div>
           <button
             type="button"
-            className="flex w-full cursor-pointer items-center justify-between gap-3 border-t border-line py-1.5 text-left text-[14px] first:border-t-0"
+            disabled={!scheduleKind}
+            title={!scheduleKind ? '渠道能力加载中' : undefined}
+            className="flex w-full cursor-pointer items-center justify-between gap-3 border-t border-line py-1.5 text-left text-[14px] first:border-t-0 disabled:cursor-default"
             onClick={() => setTimerOpen(true)}
           >
             <span className="flex-none text-ink-2">节奏</span>
             <span className="flex min-w-0 flex-1 items-center justify-end">
-              <OverflowText
-                className="min-w-0 flex-1 text-right font-medium text-ink-1"
-                text={cronExpr ? (cronHuman ?? '自定义执行节奏') : '—'}
-              />
+              {account.loading ? (
+                <SkeletonText className="ml-auto w-28" />
+              ) : account.error && account.data === null ? (
+                <span className="ml-auto text-[13px] text-warn">暂不可用</span>
+              ) : (
+                <OverflowText
+                  className="min-w-0 flex-1 text-right font-medium text-ink-1"
+                  text={cronExpr ? (cronHuman ?? '自定义执行节奏') : '—'}
+                />
+              )}
               <span className="ml-1.5 flex-none text-ink-3" aria-hidden>
                 ›
               </span>
             </span>
           </button>
-          <ScheduleTimeline
-            lastExecutedAt={item.last_exec_at}
-            nextRunTimes={nextRun.data?.next_execution_times ?? []}
-          />
+          {nextRun.loading ? (
+            <ScheduleTimelineSkeleton />
+          ) : nextRun.error && nextRun.data === null ? (
+            <div className="border-t border-line py-3 text-[13px] text-warn">自动执行计划暂不可用</div>
+          ) : (
+            <ScheduleTimeline
+              lastExecutedAt={item.last_exec_at}
+              nextRunTimes={nextRun.data?.next_execution_times ?? []}
+            />
+          )}
         </Card>
       </div>
 
@@ -530,7 +586,7 @@ export function AccountDetail({ accountId, item, onDashboardRefresh }: AccountDe
 }
 
 /** 状态卡里的键值行。 */
-function Kv({ k, v, ok, mono }: { k: string; v: string; ok?: boolean; mono?: boolean }) {
+function Kv({ k, v, ok, mono }: { k: string; v: ReactNode; ok?: boolean; mono?: boolean }) {
   return (
     <div className="flex items-center justify-between border-t border-line py-1.5 text-[14px] first:border-t-0">
       <span className="text-ink-2">{k}</span>
@@ -542,5 +598,38 @@ function Kv({ k, v, ok, mono }: { k: string; v: string; ok?: boolean; mono?: boo
         {v}
       </span>
     </div>
+  )
+}
+
+/** 仪表盘与账户路由共用的冷拉骨架。 */
+export function AccountDetailSkeleton() {
+  return (
+    <SkeletonGroup label="正在加载账户详情">
+      <Card className="p-6">
+        <Skeleton className="h-5 w-40" />
+        <Skeleton className="mt-[18px] h-8 w-52" />
+        <Skeleton className="mt-2 h-4 w-44" />
+        <div className="mt-6 border-t border-line pt-4">
+          <Skeleton className="h-4 w-20" />
+          <Skeleton className="mt-2 h-10 w-64" />
+          <Skeleton className="mt-2 h-4 w-48" />
+        </div>
+      </Card>
+      <SectionLabel>状态</SectionLabel>
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+        {Array.from({ length: 3 }, (_, index) => (
+          <Card key={index} className="min-h-[190px] px-6 py-4">
+            <Skeleton className="h-4 w-24" />
+            <div className="mt-4 space-y-3 border-t border-line pt-3">
+              <Skeleton className="h-4 w-full" />
+              <Skeleton className="h-4 w-full" />
+              <Skeleton className="h-4 w-4/5" />
+            </div>
+          </Card>
+        ))}
+      </div>
+      <div className="mt-6 mb-3"><Skeleton className="h-3 w-20" /></div>
+      <Card className="px-6 py-4"><Skeleton className="h-4 w-full" /></Card>
+    </SkeletonGroup>
   )
 }

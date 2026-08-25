@@ -4,6 +4,7 @@ import {
   formatRecentExecution,
   formatTimeUntil,
 } from '@/features/account/scheduleTime'
+import { Skeleton, SkeletonGroup } from '@/components/ui/Skeleton'
 
 interface ScheduleTimelineProps {
   lastExecutedAt: string | null
@@ -50,5 +51,26 @@ export function ScheduleTimeline({ lastExecutedAt, nextRunTimes, now = Date.now(
         )}
       </div>
     </div>
+  )
+}
+
+/** 与真实时间线同高的首次加载占位。 */
+export function ScheduleTimelineSkeleton() {
+  return (
+    <SkeletonGroup label="正在加载自动执行计划" className="border-t border-line">
+      <div className="flex items-center justify-between gap-3 py-1.5">
+        <Skeleton className="h-4 w-20" />
+        <Skeleton className="h-4 w-12" />
+      </div>
+      <div className="space-y-2 border-t border-line py-1.5">
+        <Skeleton className="h-4 w-12" />
+        {Array.from({ length: 3 }, (_, index) => (
+          <div key={index} className="flex items-center justify-between gap-3">
+            <Skeleton className="h-4 w-24" />
+            <Skeleton className="h-3 w-14" />
+          </div>
+        ))}
+      </div>
+    </SkeletonGroup>
   )
 }

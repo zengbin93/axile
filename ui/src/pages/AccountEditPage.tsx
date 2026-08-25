@@ -9,6 +9,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { useParams, useViewTransitionState } from 'react-router'
 import { useNavigate } from '@/components/ui/nav'
 import { Chip } from '@/components/ui/Card'
+import { Skeleton } from '@/components/ui/Skeleton'
 import { Select } from '@/components/ui/Select'
 import { ExecutionTimeoutInput } from '@/features/account/ExecutionTimeoutInput'
 import { executionTimeoutError } from '@/features/account/executionTimeout'
@@ -18,7 +19,7 @@ import { getAccount, updateAccount } from '@/lib/api/accounts'
 import { testFeishu, type TestResult } from '@/lib/api/init'
 import { usePolling } from '@/lib/hooks/usePolling'
 import { useDomainStore } from '@/stores/domain'
-import { useChannelDescriptor } from '@/stores/channels'
+import { useChannelCatalogStore, useChannelDescriptor } from '@/stores/channels'
 import { useToastStore } from '@/stores/ui'
 import { channelLabel } from '@/features/dashboard/display'
 import { describeCron } from '@/features/setup/cron'
@@ -225,6 +226,10 @@ export function AccountEditPage() {
   const toast = useToastStore((s) => s.toast)
   const accounts = useDomainStore((s) => s.accounts)
   const portfolios = useDomainStore((s) => s.portfolios)
+  const portfoliosError = useDomainStore((s) => s.portfoliosError)
+  const refreshPortfolios = useDomainStore((s) => s.refreshPortfolios)
+  const channelCatalogLoading = useChannelCatalogStore((s) => s.loading)
+  const channelCatalogError = useChannelCatalogStore((s) => s.error)
   const refreshAccounts = useDomainStore((s) => s.refreshAccounts)
 
   // 与详情 hero 账户名配对 FLIP：进编辑 / 回详情时挂同一 ``account-name-*``。
@@ -232,7 +237,10 @@ export function AccountEditPage() {
   const tDetail = useViewTransitionState(`/accounts/${accountId}`)
   const nameVt = tEdit || tDetail
 
-  const account = usePolling(useCallback((s: AbortSignal) => getAccount(accountId, s), [accountId]), 0)
+  const account = usePolling(useCallback((s: AbortSignal) => getAccount(accountId, s), [accountId]), {
+    queryKey: `account:${accountId}`,
+    intervalMs: 0,
+  })
   const acc = account.data
   const channelDescriptor = useChannelDescriptor(acc?.trade_channel)
   const item = accounts?.find((a) => a.account_id === accountId) ?? null
@@ -268,7 +276,7 @@ export function AccountEditPage() {
   if (account.error && !acc)
     return <EditError id={accountId} name={displayName} message={account.error.message} />
 
-  if (account.loading || !ready || !acc || !draft)
+  if (account.loading || !ready || !acc || !draft || (channelDescriptor == null && channelCatalogLoading))
     return (
       <section className="pb-24">
         <EditBreadcrumb id={accountId} name={displayName} />
@@ -318,7 +326,7 @@ export function AccountEditPage() {
   const patch = buildPatch(d, acc, showShortLeverage)
   const changes = summarize(patch, acc, portfolios)
   const dirty = changes.length > 0
-  const blocked = Boolean(jsonErr || levErr || timeoutErr)
+  const blocked = Boolean(jsonErr || levErr || timeoutErr || portfolios == null || portfoliosError || channelCatalogError)
 
   const save = async () => {
     if (jsonErr) return toast(`高级 JSON 有误：${jsonErr}`)
@@ -501,6 +509,7 @@ export function AccountEditPage() {
           <Select<number | null>
             ariaLabel="跟随组合"
             searchable
+            disabled={portfolios == null || Boolean(portfoliosError)}
             className="w-full justify-between px-3 py-2 text-[14px]"
             value={d.portfolioId ?? null}
             onChange={(v) => set({ portfolioId: v })}
@@ -514,6 +523,8 @@ export function AccountEditPage() {
               })),
             ]}
           />
+          {portfolios == null && !portfoliosError && <Skeleton className="mt-2 h-3 w-40" />}
+          {portfoliosError && <div className="mt-2 text-[12px] text-warn">组合关系暂不可用：{portfoliosError.message} <button className="font-semibold underline" onClick={() => void refreshPortfolios()}>重试</button></div>}
         </Row>
         <Row label="空仓写记录" hint="审计留痕">
           <Toggle on={d.writeEmpty} onClick={() => set({ writeEmpty: !d.writeEmpty })} />

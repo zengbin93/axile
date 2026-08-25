@@ -54,7 +54,10 @@ export function AccountEditAlgorithmPage() {
   const navigate = useNavigate()
   const toast = useToastStore((s) => s.toast)
   const refreshAccounts = useDomainStore((s) => s.refreshAccounts)
-  const account = usePolling(useCallback((s: AbortSignal) => getAccount(accountId, s), [accountId]), 0)
+  const account = usePolling(useCallback((s: AbortSignal) => getAccount(accountId, s), [accountId]), {
+    queryKey: `account:${accountId}`,
+    intervalMs: 0,
+  })
   const acc = account.data
   const descriptor = useChannelDescriptor(acc?.trade_channel)
 

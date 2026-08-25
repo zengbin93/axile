@@ -3,6 +3,7 @@ import { ChevronDown } from 'lucide-react'
 import { ConfirmModal, type ConfirmSpec } from '@/components/ui/ConfirmModal'
 import { Segmented } from '@/components/ui/Segmented'
 import { Select } from '@/components/ui/Select'
+import { Skeleton } from '@/components/ui/Skeleton'
 import { Toggle } from '@/features/account/editUi'
 import { getAlgorithms } from '@/lib/api/system'
 import { useChannelDescriptor } from '@/stores/channels'
@@ -845,16 +846,20 @@ export function AlgorithmEditor({ slot, channel, value, onChange, allowClear }: 
         <div className="overflow-hidden">
           <div className="flex flex-wrap items-center gap-3">
             <label className="text-[13px] text-ink-2">执行算法</label>
-            <Select
-              className="min-w-[220px] justify-between px-3 py-1.5 text-[14px]"
-              value={method}
-              onChange={pick}
-              options={candidates.map((a) => ({
-                value: a.name,
-                label: algoLabel(a.name),
-                hint: a.builtin || DEDICATED[a.name] ? undefined : '自定义',
-              }))}
-            />
+            {algos == null ? (
+              <Skeleton className="h-9 w-[220px]" />
+            ) : (
+              <Select
+                className="min-w-[220px] justify-between px-3 py-1.5 text-[14px]"
+                value={method}
+                onChange={pick}
+                options={candidates.map((a) => ({
+                  value: a.name,
+                  label: algoLabel(a.name),
+                  hint: a.builtin || DEDICATED[a.name] ? undefined : '自定义',
+                }))}
+              />
+            )}
             {!isDefault && (
               <button
                 type="button"

@@ -1,71 +1,171 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 
-/** 轮询状态机。`data` 保留上一次成功值，失联时用于降级展示。 */
+export interface PollingOptions {
+  /** 查询身份。身份变化时旧数据立即失效，避免跨实体闪现。 */
+  queryKey: string
+  /** 轮询间隔；小于等于 0 时只取一次。 */
+  intervalMs?: number
+  /** 依赖未就绪时关闭查询。 */
+  enabled?: boolean
+}
+
+/** 轮询状态机。后台刷新保留上一次成功值。 */
 export interface PollingState<T> {
   data: T | null
   error: Error | null
-  /** 首次加载中（尚无任何数据）。 */
+  /** 当前查询首次加载中（尚无任何成功数据）。 */
   loading: boolean
-  /** 最近一次成功的时间戳（ms），供「数据 N 秒前」展示。 */
+  /** 已有数据时的后台刷新；UI 默认静默。 */
+  refreshing: boolean
+  /** 最近一次成功的时间戳（ms）。 */
   updatedAt: number | null
-  /** 手动触发一次刷新。 */
-  refresh: () => void
+  /** 手动触发并等待一次真实刷新。 */
+  refresh: () => Promise<void>
+}
+
+export interface StoredPollingState<T> {
+  key: string | null
+  data: T | null
+  error: Error | null
+  loading: boolean
+  refreshing: boolean
+  updatedAt: number | null
+}
+
+export interface PollingView<T> {
+  data: T | null
+  error: Error | null
+  loading: boolean
+  refreshing: boolean
+  updatedAt: number | null
+}
+
+/** 按当前查询身份裁剪内部状态；key 变化后的首帧也绝不泄露旧数据。 */
+export function pollingView<T>(
+  state: StoredPollingState<T>,
+  queryKey: string,
+  enabled: boolean,
+): PollingView<T> {
+  if (!enabled || state.key !== queryKey) {
+    return {
+      data: null,
+      error: null,
+      loading: enabled,
+      refreshing: false,
+      updatedAt: null,
+    }
+  }
+  return {
+    data: state.data,
+    error: state.error,
+    loading: state.loading,
+    refreshing: state.refreshing,
+    updatedAt: state.updatedAt,
+  }
 }
 
 /**
- * 轮询一个异步取数函数，按 `intervalMs` 周期刷新。
+ * 轮询一个异步取数函数。
  *
- * - 保留上一次成功数据：请求失败时 `data` 不清空，仅置 `error`（失联降级）。
- * - 组件卸载 / 依赖变化时中止在途请求。
- * - `intervalMs <= 0` 时只取一次、不轮询。
+ * 同一 ``queryKey`` 刷新时保留成功数据；身份变化时立即隐藏旧数据。调用方必须用
+ * ``useCallback`` 固定 fetcher，并把会改变响应身份的依赖编码进 ``queryKey``。
  */
 export function usePolling<T>(
   fetcher: (signal: AbortSignal) => Promise<T>,
-  intervalMs = 5000,
-  /** 变化时重新取数（用于依赖上游数据的联动请求）。 */
-  resetKey?: unknown,
+  { queryKey, intervalMs = 5000, enabled = true }: PollingOptions,
 ): PollingState<T> {
-  const [data, setData] = useState<T | null>(null)
-  const [error, setError] = useState<Error | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [updatedAt, setUpdatedAt] = useState<number | null>(null)
-
-  // fetcher 每次渲染都是新引用；用 ref 固定，避免把它放进 effect 依赖。
   const fetcherRef = useRef(fetcher)
   fetcherRef.current = fetcher
 
-  const [tick, setTick] = useState(0)
-  const refresh = useCallback(() => setTick((t) => t + 1), [])
+  const [state, setState] = useState<StoredPollingState<T>>({
+    key: null,
+    data: null,
+    error: null,
+    loading: false,
+    refreshing: false,
+    updatedAt: null,
+  })
+  const requestRef = useRef<{
+    key: string
+    id: number
+    controller: AbortController
+  } | null>(null)
+  const requestIdRef = useRef(0)
 
-  useEffect(() => {
+  const run = useCallback((): Promise<void> => {
+    if (!enabled) return Promise.resolve()
+
+    requestRef.current?.controller.abort()
     const controller = new AbortController()
-    let cancelled = false
+    const id = ++requestIdRef.current
 
-    const run = async () => {
+    setState((previous) => {
+      const sameKey = previous.key === queryKey
+      const data = sameKey ? previous.data : null
+      return {
+        key: queryKey,
+        data,
+        error: null,
+        loading: data === null,
+        refreshing: data !== null,
+        updatedAt: sameKey ? previous.updatedAt : null,
+      }
+    })
+
+    const promise = (async () => {
       try {
         const result = await fetcherRef.current(controller.signal)
-        if (cancelled) return
-        setData(result)
-        setError(null)
-        setUpdatedAt(Date.now())
-      } catch (err) {
-        if (cancelled || controller.signal.aborted) return
-        setError(err instanceof Error ? err : new Error(String(err)))
+        if (controller.signal.aborted || requestIdRef.current !== id) return
+        setState({
+          key: queryKey,
+          data: result,
+          error: null,
+          loading: false,
+          refreshing: false,
+          updatedAt: Date.now(),
+        })
+      } catch (error) {
+        if (controller.signal.aborted || requestIdRef.current !== id) return
+        setState((previous) => ({
+          key: queryKey,
+          data: previous.key === queryKey ? previous.data : null,
+          error: error instanceof Error ? error : new Error(String(error)),
+          loading: false,
+          refreshing: false,
+          updatedAt: previous.key === queryKey ? previous.updatedAt : null,
+        }))
       } finally {
-        if (!cancelled) setLoading(false)
+        if (requestRef.current?.id === id) requestRef.current = null
       }
+    })()
+
+    requestRef.current = { key: queryKey, id, controller }
+    return promise
+  }, [enabled, queryKey])
+
+  useEffect(() => {
+    if (!enabled) {
+      requestRef.current?.controller.abort()
+      requestRef.current = null
+      return
     }
 
     void run()
-    const timer =
-      intervalMs > 0 ? setInterval(() => void run(), intervalMs) : undefined
+    const timer = intervalMs > 0
+      ? window.setInterval(() => {
+          if (!requestRef.current) void run()
+        }, intervalMs)
+      : undefined
 
     return () => {
-      cancelled = true
-      controller.abort()
-      if (timer) clearInterval(timer)
+      if (timer !== undefined) window.clearInterval(timer)
+      if (requestRef.current?.key === queryKey) {
+        requestRef.current.controller.abort()
+        requestRef.current = null
+      }
     }
-  }, [intervalMs, tick, resetKey])
+  }, [enabled, intervalMs, queryKey, run])
 
-  return { data, error, loading, updatedAt, refresh }
+  const view = pollingView(state, queryKey, enabled)
+  return { ...view, refresh: run }
 }

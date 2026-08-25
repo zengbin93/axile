@@ -1,3 +1,5 @@
+import type { ReactNode } from 'react'
+
 /**
  * 骨架占位。
  *
@@ -11,7 +13,29 @@ interface SkeletonProps {
 
 /** 单个脉冲灰块。 */
 export function Skeleton({ className = '' }: SkeletonProps) {
-  return <div className={`animate-pulse rounded-md bg-fill ${className}`} />
+  return <div aria-hidden className={`animate-pulse rounded-md bg-fill motion-reduce:animate-none ${className}`} />
+}
+
+/** 行内文字槽骨架；宽度由调用处按成品文字指定。 */
+export function SkeletonText({ className = '' }: SkeletonProps) {
+  return <Skeleton className={`inline-block h-[1em] align-middle ${className}`} />
+}
+
+/** 给一组纯视觉骨架补充统一的 busy 语义。 */
+export function SkeletonGroup({
+  label,
+  className = '',
+  children,
+}: {
+  label: string
+  className?: string
+  children: ReactNode
+}) {
+  return (
+    <div aria-busy="true" aria-label={label} className={className}>
+      {children}
+    </div>
+  )
 }
 
 /** 多行等宽骨架（末行略短，贴近真实文本块）。 */

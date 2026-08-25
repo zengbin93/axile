@@ -2,7 +2,7 @@ import { useCallback } from 'react'
 import { useParams } from 'react-router'
 import { Breadcrumb } from '@/components/ui/Breadcrumb'
 import { Card } from '@/components/ui/Card'
-import { SkeletonLines } from '@/components/ui/Skeleton'
+import { Skeleton, SkeletonLines } from '@/components/ui/Skeleton'
 import { HoldingsView } from '@/features/account/HoldingsView'
 import { accountAssetTerms } from '@/features/dashboard/display'
 import { getAccount, getAccountAssetSnapshots, getAccountTargetWeights } from '@/lib/api/accounts'
@@ -24,16 +24,18 @@ export function AccountHoldingsPage() {
   const item = accounts?.find((a) => a.account_id === accountId) ?? null
   const assetTerms = accountAssetTerms(item?.trade_channel)
 
-  const account = usePolling(useCallback((s: AbortSignal) => getAccount(accountId, s), [accountId]), 15000)
+  const account = usePolling(useCallback((s: AbortSignal) => getAccount(accountId, s), [accountId]), {
+    queryKey: `account:${accountId}`,
+    intervalMs: 15000,
+  })
   const snapshots = usePolling(
     useCallback((s: AbortSignal) => getAccountAssetSnapshots(accountId, { limit: 1 }, s), [accountId]),
-    10000,
+    { queryKey: `account:${accountId}:asset-snapshots:1`, intervalMs: 10000 },
   )
   // 目标改取账户级「执行器口径」权重（后端已叠加杠杆与精度），与含杠杆的真实持仓同尺。
   const weights = usePolling<LatestWeights>(
     useCallback((s: AbortSignal) => getAccountTargetWeights(accountId, s), [accountId]),
-    60000,
-    accountId,
+    { queryKey: `account:${accountId}:target-weights`, intervalMs: 60000 },
   )
 
   const latestAssets = snapshots.data?.data[0]?.assets
@@ -59,10 +61,24 @@ export function AccountHoldingsPage() {
       <div className="mt-3 text-[18px] font-[640]">{name}</div>
 
       <Card className="mt-4 max-w-[760px] px-6 py-5">
-        {snapshots.loading ? (
-          <SkeletonLines rows={6} />
-        ) : snapshots.error ? (
-          <p className="text-[14px] text-bad">加载失败：{snapshots.error.message}</p>
+        {(!snapshots.data || !weights.data) && (snapshots.loading || weights.loading) ? (
+          <div aria-label="正在加载持仓与目标" aria-busy="true">
+            <div className="flex items-center justify-between border-b border-line pb-3">
+              <Skeleton className="h-4 w-28" />
+              <Skeleton className="h-4 w-20" />
+            </div>
+            <SkeletonLines rows={6} className="mt-3" />
+          </div>
+        ) : snapshots.error || weights.error ? (
+          <div className="text-[14px] text-warn">
+            持仓对照暂不可用：{snapshots.error?.message ?? weights.error?.message}
+            <button
+              className="ml-3 cursor-pointer border-0 bg-transparent font-semibold text-warn underline"
+              onClick={() => void (snapshots.error ? snapshots.refresh() : weights.refresh())}
+            >
+              重试
+            </button>
+          </div>
         ) : holdingsStale ? (
           <div className="text-[14px] leading-relaxed text-warn">
             持仓数据待刷新 —— 实时口径显示当前持有 {holdingsCount} 个品种，但最近的资产观测未返回持仓明细。

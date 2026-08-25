@@ -8,6 +8,7 @@ import { leverageError } from '@/features/account/leverage'
 import { WizardPage, WizardNav } from '@/features/setup/WizardNav'
 import { Segmented } from '@/components/ui/Segmented'
 import { ConditionalReveal } from '@/components/ui/ConditionalReveal'
+import { Skeleton } from '@/components/ui/Skeleton'
 import { ConnectionField } from '@/components/ui/ConnectionField'
 import { DirectoryPicker } from '@/components/ui/DirectoryPicker'
 import type { ClipboardCandidate } from '@/components/ui/connectionFieldClipboard'
@@ -660,7 +661,9 @@ export function AcctConfirm() {
   const descriptor = useChannelDescriptor(acct.channel)
   const scheduleKind = descriptor?.schedule.kind
   const showShortLeverage = descriptor?.ui.show_short_leverage ?? true
-  const [rows, setRows] = useState<[string, number][] | null>(null)
+  const [previewState, setPreviewState] = useState<
+    { status: 'idle' | 'loading' } | { status: 'success'; rows: [string, number][] } | { status: 'error'; message: string }
+  >({ status: 'idle' })
 
   const cronList = scheduleKind ? resolveCronList(scheduleKind, acct) : []
   const cronExpr = cronToExpr(cronList)
@@ -681,11 +684,13 @@ export function AcctConfirm() {
       return
     }
     try {
+      setPreviewState({ status: 'loading' })
       const w = await getLatestWeights(acct.portfolioId)
-      setRows(Object.entries(w).filter(([, v]) => Math.abs(v) > 1e-9).sort((a, b) => Math.abs(b[1]) - Math.abs(a[1])))
+      setPreviewState({ status: 'success', rows: Object.entries(w).filter(([, v]) => Math.abs(v) > 1e-9).sort((a, b) => Math.abs(b[1]) - Math.abs(a[1])) })
     } catch (e) {
-      toast(`试跑失败：${e instanceof Error ? e.message : String(e)}`)
-      setRows([])
+      const message = e instanceof Error ? e.message : String(e)
+      toast(`试跑失败：${message}`)
+      setPreviewState({ status: 'error', message })
     }
   }
 
@@ -768,13 +773,15 @@ export function AcctConfirm() {
           )}
 
           <div className="mt-5">
-            <button className="cursor-pointer rounded-[11px] border-0 bg-ink-1 px-[22px] py-2.5 text-[14px] font-[550] text-surface" onClick={preview}>
-              ▶ 试跑（不下单）
+            <button disabled={previewState.status === 'loading'} className="cursor-pointer rounded-[11px] border-0 bg-ink-1 px-[22px] py-2.5 text-[14px] font-[550] text-surface disabled:cursor-not-allowed disabled:opacity-45" onClick={preview}>
+              {previewState.status === 'loading' ? '试跑中…' : '▶ 试跑（不下单）'}
             </button>
             <div className="mt-[18px] max-w-[460px] rounded-[14px] border border-dashed border-line bg-surface p-5">
-              {rows == null && <div className="py-5 text-center text-[14px] text-ink-3">试跑看这套组合此刻会调成什么样</div>}
-              {rows != null && rows.length === 0 && <div className="py-5 text-center text-[14px] text-ink-3">无目标持仓。</div>}
-              {rows?.map(([sym, w]) => (
+              {previewState.status === 'idle' && <div className="py-5 text-center text-[14px] text-ink-3">试跑看这套组合此刻会调成什么样</div>}
+              {previewState.status === 'loading' && <div aria-busy="true"><Skeleton className="h-4 w-full" /><Skeleton className="mt-3 h-4 w-4/5" /><Skeleton className="mt-3 h-4 w-3/5" /></div>}
+              {previewState.status === 'error' && <div className="py-5 text-center text-[14px] text-warn">试跑暂不可用：{previewState.message}</div>}
+              {previewState.status === 'success' && previewState.rows.length === 0 && <div className="py-5 text-center text-[14px] text-ink-3">无目标持仓。</div>}
+              {previewState.status === 'success' && previewState.rows.map(([sym, w]) => (
                 <div key={sym} className="flex items-center justify-between border-b border-line py-2.5 text-[15px] last:border-b-0">
                   <span className="font-[520]">{sym}</span>
                   <span className={`num text-ink-2 ${w < 0 ? 'text-bad' : ''}`}>{(w * 100).toFixed(1)}%</span>

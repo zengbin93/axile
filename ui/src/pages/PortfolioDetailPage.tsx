@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useState, type ReactNode } from 'react'
 import { useParams, useViewTransitionState } from 'react-router'
 import { Link, useNavigate } from '@/components/ui/nav'
 import { Breadcrumb } from '@/components/ui/Breadcrumb'
@@ -22,8 +22,12 @@ export function PortfolioDetailPage() {
   const toast = useToastStore((s) => s.toast)
   const [confirm, setConfirm] = useState<ConfirmSpec | null>(null)
 
-  const portfolio = usePolling(useCallback((s: AbortSignal) => getPortfolio(portfolioId, s), [portfolioId]), 0)
+  const portfolio = usePolling(useCallback((s: AbortSignal) => getPortfolio(portfolioId, s), [portfolioId]), {
+    queryKey: `portfolio:${portfolioId}`,
+    intervalMs: 0,
+  })
   const accounts = useDomainStore((s) => s.accounts)
+  const accountsError = useDomainStore((s) => s.accountsError)
   const portfolios = useDomainStore((s) => s.portfolios)
 
   const pf = portfolio.data
@@ -38,11 +42,14 @@ export function PortfolioDetailPage() {
 
   const weights = usePolling<LatestWeights>(
     useCallback(
-      (s: AbortSignal) => (pf ? getLatestWeights(portfolioId, s) : Promise.resolve({})),
-      [portfolioId, pf],
+      (s: AbortSignal) => getLatestWeights(portfolioId, s),
+      [portfolioId],
     ),
-    0,
-    pf ? `${portfolioId}` : null,
+    {
+      queryKey: `portfolio:${portfolioId}:latest-weights`,
+      intervalMs: 0,
+      enabled: pf !== null,
+    },
   )
 
   if (portfolio.error && !pf)
@@ -106,8 +113,8 @@ export function PortfolioDetailPage() {
             </div>
             {head.description && <div className="mt-2 text-[13px] text-ink-2">{head.description}</div>}
             <div className="mt-6 flex gap-8 border-t border-line pt-4">
-              <Meta k="跟随账户" v={boundAccount ? '1 个' : '未绑定'} />
-              <Meta k="目标覆盖" v={targetRows.length ? `${coverage.toFixed(0)}%` : '—'} />
+              <Meta k="跟随账户" v={accountsError ? <span className="text-warn">暂不可用</span> : accounts == null ? <Skeleton className="h-5 w-16" /> : boundAccount ? '1 个' : '未绑定'} />
+              <Meta k="目标覆盖" v={!weights.data && weights.loading ? <Skeleton className="h-5 w-16" /> : weights.error ? <span className="text-warn">暂不可用</span> : targetRows.length ? `${coverage.toFixed(0)}%` : '—'} />
               <Meta k="创建" v={head.created_at.slice(0, 10)} />
             </div>
             <div className="mt-6 flex gap-2.5">
@@ -117,7 +124,7 @@ export function PortfolioDetailPage() {
               >
                 编辑组合
               </button>
-              {boundAccount && (
+              {accounts != null && !accountsError && boundAccount && (
                 <button
                   className="cursor-pointer rounded-[9px] border-0 bg-ink-1 px-4 py-2 text-[13.5px] font-[550] text-surface"
                   onClick={runFanout}
@@ -140,8 +147,8 @@ export function PortfolioDetailPage() {
       <SectionLabel>组合原始目标 · 各账户再套自己的风控/杠杆</SectionLabel>
       <Card className="px-6 py-4">
         {!pf && <SkeletonLines rows={3} />}
-        {pf && weights.loading && <p className="text-[13px] text-ink-2">计算目标权重中…</p>}
-        {pf && weights.error && <p className="text-[13px] text-ink-3">目标权重暂不可用：{weights.error.message}</p>}
+        {pf && !weights.data && weights.loading && <SkeletonLines rows={3} />}
+        {pf && weights.error && <p className="text-[13px] text-warn">目标权重暂不可用：{weights.error.message} <button className="font-semibold underline" onClick={() => void weights.refresh()}>重试</button></p>}
         {pf && !weights.loading && !weights.error && targetRows.length === 0 && (
           <p className="text-[13px] text-ink-3">当前无目标持仓。</p>
         )}
@@ -168,7 +175,11 @@ export function PortfolioDetailPage() {
       {/* 跟随账户 */}
       <SectionLabel>跟随此组合的账户</SectionLabel>
       <Card className="px-6 py-2">
-        {boundAccount ? (
+        {accounts == null && !accountsError ? (
+          <div className="py-3"><Skeleton className="h-4 w-36" /><Skeleton className="mt-2 h-3 w-24" /></div>
+        ) : accountsError ? (
+          <p className="py-3 text-[13px] text-warn">绑定关系暂不可用：{accountsError.message}</p>
+        ) : boundAccount ? (
           <Link
             to={`/accounts/${boundAccount.account_id}`}
             className="flex items-center gap-3 py-3 text-inherit hover:bg-bg-subtle"
@@ -194,7 +205,7 @@ export function PortfolioDetailPage() {
   )
 }
 
-function Meta({ k, v }: { k: string; v: string }) {
+function Meta({ k, v }: { k: string; v: ReactNode }) {
   return (
     <div>
       <div className="text-xs text-ink-3">{k}</div>

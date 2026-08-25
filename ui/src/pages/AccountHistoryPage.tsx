@@ -74,19 +74,22 @@ export function AccountHistoryPage() {
   // 金额共享元素 FLIP（详情卡金额 → 本页 hero）；曲线不共享（root 淡入）。
   const amountVt = useViewTransitionState(`/accounts/${accountId}/history`)
 
-  const account = usePolling(useCallback((s: AbortSignal) => getAccount(accountId, s), [accountId]), 0)
+  const account = usePolling(useCallback((s: AbortSignal) => getAccount(accountId, s), [accountId]), {
+    queryKey: `account:${accountId}`,
+    intervalMs: 0,
+  })
   const assetTerms = accountAssetTerms(account.data?.trade_channel)
   const activity = usePolling(
     useCallback((s: AbortSignal) => getAccountActivity(accountId, { limit: 500 }, s), [accountId]),
-    0,
+    { queryKey: `account:${accountId}:activity:500`, intervalMs: 0 },
   )
   const bindings = usePolling(
     useCallback((s: AbortSignal) => getPortfolioRecords(accountId, s), [accountId]),
-    0,
+    { queryKey: `account:${accountId}:portfolio-records`, intervalMs: 0 },
   )
   const snapshots = usePolling(
     useCallback((s: AbortSignal) => getAccountAssetSnapshots(accountId, { limit: 500 }, s), [accountId]),
-    0,
+    { queryKey: `account:${accountId}:asset-snapshots:500`, intervalMs: 0 },
   )
   // 首帧优先用 hover 预取缓存：有缓存即直接出图，落地不闪骨架，金额 FLIP 有真实落点。
   const cached = getCachedExecuteRecords(accountId)
@@ -103,8 +106,8 @@ export function AccountHistoryPage() {
   const snapshotCurrency = [...rangedSnapshots].reverse().find((s) => s.assets.currency)?.assets.currency ?? ''
   const stats = aggregateStats(ranged, points, snapshotCurrency)
   const currencyUnit = displayCurrencyUnit(stats.currency)
-  const segments = buildSegments(bindings.data?.data ?? [], points)
-  const events = buildEvents(bindings.data?.data ?? [], ranged, rangedSkips)
+  const segments = bindings.data ? buildSegments(bindings.data.data, points) : []
+  const events = bindings.data ? buildEvents(bindings.data.data, ranged, rangedSkips) : []
 
   const sgn = (v: number) => (v >= 0 ? '+' : '−') + formatMoney(Math.abs(v))
   const ret = stats.pnl != null && stats.eqFirst ? (stats.pnl / stats.eqFirst) * 100 : null
@@ -297,7 +300,11 @@ export function AccountHistoryPage() {
           {/* 分段收益 */}
           <SectionLabel>绑定分段收益 · {assetTerms.shortLabel}跨多段绑定，分开算才诚实</SectionLabel>
           <Card className="px-6 py-4">
-            {segments.length === 0 ? (
+            {!bindings.data && bindings.loading ? (
+              <><Skeleton className="h-4 w-44" /><Skeleton className="mt-3 h-4 w-56" /></>
+            ) : bindings.error ? (
+              <p className="text-[13px] text-warn">绑定记录暂不可用：{bindings.error.message} <button className="font-semibold underline" onClick={() => void bindings.refresh()}>重试</button></p>
+            ) : segments.length === 0 ? (
               <p className="text-[13px] text-ink-3">本区间无可用的分段数据。</p>
             ) : (
               segments.map((s, i) => (
@@ -318,7 +325,11 @@ export function AccountHistoryPage() {
           <div id="account-timeline" className="scroll-mt-4">
           <SectionLabel>账户时间线 · 你不在时发生了什么</SectionLabel>
           <Card className="px-6 py-4">
-            {events.length === 0 ? (
+            {!bindings.data && bindings.loading ? (
+              <><Skeleton className="h-4 w-full" /><Skeleton className="mt-3 h-4 w-4/5" /><Skeleton className="mt-3 h-4 w-3/5" /></>
+            ) : bindings.error ? (
+              <p className="text-[13px] text-warn">绑定时间线暂不可用：{bindings.error.message} <button className="font-semibold underline" onClick={() => void bindings.refresh()}>重试</button></p>
+            ) : events.length === 0 ? (
               <p className="text-[13px] text-ink-3">本区间无异常事件。</p>
             ) : (
               <div className="relative pl-[22px]">

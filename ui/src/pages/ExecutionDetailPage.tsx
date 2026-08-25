@@ -546,8 +546,16 @@ export function ExecutionDetailPage() {
   const running = useRunning(accountId)
   const isLive = running != null && running.executionId === executionId
   const pollMs = isLive ? 2500 : 0
-  const events = usePolling(eventsFetcher, pollMs, executionId ?? null)
-  const artifacts = usePolling(artifactsFetcher, pollMs, executionId ?? null)
+  const events = usePolling(eventsFetcher, {
+    queryKey: `execution:${executionId ?? 'missing'}:events`,
+    intervalMs: pollMs,
+    enabled: Boolean(executionId),
+  })
+  const artifacts = usePolling(artifactsFetcher, {
+    queryKey: `execution:${executionId ?? 'missing'}:artifacts`,
+    intervalMs: pollMs,
+    enabled: Boolean(executionId),
+  })
 
   const loading = events.loading || artifacts.loading
   const error = events.error || artifacts.error
