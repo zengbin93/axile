@@ -315,6 +315,8 @@ class CTPExecutor(AbstractExecutor, UnifiedCallbackClient):
         product_id = str(getattr(instrument, "ProductID", "") or "")
         if not exchange_id or not product_id:
             return False, "CTP.SESSION.NO_METADATA"
+        if getattr(instrument, "ProductClass", None) == td.THOST_FTDC_PC_Options:
+            return False, "CTP.SESSION.NO_SESSION_TABLE"
         sessions = get_ctp_product_sessions(exchange_id, product_id)
         if not sessions:
             return False, "CTP.SESSION.NO_SESSION_TABLE"

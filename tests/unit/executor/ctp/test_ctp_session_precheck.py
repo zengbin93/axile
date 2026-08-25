@@ -29,7 +29,7 @@ def _executor() -> CTPExecutor:
         "IF2609": SimpleNamespace(ExchangeID="CFFEX", ProductID="IF"),
         "ag2609C5000": SimpleNamespace(
             ExchangeID="SHFE",
-            ProductID="ag_o",
+            ProductID="ag",
             ProductClass=td.THOST_FTDC_PC_Options,
         ),
         "unknown2612": SimpleNamespace(ExchangeID="SHFE", ProductID="unknown"),
