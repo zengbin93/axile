@@ -268,6 +268,7 @@ def test_execution_engine_prewarms_runtime_before_serial_dispatch(monkeypatch) -
         serial_calls.append([task.symbol for task in prepared_tasks])
         return []
 
+    monkeypatch.setattr(executor, "_supports_parallel_symbol_dispatch", lambda: False)
     monkeypatch.setattr(engine, "_run_symbol_algorithms_serially", fake_run_symbol_algorithms_serially)
 
     assert engine._run_prepared_symbol_algorithms(tasks) == []
