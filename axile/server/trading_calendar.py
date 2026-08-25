@@ -390,15 +390,14 @@ async def list_calendar_entries(
     if start is None or end is None:
         bounds: list[tuple[date | None, date | None]] = []
         for model in (TradingCalendarRecord, TradingCalendarOverride):
-            bounds.append(
-                (
-                    await session.execute(
-                        select(func.min(col(model.cal_date)), func.max(col(model.cal_date))).where(
-                            col(model.calendar_id) == calendar_id
-                        )
+            row = (
+                await session.execute(
+                    select(func.min(col(model.cal_date)), func.max(col(model.cal_date))).where(
+                        col(model.calendar_id) == calendar_id
                     )
-                ).one()
-            )
+                )
+            ).one()
+            bounds.append(cast("tuple[date | None, date | None]", row))
         minima = [cast(date, lower) for lower, _ in bounds if lower is not None]
         maxima = [cast(date, upper) for _, upper in bounds if upper is not None]
         if not minima or not maxima:
@@ -866,19 +865,21 @@ async def _sync_one_shinny(calendar_id: str, *, force: bool) -> bool:
         if config is None or config.refresh_kind != SHINNY_CALENDAR_REFRESH_KIND:
             return False
         today = date.today()
-        if today.year > SHINNY_CALENDAR_LAST_YEAR:
-            logger.warning("Shinny 交易日历仅覆盖至 {}，不再刷新 {}", SHINNY_CALENDAR_LAST_YEAR, calendar_id)
+        last_supported_day = date(SHINNY_CALENDAR_LAST_YEAR, 12, 31)
+        if today > last_supported_day:
+            logger.warning("Shinny 交易日历仅覆盖至 {}，不再刷新 {}", last_supported_day, calendar_id)
             return False
+        covered_end = min(today + timedelta(days=CALENDAR_MIN_FUTURE_DAYS), last_supported_day)
         covered = await session.scalar(
             select(func.count())
             .select_from(TradingCalendarRecord)
             .where(
                 col(TradingCalendarRecord.calendar_id) == calendar_id,
                 col(TradingCalendarRecord.cal_date) >= today,
-                col(TradingCalendarRecord.cal_date) <= today + timedelta(days=CALENDAR_MIN_FUTURE_DAYS),
+                col(TradingCalendarRecord.cal_date) <= covered_end,
             )
         )
-        if not force and int(covered or 0) == CALENDAR_MIN_FUTURE_DAYS + 1:
+        if not force and int(covered or 0) == (covered_end - today).days + 1:
             return False
         try:
             await _save_shinny_calendar(

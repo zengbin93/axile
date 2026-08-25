@@ -114,7 +114,11 @@ class AbstractExecutorExecutionRuntimeHostMixin:
             return self._is_channel_calendar_open(session_start_day)
 
         try:
-            if calendar.is_open(calendar_id, session_start_day) is not True:
+            session_state = calendar.is_open(calendar_id, session_start_day)
+            if session_state is None:
+                executor.logger.warning("{} {} 缺少有效交易日历，继续放行", calendar_id, session_start_day)
+                return True
+            if not session_state:
                 return False
             for offset in range(1, 15):
                 candidate = session_start_day + timedelta(days=offset)

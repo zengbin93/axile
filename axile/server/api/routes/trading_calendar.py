@@ -42,6 +42,10 @@ from axile.server.trading_calendar import (
 router = APIRouter(prefix="/market/trading-calendar", tags=["market"])
 
 
+def _today() -> date:
+    return date.today()
+
+
 class FunctionRequest(BaseModel):
     """Python 日历函数载荷。"""
 
@@ -168,7 +172,9 @@ async def update_shinny_calendar(
     calendar_id: Annotated[str, Query(alias="calendarId", min_length=1)] = CALENDAR_ID,
 ) -> CalendarStatus:
     """物化 Shinny 中国期货/通用节假日日历；内置数据仅覆盖至 2026 年。"""
-    today = date.today()
+    today = _today()
+    if today > date(2026, 12, 31):
+        raise HTTPException(status_code=422, detail="Shinny 内置节假日仅覆盖至 2026-12-31")
     try:
         await save_shinny_calendar(
             session,

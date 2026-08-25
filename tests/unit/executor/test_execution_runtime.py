@@ -200,8 +200,13 @@ class _Calendar:
     def __init__(self, open_days: set[date]) -> None:
         self.open_days = open_days
 
-    def is_open(self, _calendar_id: str, day: date) -> bool:
+    def is_open(self, _calendar_id: str, day: date) -> bool | None:
         return day in self.open_days
+
+
+class _UncoveredCalendar:
+    def is_open(self, _calendar_id: str, _day: date) -> None:
+        return None
 
 
 def test_china_futures_session_keeps_friday_night_open_after_midnight() -> None:
@@ -222,6 +227,15 @@ def test_china_futures_session_rejects_sunday_night_and_holiday_eve() -> None:
 
     assert executor._is_china_futures_session_open(datetime(2026, 8, 23, 21, 30)) is False
     assert executor._is_china_futures_session_open(datetime(2026, 9, 30, 21, 30)) is False
+
+
+def test_china_futures_session_allows_uncovered_calendar() -> None:
+    """夜盘的未覆盖状态与日盘一致，保留 fail-open 语义。"""
+    executor = _RuntimeExecutor()
+    executor.set_channel_calendar("china")
+    executor.set_trading_calendar(_UncoveredCalendar())
+
+    assert executor._is_china_futures_session_open(datetime(2027, 1, 4, 21, 30)) is True
 
 
 def test_prepare_execution_runtime_reuses_active_runtime_and_preserves_audit_seq() -> None:
