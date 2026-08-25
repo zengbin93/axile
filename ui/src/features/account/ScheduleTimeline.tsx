@@ -13,6 +13,36 @@ interface ScheduleTimelineProps {
   now?: number
 }
 
+interface ScheduleSummaryProps {
+  lastExecutedAt: string | null
+  nextRunAt: string | null
+  /** 测试可注入固定时钟；生产默认使用当前时间。 */
+  now?: number
+}
+
+/** 账户头部的最近执行与下次计划摘要。 */
+export function ScheduleSummary({ lastExecutedAt, nextRunAt, now = Date.now() }: ScheduleSummaryProps) {
+  return (
+    <div className="mt-1.5 text-[13px] text-ink-3">
+      {lastExecutedAt ? (
+        <time dateTime={lastExecutedAt} title={formatBeijingTimestamp(lastExecutedAt)}>
+          上次 {formatRecentExecution(lastExecutedAt, now)}
+        </time>
+      ) : (
+        '尚无执行'
+      )}
+      {nextRunAt && (
+        <>
+          {' · '}
+          <time dateTime={nextRunAt} title={formatBeijingTimestamp(nextRunAt)}>
+            下次 {formatPlannedAt(nextRunAt, now)}
+          </time>
+        </>
+      )}
+    </div>
+  )
+}
+
 /** 自动执行卡片中的最近执行与未来三次时间表。 */
 export function ScheduleTimeline({ lastExecutedAt, nextRunTimes, now = Date.now() }: ScheduleTimelineProps) {
   const upcoming = nextRunTimes.slice(0, 3)

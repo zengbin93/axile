@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test'
-import { rebalanceTurnover, topHoldingAdjustments } from './holdingPreview'
+import { currentHoldingPreview, rebalanceTurnover } from './holdingPreview'
 import type { RebalancePlan, RebalanceRow } from '@/lib/derive'
 
 function row(symbol: string, amount: number, action: RebalanceRow['action']): RebalanceRow {
@@ -25,14 +25,28 @@ const plan: RebalancePlan = {
   targetNet: 19,
 }
 
-describe('topHoldingAdjustments', () => {
-  it('排除到位项并按待调整幅度取前 N 项', () => {
-    expect(topHoldingAdjustments(plan, 1_000_000, 2).map(({ row }) => row.symbol)).toEqual(['large', 'mid'])
+describe('currentHoldingPreview', () => {
+  it('按品种与方向聚合，并按市值绝对值排列', () => {
+    const rows = currentHoldingPreview([
+      { symbol: 'rb2610', direction: '多头', market_value: 20_000 },
+      { symbol: 'ag2610', direction: '空头', market_value: 60_000 },
+      { symbol: 'rb2610', direction: 'long', market_value: 10_000 },
+    ], 100_000)
+
+    expect(rows).toEqual([
+      { key: 'ag2610:short', symbol: 'ag2610', direction: 'short', weight: -60, value: -60_000 },
+      { key: 'rb2610:long', symbol: 'rb2610', direction: 'long', weight: 30, value: 30_000 },
+    ])
   })
 
-  it('按权益换算调整金额，权益未知时不编金额', () => {
-    expect(topHoldingAdjustments(plan, 1_000_000, 1)[0]?.value).toBe(120_000)
-    expect(topHoldingAdjustments(plan, 0, 1)[0]?.value).toBeNull()
+  it('权益未知时保留持仓市值但不编造权重', () => {
+    expect(currentHoldingPreview([{ symbol: 'rb2610', market_value: 12_000 }], 0)[0]).toEqual({
+      key: 'rb2610:long',
+      symbol: 'rb2610',
+      direction: 'long',
+      weight: null,
+      value: 12_000,
+    })
   })
 })
 

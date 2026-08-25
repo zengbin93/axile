@@ -14,8 +14,8 @@ import { AccountActions } from '@/features/account/AccountActions'
 import { useExecutionRunner } from '@/features/account/useExecutionRunner'
 import { useTerminateAction } from '@/features/account/useTerminateAction'
 import { buildRecentActivity } from '@/features/account/recent'
-import { rebalanceTurnover, topHoldingAdjustments } from '@/features/account/holdingPreview'
-import { ScheduleTimeline, ScheduleTimelineSkeleton } from '@/features/account/ScheduleTimeline'
+import { currentHoldingPreview, rebalanceTurnover } from '@/features/account/holdingPreview'
+import { ScheduleSummary, ScheduleTimeline, ScheduleTimelineSkeleton } from '@/features/account/ScheduleTimeline'
 import { accountAssetTerms, INTEGRITY_ICON, INTEGRITY_TEXT_CLASS, STATUS_TEXT_CLASS, channelLabel } from '@/features/dashboard/display'
 import { phaseLabel, runVerb } from '@/features/dashboard/execProgress'
 import { useRunning } from '@/stores/liveExec'
@@ -142,7 +142,7 @@ export function AccountDetail({ accountId, item, onDashboardRefresh }: AccountDe
         : `${plan.off} 只待调整`
   const targetCount = Object.values(target).filter((weight) => Math.abs(weight) > 1e-9).length
   const turnover = rebalanceTurnover(plan)
-  const topAdjustments = topHoldingAdjustments(plan, item.total_asset)
+  const currentHoldings = currentHoldingPreview(positions, item.total_asset)
   // 在位性（风险轴）只由执行结果派生、不看 is_started；档位（模式）随乐观 is_started 变，便于启停后立刻日记式重写。
   // 四象限判词：模式给风险改台词（暂停+偏离＝不会自愈，措辞最重）。
   const state = stateVerdict({ ...item, is_started: isStarted })
@@ -309,10 +309,10 @@ export function AccountDetail({ accountId, item, onDashboardRefresh }: AccountDe
             </span>
           )}
         </div>
-        <div className="mt-1.5 text-[13px] text-ink-3">
-          {item.last_exec_at ? `上次 ${item.last_exec_at.replace('T', ' ')}` : '尚无执行'}
-          {nextRun.data?.next_run_time ? ` · 下次排程 ${nextRun.data.next_run_time.replace('T', ' ').slice(0, 16)}` : ''}
-        </div>
+        <ScheduleSummary
+          lastExecutedAt={item.last_exec_at}
+          nextRunAt={nextRun.data?.next_execution_times[0] ?? null}
+        />
 
         <div className="mt-6 border-t border-line pt-4">
           <div className="flex items-center gap-1.5 text-[13px] text-ink-2">
@@ -449,22 +449,22 @@ export function AccountDetail({ accountId, item, onDashboardRefresh }: AccountDe
                   </>
                 )}
               </div>
-              {topAdjustments.length > 0 && (
-                <div className="border-t border-line lg:border-t-0 lg:border-l lg:pl-5">
-                  {topAdjustments.map(({ row, value }) => (
-                    <div key={row.symbol} className="grid min-h-12 grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-3 border-t border-line text-[13px] first:border-t-0">
-                      <OverflowText className="font-mono font-medium text-ink-1" text={row.symbol} />
-                      <span className="num whitespace-nowrap text-ink-2">
-                        {row.side === 'buy' ? '买入' : '卖出'} {row.amount.toFixed(1)}%
-                        {row.action === 'flip' && <span className="ml-1.5 text-warn">翻向</span>}
-                      </span>
-                      <span className="num min-w-20 whitespace-nowrap text-right font-medium text-ink-1">
-                        {value == null ? '—' : withCurrency(fmtMoney(value), item.currency)}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              )}
+              <div className="h-40 overflow-y-auto overscroll-contain border-t border-line [scrollbar-gutter:stable] lg:border-t-0 lg:border-l lg:pl-5">
+                {currentHoldings.length === 0 ? (
+                  <div className="flex h-full items-center text-[13px] text-ink-3">当前空仓</div>
+                ) : currentHoldings.map((holding) => (
+                  <div key={holding.key} className="grid min-h-12 grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-3 border-t border-line text-[13px] first:border-t-0">
+                    <OverflowText className="font-mono font-medium text-ink-1" text={holding.symbol} />
+                    <span className="num whitespace-nowrap text-ink-2">
+                      {holding.direction === 'short' ? '空' : '多'}{' '}
+                      {holding.weight == null ? '—' : `${Math.abs(holding.weight).toFixed(1)}%`}
+                    </span>
+                    <span className="num min-w-20 whitespace-nowrap text-right font-medium text-ink-1">
+                      {holding.value == null ? '—' : withCurrency(fmtMoney(holding.value), item.currency)}
+                    </span>
+                  </div>
+                ))}
+              </div>
             </div>
           ) : null}
         </Card>
