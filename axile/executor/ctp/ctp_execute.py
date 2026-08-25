@@ -60,11 +60,7 @@ from axile.executor.ctp_product_sessions import (
     decide_ctp_product_session,
     get_ctp_product_sessions,
 )
-from axile.executor.execution_engine import (
-    ExecutionEngine,
-    _DispatchPhases,
-    _DispatchPlanningResult,
-)
+from axile.executor.execution_engine import ExecutionEngine, _DispatchPlanningResult
 from axile.executor.models.execution_result import AlgorithmResult, ExecutionStatus
 from axile.executor.models.unified_account_assets import UnifiedAccountAssets
 from axile.executor.models.unified_callback import (
@@ -141,19 +137,6 @@ class CtpExecutionEngine(ExecutionEngine):
             effective_curr_target=effective_curr_target,
             planning_failures=planning_failures,
         )
-
-    def _prepare_account_for_symbol_dispatch(self, dispatch_phases: _DispatchPhases) -> None:
-        """仅撤销本轮实际会分发的 CTP 品种挂单。"""
-        if not dispatch_phases.phase_one_tasks and not dispatch_phases.phase_two_plans:
-            return
-        self._owner.handle_termination_checkpoint()
-        symbols = list(
-            dict.fromkeys(
-                [task.symbol for task in dispatch_phases.phase_one_tasks]
-                + [plan.symbol for plan in dispatch_phases.phase_two_plans]
-            )
-        )
-        cast("CTPExecutor", self._owner)._cancel_ctp_orders_for_symbols(symbols)
 
     def _derive_dispatch_error(
         self,
@@ -410,21 +393,6 @@ class CTPExecutor(AbstractExecutor, UnifiedCallbackClient):
             now=clock_now(tz=_SHANGHAI),
             calendar_is_open=lambda day: calendar.is_open("china", day),
         ).reason_code
-
-    def _cancel_ctp_orders_for_symbols(self, symbols: list[str]) -> None:
-        """CTP 仅撤销本轮实际可能分发的品种挂单。"""
-        failed_order_ids: list[str] = []
-        for symbol in symbols:
-            for order in self.get_pending_orders(symbol):
-                try:
-                    canceled = self.cancel_order(symbol, order.order_id)
-                except Exception:
-                    failed_order_ids.append(order.order_id)
-                    continue
-                if not canceled:
-                    failed_order_ids.append(order.order_id)
-        if failed_order_ids:
-            raise RuntimeError(f"部分订单撤销失败: {'; '.join(failed_order_ids)}")
 
     @override
     def _normalize_connected_standard_input(self, standard_input: UnifiedStandardInput) -> UnifiedStandardInput:

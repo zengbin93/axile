@@ -13,7 +13,7 @@ from axile.executor.ctp.ctp_execute import CtpExecutionEngine
 from axile.executor.models.execution_result import AlgorithmResult, ExecutionStatus
 from axile.executor.models.unified_account_assets import UnifiedAccountAssets
 from axile.executor.models.unified_input import CTPAccountConfig, UnifiedStandardInput
-from axile.executor.models.unified_order import OrderDirection, OrderType, TradeRecord, UnifiedOrder
+from axile.executor.models.unified_order import OrderDirection, OrderStatus, OrderType, TradeRecord, UnifiedOrder
 from axile.executor.models.unified_price import UnifiedPriceData
 
 
@@ -22,7 +22,9 @@ class _CtpSessionExecutor(AbstractExecutor):
         self.decisions = decisions
         self.market_data_requests: list[list[str]] = []
         self.websocket_requests: list[list[str]] = []
-        self.cancelled_symbol_sets: list[list[str]] = []
+        self.cancel_all_orders_calls = 0
+        self.pending_orders: list[UnifiedOrder] = []
+        self.cancelled_orders: list[tuple[str, str]] = []
         super().__init__(
             TradeChannel.CTP,
             CTPAccountConfig(
@@ -51,9 +53,6 @@ class _CtpSessionExecutor(AbstractExecutor):
     def _get_ctp_session_block_reason(self, symbol: str) -> str | None:
         return self.decisions[symbol]
 
-    def _cancel_ctp_orders_for_symbols(self, symbols: list[str]) -> None:
-        self.cancelled_symbol_sets.append(symbols)
-
     def get_account_assets(self) -> UnifiedAccountAssets:
         return UnifiedAccountAssets(available_cash=1000, total_asset=1000, market_value=0, positions=[])
 
@@ -79,7 +78,9 @@ class _CtpSessionExecutor(AbstractExecutor):
         self.websocket_requests.append(list(symbols or []))
 
     def cancel_all_orders(self) -> None:
-        raise AssertionError("CTP 不应调用账户级 cancel_all_orders")
+        self.cancel_all_orders_calls += 1
+        for order in self.pending_orders:
+            self.cancel_order(order.symbol, order.order_id)
 
     def _place_order_impl(
         self,
@@ -102,8 +103,7 @@ class _CtpSessionExecutor(AbstractExecutor):
         )
 
     def _get_pending_orders_impl(self, symbol: str | None = None) -> list[UnifiedOrder]:
-        _ = symbol
-        return []
+        return [order for order in self.pending_orders if symbol is None or order.symbol == symbol]
 
     def _query_trades_impl(self, symbol: str, order_id: str) -> list[TradeRecord]:
         _ = (symbol, order_id)
@@ -134,7 +134,7 @@ class _CtpSessionExecutor(AbstractExecutor):
         return False
 
     def _cancel_order_impl(self, symbol: str, order_id: str) -> bool:
-        _ = (symbol, order_id)
+        self.cancelled_orders.append((symbol, order_id))
         return True
 
 
@@ -186,8 +186,40 @@ def test_ctp_engine_only_queries_and_dispatches_session_allowed_symbols(monkeypa
     }
     assert executor.market_data_requests == [["ag2612"]]
     assert all("IF2609" not in request for request in executor.websocket_requests)
-    assert executor.cancelled_symbol_sets == [["ag2612"]]
+    assert executor.cancel_all_orders_calls == 1
     assert dispatched_symbols == ["ag2612"]
+
+
+def test_next_execution_cancels_deadline_residual_orders_from_blocked_symbols(monkeypatch: pytest.MonkeyPatch) -> None:
+    """下一轮即使阻断旧 symbol，仍要账户级清理 deadline 残单。"""
+    from axile.executor import execution_engine as engine_module
+
+    executor = _CtpSessionExecutor({"IF2609": "CTP.SESSION.CLOSED", "ag2612": None})
+    executor.pending_orders = [
+        UnifiedOrder(
+            order_id="deadline-if-order",
+            symbol="IF2609",
+            direction=OrderDirection.BUY,
+            order_type=OrderType.LIMIT,
+            volume=1,
+            price=100,
+            status=OrderStatus.SUBMITTED,
+        )
+    ]
+    monkeypatch.setattr(
+        engine_module,
+        "resolve_algorithm",
+        lambda _name, _session: lambda _session, algorithm_input: AlgorithmResult(
+            symbol=algorithm_input.symbol,
+            algorithm="SINGLE-MAKER",
+            target_volume=algorithm_input.target_volume,
+        ),
+    )
+
+    executor.execute(_input(), cleanup=False)
+
+    assert executor.cancel_all_orders_calls == 1
+    assert executor.cancelled_orders == [("IF2609", "deadline-if-order")]
 
 
 def test_ctp_engine_blocks_all_session_rejections_without_execution_io() -> None:
@@ -200,7 +232,7 @@ def test_ctp_engine_blocks_all_session_rejections_without_execution_io() -> None
     assert set(output.symbol_results) == {"IF2609", "ag2612"}
     assert executor.market_data_requests == []
     assert executor.websocket_requests == []
-    assert executor.cancelled_symbol_sets == []
+    assert executor.cancel_all_orders_calls == 0
 
 
 class _AuditRuntime:

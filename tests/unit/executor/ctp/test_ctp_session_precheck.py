@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from datetime import date, datetime
 from types import SimpleNamespace
-from unittest.mock import Mock
 from zoneinfo import ZoneInfo
 
 from openctp_ctp import thosttraderapi as td
@@ -67,15 +66,3 @@ def test_session_check_blocks_unknown_product_and_options_without_session_table(
 
     for symbol in ("unknown2612", "ag2609C5000", "missingclass2612"):
         assert executor._get_ctp_session_block_reason(symbol) == "CTP.SESSION.NO_SESSION_TABLE"
-
-
-def test_ctp_scoped_cancel_only_queries_allowed_dispatch_symbols() -> None:
-    executor = _executor()
-    pending = SimpleNamespace(symbol="ag2612", order_id="ag-pending")
-    executor.get_pending_orders = Mock(side_effect=lambda symbol: [pending] if symbol == "ag2612" else [])
-    executor.cancel_order = Mock(return_value=True)
-
-    executor._cancel_ctp_orders_for_symbols(["ag2612"])
-
-    executor.get_pending_orders.assert_called_once_with("ag2612")
-    executor.cancel_order.assert_called_once_with("ag2612", "ag-pending")

@@ -134,8 +134,8 @@ def test_night_session_fails_closed_when_next_trading_day_is_unavailable() -> No
     assert decision.reason_code == "CTP.SESSION.CALENDAR_UNAVAILABLE"
 
 
-def test_static_futures_table_has_expected_coverage_and_excludes_dead_keys() -> None:
-    assert len(CTP_PRODUCT_SESSIONS) == 88
+def test_static_futures_table_has_expected_coverage() -> None:
+    assert len(CTP_PRODUCT_SESSIONS) == 91
     assert {exchange_id for exchange_id, _ in CTP_PRODUCT_SESSIONS} == {
         "CFFEX",
         "CZCE",
@@ -144,12 +144,33 @@ def test_static_futures_table_has_expected_coverage_and_excludes_dead_keys() -> 
         "INE",
         "SHFE",
     }
-    assert not {("DCE", product_id) for product_id in ("l_f", "pp_f", "v_f")} & CTP_PRODUCT_SESSIONS.keys()
+    assert {
+        ("DCE", "l_f"),
+        ("DCE", "pp_f"),
+        ("DCE", "v_f"),
+    } <= CTP_PRODUCT_SESSIONS.keys()
     assert [(session.time_begin, session.time_end) for session in get_ctp_product_sessions("SHFE", "ag")][0] == (
         time(21),
         time(2, 30),
     )
     assert not get_ctp_product_sessions("SHFE", "ag_o")
+    assert [(session.time_begin, session.time_end) for session in get_ctp_product_sessions("DCE", "l_f")] == [
+        (time(21), time(23)),
+        (time(9), time(10, 15)),
+        (time(10, 30), time(11, 30)),
+        (time(13, 30), time(15)),
+    ]
+    assert [(session.time_begin, session.time_end) for session in get_ctp_product_sessions("DCE", "pp_f")] == [
+        (time(21), time(23)),
+        (time(9), time(10, 15)),
+        (time(10, 30), time(11, 30)),
+        (time(13, 30), time(15)),
+    ]
+    assert [(session.time_begin, session.time_end) for session in get_ctp_product_sessions("DCE", "v_f")] == [
+        (time(9), time(10, 15)),
+        (time(10, 30), time(11, 30)),
+        (time(13, 30), time(15)),
+    ]
 
 
 @pytest.mark.parametrize(
