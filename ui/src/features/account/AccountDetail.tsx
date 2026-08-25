@@ -459,7 +459,7 @@ export function AccountDetail({ accountId, item, onDashboardRefresh }: AccountDe
                   <div className="flex h-full items-center text-[13px] text-ink-3">当前空仓</div>
                 ) : currentHoldings.map((holding) => (
                   <div role="listitem" key={holding.key} className="grid min-h-8 grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-2 border-t border-line text-[12.5px] first:border-t-0">
-                    <OverflowText className="font-mono font-medium text-ink-1" text={holding.symbol} />
+                    <OverflowText className="text-[13px] font-[560] text-ink-1" text={holding.symbol} />
                     <span className="num whitespace-nowrap text-ink-2">
                       {holding.direction === 'short' ? '空' : '多'}{' '}
                       {holding.weight == null ? '—' : `${Math.abs(holding.weight).toFixed(1)}%`}
