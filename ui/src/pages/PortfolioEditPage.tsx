@@ -4,6 +4,7 @@ import { Breadcrumb } from '@/components/ui/Breadcrumb'
 import { Card, SectionLabel } from '@/components/ui/Card'
 import { useNavigate } from '@/components/ui/nav'
 import { Skeleton, SkeletonLines } from '@/components/ui/Skeleton'
+import { ErrorNotice } from '@/components/ui/ErrorNotice'
 import { CustomFunctionEditor } from '@/features/portfolio/CustomFunctionEditor'
 import { usePolling } from '@/lib/hooks/usePolling'
 import { getPortfolio, updatePortfolio } from '@/lib/api/portfolios'
@@ -28,6 +29,7 @@ export function PortfolioEditPage() {
   const [code, setCode] = useState('')
   const [original, setOriginal] = useState({ name: '', code: '' })
   const [saving, setSaving] = useState(false)
+  const [saveError, setSaveError] = useState<Error | null>(null)
   const pf = portfolio.data
 
   useEffect(() => {
@@ -47,13 +49,15 @@ export function PortfolioEditPage() {
   const publish = async () => {
     if (!name.trim() || !code.trim() || saving || accounts == null || accountsError) return
     setSaving(true)
+    setSaveError(null)
     try {
       await updatePortfolio(portfolioId, { name: name.trim(), custom_calc_py_code: code })
       toast('组合已更新')
       void refreshPortfolios()
       navigate(`/portfolios/${portfolioId}`)
     } catch (error) {
-      toast(`保存失败：${error instanceof Error ? error.message : String(error)}`)
+      setSaveError(error instanceof Error ? error : new Error(String(error)))
+    } finally {
       setSaving(false)
     }
   }
@@ -62,7 +66,10 @@ export function PortfolioEditPage() {
     return (
       <section>
         <EditCrumb id={portfolioId} name={pf?.name} />
-        <p className="mt-3 text-[14px] text-warn">组合加载失败：{portfolio.error?.message ?? '不存在'}</p>
+        <Card className="mt-3 px-6 py-4"><SkeletonLines rows={2} /></Card>
+        <SectionLabel>组合名称</SectionLabel>
+        <Skeleton className="h-12 w-full max-w-[520px]" />
+        <Card className="mt-6 px-6 py-4"><SkeletonLines rows={5} /></Card>
       </section>
     )
   }
@@ -70,10 +77,7 @@ export function PortfolioEditPage() {
     return (
       <section>
         <EditCrumb id={portfolioId} name={pf?.name} />
-        <Card className="mt-3 px-6 py-4"><SkeletonLines rows={2} /></Card>
-        <SectionLabel>组合名称</SectionLabel>
-        <Skeleton className="h-12 w-full max-w-[520px]" />
-        <Card className="mt-6 px-6 py-4"><SkeletonLines rows={5} /></Card>
+        <ErrorNotice title="组合加载失败" error={portfolio.error ?? new Error('组合不存在')} onRetry={portfolio.refresh} />
       </section>
     )
   }
@@ -98,15 +102,16 @@ export function PortfolioEditPage() {
       <input
         className="w-full max-w-[520px] rounded-[8px] border border-ink-3/30 bg-surface px-4 py-3 text-[16px] font-[550] outline-none focus:border-ink-2"
         value={name}
-        onChange={(event) => setName(event.target.value)}
+        onChange={(event) => { setName(event.target.value); setSaveError(null) }}
       />
 
       <SectionLabel>目标计算函数</SectionLabel>
       <Card className="px-6 py-5">
-        <CustomFunctionEditor code={code} onChange={setCode} />
+        <CustomFunctionEditor code={code} onChange={(value) => { setCode(value); setSaveError(null) }} />
       </Card>
 
-      <div className="mt-6 flex items-center justify-end gap-3 border-t border-line pt-4">
+      <ErrorNotice title="保存组合失败" error={saveError} variant="mutation" onRetry={publish} />
+      <div className="mt-2 flex items-center justify-end gap-3 border-t border-line pt-4">
         <span className="mr-auto text-[13px] text-ink-3">{dirty ? '有未保存修改' : '没有修改'}</span>
         <button
           className="cursor-pointer rounded-[8px] border-0 bg-ink-1 px-5 py-2.5 text-[14px] font-[550] text-surface disabled:opacity-45"

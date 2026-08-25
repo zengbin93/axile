@@ -4,6 +4,7 @@ import { WizardPage, WizardNav } from '@/features/setup/WizardNav'
 import { ConfirmModal, type ConfirmSpec } from '@/components/ui/ConfirmModal'
 import { CustomFunctionEditor } from '@/features/portfolio/CustomFunctionEditor'
 import { OverflowText } from '@/components/ui/OverflowText'
+import { ErrorNotice } from '@/components/ui/ErrorNotice'
 import { createPortfolio } from '@/lib/api/portfolios'
 import { useWizardStore } from '@/stores/wizard'
 import { useToastStore } from '@/stores/ui'
@@ -105,11 +106,7 @@ export function PfName() {
               onChange={changeMarket}
             />
             {loading && markets.length === 0 && <p className="mt-2 text-[13px] text-ink-2">加载市场…</p>}
-            {error && markets.length === 0 && (
-              <button type="button" className="mt-2 text-[13px] text-warn hover:underline" onClick={() => void refresh()}>
-                市场目录加载失败，点击重试
-              </button>
-            )}
+            <ErrorNotice title="市场目录加载失败" error={markets.length === 0 ? error : null} onRetry={refresh} />
           </div>
         </WizardPage>
       </div>
@@ -127,8 +124,10 @@ export function PfDefine() {
   const toast = useToastStore((s) => s.toast)
   const refreshPortfolios = useDomainStore((s) => s.refreshPortfolios)
   const [confirm, setConfirm] = useState<ConfirmSpec | null>(null)
+  const [createError, setCreateError] = useState<Error | null>(null)
 
   const doCreate = async () => {
+    setCreateError(null)
     if (!selectedMarket) {
       toast('当前市场不可用，请返回上一步重新选择')
       return
@@ -144,7 +143,7 @@ export function PfDefine() {
       void refreshPortfolios()
       navigate('/setup/pf/done')
     } catch (e) {
-      toast(`创建失败：${e instanceof Error ? e.message : String(e)}`)
+      setCreateError(e instanceof Error ? e : new Error(String(e)))
     }
   }
 
@@ -198,9 +197,10 @@ export function PfDefine() {
           </div>
           <CustomFunctionEditor
             code={pf.customCode}
-            onChange={(customCode) => setPf({ customCode, verified: null })}
+            onChange={(customCode) => { setCreateError(null); setPf({ customCode, verified: null }) }}
             onVerifiedChange={(v) => setPf({ verified: v })}
           />
+          <ErrorNotice title="创建组合失败" error={createError} variant="mutation" onRetry={doCreate} />
         </WizardPage>
       </div>
       <WizardNav prevTo="/setup/pf/name" nextLabel="创建" onNext={onNext} nextDisabled={!canNext} />

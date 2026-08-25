@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useParams } from 'react-router'
 import { useNavigate } from '@/components/ui/nav'
 import { Chip } from '@/components/ui/Card'
+import { ErrorNotice } from '@/components/ui/ErrorNotice'
 import { Select } from '@/components/ui/Select'
 import {
   EditBreadcrumb,
@@ -301,17 +302,25 @@ export function AccountEditControlPage() {
   const [previewing, setPreviewing] = useState(false)
   const [previewNote, setPreviewNote] = useState('')
   const [saving, setSaving] = useState(false)
+  const [policyError, setPolicyError] = useState<Error | null>(null)
+  const [previewError, setPreviewError] = useState<Error | null>(null)
+  const [saveError, setSaveError] = useState<Error | null>(null)
 
-  useEffect(() => {
-    if (!account.data || model) return
+  const loadPolicy = useCallback(() => {
+    if (!account.data) return
+    setPolicyError(null)
     getAccountControlPolicy(accountId)
       .then((value) => {
         setModel(value)
         setPresetKey(value.preset_key)
         setOverride(cloneOverride(value.override))
       })
-      .catch((error) => toast(`流控加载失败：${error instanceof Error ? error.message : String(error)}`))
-  }, [account.data, accountId, model, toast])
+      .catch((error) => setPolicyError(error instanceof Error ? error : new Error(String(error))))
+  }, [account.data, accountId])
+
+  useEffect(() => {
+    if (!model) loadPolicy()
+  }, [loadPolicy, model])
 
   const acc = account.data
   const normalized = normalizedOverride(override)
@@ -325,7 +334,8 @@ export function AccountEditControlPage() {
     Object.values(operation ?? {}).flatMap((scope) => RULES.map(({ key }) => ruleError(key, scope?.[key])).filter(Boolean)),
   ).concat(Object.values(override.groups ?? {}).flatMap((scope) => RULES.map(({ key }) => ruleError(key, scope?.[key])).filter(Boolean)))
 
-  if (account.error && !acc) return <EditError id={accountId} message={account.error.message} />
+  if (account.error && !acc) return <EditError id={accountId} error={account.error} onRetry={account.refresh} />
+  if (policyError && !model) return <EditError id={accountId} name={acc?.name} error={policyError} onRetry={loadPolicy} />
   if (!acc || !model || !effective) return <EditLoading id={accountId} leaf="流控" />
 
   const switchPreset = async (nextKey: string) => {
@@ -333,13 +343,14 @@ export function AccountEditControlPage() {
     const previous = presetKey
     setPresetKey(nextKey)
     setPreviewing(true)
+    setPreviewError(null)
     try {
       const preview = await getAccountControlPolicy(accountId, nextKey)
       setModel(preview)
       setPreviewNote(`已按 ${preview.preset_display_name} 预设方案重新计算，${overrideCount} 处账户设置保持不变。`)
     } catch (error) {
       setPresetKey(previous)
-      toast(`预览失败：${error instanceof Error ? error.message : String(error)}`)
+      setPreviewError(error instanceof Error ? error : new Error(String(error)))
     } finally {
       setPreviewing(false)
     }
@@ -378,6 +389,7 @@ export function AccountEditControlPage() {
   const save = async () => {
     if (errors.length) return toast(`流控设置有误：${errors[0]}`)
     setSaving(true)
+    setSaveError(null)
     try {
       await updateAccount(accountId, {
         account_control_preset: presetKey,
@@ -387,7 +399,7 @@ export function AccountEditControlPage() {
       void refreshAccounts()
       navigate(`/accounts/${accountId}/edit`)
     } catch (error) {
-      toast(`更新失败：${error instanceof Error ? error.message : String(error)}`)
+      setSaveError(error instanceof Error ? error : new Error(String(error)))
     } finally {
       setSaving(false)
     }
@@ -423,6 +435,7 @@ export function AccountEditControlPage() {
           {previewNote && <p className="mt-2 text-[12px] text-ink-2">{previewNote}</p>}
         </div>
       </Section>
+      <ErrorNotice title="预设方案预览失败" error={previewError} variant="mutation" />
 
       <Section label="常用操作"><div className="flex flex-col gap-2 md:col-span-2">{common.map(renderOperation)}</div></Section>
 
@@ -459,7 +472,7 @@ export function AccountEditControlPage() {
         </Section>
       )}
 
-      <EditSaveBar changes={changes} blocked={Boolean(errors.length || previewing)} cancelTo={`/accounts/${accountId}/edit`} onSave={() => void save()} saving={saving} />
+      <EditSaveBar changes={changes} blocked={Boolean(errors.length || previewing)} cancelTo={`/accounts/${accountId}/edit`} onSave={() => void save()} saving={saving} error={saveError} />
     </section>
   )
 }

@@ -19,6 +19,7 @@ describe('pollingView', () => {
       loading: true,
       refreshing: false,
       updatedAt: null,
+      stale: false,
     })
   })
 
@@ -29,6 +30,18 @@ describe('pollingView', () => {
       loading: false,
       refreshing: true,
       updatedAt: 123,
+      stale: false,
+    })
+  })
+
+  it('已有数据后的刷新错误标记为 stale', () => {
+    expect(pollingView({ ...ready, error: new Error('断线') }, 'account:1', true)).toEqual({
+      data: { value: 1 },
+      error: expect.any(Error),
+      loading: false,
+      refreshing: false,
+      updatedAt: 123,
+      stale: true,
     })
   })
 
@@ -39,6 +52,7 @@ describe('pollingView', () => {
       loading: false,
       refreshing: false,
       updatedAt: null,
+      stale: false,
     })
   })
 })

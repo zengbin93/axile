@@ -7,6 +7,7 @@ import { Skeleton, SkeletonLines } from '@/components/ui/Skeleton'
 import { ExposureBar } from '@/components/viz/ExposureBar'
 import { ConfirmModal, type ConfirmSpec } from '@/components/ui/ConfirmModal'
 import { OverflowText } from '@/components/ui/OverflowText'
+import { ErrorNotice } from '@/components/ui/ErrorNotice'
 import { getPortfolio, getPortfolioTargetSnapshot, refreshPortfolioTargetSnapshot } from '@/lib/api/portfolios'
 import { useDomainStore } from '@/stores/domain'
 import { triggerExecute } from '@/lib/api/executions'
@@ -23,6 +24,7 @@ export function PortfolioDetailPage() {
   const navigate = useNavigate()
   const toast = useToastStore((s) => s.toast)
   const [confirm, setConfirm] = useState<ConfirmSpec | null>(null)
+  const [actionError, setActionError] = useState<Error | null>(null)
 
   const portfolio = usePolling(useCallback((s: AbortSignal) => getPortfolio(portfolioId, s), [portfolioId]), {
     queryKey: `portfolio:${portfolioId}`,
@@ -61,7 +63,7 @@ export function PortfolioDetailPage() {
             { label: lite?.name ?? `组合 #${portfolioId}` },
           ]}
         />
-        <p className="mt-3 text-[14px] text-bad">组合加载失败：{portfolio.error.message}</p>
+        <ErrorNotice title="组合加载失败" error={portfolio.error} onRetry={portfolio.refresh} />
       </section>
     )
 
@@ -78,11 +80,12 @@ export function PortfolioDetailPage() {
       body: `通知跟随本组合的账户（${boundAccount.name}）立即按最新目标调仓。若目标未变，多数会空跑、几乎不增成本。`,
       okText: '通知执行',
       onConfirm: async () => {
+        setActionError(null)
         try {
           await triggerExecute(boundAccount.account_id)
           toast(`已通知 ${boundAccount.name} 立即调仓`)
         } catch (e) {
-          toast(`触发失败：${e instanceof Error ? e.message : String(e)}`)
+          setActionError(e instanceof Error ? e : new Error(String(e)))
         }
       },
     })
@@ -133,6 +136,7 @@ export function PortfolioDetailPage() {
                 </button>
               )}
             </div>
+            <ErrorNotice title="触发执行失败" error={actionError} variant="mutation" onRetry={runFanout} />
           </>
         ) : (
           <>
@@ -163,7 +167,13 @@ export function PortfolioDetailPage() {
         )}
         {!pf && <SkeletonLines rows={3} />}
         {pf && !weights.data && weights.loading && <SkeletonLines rows={3} />}
-        {pf && weights.error && <p className="text-[13px] text-warn">目标权重快照暂不可用：{weights.error.message} <button className="font-semibold underline" onClick={() => void weights.reloadSnapshot()}>重试</button></p>}
+        <ErrorNotice
+          title="目标权重快照加载失败"
+          error={pf ? weights.error : null}
+          variant={weights.stale ? 'stale' : 'section'}
+          updatedAt={weights.updatedAt}
+          onRetry={weights.reloadSnapshot}
+        />
         {pf && !weights.loading && !weights.error && !weights.data?.calculated_at && (
           <p className="text-[13px] text-ink-3">尚无目标权重，点击刷新按钮计算。</p>
         )}
@@ -196,7 +206,7 @@ export function PortfolioDetailPage() {
         {accounts == null && !accountsError ? (
           <div className="py-3"><Skeleton className="h-4 w-36" /><Skeleton className="mt-2 h-3 w-24" /></div>
         ) : accountsError ? (
-          <p className="py-3 text-[13px] text-warn">绑定关系暂不可用：{accountsError.message}</p>
+          <ErrorNotice title="绑定关系加载失败" error={accountsError} onRetry={() => useDomainStore.getState().refreshAccounts()} />
         ) : boundAccount ? (
           <Link
             to={`/accounts/${boundAccount.account_id}`}

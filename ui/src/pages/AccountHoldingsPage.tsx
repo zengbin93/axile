@@ -3,6 +3,7 @@ import { useParams } from 'react-router'
 import { Breadcrumb } from '@/components/ui/Breadcrumb'
 import { Card } from '@/components/ui/Card'
 import { Skeleton, SkeletonLines } from '@/components/ui/Skeleton'
+import { ErrorNotice } from '@/components/ui/ErrorNotice'
 import { HoldingsView } from '@/features/account/HoldingsView'
 import { accountAssetTerms } from '@/features/dashboard/display'
 import { TargetSnapshotControl } from '@/features/portfolio/TargetSnapshotControl'
@@ -85,17 +86,7 @@ export function AccountHoldingsPage() {
             </div>
             <SkeletonLines rows={6} className="mt-3" />
           </div>
-        ) : snapshots.error || weights.error ? (
-          <div className="text-[14px] text-warn">
-            持仓对照暂不可用：{snapshots.error?.message ?? weights.error?.message}
-            <button
-              className="ml-3 cursor-pointer border-0 bg-transparent font-semibold text-warn underline"
-              onClick={() => void (snapshots.error ? snapshots.refresh() : weights.reloadSnapshot())}
-            >
-              重试
-            </button>
-          </div>
-        ) : !weights.data?.calculated_at ? (
+        ) : snapshots.error || weights.error ? null : !weights.data?.calculated_at ? (
           <div className="text-[14px] text-ink-3">尚无目标权重，点击刷新按钮计算后再查看持仓对照。</div>
         ) : holdingsStale ? (
           <div className="text-[14px] leading-relaxed text-warn">
@@ -113,6 +104,13 @@ export function AccountHoldingsPage() {
             assetLabel={assetTerms.shortLabel}
           />
         )}
+        <ErrorNotice
+          title="持仓对照加载失败"
+          error={snapshots.error ?? weights.error}
+          variant={snapshots.stale || weights.data != null ? 'stale' : 'section'}
+          updatedAt={snapshots.updatedAt ?? weights.updatedAt}
+          onRetry={() => Promise.all([snapshots.refresh(), weights.reloadSnapshot()]).then(() => undefined)}
+        />
       </Card>
     </section>
   )

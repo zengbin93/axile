@@ -5,6 +5,7 @@ import { Breadcrumb } from '@/components/ui/Breadcrumb'
 import { Card, Chip } from '@/components/ui/Card'
 import { Skeleton } from '@/components/ui/Skeleton'
 import { ConfirmModal, type ConfirmSpec } from '@/components/ui/ConfirmModal'
+import { ErrorNotice } from '@/components/ui/ErrorNotice'
 import { deletePortfolio } from '@/lib/api/portfolios'
 import { useDomainStore } from '@/stores/domain'
 import { useToastStore } from '@/stores/ui'
@@ -15,6 +16,7 @@ export function PortfoliosPage() {
   const navigate = useNavigate()
   const toast = useToastStore((s) => s.toast)
   const [confirm, setConfirm] = useState<ConfirmSpec | null>(null)
+  const [deleteError, setDeleteError] = useState<Error | null>(null)
 
   const portfolios = useDomainStore((s) => s.portfolios)
   const accounts = useDomainStore((s) => s.accounts)
@@ -44,12 +46,13 @@ export function PortfoliosPage() {
       okText: '删除',
       danger: true,
       onConfirm: async () => {
+        setDeleteError(null)
         try {
           await deletePortfolio(p.id!)
           toast('组合已删除')
           void refreshPortfolios()
         } catch (e) {
-          toast(`删除失败：${e instanceof Error ? e.message : String(e)}`)
+          setDeleteError(e instanceof Error ? e : new Error(String(e)))
         }
       },
     })
@@ -76,9 +79,13 @@ export function PortfoliosPage() {
           <Skeleton className="h-8 w-32" />
         </Card>
       ))}
-      {portfolios == null && portfoliosError && (
-        <p className="text-[14px] text-warn">组合暂不可用：{portfoliosError.message}</p>
-      )}
+      <ErrorNotice
+        title={portfolios == null ? '组合加载失败' : '组合更新失败'}
+        error={portfoliosError}
+        variant={portfolios == null ? 'section' : 'stale'}
+        onRetry={refreshPortfolios}
+      />
+      <ErrorNotice title="删除组合失败" error={deleteError} variant="mutation" />
 
       {portfolios != null && list.length === 0 && (
         <Card className="p-8 text-center">

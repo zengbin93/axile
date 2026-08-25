@@ -9,6 +9,7 @@ import { InkRewrite } from '@/components/ui/InkRewrite'
 import { NumberTicker } from '@/components/ui/NumberTicker'
 import { OverflowText } from '@/components/ui/OverflowText'
 import { Tooltip } from '@/components/ui/Tooltip'
+import { ErrorNotice } from '@/components/ui/ErrorNotice'
 import { Skeleton, SkeletonGroup, SkeletonText } from '@/components/ui/Skeleton'
 import { AccountActions } from '@/features/account/AccountActions'
 import { useExecutionRunner } from '@/features/account/useExecutionRunner'
@@ -55,6 +56,7 @@ export function AccountDetail({ accountId, item, onDashboardRefresh }: AccountDe
   const toast = useToastStore((s) => s.toast)
   const [timerOpen, setTimerOpen] = useState(false)
   const [refreshingAssets, setRefreshingAssets] = useState(false)
+  const [actionError, setActionError] = useState<Error | null>(null)
   // 启停乐观态：确认后立刻翻转，驱动按钮/状态句日记式换字；与 item 对齐后清除。
   const [startedOverride, setStartedOverride] = useState<boolean | null>(null)
   // 共享元素 FLIP 门控：
@@ -150,7 +152,8 @@ export function AccountDetail({ accountId, item, onDashboardRefresh }: AccountDe
   // 执行态：服务端 live 优先，runner 仅首帧前乐观；驱动主句「正在执行/清仓」与生命体征。
   const isRunning = !!(live || runner.running)
   // 终止动作 + 防连点：点后乐观进「终止中…」并禁用按钮，执行离开运行态即复位。
-  const { terminating, terminate } = useTerminateAction(accountId, isRunning, activity.refresh)
+  const terminateAction = useTerminateAction(accountId, isRunning, activity.refresh)
+  const { terminating, terminate } = terminateAction
   const runKind = live?.kind ?? (runner.kind === 'clear' ? 'clear' : 'rebalance')
   // 主句只跟离散态变（进出执行、执行↔清仓、启停空闲句）；phase 不并入，避免连刷糊墨。
   const statusHeadline = isRunning
@@ -172,6 +175,7 @@ export function AccountDetail({ accountId, item, onDashboardRefresh }: AccountDe
   const cronHuman = cronExpr && scheduleKind ? describeCron(scheduleKind, cronExpr) : null
   const onToggleStarted = async () => {
     const next = !isStarted
+    setActionError(null)
     setStartedOverride(next)
     try {
       await updateAccount(accountId, { is_started: next })
@@ -180,28 +184,30 @@ export function AccountDetail({ accountId, item, onDashboardRefresh }: AccountDe
       onDashboardRefresh?.()
     } catch (e) {
       setStartedOverride(null)
-      toast(`操作失败：${e instanceof Error ? e.message : String(e)}`)
+      setActionError(e instanceof Error ? e : new Error(String(e)))
     }
   }
   const onDelete = async () => {
+    setActionError(null)
     try {
       await deleteAccount(accountId)
       toast('账户已删除')
       onDashboardRefresh?.()
       navigate('/')
     } catch (e) {
-      toast(`删除失败：${e instanceof Error ? e.message : String(e)}`)
+      setActionError(e instanceof Error ? e : new Error(String(e)))
     }
   }
   const onRefreshAssets = async () => {
     if (refreshingAssets || isRunning) return
     setRefreshingAssets(true)
+    setActionError(null)
     try {
       await refreshAccountAssets(accountId)
       await Promise.all([assetSnapshots.refresh(), onDashboardRefresh?.()])
       toast('账户权益已刷新')
     } catch (e) {
-      toast(`刷新失败：${e instanceof Error ? e.message : String(e)}`)
+      setActionError(e instanceof Error ? e : new Error(String(e)))
     } finally {
       setRefreshingAssets(false)
     }
@@ -237,6 +243,11 @@ export function AccountDetail({ accountId, item, onDashboardRefresh }: AccountDe
             onDelete={onDelete}
           />
         </div>
+        <ErrorNotice
+          title="账户操作失败"
+          error={actionError ?? runner.error ?? terminateAction.error}
+          variant="mutation"
+        />
 
         {/*
          * 状态区固定为「标题行 + 副行」两行结构，高度不随运行态增减（框不动，戏在框里演）。
@@ -419,11 +430,7 @@ export function AccountDetail({ accountId, item, onDashboardRefresh }: AccountDe
                 {Array.from({ length: 3 }, (_, index) => <Skeleton key={index} className="h-10 w-full" />)}
               </div>
             </SkeletonGroup>
-          ) : comparisonError ? (
-            <div className="border-t border-line py-3 text-[13px] leading-relaxed text-warn">
-              持仓与目标对照暂不可用
-            </div>
-          ) : !weights.data?.calculated_at ? (
+          ) : comparisonError ? null : !weights.data?.calculated_at ? (
             <div className="border-t border-line py-3 text-[13px] leading-relaxed text-ink-3">
               尚无目标权重，刷新后生成持仓对照
             </div>
@@ -472,6 +479,13 @@ export function AccountDetail({ accountId, item, onDashboardRefresh }: AccountDe
               </div>
             </div>
           ) : null}
+          <ErrorNotice
+            title="持仓与目标对照加载失败"
+            error={comparisonError}
+            variant={positions.length > 0 || weights.data != null ? 'stale' : 'section'}
+            updatedAt={assetSnapshots.updatedAt ?? weights.updatedAt}
+            onRetry={() => Promise.all([assetSnapshots.refresh(), activity.refresh(), weights.reloadSnapshot()]).then(() => undefined)}
+          />
         </Card>
 
         <Card className="px-6 py-4">
@@ -499,7 +513,7 @@ export function AccountDetail({ accountId, item, onDashboardRefresh }: AccountDe
               {account.loading ? (
                 <SkeletonText className="ml-auto w-28" />
               ) : account.error && account.data === null ? (
-                <span className="ml-auto text-[13px] text-warn">暂不可用</span>
+                <span className="ml-auto text-[13px] text-ink-3">—</span>
               ) : (
                 <OverflowText
                   className="min-w-0 flex-1 text-right font-medium text-ink-1"
@@ -511,16 +525,28 @@ export function AccountDetail({ accountId, item, onDashboardRefresh }: AccountDe
               </span>
             </span>
           </button>
+          <ErrorNotice
+            title="账户节奏加载失败"
+            error={account.error}
+            variant={account.stale ? 'stale' : 'compact'}
+            updatedAt={account.updatedAt}
+            onRetry={account.refresh}
+          />
           {nextRun.loading ? (
             <ScheduleTimelineSkeleton />
-          ) : nextRun.error && nextRun.data === null ? (
-            <div className="border-t border-line py-3 text-[13px] text-warn">自动执行计划暂不可用</div>
-          ) : (
+          ) : nextRun.error && nextRun.data === null ? null : (
             <ScheduleTimeline
               lastExecutedAt={item.last_exec_at}
               nextRunTimes={nextRun.data?.next_execution_times ?? []}
             />
           )}
+          <ErrorNotice
+            title="自动执行计划加载失败"
+            error={nextRun.error}
+            variant={nextRun.stale ? 'stale' : 'compact'}
+            updatedAt={nextRun.updatedAt}
+            onRetry={nextRun.refresh}
+          />
         </Card>
       </div>
 
@@ -547,7 +573,15 @@ export function AccountDetail({ accountId, item, onDashboardRefresh }: AccountDe
       </div>
       <Card className="overflow-hidden">
         {activity.loading && <div className="px-6 py-4 text-[14px] text-ink-2">加载中…</div>}
-        {activity.error && <div className="px-6 py-4 text-[14px] text-warn">加载失败：{activity.error.message}</div>}
+        <div className="px-6">
+          <ErrorNotice
+            title="近期活动加载失败"
+            error={activity.error}
+            variant={activity.stale ? 'stale' : 'section'}
+            updatedAt={activity.updatedAt}
+            onRetry={activity.refresh}
+          />
+        </div>
         {!activity.loading && !activity.error && (activity.data?.data.length ?? 0) === 0 && (
           <div className="px-6 py-4 text-[14px] text-ink-3">暂无执行或跳过记录。</div>
         )}
@@ -595,7 +629,7 @@ export function AccountDetail({ accountId, item, onDashboardRefresh }: AccountDe
                         <span className="w-4 flex-none text-center text-warn">⚠</span>
                         <OverflowText
                           className="min-w-0 flex-1 text-ink-1"
-                          text={row.count > 1 ? `连续 ${row.count}${row.saturated ? '+' : ''} 次执行失败` : '执行失败'}
+                          text={`${row.count > 1 ? `连续 ${row.count}${row.saturated ? '+' : ''} 次执行失败` : '执行失败'}${row.reason ? ` · 最近：${row.reason}` : ''}`}
                         />
                       </>
                     )}

@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'bun:test'
 
 import { buildExecutionDetail } from './executionDetail'
-import type { ExecutionArtifact, ExecutionEvent } from '@/types/api'
+import type { ExecutionArtifact, ExecutionEvent, ExecutionStatus } from '@/types/api'
 
 /** 造一条最小可用的执行事件。 */
 function ev(patch: Partial<ExecutionEvent>): ExecutionEvent {
@@ -83,6 +83,19 @@ function baseFixture(): { events: ExecutionEvent[]; artifacts: ExecutionArtifact
 }
 
 describe('buildExecutionDetail · 头条', () => {
+  it('status 失败在空事件和空附件时仍生成真实失败判词', () => {
+    const task = {
+      execution_id: 'e', account_id: 3, execution_kind: null, status: 'FAILED',
+      created_at: '2026-08-25T11:32:05', started_at: null, finished_at: '2026-08-25T11:32:05',
+      error: '调仓执行失败, 错误原因: CTP 交易前置断线: 4097', record_id: 36, is_success: 0,
+      cancel_requested_at: null, cancel_reason: null, terminate_mode: null,
+    } satisfies ExecutionStatus
+    const model = buildExecutionDetail([], [], task)
+    expect(model.failure?.category).toBe('CTP 连接')
+    expect(model.task?.started_at).toBeNull()
+    expect(model.header.totalCount).toBe(0)
+  })
+
   it('汇总触发/耗时/到位/权益/敞口/来源', () => {
     const { events, artifacts } = baseFixture()
     const { header } = buildExecutionDetail(events, artifacts)

@@ -16,6 +16,7 @@
 import type { EquityPoint } from '@/components/viz/EquityChart'
 import type { ScheduleSkipActivity } from '@/lib/api/accounts'
 import type { AccountAssetSnapshot, ExecuteRecord, PortfolioAccountRecord } from '@/types/api'
+import { executionRecordError } from '@/features/account/executionRecordError'
 
 export type RangeKey = '30' | '90' | 'all'
 
@@ -300,11 +301,6 @@ export interface HistoryEvent {
 const FAIL_EVENT_CAP = 8
 
 /** 从执行记录里取顶层失败原因（后端写在 raw_result.error）。 */
-function recordError(record: ExecuteRecord): string {
-  const err = (record.raw_result as { error?: unknown }).error
-  return typeof err === 'string' ? err.trim() : ''
-}
-
 /** 从绑定记录 + 失败执行构建账户时间线。 */
 export function buildEvents(
   bindings: PortfolioAccountRecord[],
@@ -328,7 +324,7 @@ export function buildEvents(
     .filter((r) => r.is_success !== 1 && r.raw_result?.task_status !== 'TERMINATED')
     .sort((a, b) => b.created_at.localeCompare(a.created_at))
   for (const r of failRecords.slice(0, FAIL_EVENT_CAP)) {
-    const reason = recordError(r)
+    const reason = executionRecordError(r)
     events.push({
       date: r.created_at.replace('T', ' ').slice(5, 16),
       kind: 'fail',

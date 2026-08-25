@@ -10,14 +10,52 @@ const BASE = '/api/v1'
 /** 可选的 API 口令；生产由部署方注入，dev 一般为空。 */
 const API_PASSWORD = import.meta.env.VITE_API_PASSWORD as string | undefined
 
-/** API 调用失败时抛出的统一错误，携带 HTTP 状态码。 */
+/** API 调用失败时抛出的统一错误，仅保留可安全展示的诊断标识。 */
 export class ApiError extends Error {
   status: number
-  constructor(status: number, message: string) {
+  code: string | null
+  requestId: string | null
+
+  constructor(status: number, message: string, options: { code?: string | null; requestId?: string | null } = {}) {
     super(message)
     this.name = 'ApiError'
     this.status = status
+    this.code = options.code ?? null
+    this.requestId = options.requestId ?? null
   }
+}
+
+type ErrorBody = {
+  detail?: unknown
+  message?: unknown
+  code?: unknown
+  request_id?: unknown
+}
+
+/** FastAPI 校验错误只取字段路径与消息，刻意丢弃可能含密钥的 input/body。 */
+function validationMessage(detail: unknown): string | null {
+  if (!Array.isArray(detail)) return null
+  const issue = detail[0]
+  if (!issue || typeof issue !== 'object') return null
+  const { loc, msg } = issue as { loc?: unknown; msg?: unknown }
+  if (typeof msg !== 'string') return null
+  const path = Array.isArray(loc)
+    ? loc.filter((part) => part !== 'body').map(String).join('.')
+    : ''
+  return path ? `${path}：${msg}` : msg
+}
+
+export function apiErrorFromBody(status: number, statusText: string, body: unknown): ApiError {
+  const payload = body && typeof body === 'object' ? body as ErrorBody : {}
+  const message = typeof payload.message === 'string'
+    ? payload.message
+    : typeof payload.detail === 'string'
+      ? payload.detail
+      : (validationMessage(payload.detail) ?? statusText) || `HTTP ${status}`
+  return new ApiError(status, message, {
+    code: typeof payload.code === 'string' ? payload.code : null,
+    requestId: typeof payload.request_id === 'string' ? payload.request_id : null,
+  })
 }
 
 function headers(extra?: HeadersInit): HeadersInit {
@@ -28,14 +66,13 @@ function headers(extra?: HeadersInit): HeadersInit {
 
 async function parse<T>(res: Response): Promise<T> {
   if (!res.ok) {
-    let detail = res.statusText
+    let body: unknown = null
     try {
-      const body = (await res.json()) as { detail?: string }
-      if (body?.detail) detail = body.detail
+      body = await res.json()
     } catch {
-      // 非 JSON 响应，沿用 statusText
+      // 非 JSON 响应沿用 HTTP 状态，不把响应正文直接暴露给 UI。
     }
-    throw new ApiError(res.status, detail)
+    throw apiErrorFromBody(res.status, res.statusText, body)
   }
   if (res.status === 204) return undefined as T
   return (await res.json()) as T

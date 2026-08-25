@@ -4,17 +4,21 @@ import { useDomainStore } from '@/stores/domain'
 import { integrityOf } from '@/lib/derive'
 import { ThemeToggle } from '@/components/ThemeToggle'
 import { timeAgo } from '@/lib/format'
+import { RefreshCw } from 'lucide-react'
+import { Tooltip } from '@/components/ui/Tooltip'
+import { shortErrorReason } from '@/lib/errorInfo'
 
 /**
  * 顶栏 —— 品牌、后端活性点、设置入口。
  *
  * 活性点/新鲜度直接来自共享账户数据的刷新（比单独 ping health 更诚实）：
- * 有数据且最近一次刷新无误=绿+「数据 N 秒前」；刷新出错=红「与服务器失联」。
+ * 有数据且最近一次刷新无误=中性+「数据 N 秒前」；刷新出错=琥珀并保留原因。
  */
 export function TopBar() {
   const updatedAt = useDomainStore((s) => s.accountsUpdatedAt)
   const error = useDomainStore((s) => s.accountsError)
   const accounts = useDomainStore((s) => s.accounts)
+  const refreshAccounts = useDomainStore((s) => s.refreshAccounts)
   const connecting = accounts == null && error == null
   const online = accounts != null && error == null && updatedAt != null
   // 全舰队「偏离」计数（风险轴）：常驻顶栏、跟着翻页；随 5s 轮询自动增减，账户对回目标即清零。
@@ -32,7 +36,7 @@ export function TopBar() {
     ? '正在连接'
     : online
     ? `数据 ${timeAgo(updatedAt)} · 服务正常`
-    : '与服务器失联'
+    : `与服务器失联 · ${shortErrorReason(error)}`
 
   return (
     <header className="sticky top-0 z-20 flex flex-wrap items-center gap-3 border-b border-line bg-surface/75 px-6 py-3 backdrop-blur-md">
@@ -52,6 +56,18 @@ export function TopBar() {
         />
         {statusText}
       </span>
+      {error && (
+        <Tooltip content={`${shortErrorReason(error, 160)}；点击重试`}>
+          <button
+            type="button"
+            aria-label="重试连接服务器"
+            className="cursor-pointer text-ink-3 hover:text-warn"
+            onClick={() => void refreshAccounts()}
+          >
+            <RefreshCw size={14} aria-hidden />
+          </button>
+        </Tooltip>
+      )}
       {/* 偏离计数：风险从单页抬到全局。琥珀（偏离色）、仅 N>0 才现身（安静即好），点击回舰队。 */}
       {accounts != null && offCount > 0 && (
         <Link

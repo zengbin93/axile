@@ -2,6 +2,7 @@ import { useMemo } from 'react'
 import { useDomainStore } from '@/stores/domain'
 import { FleetView } from '@/features/dashboard/FleetView'
 import { AccountDetail, AccountDetailSkeleton } from '@/features/account/AccountDetail'
+import { ErrorNotice } from '@/components/ui/ErrorNotice'
 
 /** 仪表盘：N=1 原子视图 / N≥2 舰队视图。账户读自共享领域 store。 */
 export function DashboardPage() {
@@ -18,7 +19,7 @@ export function DashboardPage() {
 
   // 首次加载：无数据时才 loading / 报错；已有数据则一直渲染（失联降级由顶栏体现）。
   if (accounts == null) {
-    if (error) return <p className="text-[14px] text-warn">取数失败：{error.message}</p>
+    if (error) return <ErrorNotice title="账户加载失败" error={error} onRetry={refresh} />
     return <AccountDetailSkeleton />
   }
 

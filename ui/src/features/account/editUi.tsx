@@ -10,6 +10,7 @@ import { Link } from '@/components/ui/nav'
 import { Breadcrumb } from '@/components/ui/Breadcrumb'
 import { OverflowText } from '@/components/ui/OverflowText'
 import { Skeleton } from '@/components/ui/Skeleton'
+import { ErrorNotice } from '@/components/ui/ErrorNotice'
 import { MOTION_LAYOUT } from '@/lib/viewTransition'
 
 /** 入口卡 ↔ 子页顶栏 共享容器名（同构壳 FLIP，非文案内容 morph）。 */
@@ -82,11 +83,11 @@ export function EditLoading({
 }
 
 /** 加载失败。 */
-export function EditError({ id, name, message }: { id: number; name?: string; message: string }) {
+export function EditError({ id, name, error, onRetry }: { id: number; name?: string; error: unknown; onRetry?: () => void }) {
   return (
     <section>
       <EditBreadcrumb id={id} name={name} />
-      <p className="mt-3 text-[14px] text-bad">账户加载失败：{message}</p>
+      <ErrorNotice title="账户加载失败" error={error} onRetry={onRetry} />
     </section>
   )
 }
@@ -302,12 +303,14 @@ export function EditSaveBar({
   cancelTo,
   onSave,
   saving,
+  error = null,
 }: {
   changes: string[]
   blocked?: boolean
   cancelTo: string
   onSave: () => void
   saving?: boolean
+  error?: unknown | null
 }) {
   const open = changes.length > 0
   return (
@@ -320,7 +323,7 @@ export function EditSaveBar({
       <div className="mx-auto flex max-w-[860px] items-center gap-4 px-6 py-3">
         <div className="min-w-0 flex-1">
           <div className="text-[11px] font-semibold tracking-wide text-ink-3">
-            待保存 · {changes.length} 项{blocked && <span className="text-bad"> · 有错误</span>}
+            待保存 · {changes.length} 项{blocked && <span className="text-warn"> · 有错误</span>}
           </div>
           <OverflowText className="num text-[13px] text-ink-1" text={changes.join('  ·  ')} />
         </div>
@@ -336,6 +339,9 @@ export function EditSaveBar({
         >
           {saving ? '保存中…' : '保存'}
         </button>
+      </div>
+      <div className="mx-auto max-w-[860px] px-6">
+        <ErrorNotice title="保存失败" error={error} variant="mutation" onRetry={onSave} />
       </div>
     </div>
   )

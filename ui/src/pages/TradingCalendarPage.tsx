@@ -6,6 +6,7 @@ import { PythonFunctionEditor } from '@/components/ui/PythonFunctionEditor'
 import { Segmented } from '@/components/ui/Segmented'
 import { Select } from '@/components/ui/Select'
 import { Skeleton } from '@/components/ui/Skeleton'
+import { ErrorNotice } from '@/components/ui/ErrorNotice'
 import { usePolling } from '@/lib/hooks/usePolling'
 import {
   getCalendarDiagnostics,
@@ -78,6 +79,7 @@ export function TradingCalendarPage() {
   const [edits, setEdits] = useState<Record<string, boolean>>({})
   const [overrides, setOverrides] = useState<CalendarOverride[]>([])
   const [confirm, setConfirm] = useState<ConfirmSpec | null>(null)
+  const [actionError, setActionError] = useState<Error | null>(null)
   const fileInput = useRef<HTMLInputElement>(null)
   const previewRequest = useRef(0)
   const rangeRequest = useRef(0)
@@ -136,11 +138,10 @@ export function TradingCalendarPage() {
       if (request !== rangeRequest.current) return
       const message = error instanceof Error ? error.message : String(error)
       setRangeError(message)
-      toast(`加载失败：${message}`)
     } finally {
       if (request === rangeRequest.current) setRangeLoading(false)
     }
-  }, [calendarId, end, start, toast])
+  }, [calendarId, end, start])
 
   const afterReplacement = async () => {
     setSelectedFile(null)
@@ -176,7 +177,6 @@ export function TradingCalendarPage() {
       if (request !== previewRequest.current) return
       const message = error instanceof Error ? error.message : String(error)
       setUploadError(message)
-      toast(`CSV 预检失败：${message}`)
     } finally {
       if (request === previewRequest.current) setUploading(false)
     }
@@ -186,12 +186,13 @@ export function TradingCalendarPage() {
     if (!selectedFile) return
     replaceWithConfirmation('CSV', async () => {
       setReplacing(true)
+      setActionError(null)
       try {
         await importCalendarCsv(calendarId, selectedFile)
         toast('CSV 日历已替换')
         await afterReplacement()
       } catch (error) {
-        toast(`导入失败：${error instanceof Error ? error.message : String(error)}`)
+        setActionError(error instanceof Error ? error : new Error(String(error)))
       } finally {
         setReplacing(false)
       }
@@ -200,10 +201,11 @@ export function TradingCalendarPage() {
 
   const runFunction = async () => {
     setRunning(true)
+    setActionError(null)
     try {
       setFunctionResult(await validateCalendarFunction(calendarId, code, today, addDays(today, 6)))
     } catch (error) {
-      toast(`试跑失败：${error instanceof Error ? error.message : String(error)}`)
+      setActionError(error instanceof Error ? error : new Error(String(error)))
     } finally {
       setRunning(false)
     }
@@ -223,7 +225,6 @@ export function TradingCalendarPage() {
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error)
         setSaveError(message)
-        toast(`保存失败：${message}`)
       } finally {
         setSaving(false)
       }
@@ -233,23 +234,25 @@ export function TradingCalendarPage() {
   const saveEdits = async () => {
     const entries = Object.entries(edits).map(([calDate, isOpen]) => ({ calDate, isOpen }))
     setMutating(true)
+    setActionError(null)
     try {
       await saveCalendarOverrides(calendarId, entries)
       toast(`已保存 ${entries.length} 条人工调整`)
       await Promise.all([loadRange(), calendar.refresh()])
     } catch (error) {
-      toast(`保存失败：${error instanceof Error ? error.message : String(error)}`)
+      setActionError(error instanceof Error ? error : new Error(String(error)))
     } finally { setMutating(false) }
   }
 
   const restoreDates = async (dates: string[]) => {
     setMutating(true)
+    setActionError(null)
     try {
       await restoreCalendarOverrides(calendarId, dates)
       toast(`已恢复 ${dates.length} 个日期`)
       await Promise.all([loadRange(), calendar.refresh()])
     } catch (error) {
-      toast(`恢复失败：${error instanceof Error ? error.message : String(error)}`)
+      setActionError(error instanceof Error ? error : new Error(String(error)))
     } finally { setMutating(false) }
   }
 
@@ -277,8 +280,9 @@ export function TradingCalendarPage() {
           />
         </div>
 
-        {requirementsError && <p className="mt-5 text-[13px] text-warn">日历目录暂不可用：{requirementsError}</p>}
-        {calendar.error && !calendar.data && <p className="mt-5 text-[13px] text-warn">日历数据暂不可用：{calendar.error.message} <button className="font-semibold underline" onClick={() => void calendar.refresh()}>重试</button></p>}
+        <ErrorNotice title="日历目录加载失败" error={requirementsError} />
+        <ErrorNotice title="日历数据加载失败" error={calendar.error} variant={calendar.stale ? 'stale' : 'section'} updatedAt={calendar.updatedAt} onRetry={calendar.refresh} />
+        <ErrorNotice title="日历操作失败" error={actionError} variant="mutation" />
 
         <div className="mt-5 border-b border-line pb-5" role="status">
           {!status ? <><Skeleton className="h-4 w-40" /><Skeleton className="mt-2 h-3 w-72 max-w-full" /></> : <>
@@ -363,7 +367,7 @@ export function TradingCalendarPage() {
                             <button disabled={mutating} className="inline-flex items-center gap-1.5 rounded-[8px] border border-line px-4 py-2 text-[13px] text-ink-2 disabled:opacity-45" onClick={async () => { setMutating(true); try { const result = await refreshCalendar(calendarId); toast(result.message); await calendar.refresh() } finally { setMutating(false) } }}>{mutating ? <LoaderCircle size={14} className="animate-spin motion-reduce:animate-none" /> : <RefreshCw size={14} />} {mutating ? '刷新中…' : '立即刷新'}</button>
                           )}
                         </div>
-                        {saveError && <p className="mt-2 text-[12.5px] text-warn" role="alert">保存失败：{saveError}</p>}
+                        <ErrorNotice title="保存自定义函数失败" error={saveError} variant="mutation" onRetry={saveFunction} />
                       </>
                     )}
                   </div>
@@ -384,7 +388,7 @@ export function TradingCalendarPage() {
             </div>
           </div>
           {rangeLoading && !rangeLoaded && <div className="mt-4 border-y border-line px-3 py-2" aria-busy="true">{Array.from({ length: 5 }, (_, index) => <Skeleton key={index} className="my-3 h-5 w-full" />)}</div>}
-          {rangeError && <p className="mt-4 text-[13px] text-warn">区间数据暂不可用：{rangeError} <button className="font-semibold underline" onClick={() => void loadRange()}>重试</button></p>}
+          <ErrorNotice title="区间数据加载失败" error={rangeError} onRetry={loadRange} />
           {rows.length > 0 && (
             <div className="mt-4 overflow-x-auto border-y border-line">
               <div className="grid min-w-[650px] grid-cols-[130px_1fr_1fr_auto] gap-4 border-b border-line px-3 py-2 text-[12px] text-ink-3"><span>日期</span><span>基础状态</span><span>人工状态</span><span>最终状态</span></div>

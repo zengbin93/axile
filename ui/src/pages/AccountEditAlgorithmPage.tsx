@@ -65,6 +65,7 @@ export function AccountEditAlgorithmPage() {
   const [trade, setTrade] = useState<AlgorithmRef | null>(null)
   const [empty, setEmpty] = useState<AlgorithmRef | null>(null)
   const [saving, setSaving] = useState(false)
+  const [saveError, setSaveError] = useState<Error | null>(null)
 
   useEffect(() => {
     if (!acc || !descriptor || ready) return
@@ -74,7 +75,7 @@ export function AccountEditAlgorithmPage() {
   }, [acc, descriptor, ready])
 
   if (account.error && !acc)
-    return <EditError id={accountId} message={account.error.message} />
+    return <EditError id={accountId} error={account.error} onRetry={account.refresh} />
 
   if (account.loading || !ready || !acc || !trade || !descriptor)
     return <EditLoading id={accountId} leaf="执行算法" />
@@ -107,6 +108,7 @@ export function AccountEditAlgorithmPage() {
         : null
     }
     setSaving(true)
+    setSaveError(null)
     try {
       await updateAccount(accountId, patch)
       toast('执行算法已更新')
@@ -114,7 +116,7 @@ export function AccountEditAlgorithmPage() {
       account.refresh()
       navigate(`/accounts/${accountId}/edit`)
     } catch (e) {
-      toast(`更新失败：${e instanceof Error ? e.message : String(e)}`)
+      setSaveError(e instanceof Error ? e : new Error(String(e)))
     } finally {
       setSaving(false)
     }
@@ -150,10 +152,10 @@ export function AccountEditAlgorithmPage() {
       />
 
       <Section label="主交易">
-        {slotRow('trade', '下单算法', trade, (v) => setTrade(v ?? descriptor.defaults.trade_algorithm))}
+        {slotRow('trade', '下单算法', trade, (v) => { setSaveError(null); setTrade(v ?? descriptor.defaults.trade_algorithm) })}
       </Section>
       <Section label="清仓">
-        {slotRow('empty', '清仓算法', empty, setEmpty)}
+        {slotRow('empty', '清仓算法', empty, (value) => { setSaveError(null); setEmpty(value) })}
       </Section>
 
       <EditSaveBar
@@ -162,6 +164,7 @@ export function AccountEditAlgorithmPage() {
         cancelTo={`/accounts/${accountId}/edit`}
         onSave={() => void save()}
         saving={saving}
+        error={saveError}
       />
     </section>
   )

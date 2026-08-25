@@ -10,13 +10,14 @@
 import { formatMoney } from '@/lib/derive'
 import type { AccountActivity } from '@/lib/api/accounts'
 import type { ExecuteRecord } from '@/types/api'
+import { executionRecordError } from '@/features/account/executionRecordError'
 
 type Kind = 'fill' | 'clear' | 'noop' | 'fail' | 'terminated'
 
 export type RecentRow =
   | { type: 'fill'; key: string; time: string; executionId: string | null; desc: string; amount: string }
   | { type: 'noop'; key: string; time: string; count: number }
-  | { type: 'fail'; key: string; time: string; count: number; saturated: boolean; executionId: string | null }
+  | { type: 'fail'; key: string; time: string; count: number; saturated: boolean; executionId: string | null; reason: string }
   | { type: 'terminated'; key: string; time: string; count: number; executionId: string | null }
   | { type: 'skip'; key: string; time: string; count: number }
 
@@ -128,6 +129,7 @@ export function buildRecentActivity(
         count: run.length,
         saturated,
         executionId: latest.execution_id ?? null,
+        reason: executionRecordError(latest),
       })
     }
     i = j

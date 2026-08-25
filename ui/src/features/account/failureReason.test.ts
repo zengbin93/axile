@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { describeFailure } from './failureReason'
+import { describeFailure, describeFailureText } from './failureReason'
 import type { ExecutionEvent } from '../../types/api'
 
 /** 造一条 execution_failed 事件；error 可为裸串或 worker 对象。 */
@@ -57,4 +57,11 @@ test('认不出的错 → 未归类兜底，保留原文', () => {
 
 test('无事件 → null', () => {
   expect(describeFailure(null)).toBeNull()
+})
+
+test('状态接口的 CTP 4097 → CTP 连接，可在恢复后重试', () => {
+  const f = describeFailureText('调仓执行失败, 错误原因: CTP 交易前置断线: 4097')
+  expect(f.category).toBe('CTP 连接')
+  expect(f.human).toBe('CTP 交易前置已断开')
+  expect(f.retryable).toBe(true)
 })

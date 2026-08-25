@@ -5,6 +5,7 @@ import { ConfirmModal, type ConfirmSpec } from '@/components/ui/ConfirmModal'
 import { OverflowText } from '@/components/ui/OverflowText'
 import { Segmented } from '@/components/ui/Segmented'
 import { Select } from '@/components/ui/Select'
+import { ErrorNotice } from '@/components/ui/ErrorNotice'
 import { CalendarSetupStep } from '@/features/init/CalendarSetupStep'
 import type { CalendarSetupSnapshot } from '@/features/init/calendarSetupState'
 import { WizardPage } from '@/features/setup/WizardNav'
@@ -209,6 +210,7 @@ export function InitWizard({
   })
   const [feishuTest, setFeishuTest] = useState<TestState>(null)
   const [confirm, setConfirm] = useState<ConfirmSpec | null>(null)
+  const [saveError, setSaveError] = useState<Error | null>(null)
 
   const [draft, setDraft] = useState<Draft>({
     sqlalchemy_database_uri: initial.sqlalchemy_database_uri || DEFAULT_DB_URI,
@@ -219,7 +221,10 @@ export function InitWizard({
     algorithm_modules: (initial.algorithm_modules ?? []).join('\n'),
     algorithm_directories: (initial.algorithm_directories ?? []).join('\n'),
   })
-  const set = (patch: Partial<Draft>) => setDraft((d) => ({ ...d, ...patch }))
+  const set = (patch: Partial<Draft>) => {
+    setSaveError(null)
+    setDraft((d) => ({ ...d, ...patch }))
+  }
 
   const runDbTest = async () => {
     setDbTest('busy')
@@ -256,6 +261,7 @@ export function InitWizard({
 
   const doSave = async () => {
     setSaving(true)
+    setSaveError(null)
     try {
       const splitLines = (s: string) =>
         s
@@ -272,7 +278,7 @@ export function InitWizard({
       await waitReadyAndReload()
     } catch (e) {
       setSaving(false)
-      toast('保存失败：' + errText(e))
+      setSaveError(e instanceof Error ? e : new Error(errText(e)))
     }
   }
 
@@ -455,7 +461,10 @@ export function InitWizard({
             )}
           </div>
 
-          <div className="flex gap-3 border-t border-line bg-surface px-5 py-3.5 sm:px-12">
+          <div className="border-t border-line bg-surface px-5 sm:px-12">
+            <ErrorNotice title="保存系统配置失败" error={saveError} variant="mutation" onRetry={doSave} />
+          </div>
+          <div className="flex gap-3 bg-surface px-5 py-3.5 sm:px-12">
             {isEdit ? (
               // edit=设置页：右侧常驻「保存并重启」，可从任意节直接保存（经确认弹窗）。
               <>

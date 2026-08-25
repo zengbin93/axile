@@ -19,6 +19,8 @@ export interface PollingState<T> {
   refreshing: boolean
   /** 最近一次成功的时间戳（ms）。 */
   updatedAt: number | null
+  /** 已有成功数据、但最近一次刷新失败。 */
+  stale: boolean
   /** 手动触发并等待一次真实刷新。 */
   refresh: () => Promise<void>
 }
@@ -38,6 +40,7 @@ export interface PollingView<T> {
   loading: boolean
   refreshing: boolean
   updatedAt: number | null
+  stale: boolean
 }
 
 /** 按当前查询身份裁剪内部状态；key 变化后的首帧也绝不泄露旧数据。 */
@@ -53,6 +56,7 @@ export function pollingView<T>(
       loading: enabled,
       refreshing: false,
       updatedAt: null,
+      stale: false,
     }
   }
   return {
@@ -61,6 +65,7 @@ export function pollingView<T>(
     loading: state.loading,
     refreshing: state.refreshing,
     updatedAt: state.updatedAt,
+    stale: state.data !== null && state.error !== null,
   }
 }
 

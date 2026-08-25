@@ -67,6 +67,14 @@ interface Pattern {
  */
 const PATTERNS: Pattern[] = [
   {
+    test: /CTP.*交易前置断线.*4097|交易前置断线.*4097/i,
+    category: 'CTP 连接',
+    human: 'CTP 交易前置已断开',
+    blame: 'system',
+    retryable: true,
+    action: '检查交易前置网络和登录状态，恢复连接后重试',
+  },
+  {
     test: /-2015|-2014|invalid api[- ]?key|api[- ]?key.*ip|not white ?listed/i,
     category: '密钥/权限',
     human: 'API Key 无效、权限不足或 IP 未加白',
@@ -141,14 +149,26 @@ function familyBlame(family: string): FailureBlame {
 export function describeFailure(event: ExecutionEvent | null | undefined): FailureReason | null {
   if (!event) return null
   const { text, retryable } = rawErrorOf(event)
-  const haystack = `${text} ${event.reason_code} ${event.reason_family}`
+  return describeFailureText(text, {
+    reasonCode: event.reason_code,
+    reasonFamily: event.reason_family,
+    retryable,
+  })
+}
+
+/** 状态接口只有原始错误串时，复用与失败事件相同的人读归类。 */
+export function describeFailureText(
+  text: string,
+  options: { reasonCode?: string; reasonFamily?: string; retryable?: boolean | null } = {},
+): FailureReason {
+  const haystack = `${text} ${options.reasonCode ?? ''} ${options.reasonFamily ?? ''}`
   for (const p of PATTERNS) {
     if (p.test.test(haystack)) {
       return {
         category: p.category,
         human: p.human,
         blame: p.blame,
-        retryable: retryable ?? p.retryable,
+        retryable: options.retryable ?? p.retryable,
         action: p.action,
         raw: text,
       }
@@ -157,8 +177,8 @@ export function describeFailure(event: ExecutionEvent | null | undefined): Failu
   return {
     category: '未归类',
     human: text || '执行失败（无错误详情）',
-    blame: familyBlame(event.reason_family),
-    retryable: retryable ?? false,
+    blame: familyBlame(options.reasonFamily ?? 'SYSTEM'),
+    retryable: options.retryable ?? false,
     action: '查看下方原始错误',
     raw: text,
   }

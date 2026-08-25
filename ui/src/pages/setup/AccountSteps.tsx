@@ -9,6 +9,7 @@ import { WizardPage, WizardNav } from '@/features/setup/WizardNav'
 import { Segmented } from '@/components/ui/Segmented'
 import { ConditionalReveal } from '@/components/ui/ConditionalReveal'
 import { Skeleton } from '@/components/ui/Skeleton'
+import { ErrorNotice } from '@/components/ui/ErrorNotice'
 import { ConnectionField } from '@/components/ui/ConnectionField'
 import { DirectoryPicker } from '@/components/ui/DirectoryPicker'
 import type { ClipboardCandidate } from '@/components/ui/connectionFieldClipboard'
@@ -111,11 +112,7 @@ export function AcctChannel() {
         <WizardPage kicker="账户设置 · 1 / 6" title="连接哪个交易所 / 券商？" lead="不同渠道连接方式完全不同——选定后进入对应的连接页。">
           <div className="grid grid-cols-1 gap-3">
             {loading && channels === null && <p className="text-[14px] text-ink-2">加载渠道…</p>}
-            {error && channels === null && (
-              <button type="button" className="text-left text-[14px] text-warn hover:underline" onClick={() => void refresh()}>
-                渠道目录加载失败，点击重试
-              </button>
-            )}
+            <ErrorNotice title="渠道目录加载失败" error={channels === null ? error : null} onRetry={refresh} />
             {channels?.map((ch) => {
               const available = ch.available
               const isSelected = acct.channel === ch.channel
@@ -664,6 +661,7 @@ export function AcctConfirm() {
   const [previewState, setPreviewState] = useState<
     { status: 'idle' | 'loading' } | { status: 'success'; rows: [string, number][] } | { status: 'error'; message: string }
   >({ status: 'idle' })
+  const [createError, setCreateError] = useState<Error | null>(null)
 
   const cronList = scheduleKind ? resolveCronList(scheduleKind, acct) : []
   const cronExpr = cronToExpr(cronList)
@@ -689,12 +687,12 @@ export function AcctConfirm() {
       setPreviewState({ status: 'success', rows: Object.entries(w).filter(([, v]) => Math.abs(v) > 1e-9).sort((a, b) => Math.abs(b[1]) - Math.abs(a[1])) })
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e)
-      toast(`试跑失败：${message}`)
       setPreviewState({ status: 'error', message })
     }
   }
 
   const submit = async () => {
+    setCreateError(null)
     try {
       if (!descriptor) {
         toast('渠道描述尚未加载，请稍后重试')
@@ -750,7 +748,7 @@ export function AcctConfirm() {
       void refreshAccounts()
       navigate(account.id != null ? `/accounts/${account.id}` : '/')
     } catch (e) {
-      toast(`创建失败：${e instanceof Error ? e.message : String(e)}`)
+      setCreateError(e instanceof Error ? e : new Error(String(e)))
     }
   }
 
@@ -779,7 +777,7 @@ export function AcctConfirm() {
             <div className="mt-[18px] max-w-[460px] rounded-[14px] border border-dashed border-line bg-surface p-5">
               {previewState.status === 'idle' && <div className="py-5 text-center text-[14px] text-ink-3">试跑看这套组合此刻会调成什么样</div>}
               {previewState.status === 'loading' && <div aria-busy="true"><Skeleton className="h-4 w-full" /><Skeleton className="mt-3 h-4 w-4/5" /><Skeleton className="mt-3 h-4 w-3/5" /></div>}
-              {previewState.status === 'error' && <div className="py-5 text-center text-[14px] text-warn">试跑暂不可用：{previewState.message}</div>}
+              <ErrorNotice title="试跑失败" error={previewState.status === 'error' ? previewState.message : null} onRetry={preview} />
               {previewState.status === 'success' && previewState.rows.length === 0 && <div className="py-5 text-center text-[14px] text-ink-3">无目标持仓。</div>}
               {previewState.status === 'success' && previewState.rows.map(([sym, w]) => (
                 <div key={sym} className="flex items-center justify-between border-b border-line py-2.5 text-[15px] last:border-b-0">
@@ -789,6 +787,7 @@ export function AcctConfirm() {
               ))}
             </div>
           </div>
+          <ErrorNotice title="创建账户失败" error={createError} variant="mutation" onRetry={submit} />
         </WizardPage>
       </div>
       <WizardNav prevTo="/setup/acct/timer" nextLabel="创建并开跑" onNext={submit} nextDisabled={acct.portfolioId == null || !acct.name.trim()} />

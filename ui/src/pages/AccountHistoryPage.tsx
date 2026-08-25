@@ -7,6 +7,7 @@ import { Skeleton } from '@/components/ui/Skeleton'
 import { EquityChart, type ChartMarker } from '@/components/viz/EquityChart'
 import { DailyBars } from '@/components/viz/DailyBars'
 import { Segmented } from '@/components/ui/Segmented'
+import { ErrorNotice } from '@/components/ui/ErrorNotice'
 import {
   getAccount,
   getAccountActivity,
@@ -151,6 +152,8 @@ export function AccountHistoryPage() {
     setHoverIdx(null)
     setRange(v)
   })
+  const historyError = activity.error ?? snapshots.error
+  const historyReady = recordsData != null && snapshots.data != null
 
   return (
     <section>
@@ -185,11 +188,13 @@ export function AccountHistoryPage() {
           </div>
         </>
       )}
-      {(!recordsData || !snapshots.data) && (activity.error || snapshots.error) && (
-        <p className="text-[14px] text-bad">
-          加载失败：{activity.error?.message ?? snapshots.error?.message}
-        </p>
-      )}
+      <ErrorNotice
+        title="账户回看数据加载失败"
+        error={historyError}
+        variant={historyReady ? 'stale' : 'section'}
+        updatedAt={activity.updatedAt ?? snapshots.updatedAt}
+        onRetry={() => Promise.all([activity.refresh(), snapshots.refresh()]).then(() => undefined)}
+      />
 
       {recordsData && snapshots.data && (
         <>
@@ -303,7 +308,7 @@ export function AccountHistoryPage() {
             {!bindings.data && bindings.loading ? (
               <><Skeleton className="h-4 w-44" /><Skeleton className="mt-3 h-4 w-56" /></>
             ) : bindings.error ? (
-              <p className="text-[13px] text-warn">绑定记录暂不可用：{bindings.error.message} <button className="font-semibold underline" onClick={() => void bindings.refresh()}>重试</button></p>
+              <ErrorNotice title="绑定记录加载失败" error={bindings.error} onRetry={bindings.refresh} />
             ) : segments.length === 0 ? (
               <p className="text-[13px] text-ink-3">本区间无可用的分段数据。</p>
             ) : (
@@ -328,7 +333,7 @@ export function AccountHistoryPage() {
             {!bindings.data && bindings.loading ? (
               <><Skeleton className="h-4 w-full" /><Skeleton className="mt-3 h-4 w-4/5" /><Skeleton className="mt-3 h-4 w-3/5" /></>
             ) : bindings.error ? (
-              <p className="text-[13px] text-warn">绑定时间线暂不可用：{bindings.error.message} <button className="font-semibold underline" onClick={() => void bindings.refresh()}>重试</button></p>
+              <ErrorNotice title="绑定时间线加载失败" error={bindings.error} onRetry={bindings.refresh} />
             ) : events.length === 0 ? (
               <p className="text-[13px] text-ink-3">本区间无异常事件。</p>
             ) : (

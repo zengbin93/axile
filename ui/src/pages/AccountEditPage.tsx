@@ -9,6 +9,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { useParams, useViewTransitionState } from 'react-router'
 import { useNavigate } from '@/components/ui/nav'
 import { Chip } from '@/components/ui/Card'
+import { ErrorNotice } from '@/components/ui/ErrorNotice'
 import { Skeleton } from '@/components/ui/Skeleton'
 import { Select } from '@/components/ui/Select'
 import { ExecutionTimeoutInput } from '@/features/account/ExecutionTimeoutInput'
@@ -251,6 +252,7 @@ export function AccountEditPage() {
   const [advanced, setAdvanced] = useState(false)
   const [draft, setDraft] = useState<Draft | null>(null)
   const [feishuTest, setFeishuTest] = useState<TestResult | 'busy' | null>(null)
+  const [saveError, setSaveError] = useState<Error | null>(null)
   useEffect(() => {
     if (!acc || ready) return
     setDraft(draftOf(acc))
@@ -274,7 +276,7 @@ export function AccountEditPage() {
   )
 
   if (account.error && !acc)
-    return <EditError id={accountId} name={displayName} message={account.error.message} />
+    return <EditError id={accountId} name={displayName} error={account.error} onRetry={account.refresh} />
 
   if (account.loading || !ready || !acc || !draft || (channelDescriptor == null && channelCatalogLoading))
     return (
@@ -287,7 +289,10 @@ export function AccountEditPage() {
 
   const showShortLeverage = channelDescriptor?.ui.show_short_leverage ?? true
   const d = draft
-  const set = (patch: Partial<Draft>) => setDraft((prev) => (prev ? { ...prev, ...patch } : prev))
+  const set = (patch: Partial<Draft>) => {
+    setSaveError(null)
+    setDraft((prev) => (prev ? { ...prev, ...patch } : prev))
+  }
   const scheduleKind = channelDescriptor?.schedule.kind
 
   // 飞书 key 容忍粘贴整条 webhook 链接：测试与保存都用规整后的裸 key
@@ -333,6 +338,7 @@ export function AccountEditPage() {
     if (levErr) return toast(`杠杆有误：${levErr}`)
     if (timeoutErr) return toast(`执行超时有误：${timeoutErr}`)
     if (!dirty) return toast('没有改动')
+    setSaveError(null)
     try {
       await updateAccount(accountId, patch)
       toast('账户已更新')
@@ -340,7 +346,7 @@ export function AccountEditPage() {
       account.refresh()
       navigate(`/accounts/${accountId}`)
     } catch (e) {
-      toast(`更新失败：${e instanceof Error ? e.message : String(e)}`)
+      setSaveError(e instanceof Error ? e : new Error(String(e)))
     }
   }
 
@@ -357,7 +363,7 @@ export function AccountEditPage() {
           placeholder="留空 = 不设置 / 不改"
           onChange={(e) => set({ [key]: e.target.value })}
         />
-        {err && <div className="mt-1 text-[12px] text-bad">JSON 有误：{err}</div>}
+        {err && <div className="mt-1 text-[12px] text-warn">JSON 有误：{err}</div>}
       </Row>
     )
   }
@@ -524,7 +530,7 @@ export function AccountEditPage() {
             ]}
           />
           {portfolios == null && !portfoliosError && <Skeleton className="mt-2 h-3 w-40" />}
-          {portfoliosError && <div className="mt-2 text-[12px] text-warn">组合关系暂不可用：{portfoliosError.message} <button className="font-semibold underline" onClick={() => void refreshPortfolios()}>重试</button></div>}
+          <ErrorNotice title="组合关系加载失败" error={portfoliosError} variant="compact" onRetry={refreshPortfolios} />
         </Row>
         <Row label="空仓写记录" hint="审计留痕">
           <Toggle on={d.writeEmpty} onClick={() => set({ writeEmpty: !d.writeEmpty })} />
@@ -566,7 +572,7 @@ export function AccountEditPage() {
               onChange={(e) => set({ newConfig: e.target.value })}
             />
             {d.newConfig.trim() && parseJson(d.newConfig).error && (
-              <div className="mt-1 text-[12px] text-bad">JSON 有误：{parseJson(d.newConfig).error}</div>
+              <div className="mt-1 text-[12px] text-warn">JSON 有误：{parseJson(d.newConfig).error}</div>
             )}
           </Row>
         </div>
@@ -577,6 +583,7 @@ export function AccountEditPage() {
         blocked={blocked}
         cancelTo={`/accounts/${accountId}`}
         onSave={() => void save()}
+        error={saveError}
       />
     </section>
   )

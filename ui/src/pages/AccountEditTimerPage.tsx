@@ -47,6 +47,7 @@ export function AccountEditTimerPage() {
   const [ready, setReady] = useState(false)
   const [timer, setTimer] = useState<TimerEditorState | null>(null)
   const [saving, setSaving] = useState(false)
+  const [saveError, setSaveError] = useState<Error | null>(null)
 
   useEffect(() => {
     if (!acc || !descriptor || ready) return
@@ -55,7 +56,7 @@ export function AccountEditTimerPage() {
   }, [acc, descriptor, ready])
 
   if (account.error && !acc)
-    return <EditError id={accountId} message={account.error.message} />
+    return <EditError id={accountId} error={account.error} onRetry={account.refresh} />
 
   if (account.loading || !ready || !acc || !timer || !descriptor)
     return <EditLoading id={accountId} leaf="定时" />
@@ -76,6 +77,7 @@ export function AccountEditTimerPage() {
     if (err) return toast(`执行节奏有误：${err}`)
     if (!dirty) return toast('没有改动')
     setSaving(true)
+    setSaveError(null)
     try {
       await updateAccount(accountId, { cron_expr: cronNext })
       toast(cronNext ? '节奏已更新' : '已关闭自动调仓节奏')
@@ -83,7 +85,7 @@ export function AccountEditTimerPage() {
       account.refresh()
       navigate(`/accounts/${accountId}/edit`)
     } catch (e) {
-      toast(`更新失败：${e instanceof Error ? e.message : String(e)}`)
+      setSaveError(e instanceof Error ? e : new Error(String(e)))
     } finally {
       setSaving(false)
     }
@@ -107,7 +109,7 @@ export function AccountEditTimerPage() {
           scheduleKind={scheduleKind}
           value={timer}
           onChange={(next) =>
-            setTimer((prev) => (typeof next === 'function' ? next(prev as TimerEditorState) : next))
+            { setSaveError(null); setTimer((prev) => (typeof next === 'function' ? next(prev as TimerEditorState) : next)) }
           }
         />
       </div>
@@ -118,6 +120,7 @@ export function AccountEditTimerPage() {
         cancelTo={`/accounts/${accountId}/edit`}
         onSave={() => void save()}
         saving={saving}
+        error={saveError}
       />
     </section>
   )

@@ -49,6 +49,13 @@ test('连续失败折叠成一行并计数', () => {
   expect(rows[0]).toMatchObject({ type: 'fail', count: 2, executionId: 'e3' })
 })
 
+test('失败折叠行保留最近一次可行动原因', () => {
+  const latest = rec(3, 'fail')
+  latest.raw_result = { error: 'CTP 交易前置断线: 4097' }
+  const { rows } = buildRecentActivity(executions([latest]))
+  expect(rows[0]).toMatchObject({ type: 'fail', reason: 'CTP 交易前置断线: 4097' })
+})
+
 test('成交逐条保留，含变动描述', () => {
   const { rows } = buildRecentActivity(executions([rec(1, 'fill')]))
   expect(rows[0]).toMatchObject({ type: 'fill', desc: '调仓执行 · 1 处变动' })

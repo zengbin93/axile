@@ -4,8 +4,9 @@ import { Breadcrumb } from '@/components/ui/Breadcrumb'
 import { Card } from '@/components/ui/Card'
 import { SkeletonLines } from '@/components/ui/Skeleton'
 import { NumberTicker } from '@/components/ui/NumberTicker'
+import { ErrorNotice } from '@/components/ui/ErrorNotice'
 import { usePolling } from '@/lib/hooks/usePolling'
-import { getExecutionArtifacts, getExecutionEvents } from '@/lib/api/executions'
+import { getExecutionArtifacts, getExecutionEvents, getExecutionStatus } from '@/lib/api/executions'
 import { currencyOf } from '@/lib/derive'
 import { displayCurrencyUnit, fmtMoney, withCurrency } from '@/lib/format'
 import {
@@ -22,7 +23,7 @@ import { accountAssetTerms } from '@/features/dashboard/display'
 import { useDomainStore } from '@/stores/domain'
 import { useChannelDescriptor } from '@/stores/channels'
 import { useRunning } from '@/stores/liveExec'
-import type { ChannelCapability, ExecOrder, ExecutionArtifact, ExecutionEvent } from '@/types/api'
+import type { ChannelCapability, ExecOrder, ExecutionArtifact, ExecutionEvent, ExecutionStatus } from '@/types/api'
 
 /** 触发来源文案。 */
 const TRIGGER_LABEL: Record<string, string> = { manual: '手动', scheduler: '定时', empty_positions: '清仓' }
@@ -140,6 +141,7 @@ function verdict(m: ExecutionDetailModel): { icon: string; cls: string; text: st
   const notReached = totalCount - reachedCount
   // 执行级失败（如时钟偏移 -1021 在下单前中止）优先做判词，别让 0 逐只塌成中性「无结果」。
   if (m.failure) return { icon: '✕', cls: 'text-warn font-bold', text: `执行失败 · ${m.failure.category}` }
+  if (m.task?.status === 'TERMINATED') return { icon: '■', cls: 'text-ink-2', text: '执行已终止' }
   if (failedCount > 0) return { icon: '✕', cls: 'text-warn font-bold', text: `${failedCount} 项失败` }
   if (notReached > 0) return { icon: '⚠', cls: 'text-warn', text: `${reachedCount}/${totalCount} 到位 · ${notReached} 只未到位` }
   if (totalCount === 0) return { icon: '–', cls: 'text-ink-3', text: '无逐只结果' }
@@ -172,7 +174,7 @@ function Header({ m, currency, assetLabel }: { m: ExecutionDetailModel; currency
           </span>
         )}
       </div>
-      <SnapshotNote h={h} assetLabel={assetLabel} />
+      <SnapshotNote m={m} assetLabel={assetLabel} />
       {m.failure && <FailureNote f={m.failure} />}
     </div>
   )
@@ -185,7 +187,9 @@ function Header({ m, currency, assetLabel }: { m: ExecutionDetailModel; currency
  * 出强提示；仅执行前基线缺失时，只有权益族退化、到位度仍可信，出「只警告该退化的量」的准提示。
  * 琥珀只点在真正偏离的量上，不再把可信的到位度也刷成「仅供参考」。
  */
-function SnapshotNote({ h, assetLabel }: { h: ExecutionDetailModel['header']; assetLabel: string }) {
+function SnapshotNote({ m, assetLabel }: { m: ExecutionDetailModel; assetLabel: string }) {
+  const h = m.header
+  if (m.task?.status === 'FAILED' && m.task.started_at == null) return null
   const posBad = h.sourcePosition !== 'real'
   const eqBad = h.sourceEquity !== 'real'
   if (!posBad && !eqBad) return null
@@ -204,18 +208,12 @@ function SnapshotNote({ h, assetLabel }: { h: ExecutionDetailModel['header']; as
  */
 function FailureNote({ f }: { f: FailureReason }) {
   return (
-    <div className="mt-2 rounded bg-warn-soft px-3 py-2 text-[12.5px] text-warn">
-      <div className="font-medium">{f.human}</div>
-      <div className="mt-0.5 text-[12px]">
-        归{BLAME_LABEL[f.blame]} · {f.retryable ? '同步前置后可重试' : '需先处理再重试'} · {f.action}
-      </div>
-      {f.raw && (
-        <details className="mt-1">
-          <summary className="cursor-pointer select-none text-[11.5px] text-ink-3 hover:text-ink-2">原始错误</summary>
-          <div className="num mt-1 break-all whitespace-pre-wrap text-[11.5px] text-ink-3">{f.raw}</div>
-        </details>
-      )}
-    </div>
+    <ErrorNotice
+      title={f.human}
+      error={new Error(`归${BLAME_LABEL[f.blame]} · ${f.retryable ? '恢复前置后可重试' : '需先处理再重试'} · ${f.action}`)}
+      variant="mutation"
+      evidence={f.raw ? [{ label: '原始错误', value: f.raw }] : []}
+    />
   )
 }
 
@@ -531,6 +529,11 @@ export function ExecutionDetailPage() {
   const units = descriptor?.units ?? DEFAULT_UNITS
   const assetTerms = accountAssetTerms(item?.trade_channel)
 
+  const statusFetcher = useCallback(
+    (signal: AbortSignal): Promise<ExecutionStatus> =>
+      executionId ? getExecutionStatus(executionId, signal) : Promise.reject(new Error('缺少 execution_id')),
+    [executionId],
+  )
   const eventsFetcher = useCallback(
     (signal: AbortSignal): Promise<{ data: ExecutionEvent[] }> =>
       executionId ? getExecutionEvents(executionId, signal) : Promise.resolve({ data: [], count: 0 }),
@@ -546,6 +549,11 @@ export function ExecutionDetailPage() {
   const running = useRunning(accountId)
   const isLive = running != null && running.executionId === executionId
   const pollMs = isLive ? 2500 : 0
+  const status = usePolling(statusFetcher, {
+    queryKey: `execution:${executionId ?? 'missing'}:status`,
+    intervalMs: pollMs,
+    enabled: Boolean(executionId),
+  })
   const events = usePolling(eventsFetcher, {
     queryKey: `execution:${executionId ?? 'missing'}:events`,
     intervalMs: pollMs,
@@ -557,10 +565,10 @@ export function ExecutionDetailPage() {
     enabled: Boolean(executionId),
   })
 
-  const loading = events.loading || artifacts.loading
-  const error = events.error || artifacts.error
+  const loading = status.loading && events.loading && artifacts.loading
   const rawEvents = events.data?.data ?? []
-  const model = !loading && !error ? buildExecutionDetail(rawEvents, artifacts.data?.data ?? []) : null
+  const hasAnyData = status.data != null || events.data != null || artifacts.data != null
+  const model = hasAnyData ? buildExecutionDetail(rawEvents, artifacts.data?.data ?? [], status.data) : null
 
   return (
     <section>
@@ -571,6 +579,9 @@ export function ExecutionDetailPage() {
         ]}
       />
       <div className="num mt-3 text-[15px] font-mono text-ink-2">{executionId}</div>
+      <div className="max-w-[760px]">
+        <ErrorNotice title="执行状态加载失败" error={status.error} onRetry={status.refresh} />
+      </div>
       {model && <Header m={model} currency={currency} assetLabel={assetTerms.shortLabel} />}
 
       {/* 运行中：顶部给一条确定态阶段条作一瞥总览；逐事件细节仍在下方脊柱。 */}
@@ -582,7 +593,8 @@ export function ExecutionDetailPage() {
 
       <Card className="mt-4 max-w-[760px] px-6 py-5">
         {loading && <SkeletonLines rows={5} />}
-        {error && <p className="text-[14px] text-warn">加载失败：{error.message}</p>}
+        <ErrorNotice title="执行事件加载失败" error={events.error} onRetry={events.refresh} />
+        <ErrorNotice title="执行证据加载失败" error={artifacts.error} onRetry={artifacts.refresh} />
         {model && (
           <>
             <TargetChangeView m={model} />
@@ -607,7 +619,11 @@ export function ExecutionDetailPage() {
                 })}
               </>
             ) : (
-              <p className="text-[13px] text-ink-3">本次执行无逐只对账（可能为空跑或早期终止）。</p>
+              <p className="text-[13px] text-ink-3">
+                {model.task?.status === 'FAILED' && model.task.started_at == null
+                  ? '执行未进入执行链路，未产生逐只结果和账户快照。'
+                  : '本次执行未产生逐只对账。'}
+              </p>
             )}
             <Spine m={model} />
             <Evidence m={model} currency={currency} assetLabel={assetTerms.shortLabel} />

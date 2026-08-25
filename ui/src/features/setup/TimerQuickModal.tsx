@@ -8,6 +8,7 @@
 import { useEffect, useState } from 'react'
 import { Link } from '@/components/ui/nav'
 import { Select } from '@/components/ui/Select'
+import { ErrorNotice } from '@/components/ui/ErrorNotice'
 import { MOTION_LAYOUT, usePanelFadeReady } from '@/lib/viewTransition'
 import {
   DEFAULT_PRESET,
@@ -115,6 +116,7 @@ function TimerQuickModalReady({
   const [state, setState] = useState<TimerEditorState>(() => draftFromCron(market, cronExpr).state)
   const [fromComplex, setFromComplex] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [saveError, setSaveError] = useState<Error | null>(null)
 
   useEffect(() => {
     if (!open) return
@@ -122,6 +124,7 @@ function TimerQuickModalReady({
     setState(d.state)
     setFromComplex(d.fromComplex)
     setSaving(false)
+    setSaveError(null)
   }, [open, market, cronExpr])
 
   useEffect(() => {
@@ -133,7 +136,10 @@ function TimerQuickModalReady({
     return () => window.removeEventListener('keydown', onKey)
   }, [open, onClose, saving])
 
-  const patch = (p: Partial<TimerEditorState>) => setState((prev) => ({ ...prev, ...p }))
+  const patch = (p: Partial<TimerEditorState>) => {
+    setSaveError(null)
+    setState((prev) => ({ ...prev, ...p }))
+  }
 
   const pickPreset = (id: string) => {
     const rule = ruleFromPreset(market, id)
@@ -159,13 +165,14 @@ function TimerQuickModalReady({
       return
     }
     setSaving(true)
+    setSaveError(null)
     try {
       await updateAccount(accountId, { cron_expr: cronNext })
       toast(cronNext ? '节奏已更新' : '已关闭自动调仓节奏')
       onSaved()
       onClose()
     } catch (e) {
-      toast(`保存失败：${e instanceof Error ? e.message : String(e)}`)
+      setSaveError(e instanceof Error ? e : new Error(String(e)))
     } finally {
       setSaving(false)
     }
@@ -306,6 +313,7 @@ function TimerQuickModalReady({
                   </Link>
                 </div>
               </div>
+              <ErrorNotice title="保存定时节奏失败" error={saveError} variant="mutation" onRetry={save} />
             </div>
 
             <div className="mt-1 flex justify-end gap-2.5 border-t border-line px-5 py-3.5">

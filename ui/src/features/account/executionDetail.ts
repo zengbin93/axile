@@ -7,13 +7,14 @@
  */
 import { eventError } from '@/features/account/executionRows'
 import { executionReasonText, symbolSkipSummaryReason } from '@/features/account/executionReason'
-import { describeFailure, type FailureReason } from '@/features/account/failureReason'
+import { describeFailure, describeFailureText, type FailureReason } from '@/features/account/failureReason'
 import type {
   AccountSnapshotSource,
   ExecOrder,
   ExecutionArtifact,
   ExecutionEvent,
   ExecutionReconciliation,
+  ExecutionStatus,
   SymbolTca,
 } from '@/types/api'
 
@@ -131,6 +132,8 @@ export interface ExecutionDetailModel {
   hasReconciliation: boolean
   /** 执行级失败判词（-1021 等翻成人话）；无 execution_failed 事件时为 null。 */
   failure: FailureReason | null
+  /** 执行任务状态真源；旧记录或接口不可用时为 null。 */
+  task: ExecutionStatus | null
 }
 
 type Dict = Record<string, unknown>
@@ -593,6 +596,7 @@ function reconciliationOf(artifacts: ExecutionArtifact[]): ExecutionReconciliati
 export function buildExecutionDetail(
   events: ExecutionEvent[],
   artifacts: ExecutionArtifact[],
+  task: ExecutionStatus | null = null,
 ): ExecutionDetailModel {
   const started = eventAt(events, 'execution_started')
   const startedAt = started?.ts_local_created ?? null
@@ -625,9 +629,9 @@ export function buildExecutionDetail(
   const sourceEquity = (SOURCE_RANK[srcBefore] ?? 3) >= (SOURCE_RANK[srcAfter] ?? 3) ? srcBefore : srcAfter
 
   const header: ExecutionHeader = {
-    kind: asStr(startedDebug?.execution_kind) || 'rebalance',
+    kind: asStr(startedDebug?.execution_kind) || task?.execution_kind || 'rebalance',
     trigger: asStr(startedDebug?.trigger_source) || '',
-    durationSec: asNum(summary?.execution_time),
+    durationSec: asNum(summary?.execution_time) ?? diffSeconds(task?.started_at ?? null, task?.finished_at ?? null),
     reachedCount,
     totalCount: symbols.length,
     failedCount,
@@ -653,6 +657,7 @@ export function buildExecutionDetail(
 
   const targetChange = buildTargetChange(artifacts)
   const failure = describeFailure(eventAt(events, 'execution_failed'))
+    ?? (task?.status === 'FAILED' ? describeFailureText(task.error ?? '') : null)
 
   return {
     header,
@@ -663,5 +668,6 @@ export function buildExecutionDetail(
     artifacts,
     hasReconciliation: recon != null,
     failure,
+    task,
   }
 }

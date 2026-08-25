@@ -32,6 +32,7 @@ export function useExecutionRunner(accountId: number, onSettled?: () => void) {
     kind: null,
     executionId: null,
   })
+  const [error, setError] = useState<Error | null>(null)
   const pollRef = useRef<ReturnType<typeof setInterval> | undefined>(undefined)
   const settledRef = useRef(onSettled)
   settledRef.current = onSettled
@@ -49,6 +50,7 @@ export function useExecutionRunner(accountId: number, onSettled?: () => void) {
     async (kind: RunKind) => {
       if (runningRef.current) return
       runningRef.current = true
+      setError(null)
       // 乐观进执行：不等 trigger 返回，避免「点了没反应」。
       setState({ running: true, kind, executionId: null })
       try {
@@ -68,15 +70,9 @@ export function useExecutionRunner(accountId: number, onSettled?: () => void) {
               runningRef.current = false
               setState({ running: false, kind: null, executionId: null })
               const ok = st.status === 'SUCCEEDED'
-              toast(
-                ok
-                  ? kind === 'exec'
-                    ? '执行完成 · 已按目标到位'
-                    : '已清仓'
-                  : st.status === 'TERMINATED'
-                    ? '执行已终止'
-                    : `执行失败：${st.error ?? '未知原因'}`,
-              )
+              if (ok) toast(kind === 'exec' ? '执行完成 · 已按目标到位' : '已清仓')
+              else if (st.status === 'TERMINATED') toast('执行已终止')
+              if (st.status === 'FAILED') setError(new Error(st.error ?? '执行失败，服务端未返回原因'))
               settledRef.current?.()
             }
           } catch {
@@ -86,11 +82,11 @@ export function useExecutionRunner(accountId: number, onSettled?: () => void) {
       } catch (err) {
         runningRef.current = false
         setState({ running: false, kind: null, executionId: null })
-        toast(`触发失败：${err instanceof Error ? err.message : String(err)}`)
+        setError(err instanceof Error ? err : new Error(String(err)))
       }
     },
     [accountId, toast, stopPoll],
   )
 
-  return { ...state, start }
+  return { ...state, error, clearError: () => setError(null), start }
 }
