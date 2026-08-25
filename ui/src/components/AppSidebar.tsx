@@ -1,8 +1,6 @@
 import { useEffect, type ComponentType, type CSSProperties, type ReactNode } from 'react'
 import { useLocation } from 'react-router'
 import {
-  AlarmClock,
-  Bot,
   Boxes,
   CalendarDays,
   ChartNoAxesCombined,
@@ -10,8 +8,6 @@ import {
   ListChecks,
   Plus,
   Settings2,
-  ShieldCheck,
-  SlidersHorizontal,
   WalletCards,
 } from 'lucide-react'
 import { Link } from '@/components/ui/nav'
@@ -20,7 +16,7 @@ import { useNavigationStore } from '@/stores/ui'
 
 interface NavItemSpec {
   label: string
-  icon: ComponentType<{ size?: number; 'aria-hidden'?: boolean }>
+  icon?: ComponentType<{ size?: number; 'aria-hidden'?: boolean }>
   to: string | null
   active: (pathname: string, hash: string) => boolean
 }
@@ -49,9 +45,13 @@ function NavItem({ item }: { item: NavItemSpec }) {
   const Icon = item.icon
   const content = (
     <>
-      {active && <span aria-hidden className="absolute inset-0 rounded-[9px] bg-accent-soft" style={activeMarkerStyle} />}
+      {active && (
+        <span aria-hidden className="absolute inset-0 rounded-[7px] bg-accent-soft" style={activeMarkerStyle}>
+          <span className="absolute inset-y-1 left-0 w-0.5 rounded-full bg-accent" />
+        </span>
+      )}
       <span className="relative z-[1] flex items-center gap-2.5">
-        <Icon size={15} aria-hidden />
+        {Icon && <Icon size={15} aria-hidden />}
         <span>{item.label}</span>
       </span>
     </>
@@ -59,7 +59,7 @@ function NavItem({ item }: { item: NavItemSpec }) {
 
   if (!item.to) {
     return (
-      <span className="relative flex h-8.5 items-center gap-2.5 rounded-[9px] px-3 text-[13px] text-ink-3" aria-disabled="true">
+      <span className="relative flex h-8.5 items-center gap-2.5 rounded-[7px] px-3 text-[13px] text-ink-3" aria-disabled="true">
         {content}
       </span>
     )
@@ -69,7 +69,7 @@ function NavItem({ item }: { item: NavItemSpec }) {
     <Link
       to={item.to}
       aria-current={active ? 'page' : undefined}
-      className={`relative flex h-8.5 items-center gap-2.5 rounded-[9px] px-3 text-[13px] transition-colors duration-150 motion-reduce:transition-none ${
+      className={`relative flex h-8.5 items-center gap-2.5 rounded-[7px] px-3 text-[13px] transition-colors duration-150 motion-reduce:transition-none ${
         active ? 'text-ink-1' : 'text-ink-2 hover:bg-bg-subtle hover:text-ink-1'
       }`}
     >
@@ -112,11 +112,16 @@ export function AppSidebar() {
     },
     { label: '回看与绩效', icon: ChartNoAxesCombined, to: accountPath('/history'), active: exact(accountPath('/history')) },
   ]
-  const accountSettings: NavItemSpec[] = [
-    { label: '基本配置', icon: SlidersHorizontal, to: accountPath('/edit'), active: exact(accountPath('/edit')) },
-    { label: '定时节奏', icon: AlarmClock, to: accountPath('/edit/timer'), active: exact(accountPath('/edit/timer')) },
-    { label: '执行算法', icon: Bot, to: accountPath('/edit/algorithm'), active: exact(accountPath('/edit/algorithm')) },
-    { label: '执行流控', icon: ShieldCheck, to: accountPath('/edit/control'), active: exact(accountPath('/edit/control')) },
+  const accountParameters: NavItemSpec[] = [
+    { label: '基本信息', to: accountPath('/edit'), active: exact(accountPath('/edit')) },
+    { label: '杠杆设置', to: accountPath('/edit/leverage'), active: exact(accountPath('/edit/leverage')) },
+    { label: '品种控制', to: accountPath('/edit/symbols'), active: exact(accountPath('/edit/symbols')) },
+  ]
+  const accountExecution: NavItemSpec[] = [
+    { label: '定时节奏', to: accountPath('/edit/timer'), active: exact(accountPath('/edit/timer')) },
+    { label: '执行算法', to: accountPath('/edit/algorithm'), active: exact(accountPath('/edit/algorithm')) },
+    { label: '执行流控', to: accountPath('/edit/control'), active: exact(accountPath('/edit/control')) },
+    { label: '组合执行', to: accountPath('/edit/portfolio'), active: exact(accountPath('/edit/portfolio')) },
   ]
 
   return (
@@ -134,8 +139,12 @@ export function AppSidebar() {
         {accountOverview.map((item) => <NavItem key={item.label} item={item} />)}
       </NavSection>
 
-      <NavSection label="账户配置">
-        {accountSettings.map((item) => <NavItem key={item.label} item={item} />)}
+      <NavSection label="账户参数">
+        {accountParameters.map((item) => <NavItem key={item.label} item={item} />)}
+      </NavSection>
+
+      <NavSection label="自动执行">
+        {accountExecution.map((item) => <NavItem key={item.label} item={item} />)}
       </NavSection>
 
       <NavSection label="系统">

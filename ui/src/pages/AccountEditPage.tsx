@@ -1,8 +1,8 @@
 /**
- * 账户编辑总览 /accounts/:id/edit。
+ * 账户浅配置页 /accounts/:id/edit/*。
  *
- * 中长期信息架构：总览只扛浅字段 + 子系统入口；完整定时 / 执行算法各走子路由，
- * 避免长页嵌套重编辑器。保存仍为最小 PATCH + 底栏变更摘要。
+ * 基本信息、杠杆、品种控制、组合执行各走可直达子路由；定时、算法、流控
+ * 仍由各自的完整编辑器承载。保存保持最小 PATCH + 底栏变更摘要。
  */
 
 import { useCallback, useEffect, useState } from 'react'
@@ -16,6 +16,8 @@ import { ExecutionTimeoutInput } from '@/features/account/ExecutionTimeoutInput'
 import { executionTimeoutError } from '@/features/account/executionTimeout'
 import { LeverageInput } from '@/features/account/LeverageInput'
 import { leverageError } from '@/features/account/leverage'
+import { WeightPrecisionInput } from '@/features/account/WeightPrecisionInput'
+import { weightPrecisionError } from '@/features/account/weightPrecision'
 import { getAccount, updateAccount } from '@/lib/api/accounts'
 import { testFeishu, type TestResult } from '@/lib/api/init'
 import { usePolling } from '@/lib/hooks/usePolling'
@@ -23,8 +25,6 @@ import { useDomainStore } from '@/stores/domain'
 import { useChannelCatalogStore, useChannelDescriptor } from '@/stores/channels'
 import { useToastStore } from '@/stores/ui'
 import { channelLabel } from '@/features/dashboard/display'
-import { describeCron } from '@/features/setup/cron'
-import { describeAlgorithmRef, type AlgorithmRef } from '@/features/setup/algorithms'
 import {
   AREA,
   TEXT,
@@ -32,12 +32,9 @@ import {
   EditError,
   EditLoading,
   EditSaveBar,
-  EntryRow,
-  NumCell,
   Row,
   Section,
   Toggle,
-  editShellVtName,
 } from '@/features/account/editUi'
 import type { Account, PortfolioLite } from '@/types/api'
 
@@ -96,27 +93,6 @@ function norm(v: unknown): string {
 function jsonText(v: Record<string, unknown> | null | undefined): string {
   if (v == null || (typeof v === 'object' && Object.keys(v).length === 0)) return ''
   return JSON.stringify(v, null, 2)
-}
-
-function controlOverrideCount(value: Record<string, unknown> | null): number {
-  if (!value) return 0
-  const countScope = (scope: unknown) =>
-    scope && typeof scope === 'object' ? Object.values(scope).filter(Boolean).length : 0
-  const operations = value.operations && typeof value.operations === 'object'
-    ? Object.values(value.operations).reduce<number>((sum, operation) => {
-        if (!operation || typeof operation !== 'object') return sum
-        return sum + Object.values(operation).reduce<number>((scopeSum, scope) => scopeSum + countScope(scope), 0)
-      }, 0)
-    : 0
-  const groups = value.groups && typeof value.groups === 'object'
-    ? Object.values(value.groups).reduce<number>((sum, scope) => sum + countScope(scope), 0)
-    : 0
-  return operations + groups
-}
-
-function refOf(algo: Record<string, unknown> | null | undefined): AlgorithmRef | null {
-  if (!algo || typeof algo.method !== 'string') return null
-  return { method: algo.method, params: (algo.params ?? {}) as Record<string, unknown> }
 }
 
 function draftOf(acc: Account): Draft {
@@ -220,7 +196,16 @@ function summarize(patch: Partial<Account>, acc: Account, portfolios: PortfolioL
   return out
 }
 
-export function AccountEditPage() {
+type EditSection = 'basic' | 'leverage' | 'symbols' | 'portfolio'
+
+const SECTION_TITLE: Record<EditSection, string> = {
+  basic: '基本信息',
+  leverage: '杠杆设置',
+  symbols: '品种控制',
+  portfolio: '组合执行',
+}
+
+export function AccountEditPage({ section = 'basic' }: { section?: EditSection }) {
   const { id } = useParams()
   const accountId = Number(id)
   const navigate = useNavigate()
@@ -262,7 +247,7 @@ export function AccountEditPage() {
   /** 标题行账户名（可挂 FLIP）；「编辑 ·」前缀不进共享身份。 */
   const titleName = (
     <span className="text-[18px] font-[640]">
-      编辑 ·{' '}
+      {SECTION_TITLE[section]} ·{' '}
       <span
         style={
           nameVt && displayName != null
@@ -293,8 +278,6 @@ export function AccountEditPage() {
     setSaveError(null)
     setDraft((prev) => (prev ? { ...prev, ...patch } : prev))
   }
-  const scheduleKind = channelDescriptor?.schedule.kind
-
   // 飞书 key 容忍粘贴整条 webhook 链接：测试与保存都用规整后的裸 key
   // （后端 /init/test-feishu 无状态，测的就是请求体里这串，故可存盘前先测）。
   const feishuKey = extractFeishuKey(d.feishu)
@@ -307,16 +290,6 @@ export function AccountEditPage() {
     }
   }
 
-  const cronExpr = acc.cron_expr ?? ''
-  const timerSummary = !cronExpr.trim()
-    ? '已关 · 仅手动'
-    : (scheduleKind ? describeCron(scheduleKind, cronExpr, channelDescriptor?.schedule.night) : null)
-      ?? '自定义执行节奏'
-
-  const tradeSum = describeAlgorithmRef(refOf(acc.algorithm as Record<string, unknown> | null))
-  const emptySum = describeAlgorithmRef(refOf(acc.empty_positions_algorithm as Record<string, unknown> | null))
-  const algoSummary = emptySum === '未设置' ? tradeSum : `${tradeSum} · 清仓 ${emptySum}`
-
   const jsonEntries: string[] = [d.tradeRules, d.newConfig]
   const jsonErr = jsonEntries.map((t) => (t.trim() ? parseJson(t).error : undefined)).find(Boolean) ?? null
 
@@ -327,17 +300,21 @@ export function AccountEditPage() {
   const shortLevErr = showShortLeverage ? leverageError(d.shortLev, leverageOptions) : null
   // 执行总超时必须是正整数（服务端 >= 1）：这道兜底不允许按账户关掉。
   const timeoutErr = executionTimeoutError(d.executionTimeout, { allowEmpty: true })
+  const weightPrecisionErr = weightPrecisionError(d.weightPrecision, { allowEmpty: true })
   const levErr = longLevErr ?? shortLevErr
 
   const patch = buildPatch(d, acc, showShortLeverage)
   const changes = summarize(patch, acc, portfolios)
   const dirty = changes.length > 0
-  const blocked = Boolean(jsonErr || levErr || timeoutErr || portfolios == null || portfoliosError || channelCatalogError)
+  const blocked = Boolean(
+    jsonErr || levErr || timeoutErr || weightPrecisionErr || portfolios == null || portfoliosError || channelCatalogError,
+  )
 
   const save = async () => {
     if (jsonErr) return toast(`高级 JSON 有误：${jsonErr}`)
     if (levErr) return toast(`杠杆有误：${levErr}`)
     if (timeoutErr) return toast(`执行超时有误：${timeoutErr}`)
+    if (weightPrecisionErr) return toast(`权重精度有误：${weightPrecisionErr}`)
     if (!dirty) return toast('没有改动')
     setSaveError(null)
     try {
@@ -382,10 +359,11 @@ export function AccountEditPage() {
         {item && ` · 持仓 ${item.holdings_count} 只`} · 改动不会立刻下单，下次调仓生效。渠道与市场不可更改。
       </div>
 
-      <Section label="基本">
-        <Row label="名称">
-          <input className={TEXT} value={d.name} onChange={(e) => set({ name: e.target.value })} />
-        </Row>
+      {section === 'basic' && (
+        <Section label="基本信息">
+          <Row label="名称">
+            <input className={TEXT} value={d.name} onChange={(e) => set({ name: e.target.value })} />
+          </Row>
         <Row label="备注">
           <input className={TEXT} value={d.remark} placeholder="可选" onChange={(e) => set({ remark: e.target.value })} />
         </Row>
@@ -427,10 +405,12 @@ export function AccountEditPage() {
             )}
           </div>
         </Row>
-      </Section>
+        </Section>
+      )}
 
-      <Section label="杠杆">
-        <div className="flex flex-wrap gap-x-8 gap-y-3 md:col-span-2">
+      {section === 'leverage' && (
+        <Section label="杠杆设置">
+          <div className="flex flex-wrap gap-x-8 gap-y-3 md:col-span-2">
           <div className="flex flex-col gap-1">
             <label htmlFor="edit-long-leverage" className="text-[13px] text-ink-2">
               {channelDescriptor?.ui.long_leverage_label ?? '做多杠杆'}
@@ -460,36 +440,25 @@ export function AccountEditPage() {
               />
             </div>
           )}
-          <NumCell label="权重精度" value={d.weightPrecision} onChange={(v) => set({ weightPrecision: v })} />
-        </div>
-      </Section>
+          <div className="flex flex-col gap-1">
+            <label htmlFor="edit-weight-precision" className="text-[13px] text-ink-2">
+              权重精度
+            </label>
+            <WeightPrecisionInput
+              id="edit-weight-precision"
+              value={d.weightPrecision}
+              invalid={Boolean(weightPrecisionErr)}
+              error={weightPrecisionErr}
+              onChange={(weightPrecision) => set({ weightPrecision })}
+            />
+          </div>
+          </div>
+        </Section>
+      )}
 
-      <Section label="节奏与算法">
-        <EntryRow
-          label="定时"
-          hint="自动调仓"
-          summary={timerSummary}
-          to={`/accounts/${accountId}/edit/timer`}
-          shellVtName={editShellVtName(accountId, 'timer')}
-        />
-        <EntryRow
-          label="流控"
-          hint="请求节奏"
-          summary={`${acc.account_control_preset === 'ctp' ? 'CTP' : '默认'} · ${controlOverrideCount(acc.account_control_override) ? `${controlOverrideCount(acc.account_control_override)} 处自定义` : '全部使用预设值'}`}
-          to={`/accounts/${accountId}/edit/control`}
-          shellVtName={editShellVtName(accountId, 'control')}
-        />
-        <EntryRow
-          label="执行算法"
-          hint="下单 / 清仓"
-          summary={algoSummary}
-          to={`/accounts/${accountId}/edit/algorithm`}
-          shellVtName={editShellVtName(accountId, 'algorithm')}
-        />
-      </Section>
-
-      <Section label="品种控制">
-        <Row label="禁投" hint="永不建仓" top>
+      {section === 'symbols' && (
+        <Section label="品种控制">
+          <Row label="禁投" hint="永不建仓" top>
           <textarea
             className={`${AREA} min-h-[52px]`}
             rows={2}
@@ -508,11 +477,13 @@ export function AccountEditPage() {
             placeholder="可选"
             onChange={(e) => set({ risk: e.target.value })}
           />
-        </Row>
-      </Section>
+          </Row>
+        </Section>
+      )}
 
-      <Section label="组合与执行">
-        <Row label="跟随组合" span>
+      {section === 'portfolio' && (
+        <Section label="组合执行">
+          <Row label="跟随组合" span>
           <Select<number | null>
             ariaLabel="跟随组合"
             searchable
@@ -547,20 +518,23 @@ export function AccountEditPage() {
               {timeoutErr ?? '超时后停止开新单'}
             </span>
           </div>
-        </Row>
-      </Section>
+          </Row>
+        </Section>
+      )}
 
-      <button
-        type="button"
-        className="mx-0.5 mt-7 flex w-full cursor-pointer items-center gap-3 border-0 bg-transparent p-0 text-left"
-        onClick={() => setAdvanced((v) => !v)}
-      >
-        <span className="text-[11px] font-semibold tracking-wide text-ink-3">
-          {advanced ? '▾' : '▸'} 高级 · JSON 规则与换密钥
-        </span>
-        <span className="h-px flex-1 bg-line" />
-      </button>
-      {advanced && (
+      {section === 'basic' && (
+        <button
+          type="button"
+          className="mx-0.5 mt-7 flex w-full cursor-pointer items-center gap-3 border-0 bg-transparent p-0 text-left"
+          onClick={() => setAdvanced((v) => !v)}
+        >
+          <span className="text-[11px] font-semibold tracking-wide text-ink-3">
+            {advanced ? '▾' : '▸'} 高级 · JSON 规则与换密钥
+          </span>
+          <span className="h-px flex-1 bg-line" />
+        </button>
+      )}
+      {section === 'basic' && advanced && (
         <div className="mt-2 grid grid-cols-1 gap-x-8 gap-y-3 md:grid-cols-2">
           {jsonRow('tradeRules', 'trade_rules')}
           <Row label="换连接密钥" hint="只写 · 不回显" top span>
