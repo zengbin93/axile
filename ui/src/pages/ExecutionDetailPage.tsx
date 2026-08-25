@@ -583,19 +583,19 @@ export function ExecutionDetailPage() {
         ]}
       />
       <div className="num mt-3 text-[15px] font-mono text-ink-2">{executionId}</div>
-      <div className="max-w-[760px]">
+      <div>
         <ErrorNotice title="执行状态加载失败" error={status.error} onRetry={status.refresh} />
       </div>
       {model && <Header m={model} currency={currency} assetLabel={assetTerms.shortLabel} />}
 
       {/* 运行中：顶部给一条确定态阶段条作一瞥总览；逐事件细节仍在下方脊柱。 */}
       {isLive && running && (
-        <div className="mt-3 max-w-[760px]">
+        <div className="mt-3">
           <PhaseBar phase={running.phase} />
         </div>
       )}
 
-      <Card className="mt-4 max-w-[760px] px-6 py-5">
+      <Card className="mt-4 px-6 py-5">
         {loading && <SkeletonLines rows={5} />}
         <ErrorNotice title="执行事件加载失败" error={events.error} onRetry={events.refresh} />
         <ErrorNotice title="执行证据加载失败" error={artifacts.error} onRetry={artifacts.refresh} />

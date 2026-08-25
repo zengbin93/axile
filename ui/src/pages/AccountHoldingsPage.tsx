@@ -71,7 +71,7 @@ export function AccountHoldingsPage() {
       />
       <div className="mt-3 text-[18px] font-[640]">{name}</div>
 
-      <Card className="mt-4 max-w-[760px] px-6 py-5">
+      <Card className="mt-4 px-6 py-5">
         <div className="mb-3 border-b border-line pb-3">
           <TargetSnapshotControl
             snapshot={weights.data}
