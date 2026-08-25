@@ -409,7 +409,9 @@ class ExecutionEngine:
                 allowed_symbols.append(symbol)
                 continue
             resolved_algorithm = standard_input.get_resolved_symbol_algorithm(symbol)
-            algorithm_name = str(resolved_algorithm.get("method", standard_input.algorithm.get("method", "SINGLE-MAKER")))
+            algorithm_name = str(
+                resolved_algorithm.get("method", standard_input.algorithm.get("method", "SINGLE-MAKER"))
+            )
             planning_failures.append(
                 self._build_failed_algorithm_result(
                     symbol=symbol,

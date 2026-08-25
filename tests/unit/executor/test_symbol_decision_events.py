@@ -81,11 +81,11 @@ def test_emit_ctp_session_precheck_as_market_rule_warning() -> None:
         _standard_input(),
         [
             AlgorithmResult(
-                symbol="IF2609",
+                symbol="ag2609C5000",
                 algorithm="SINGLE-MAKER",
                 status=ExecutionStatus.BLOCKED,
-                error="CTP.SESSION.CLOSED",
-                memory={"precheck_reason_code": "CTP.SESSION.CLOSED"},
+                error="CTP.SESSION.NO_SESSION_TABLE",
+                memory={"precheck_reason_code": "CTP.SESSION.NO_SESSION_TABLE"},
             )
         ],
     )
@@ -94,7 +94,7 @@ def test_emit_ctp_session_precheck_as_market_rule_warning() -> None:
     assert event["event_type"] == ExecutionEventType.SYMBOL_DECISION_MADE
     assert event["status"] == ExecutionEventStatus.WARNING
     assert event["reason_family"] == ExecutionReasonFamily.MARKET_RULE
-    assert event["reason_code"] == "CTP.SESSION.CLOSED"
+    assert event["reason_code"] == "CTP.SESSION.NO_SESSION_TABLE"
 
 
 def _results(*statuses: ExecutionStatus) -> dict[str, AlgorithmResult]:

@@ -55,8 +55,10 @@ from axile.executor.ctp.requests import (
     resolve_offset,
 )
 from axile.executor.ctp.spi import MarketSpi, TraderSpi
-from axile.executor.ctp_product_sessions import decide_ctp_product_session
-from axile.executor.ctp_session_snapshot import CtpSessionSnapshotReader
+from axile.executor.ctp_product_sessions import (
+    decide_ctp_product_session,
+    get_ctp_product_sessions,
+)
 from axile.executor.models.unified_account_assets import UnifiedAccountAssets
 from axile.executor.models.unified_callback import (
     UnifiedCallbackClient,
@@ -107,8 +109,6 @@ class CTPExecutor(AbstractExecutor, UnifiedCallbackClient):
         self._trader_spi = self._market_spi = None
         self._pending_queries = {}
         self._instruments = {}
-        self._ctp_session_snapshot: CtpSessionSnapshotReader | None = None
-        self._ctp_session_snapshot_warning_emitted = False
         self._quotes = {}
         self._order_keys = {}
         self._option_actions = {}
@@ -307,11 +307,6 @@ class CTPExecutor(AbstractExecutor, UnifiedCallbackClient):
         """CTP 时段准入由 ExecutionEngine 的 symbol 预检负责。"""
         return True
 
-    def set_ctp_session_snapshot(self, snapshot: CtpSessionSnapshotReader | None) -> None:
-        """绑定仅供执行路径本地读取的 CTP 品种时段快照。"""
-        self._ctp_session_snapshot = snapshot
-        self._ctp_session_snapshot_warning_emitted = False
-
     def _precheck_symbol(self, symbol: str) -> tuple[bool, str | None]:
         instrument = self._instruments.get(symbol)
         if instrument is None:
@@ -320,20 +315,14 @@ class CTPExecutor(AbstractExecutor, UnifiedCallbackClient):
         product_id = str(getattr(instrument, "ProductID", "") or "")
         if not exchange_id or not product_id:
             return False, "CTP.SESSION.NO_METADATA"
-        snapshot = self._ctp_session_snapshot
-        if snapshot is None:
-            return False, "CTP.SESSION.SNAPSHOT_MISSING"
-        result = snapshot.get_sessions(exchange_id, product_id)
-        if result.reason_code is not None:
-            return False, result.reason_code
-        if result.warning and not getattr(self, "_ctp_session_snapshot_warning_emitted", False):
-            self.logger.warning("CTP 品种时段快照已超过 120 小时")
-            self._ctp_session_snapshot_warning_emitted = True
+        sessions = get_ctp_product_sessions(exchange_id, product_id)
+        if not sessions:
+            return False, "CTP.SESSION.NO_SESSION_TABLE"
         calendar = self._trading_calendar
         if calendar is None:
             return False, "CTP.SESSION.CALENDAR_UNAVAILABLE"
         decision = decide_ctp_product_session(
-            result.sessions,
+            sessions,
             now=clock_now(tz=_SHANGHAI),
             calendar_is_open=lambda day: calendar.is_open("china", day),
         )

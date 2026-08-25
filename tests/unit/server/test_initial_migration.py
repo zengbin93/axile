@@ -33,14 +33,12 @@ def test_migration_history_is_linear() -> None:
         "0003_plugin_network.py",
         "0004_account_asset_snapshot.py",
         "0005_target_weight_snapshot.py",
-        "0006_ctp_session_snapshot.py",
     ]
     initial = _load_migration(migration_paths[0])
     calendar = _load_migration(migration_paths[1])
     plugin_network = _load_migration(migration_paths[2])
     account_asset_snapshot = _load_migration(migration_paths[3])
     target_weight_snapshot = _load_migration(migration_paths[4])
-    ctp_session_snapshot = _load_migration(migration_paths[5])
     assert initial.revision == "0001"
     assert initial.down_revision is None
     assert calendar.revision == "0002"
@@ -51,8 +49,6 @@ def test_migration_history_is_linear() -> None:
     assert account_asset_snapshot.down_revision == "0003"
     assert target_weight_snapshot.revision == "0005"
     assert target_weight_snapshot.down_revision == "0004"
-    assert ctp_session_snapshot.revision == "0006"
-    assert ctp_session_snapshot.down_revision == "0005"
 
 
 def test_account_asset_snapshot_migration_backfills_execution_assets() -> None:
@@ -297,29 +293,6 @@ def test_initial_baseline_creates_the_current_schema() -> None:
 
         portfolio_columns = {column["name"]: column for column in inspector.get_columns("portfolio")}
         assert portfolio_columns["custom_calc_py_code"]["nullable"] is False
-
-
-def test_ctp_session_snapshot_migration_creates_and_removes_snapshot_tables() -> None:
-    migration = _load_migration(_MIGRATIONS_DIR / "0006_ctp_session_snapshot.py")
-    engine = sa.create_engine("sqlite://")
-
-    with engine.begin() as connection:
-        migration.op = Operations(MigrationContext.configure(connection))
-        migration.upgrade()
-
-        inspector = sa.inspect(connection)
-        assert {"ctp_session_snapshot", "ctp_session_snapshot_record"} <= set(inspector.get_table_names())
-        assert _index_names(inspector, "ctp_session_snapshot") == {"ix_ctp_session_snapshot_is_active"}
-        assert inspector.get_pk_constraint("ctp_session_snapshot_record")["constrained_columns"] == [
-            "snapshot_id",
-            "exchange_id",
-            "product_id",
-            "segment_no",
-        ]
-        assert inspector.get_foreign_keys("ctp_session_snapshot_record")[0]["referred_table"] == "ctp_session_snapshot"
-
-        migration.downgrade()
-        assert {"ctp_session_snapshot", "ctp_session_snapshot_record"}.isdisjoint(sa.inspect(connection).get_table_names())
 
 
 def test_trading_calendar_migration_adds_calendar_table() -> None:

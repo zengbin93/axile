@@ -7,13 +7,24 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from axile.executor.ctp_product_sessions import CtpProductSession, decide_ctp_product_session
+from axile.executor.ctp_product_sessions import (
+    CTP_PRODUCT_SESSIONS,
+    CtpProductSession,
+    decide_ctp_product_session,
+    get_ctp_product_sessions,
+)
 
 _SHANGHAI = ZoneInfo("Asia/Shanghai")
 
 
 def _session(begin: str, end: str) -> CtpProductSession:
-    return CtpProductSession(exchange_id="SHFE", product_id="ag", segment_no=1, time_begin=time.fromisoformat(begin), time_end=time.fromisoformat(end))
+    return CtpProductSession(
+        exchange_id="SHFE",
+        product_id="ag",
+        segment_no=1,
+        time_begin=time.fromisoformat(begin),
+        time_end=time.fromisoformat(end),
+    )
 
 
 def _open_days(*days: date) -> dict[date, bool]:
@@ -35,7 +46,11 @@ def _calendar(days: dict[date, bool]):
         ("2026-08-25T02:30:00", [_session("21:00", "02:30")], False),
         ("2026-08-25T10:15:00", [_session("09:00", "10:15")], False),
         ("2026-08-25T11:30:00", [_session("10:30", "11:30")], False),
-        ("2026-08-25T12:00:00", [_session("09:00", "10:15"), _session("10:30", "11:30"), _session("13:30", "15:00")], False),
+        (
+            "2026-08-25T12:00:00",
+            [_session("09:00", "10:15"), _session("10:30", "11:30"), _session("13:30", "15:00")],
+            False,
+        ),
         ("2026-08-25T15:00:00", [_session("13:30", "15:00")], False),
     ],
 )
@@ -74,9 +89,13 @@ def test_products_are_decided_independently_at_2129(
     assert product_id
 
 
-@pytest.mark.parametrize("moment", [datetime(2026, 8, 22, 0, 30, tzinfo=_SHANGHAI), datetime(2026, 8, 22, 1, 30, tzinfo=_SHANGHAI)])
+@pytest.mark.parametrize(
+    "moment", [datetime(2026, 8, 22, 0, 30, tzinfo=_SHANGHAI), datetime(2026, 8, 22, 1, 30, tzinfo=_SHANGHAI)]
+)
 def test_friday_night_continues_into_saturday_as_monday_trading_day(moment: datetime) -> None:
-    calendar = _calendar({date(2026, 8, 21): True, date(2026, 8, 22): False, date(2026, 8, 23): False, date(2026, 8, 24): True})
+    calendar = _calendar(
+        {date(2026, 8, 21): True, date(2026, 8, 22): False, date(2026, 8, 23): False, date(2026, 8, 24): True}
+    )
 
     decision = decide_ctp_product_session([_session("21:00", "02:30")], now=moment, calendar_is_open=calendar)
 
@@ -85,7 +104,19 @@ def test_friday_night_continues_into_saturday_as_monday_trading_day(moment: date
 
 def test_night_session_is_closed_before_holiday_transition() -> None:
     now = datetime(2026, 10, 1, 0, 30, tzinfo=_SHANGHAI)
-    calendar = _calendar({date(2026, 9, 30): True, date(2026, 10, 1): False, date(2026, 10, 2): False, date(2026, 10, 3): False, date(2026, 10, 4): False, date(2026, 10, 5): False, date(2026, 10, 6): False, date(2026, 10, 7): False, date(2026, 10, 8): True})
+    calendar = _calendar(
+        {
+            date(2026, 9, 30): True,
+            date(2026, 10, 1): False,
+            date(2026, 10, 2): False,
+            date(2026, 10, 3): False,
+            date(2026, 10, 4): False,
+            date(2026, 10, 5): False,
+            date(2026, 10, 6): False,
+            date(2026, 10, 7): False,
+            date(2026, 10, 8): True,
+        }
+    )
 
     decision = decide_ctp_product_session([_session("21:00", "02:30")], now=now, calendar_is_open=calendar)
 
@@ -103,10 +134,28 @@ def test_night_session_fails_closed_when_next_trading_day_is_unavailable() -> No
     assert decision.reason_code == "CTP.SESSION.CALENDAR_UNAVAILABLE"
 
 
+def test_static_futures_table_has_expected_coverage_and_excludes_dead_keys() -> None:
+    assert len(CTP_PRODUCT_SESSIONS) == 88
+    assert {exchange_id for exchange_id, _ in CTP_PRODUCT_SESSIONS} == {
+        "CFFEX",
+        "CZCE",
+        "DCE",
+        "GFEX",
+        "INE",
+        "SHFE",
+    }
+    assert not {("DCE", product_id) for product_id in ("l_f", "pp_f", "v_f")} & CTP_PRODUCT_SESSIONS.keys()
+    assert [(session.time_begin, session.time_end) for session in get_ctp_product_sessions("SHFE", "ag")][0] == (
+        time(21),
+        time(2, 30),
+    )
+    assert not get_ctp_product_sessions("SHFE", "ag_o")
+
+
 @pytest.mark.parametrize(
     ("sessions", "calendar", "expected_reason"),
     [
-        ([], _calendar(_open_days(date(2026, 8, 25))), "CTP.SESSION.SNAPSHOT_MISSING"),
+        ([], _calendar(_open_days(date(2026, 8, 25))), "CTP.SESSION.NO_SESSION_TABLE"),
         ([_session("09:00", "10:15")], lambda _day: None, "CTP.SESSION.CALENDAR_UNAVAILABLE"),
     ],
 )
