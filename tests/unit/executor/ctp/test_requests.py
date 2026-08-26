@@ -286,10 +286,20 @@ def test_settlement_query_confirms_when_current_day_is_missing(config: CTPAccoun
 _SHANGHAI = ZoneInfo("Asia/Shanghai")
 
 
+class _CalendarStub:
+    def __init__(self, *, is_open: bool = True) -> None:
+        self._is_open = is_open
+
+    def is_open(self, _calendar_id: str, _day: object) -> bool:
+        return self._is_open
+
+
 def _submit_point_executor(config: CTPAccountConfig) -> CTPExecutor:
     executor = CTPExecutor.__new__(CTPExecutor)
     executor.account_config = config
     executor.channel_type = TradeChannel.CTP
+    executor._trading_calendar = _CalendarStub()
+    executor._channel_calendar_id = "china"
     executor._instruments = {
         "ag2612": SimpleNamespace(
             ExchangeID="SHFE", ProductID="ag", ProductClass=td.THOST_FTDC_PC_Futures, PriceTick=1.0
@@ -340,14 +350,17 @@ def test_place_order_blocks_at_submit_after_session_end(
     assert executor._order_keys == {}
 
 
-def test_place_order_delegates_calendar_date_to_broker(
+def test_place_order_blocks_when_calendar_day_is_closed(
     config: CTPAccountConfig, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     executor = _submit_point_executor(config)
+    executor._trading_calendar = _CalendarStub(is_open=False)
     _at_clock(monkeypatch, datetime(2026, 8, 22, 21, 29, tzinfo=_SHANGHAI))
 
-    executor._place_order_impl("ag2612", OrderDirection.BUY, OrderType.LIMIT, 1, 9000)
-    executor._trader_api.ReqOrderInsert.assert_called_once()
+    with pytest.raises(AccountControlBlockedError, match="CTP.SESSION.CLOSED"):
+        executor._place_order_impl("ag2612", OrderDirection.BUY, OrderType.LIMIT, 1, 9000)
+
+    executor._trader_api.ReqOrderInsert.assert_not_called()
 
 
 def test_place_order_recheck_blocks_after_planning_crosses_session_boundary(

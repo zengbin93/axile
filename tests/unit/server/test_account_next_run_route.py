@@ -71,6 +71,11 @@ def test_next_run_time_returns_iso_when_job_scheduled() -> None:
             "2026-07-03T09:03:00+08:00",
             "2026-07-04T09:03:00+08:00",
         ],
+        "next_execution_times": [
+            "2026-07-02T09:03:00+08:00",
+            "2026-07-03T09:03:00+08:00",
+            "2026-07-06T09:03:00+08:00",
+        ],
     }
 
 
@@ -108,6 +113,7 @@ def test_next_run_time_null_when_no_job() -> None:
         "is_scheduled": False,
         "next_run_time": None,
         "next_run_times": [],
+        "next_execution_times": [],
     }
 
 
@@ -123,6 +129,7 @@ def test_next_run_time_null_when_job_has_no_next_fire() -> None:
         "is_scheduled": True,
         "next_run_time": None,
         "next_run_times": [],
+        "next_execution_times": [],
     }
 
 

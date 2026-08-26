@@ -13,8 +13,15 @@ from axile.executor.ctp.ctp_execute import CTPExecutor
 _SHANGHAI = ZoneInfo("Asia/Shanghai")
 
 
+class _OpenCalendar:
+    def is_open(self, _calendar_id: str, _day: object) -> bool:
+        return True
+
+
 def _executor() -> CTPExecutor:
     executor = CTPExecutor.__new__(CTPExecutor)
+    executor._trading_calendar = _OpenCalendar()
+    executor._channel_calendar_id = "china"
     executor._instruments = {
         "ag2612": SimpleNamespace(
             ExchangeID="SHFE",

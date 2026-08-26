@@ -387,8 +387,8 @@ class CTPExecutor(AbstractExecutor, UnifiedCallbackClient):
         if not sessions:
             return "CTP.SESSION.NO_SESSION_TABLE"
         now = clock_now(tz=_SHANGHAI)
-        calendar = self._trading_calendar
-        calendar_id = self._channel_calendar_id
+        calendar = getattr(self, "_trading_calendar", None)
+        calendar_id = getattr(self, "_channel_calendar_id", None)
         if calendar is None or calendar_id is None:
             return "CTP.SESSION.CALENDAR_UNAVAILABLE"
         return decide_ctp_product_session(
