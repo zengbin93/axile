@@ -119,6 +119,7 @@ export function AccountEditTimerPage() {
           scheduleKind={scheduleKind}
           nightSchedule={descriptor.schedule.night}
           value={timer}
+          layout="page"
           onChange={(next) =>
             { setSaveError(null); setTimer((prev) => (typeof next === 'function' ? next(prev as TimerEditorState) : next)) }
           }

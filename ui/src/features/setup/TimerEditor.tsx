@@ -1,7 +1,9 @@
 /**
  * 定时节奏编辑器（向导「定时」步与账户编辑页共用）。
  *
- * 总开关 + 快捷|高级 + 补发 + 排程预览；自定义表达式仅在高级 tab 底部。
+ * 总开关 + 快捷|高级|自定义 + 补发 + 排程预览。
+ * ``layout='step'``（默认，向导窄栏）：单栏，预览在底部。
+ * ``layout='page'``（账户编辑页宽栏）：预览升为右栏 sticky，日历摘要归入预览头部。
  * 动效与 :component:`AcctTimer` 原实现一致：panel-fade / grid 展开 / Segmented 滑块。
  */
 
@@ -90,6 +92,11 @@ export interface TimerEditorProps {
   nightSchedule?: NightSchedule | null
   value: TimerEditorState
   onChange: (next: TimerEditorState | ((prev: TimerEditorState) => TimerEditorState)) => void
+  /**
+   * 排布上下文。``'step'``（默认）：向导窄栏单栏，预览在底部；
+   * ``'page'``：账户编辑页宽栏，预览升为右栏 sticky（窄视口自动退回单栏）。
+   */
+  layout?: 'page' | 'step'
 }
 
 /**
@@ -137,7 +144,7 @@ function calendarSummary(preview: SchedulePreview | null): { text: string; warni
   }
 }
 
-export function TimerEditor({ tradeChannel, scheduleKind, nightSchedule, value, onChange }: TimerEditorProps) {
+export function TimerEditor({ tradeChannel, scheduleKind, nightSchedule, value, onChange, layout = 'step' }: TimerEditorProps) {
   const v = value
   const tabFade = useRemountFade(v.timerTab)
   const [schedulePreview, setSchedulePreview] = useState<SchedulePreview | null>(null)
@@ -255,6 +262,163 @@ export function TimerEditor({ tradeChannel, scheduleKind, nightSchedule, value, 
   const presetCardT =
     'transition-[border-color,background-color,box-shadow] duration-200 ease-[cubic-bezier(0.4,0,0.2,1)] motion-reduce:transition-none'
 
+  const summaryText = previewLoading && !schedulePreview ? '交易日历 · 正在判断' : summary.text
+
+  /** 编辑区列：tabs + 当前 tab 内容 + 补发。 */
+  const editorColumn = (
+    <>
+      <div>
+        <Segmented<'quick' | 'advanced' | 'custom'>
+          size="sm"
+          value={v.timerTab}
+          onChange={setTab}
+          options={[
+            { value: 'quick', label: '快捷' },
+            { value: 'advanced', label: '高级' },
+            { value: 'custom', label: '自定义' },
+          ]}
+        />
+      </div>
+
+      <div key={v.timerTab} className={tabFade ? 'panel-fade-in' : undefined}>
+        {v.timerTab === 'quick' ? (
+          <div>
+            <div className="mb-2">
+              <label className="text-sm font-[640]">节奏</label>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {PRESETS[scheduleKind].map((p) => {
+                const on = v.presetIds.includes(p.id)
+                return (
+                  <button
+                    key={p.id}
+                    type="button"
+                    onClick={() => togglePreset(p.id)}
+                    className={`min-w-[92px] rounded-[11px] border p-2.5 text-left ${presetCardT} ${
+                      on
+                        ? 'border-accent bg-accent-soft shadow-[inset_0_0_0_1px_var(--color-accent)]'
+                        : 'border-line bg-surface'
+                    }`}
+                  >
+                    <div className="text-sm font-[640]">{p.label}</div>
+                    {p.sub && <div className="text-xs text-ink-3">{p.sub}</div>}
+                  </button>
+                )
+              })}
+            </div>
+            {nightSchedule && (
+              <div className="mt-4 flex items-center gap-3">
+                <Switch
+                  ariaLabel={nightSchedule.label}
+                  on={v.nightOn}
+                  onClick={() => patch({ nightOn: !v.nightOn })}
+                />
+                <div className="min-w-0">
+                  <div className="text-sm font-[640]">{nightSchedule.label}</div>
+                  <div className="text-xs text-ink-3">{nightSchedule.range_label}</div>
+                </div>
+              </div>
+            )}
+          </div>
+        ) : v.timerTab === 'advanced' ? (
+          <TimerAdvanced
+            market={scheduleKind}
+            rules={v.scheduleRules}
+            selectedId={v.selectedRuleId}
+            onChangeRules={(scheduleRules, selectedRuleId) => patch({ scheduleRules, selectedRuleId })}
+          />
+        ) : (
+          <TimerCustom
+            rawCron={v.rawCron}
+            rawErr={rawErr}
+            onRawCron={(rawCron) => patch({ rawCron })}
+          />
+        )}
+      </div>
+
+      <div
+        inert={v.timerTab === 'custom'}
+        className={`grid transition-[grid-template-rows] ${MOTION_LAYOUT} ${
+          v.timerTab === 'custom' ? 'grid-rows-[0fr]' : 'grid-rows-[1fr]'
+        }`}
+      >
+        <div className="min-h-0 overflow-hidden">
+          <SupRow
+            supN={v.supN}
+            supM={v.supM}
+            onN={(supN) => patch({ supN })}
+            onM={(supM) => patch({ supM })}
+          />
+        </div>
+      </div>
+    </>
+  )
+
+  const previewHeader = (
+    <>
+      <div className="mb-1.5 flex items-center justify-between gap-3">
+        <div className="text-sm font-[640]">排程预览 · 北京时间</div>
+        {schedulePreview?.calendar.requirement === 'required' && (
+          <Link to="/settings/trading-calendar" className="flex-none text-[12px] text-accent hover:underline">
+            交易日历设置
+          </Link>
+        )}
+      </div>
+      <OverflowText
+        className={`mb-2.5 min-w-0 text-xs ${summary.warning ? 'text-warn' : 'text-ink-3'}`}
+        text={summaryText}
+      />
+    </>
+  )
+
+  const previewBody = !tradeChannel ? (
+    <p className="text-[13px] text-ink-3">选择交易渠道后显示。</p>
+  ) : rawErr ? (
+    <p className="text-[13px] text-ink-3">修正自定义节奏后显示。</p>
+  ) : customEmpty ? (
+    <p className="text-[13px] text-ink-3">输入自定义节奏后显示。</p>
+  ) : previewError ? (
+    <p className="border-l-2 border-warn px-3 text-[13px] text-warn">预览暂不可用，仍可保存。{previewError}</p>
+  ) : expectPreview && !schedulePreview ? (
+    <div className="space-y-2" aria-label="正在加载排程预览">{Array.from({ length: 4 }, (_, index) => <div key={index} className="h-4 w-full animate-pulse rounded bg-fill motion-reduce:animate-none" />)}</div>
+  ) : schedulePreview?.items.length ? (
+    <div className="space-y-1.5">
+      {schedulePreview.items.map((item) => {
+        const tradingDay = item.calendar_day.slice(5)
+        const legacy = item.using_legacy_fallback
+          ? `${item.label ?? '中国交易日历'} · 存量兼容闭市保护中（A 股日历未覆盖） · `
+          : ''
+        const text = item.reason_code === 'CALENDAR.NO_NIGHT_SESSION'
+          ? '无对应夜盘，已跳过'
+          : item.calendar_status === 'available_open'
+          ? `${legacy}${tradingDay} 交易日，执行`
+          : item.calendar_status === 'available_closed'
+            ? `${legacy}休市，已跳过`
+            : item.calendar_status === 'unavailable'
+              ? '日历不可用，按排程执行'
+              : '按排程执行'
+        const warning = item.calendar_status === 'unavailable'
+          && item.unavailable_reason === 'read_failed'
+        return <div key={item.scheduled_at} className={`grid grid-cols-[92px_minmax(0,1fr)] gap-3 text-[13px] ${warning ? 'text-warn' : item.action === 'skip' ? 'text-ink-3' : 'text-ink-2'}`}><span className="num">{formatScheduledAt(item.scheduled_at)}</span><span>{text}</span></div>
+      })}
+    </div>
+  ) : (
+    <p className="text-[13px] text-ink-3">选择有效节奏后显示。</p>
+  )
+
+  // page 布局：预览升右栏 sticky（窄视口退回单栏卡片）；step：底部通栏。
+  const previewPanel = layout === 'page' ? (
+    <aside className="rounded-[14px] border border-line bg-surface px-4 py-3.5 min-[1120px]:sticky min-[1120px]:top-4 min-[1120px]:max-h-[calc(100vh-160px)] min-[1120px]:overflow-y-auto">
+      {previewHeader}
+      {previewBody}
+    </aside>
+  ) : (
+    <div className="min-h-[152px] border-y border-line py-3">
+      {previewHeader}
+      {previewBody}
+    </div>
+  )
+
   return (
     <div className="space-y-5">
       <div className="flex items-center gap-3">
@@ -270,141 +434,22 @@ export function TimerEditor({ tradeChannel, scheduleKind, nightSchedule, value, 
           v.autoOn ? 'grid-rows-[1fr] opacity-100' : 'grid-rows-[0fr] opacity-0'
         }`}
       >
-        <div className="overflow-hidden">
-          {/* 收放（grid-fr + opacity）已是全部连续性，不再叠 panel-fade-in：
-              一个对象只跑一套范式；且该类若在挂载后的无关重渲染补挂，会重播入场闪一下。 */}
-          <div className="space-y-5">
-            <div className="flex items-center justify-between gap-3">
-              <Segmented<'quick' | 'advanced' | 'custom'>
-                size="sm"
-                value={v.timerTab}
-                onChange={setTab}
-                options={[
-                  { value: 'quick', label: '快捷' },
-                  { value: 'advanced', label: '高级' },
-                  { value: 'custom', label: '自定义' },
-                ]}
-              />
-              <OverflowText
-                className={`min-w-0 text-xs ${summary.warning ? 'text-warn' : 'text-ink-3'}`}
-                text={previewLoading && !schedulePreview ? '交易日历 · 正在判断' : summary.text}
-              />
+        {/* 收放（grid-fr + opacity）已是全部连续性，不再叠 panel-fade-in：
+            一个对象只跑一套范式；且该类若在挂载后的无关重渲染补挂，会重播入场闪一下。
+            用 overflow-clip 而非 overflow-hidden：clip 不产生滚动容器，
+            page 布局下不会把右栏预览的 sticky 失效掉。 */}
+        <div className="overflow-clip">
+          {layout === 'page' ? (
+            <div className="grid grid-cols-1 items-start gap-6 min-[1120px]:grid-cols-[minmax(0,1fr)_300px]">
+              <div className="min-w-0 space-y-5">{editorColumn}</div>
+              {previewPanel}
             </div>
-
-            <div key={v.timerTab} className={tabFade ? 'panel-fade-in' : undefined}>
-              {v.timerTab === 'quick' ? (
-                <div>
-                  <div className="mb-2">
-                    <label className="text-sm font-[640]">节奏</label>
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    {PRESETS[scheduleKind].map((p) => {
-                      const on = v.presetIds.includes(p.id)
-                      return (
-                        <button
-                          key={p.id}
-                          type="button"
-                          onClick={() => togglePreset(p.id)}
-                          className={`min-w-[92px] rounded-[11px] border p-2.5 text-left ${presetCardT} ${
-                            on
-                              ? 'border-accent bg-accent-soft shadow-[inset_0_0_0_1px_var(--color-accent)]'
-                              : 'border-line bg-surface'
-                          }`}
-                        >
-                          <div className="text-sm font-[640]">{p.label}</div>
-                          {p.sub && <div className="text-xs text-ink-3">{p.sub}</div>}
-                        </button>
-                      )
-                    })}
-                  </div>
-                  {nightSchedule && (
-                    <div className="mt-4 flex items-center gap-3">
-                      <Switch
-                        ariaLabel={nightSchedule.label}
-                        on={v.nightOn}
-                        onClick={() => patch({ nightOn: !v.nightOn })}
-                      />
-                      <div className="min-w-0">
-                        <div className="text-sm font-[640]">{nightSchedule.label}</div>
-                        <div className="text-xs text-ink-3">{nightSchedule.range_label}</div>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              ) : v.timerTab === 'advanced' ? (
-                <TimerAdvanced
-                  market={scheduleKind}
-                  rules={v.scheduleRules}
-                  selectedId={v.selectedRuleId}
-                  onChangeRules={(scheduleRules, selectedRuleId) => patch({ scheduleRules, selectedRuleId })}
-                />
-              ) : (
-                <TimerCustom
-                  rawCron={v.rawCron}
-                  rawErr={rawErr}
-                  onRawCron={(rawCron) => patch({ rawCron })}
-                />
-              )}
+          ) : (
+            <div className="space-y-5">
+              {editorColumn}
+              {previewPanel}
             </div>
-
-            <div
-              inert={v.timerTab === 'custom'}
-              className={`grid transition-[grid-template-rows] ${MOTION_LAYOUT} ${
-                v.timerTab === 'custom' ? 'grid-rows-[0fr]' : 'grid-rows-[1fr]'
-              }`}
-            >
-              <div className="min-h-0 overflow-hidden">
-                <SupRow
-                  supN={v.supN}
-                  supM={v.supM}
-                  onN={(supN) => patch({ supN })}
-                  onM={(supM) => patch({ supM })}
-                />
-              </div>
-            </div>
-
-            <div className="min-h-[152px] border-y border-line py-3">
-              <div className="mb-2 flex items-center justify-between gap-3">
-                <div className="text-sm font-[640]">排程预览 · 北京时间</div>
-                {schedulePreview?.calendar.requirement === 'required' && <Link to="/settings/trading-calendar" className="text-[12px] text-accent hover:underline">交易日历设置</Link>}
-              </div>
-              {!tradeChannel ? (
-                <p className="text-[13px] text-ink-3">选择交易渠道后显示。</p>
-              ) : rawErr ? (
-                <p className="text-[13px] text-ink-3">修正自定义节奏后显示。</p>
-              ) : customEmpty ? (
-                <p className="text-[13px] text-ink-3">输入自定义节奏后显示。</p>
-              ) : previewError ? (
-                <p className="border-l-2 border-warn px-3 text-[13px] text-warn">预览暂不可用，仍可保存。{previewError}</p>
-              ) : expectPreview && !schedulePreview ? (
-                <div className="space-y-2" aria-label="正在加载排程预览">{Array.from({ length: 4 }, (_, index) => <div key={index} className="h-4 w-full animate-pulse rounded bg-fill motion-reduce:animate-none" />)}</div>
-              ) : schedulePreview?.items.length ? (
-                <div className="space-y-1.5">
-                  {schedulePreview.items.map((item) => {
-                    const tradingDay = item.calendar_day.slice(5)
-                    const legacy = item.using_legacy_fallback
-                      ? `${item.label ?? '中国交易日历'} · 存量兼容闭市保护中（A 股日历未覆盖） · `
-                      : ''
-                    const text = item.reason_code === 'CALENDAR.NO_NIGHT_SESSION'
-                      ? '无对应夜盘，已跳过'
-                      : item.calendar_status === 'available_open'
-                      ? `${legacy}${tradingDay} 交易日，执行`
-                      : item.calendar_status === 'available_closed'
-                        ? `${legacy}休市，已跳过`
-                        : item.calendar_status === 'unavailable'
-                          ? '日历不可用，按排程执行'
-                          : '按排程执行'
-                    const warning = item.calendar_status === 'unavailable'
-                      && item.unavailable_reason === 'read_failed'
-                    return <div key={item.scheduled_at} className={`grid grid-cols-[92px_minmax(0,1fr)] gap-3 text-[13px] ${warning ? 'text-warn' : item.action === 'skip' ? 'text-ink-3' : 'text-ink-2'}`}><span className="num">{formatScheduledAt(item.scheduled_at)}</span><span>{text}</span></div>
-                  })}
-                </div>
-              ) : (
-                <p className="text-[13px] text-ink-3">选择有效节奏后显示。</p>
-              )}
-            </div>
-
-          </div>
+          )}
         </div>
       </div>
     </div>

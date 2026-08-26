@@ -223,7 +223,7 @@ export function TimerAdvanced({ market, rules, selectedId, onChangeRules }: Time
   if (!selected) return null
 
   const surface = (
-    <div className="flex flex-col items-center px-5 py-6">
+    <div className="flex flex-col items-center px-5 py-5">
       <Segmented<CustomFreq>
         size="sm"
         value={selected.freq}
@@ -232,27 +232,21 @@ export function TimerAdvanced({ market, rules, selectedId, onChangeRules }: Time
         className="max-w-full"
       />
 
-      {/* 主锚：身份变才淡；首帧不播 */}
+      {/* 主锚：身份变才淡；首帧不播。「北京时间」由页首 synopsis 与预览标题承担，此处不重复。 */}
       <div
         key={heroKey}
-        className={`mt-6 flex min-h-[88px] flex-col items-center justify-center gap-3 ${
+        className={`mt-5 flex min-h-[72px] flex-col items-center justify-center gap-3 ${
           heroFade ? 'panel-fade-in' : ''
         }`}
       >
         {showTime ? (
-          <>
-            <MacTimePicker
-              value={isValidTime(selected.time) ? selected.time : ''}
-              onChange={(time) => replaceSelected({ time, draft: !time })}
-            />
-            <span className="text-[11.5px] text-ink-3">北京时间</span>
-          </>
+          <MacTimePicker
+            value={isValidTime(selected.time) ? selected.time : ''}
+            onChange={(time) => replaceSelected({ time, draft: !time })}
+          />
         ) : (
-          <div className="text-center">
-            <div className="font-mono text-[28px] font-[640] tracking-tight text-ink-1">
-              {FREQ_TITLE[selected.freq]}
-            </div>
-            <div className="mt-1 text-[11.5px] text-ink-3">北京时间</div>
+          <div className="text-center font-mono text-[28px] font-[640] tracking-tight text-ink-1">
+            {FREQ_TITLE[selected.freq]}
           </div>
         )}
 
@@ -269,7 +263,7 @@ export function TimerAdvanced({ market, rules, selectedId, onChangeRules }: Time
         )}
       </div>
 
-      <div className="mt-6">
+      <div className="mt-5">
         <DayStrip
           days={selected.days}
           onToggle={toggleDay}
@@ -288,7 +282,7 @@ export function TimerAdvanced({ market, rules, selectedId, onChangeRules }: Time
             type="button"
             onClick={enterMulti}
             tabIndex={multi ? -1 : 0}
-            className="mt-7 text-[12.5px] font-semibold text-accent hover:underline"
+            className="mt-5 text-[12.5px] font-semibold text-accent hover:underline"
           >
             ＋ 加入多个时间
           </button>
@@ -360,7 +354,7 @@ export function TimerAdvanced({ market, rules, selectedId, onChangeRules }: Time
   )
 
   return (
-    <div className="flex min-h-[320px] items-stretch overflow-hidden rounded-[14px] border border-line bg-surface">
+    <div className="flex items-stretch overflow-hidden rounded-[14px] border border-line bg-surface">
       <div className="min-w-0 flex-1">{surface}</div>
       {catalog}
     </div>
@@ -372,16 +366,16 @@ export function TimerAdvanced({ market, rules, selectedId, onChangeRules }: Time
  */
 export function TimerCustom({ rawCron, rawErr, onRawCron }: TimerCustomProps) {
   return (
-    <div className="flex min-h-[320px] flex-col rounded-[14px] border border-line bg-surface px-5 py-6">
-      <div className="text-[14px] font-[640]">自定义执行节奏</div>
-      <div className="mt-1 text-xs text-ink-3">
+    <div className="flex flex-col rounded-[14px] border border-line bg-surface px-5 py-5">
+      {/* 不重复「自定义执行节奏」标题：tab 名与页首 synopsis 已表达，只留格式提示。 */}
+      <div className="text-xs text-ink-3">
         北京时间 · 每条规则包含分、时、日、月、星期；多条使用 | 分隔
       </div>
       <textarea
         value={rawCron}
         onChange={(e) => onRawCron(e.target.value)}
         placeholder="0 8 * * * | 0 20 * * 0,2,4"
-        className="mt-5 min-h-[180px] w-full resize-y rounded-[9px] border border-ink-3/30 bg-surface p-3 font-mono text-xs text-ink-1 outline-none placeholder:text-ink-3 focus:border-accent"
+        className="mt-4 min-h-[76px] w-full resize-y rounded-[9px] border border-ink-3/30 bg-surface p-3 font-mono text-xs text-ink-1 outline-none placeholder:text-ink-3 focus:border-accent"
       />
       {rawErr && <div className="mt-1.5 text-xs text-warn">{rawErr}</div>}
     </div>
