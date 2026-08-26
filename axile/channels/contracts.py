@@ -265,24 +265,6 @@ class ChannelAccountForm(_FrozenDescriptorModel):
     notices: tuple[ChannelAccountNotice, ...] = ()
 
 
-class ChannelCalendar(_FrozenDescriptorModel):
-    """描述渠道使用的共享交易日历及可选存量回退。"""
-
-    calendar_id: str = Field(pattern=r"^[a-z][a-z0-9_-]*$")
-    label: str = Field(min_length=1)
-    fallback_calendar_id: str | None = Field(default=None, pattern=r"^[a-z][a-z0-9_-]*$")
-    fallback_label: str | None = Field(default=None, min_length=1)
-
-    @model_validator(mode="after")
-    def validate_fallback(self) -> "ChannelCalendar":
-        """回退日历必须有完整且不同于主日历的声明。"""
-        if (self.fallback_calendar_id is None) != (self.fallback_label is None):
-            raise ValueError("fallback_calendar_id 与 fallback_label 必须同时声明")
-        if self.fallback_calendar_id == self.calendar_id:
-            raise ValueError("fallback_calendar_id 不能与 calendar_id 相同")
-        return self
-
-
 class ChannelNightSchedule(_FrozenDescriptorModel):
     """描述渠道快捷排程可合并的夜盘触发时点。"""
 
@@ -335,8 +317,6 @@ class ChannelDescriptor(_FrozenDescriptorModel):
         可配置杠杆范围。
     account_form : ChannelAccountForm
         账户连接表单定义。
-    calendar : ChannelCalendar | None
-        渠道使用的交易日历；为空表示渠道不需要日期限制。
     schedule : ChannelSchedule
         渠道在公共前端采用的定时规则类型。
     portfolio : ChannelPortfolioPreset
@@ -354,7 +334,6 @@ class ChannelDescriptor(_FrozenDescriptorModel):
     defaults: ChannelDefaults
     leverage: ChannelLeverage
     account_form: ChannelAccountForm
-    calendar: ChannelCalendar | None = None
     schedule: ChannelSchedule
     portfolio: ChannelPortfolioPreset
 

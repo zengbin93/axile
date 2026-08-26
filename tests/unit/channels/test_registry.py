@@ -15,7 +15,6 @@ from axile.channels import (
     ChannelAccountFieldClipboard,
     ChannelAccountFieldConstraints,
     ChannelAccountForm,
-    ChannelCalendar,
     ChannelDefaults,
     ChannelDescriptor,
     ChannelEndpointConstraints,
@@ -57,7 +56,6 @@ def _plugin(
     *,
     required_modules: tuple[str, ...] = (),
     max_parallel_symbols: int = 4,
-    calendar: ChannelCalendar | None = None,
 ) -> ChannelPlugin:
     return ChannelPlugin(
         descriptor=ChannelDescriptor(
@@ -89,7 +87,6 @@ def _plugin(
             account_form=ChannelAccountForm(
                 fields=(ChannelAccountField(name="token", label="Token", kind="secret", width="full"),)
             ),
-            calendar=calendar,
             portfolio=ChannelPortfolioPreset(market_label="Vendor", example_symbols=("DEMO",)),
         ),
         account_config_model=DemoAccountConfig,
@@ -136,23 +133,9 @@ def test_builtin_channels_have_stable_order_and_descriptor_shape() -> None:
     assert plugins[2].descriptor.defaults.trade_algorithm.method == "TARGET-POS-TASK"
     assert plugins[1].descriptor.portfolio.market_label == "A股"
     assert plugins[1].descriptor.portfolio.example_symbols == ("600000.SH", "000001.SZ")
-    assert [plugin.descriptor.calendar.calendar_id for plugin in plugins] == ["china", "ashare", "china"]
-    assert [plugin.descriptor.calendar.fallback_calendar_id for plugin in plugins] == [None, "china", None]
     assert plugins[2].descriptor.portfolio == plugins[0].descriptor.portfolio
     assert [plugin.max_parallel_symbols for plugin in plugins] == [10, 10, 10]
     assert plugins[2].descriptor.account_form.fields[0].default is None
-
-
-def test_calendar_fallback_requires_a_complete_distinct_declaration() -> None:
-    with pytest.raises(ValidationError, match="必须同时声明"):
-        ChannelCalendar(calendar_id="ashare", label="A 股交易日历", fallback_calendar_id="china")
-    with pytest.raises(ValidationError, match="不能与 calendar_id 相同"):
-        ChannelCalendar(
-            calendar_id="ashare",
-            label="A 股交易日历",
-            fallback_calendar_id="ashare",
-            fallback_label="旧日历",
-        )
 
 
 def test_channel_descriptor_requires_schedule_kind() -> None:
@@ -247,15 +230,6 @@ def test_duplicate_channel_registration_fails_clearly() -> None:
 
     with pytest.raises(DuplicateChannelError, match="重复注册"):
         register_channel(_plugin("ctp"))
-
-
-def test_plugins_can_declare_same_calendar_without_cross_plugin_comparison() -> None:
-    list_channels()
-    register_channel(_plugin("vendor-one", calendar=ChannelCalendar(calendar_id="vendor", label="Vendor Calendar")))
-    register_channel(_plugin("vendor-two", calendar=ChannelCalendar(calendar_id="vendor", label="Other Label")))
-
-    assert get_channel("vendor-one").descriptor.calendar.calendar_id == "vendor"
-    assert get_channel("vendor-two").descriptor.calendar.label == "Other Label"
 
 
 def test_entry_point_is_loaded_once_and_appended_after_builtins(monkeypatch: pytest.MonkeyPatch) -> None:

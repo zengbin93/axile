@@ -13,7 +13,6 @@ class LogComponent(StrEnum):
     EXECUTION = "执行"
     WORKER = "任务"
     SCHEDULER = "调度"
-    CALENDAR = "日历"
     AUDIT = "审计"
     ALGORITHM = "算法"
     ORDER = "订单"

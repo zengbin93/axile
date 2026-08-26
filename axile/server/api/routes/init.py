@@ -9,11 +9,10 @@ Notes
 
 import os
 import signal
-from datetime import date, timedelta
 from typing import Any, Literal
 
 import aiohttp
-from fastapi import APIRouter, BackgroundTasks, File, HTTPException, Query, UploadFile, status
+from fastapi import APIRouter, BackgroundTasks, HTTPException, status
 from loguru import logger
 from pydantic import BaseModel, ConfigDict, TypeAdapter, ValidationError
 from sqlalchemy import text
@@ -28,17 +27,6 @@ from axile.common.config import (
     write_config_toml,
 )
 from axile.server.error_notifications import build_test_card
-from axile.server.trading_calendar import (
-    CALENDAR_INITIAL_HISTORY_DAYS,
-    CALENDAR_TARGET_FUTURE_DAYS,
-    CalendarFunctionResult,
-    CalendarInputEntry,
-    normalize_calendar_id,
-    parse_calendar_csv,
-    run_calendar_function,
-    stage_initial_calendars,
-    validate_calendar_entries,
-)
 
 router = APIRouter(prefix="/init", tags=["init"])
 
@@ -108,33 +96,12 @@ class InitSaveRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     sqlalchemy_database_uri: str
-    trading_calendars: list["InitTradingCalendar"] = []
     exe_err_feishu_key: str = ""
     environment: Literal["local", "staging", "production"] = "local"
     app_log_dir: str = "./logs"
     axile_log_rotation: str = "1 day"
     algorithm_modules: list[str] = []
     algorithm_directories: list[str] = []
-
-
-class InitTradingCalendar(BaseModel):
-    """向导为一个日历选定的唯一刷新方式和已验证数据。"""
-
-    model_config = ConfigDict(extra="forbid")
-
-    calendar_id: str
-    refresh_kind: Literal["csv", "python"]
-    function_code: str = ""
-    entries: list[CalendarInputEntry]
-
-
-class InitCalendarPreview(BaseModel):
-    """初始化 CSV 校验结果；数据随最终保存载荷回传，不在服务端缓存。"""
-
-    start: date
-    end: date
-    total: int
-    entries: list[CalendarInputEntry]
 
 
 def _prefill_values() -> dict[str, Any]:
@@ -169,37 +136,6 @@ def init_status() -> InitStatus:
         configured=is_configured(),
         environment=settings.environment,
         values=_prefill_values(),
-    )
-
-
-@router.post("/trading-calendar-csv", response_model=InitCalendarPreview)
-async def preview_initial_calendar_csv(
-    file: UploadFile = File(),
-    calendar_id: str = Query(default="china", alias="calendarId"),
-) -> InitCalendarPreview:
-    """校验初始化 CSV 并把记录直接返回给向导。"""
-    try:
-        entries = parse_calendar_csv(await file.read(), calendar_id=calendar_id)
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-    return InitCalendarPreview(
-        start=min(item.cal_date for item in entries),
-        end=max(item.cal_date for item in entries),
-        total=len(entries),
-        entries=entries,
-    )
-
-
-@router.post("/test-trading-calendar-function", response_model=CalendarFunctionResult, response_model_by_alias=True)
-async def test_initial_calendar_function(payload: dict[str, str]) -> CalendarFunctionResult:
-    """以正式首次刷新范围试跑初始化 Python 日历。"""
-    calendar_id = normalize_calendar_id(payload.get("calendarId", "china"))
-    today = date.today()
-    return await run_calendar_function(
-        payload.get("functionCode", ""),
-        today - timedelta(days=CALENDAR_INITIAL_HISTORY_DAYS),
-        today + timedelta(days=CALENDAR_TARGET_FUTURE_DAYS),
-        calendar_id=calendar_id,
     )
 
 
@@ -347,21 +283,6 @@ def init_save(payload: InitSaveRequest, background_tasks: BackgroundTasks) -> Te
             detail=f"数据库地址不合法：{exc}",
         ) from exc
 
-    staged: list[dict[str, Any]] = []
-    seen: set[str] = set()
-    for calendar in payload.trading_calendars:
-        calendar_id = normalize_calendar_id(calendar.calendar_id)
-        if calendar_id in seen:
-            raise HTTPException(status_code=422, detail=f"日历 {calendar_id} 只能配置一次")
-        seen.add(calendar_id)
-        try:
-            validate_calendar_entries(calendar.entries, calendar_id=calendar_id)
-        except ValueError as exc:
-            raise HTTPException(status_code=422, detail=str(exc)) from exc
-        if calendar.refresh_kind == "python" and not calendar.function_code.strip():
-            raise HTTPException(status_code=422, detail=f"日历 {calendar_id} 缺少 Python 函数")
-        staged.append(calendar.model_dump(mode="json"))
-
     values: dict[str, Any] = {
         "sqlalchemy_database_uri": payload.sqlalchemy_database_uri,
         "exe_err_feishu_key": payload.exe_err_feishu_key,
@@ -372,7 +293,6 @@ def init_save(payload: InitSaveRequest, background_tasks: BackgroundTasks) -> Te
         "algorithm_directories": payload.algorithm_directories,
     }
     try:
-        stage_initial_calendars(staged)
         write_config_toml(values)
     except OSError as exc:
         raise HTTPException(

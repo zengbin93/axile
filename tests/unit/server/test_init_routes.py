@@ -235,49 +235,10 @@ def test_init_save_writes_config_and_schedules_restart(
     assert restarted.get("done") is True
 
 
-def test_calendar_initialization_accepts_one_validated_source(
-    client: TestClient, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    monkeypatch.setattr(cfg, "CONFIG_TOML_PATH", tmp_path / "config.toml")
-    monkeypatch.setattr(init_module, "_restart_process", lambda: None)
-    staged: list[list[dict[str, object]]] = []
-    monkeypatch.setattr(init_module, "stage_initial_calendars", staged.append)
-    payload = client.post(
-        "/api/v1/init/save",
-        json={
-            "sqlalchemy_database_uri": "sqlite+aiosqlite:///./axile.db",
-            "trading_calendars": [
-                {
-                    "calendar_id": "china",
-                    "refresh_kind": "csv",
-                    "entries": [
-                        {"calendar_id": "china", "cal_date": "2026-08-23", "is_open": False},
-                        {"calendar_id": "china", "cal_date": "2026-08-24", "is_open": True},
-                    ],
-                }
-            ],
-        },
-    )
-
-    assert payload.status_code == 200
-    assert staged[0][0]["calendar_id"] == "china"
-    assert staged[0][0]["refresh_kind"] == "csv"
-
-
-def test_calendar_initialization_rejects_duplicate_calendar_ids(
-    client: TestClient, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    monkeypatch.setattr(cfg, "CONFIG_TOML_PATH", tmp_path / "config.toml")
-    calendar = {
-        "calendar_id": "china",
-        "refresh_kind": "csv",
-        "entries": [{"calendar_id": "china", "cal_date": "2026-08-23", "is_open": False}],
-    }
-
+def test_calendar_initialization_field_is_removed(client: TestClient) -> None:
     response = client.post(
         "/api/v1/init/save",
-        json={"sqlalchemy_database_uri": "sqlite+aiosqlite:///./axile.db", "trading_calendars": [calendar, calendar]},
+        json={"sqlalchemy_database_uri": "sqlite+aiosqlite:///./axile.db", "trading_calendars": []},
     )
 
     assert response.status_code == 422
-    assert "只能配置一次" in response.json()["detail"]

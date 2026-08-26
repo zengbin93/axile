@@ -4,13 +4,11 @@
  * 总开关 + 快捷|高级|自定义 + 补发 + 排程预览。
  * ``layout='step'``（默认，向导窄栏）：单栏，预览在底部。
  * ``layout='page'``（账户编辑页宽栏）：页面级两列，预览为右侧通高列，
- * 日历摘要归入预览头部，预览条数按右栏实际可视高度自适应。
+ * 预览条数按右栏实际可视高度自适应。
  * 动效与 :component:`AcctTimer` 原实现一致：panel-fade / grid 展开 / Segmented 滑块。
  */
 
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
-import { Link } from '@/components/ui/nav'
-import { OverflowText } from '@/components/ui/OverflowText'
 import { Segmented } from '@/components/ui/Segmented'
 import { Select } from '@/components/ui/Select'
 import { MOTION_LAYOUT, useRemountFade } from '@/lib/viewTransition'
@@ -34,7 +32,7 @@ import {
   PREVIEW_ROW_PITCH,
   previewLimitForHeight,
 } from '@/features/setup/previewTimeline'
-import { previewSchedule, type SchedulePreview, type ScheduleUnavailableReason } from '@/lib/api/accounts'
+import { previewSchedule, type SchedulePreview } from '@/lib/api/accounts'
 import type { TradeChannel } from '@/types/api'
 
 export type { TimerEditorState }
@@ -139,31 +137,10 @@ function formatScheduledAt(value: string): string {
   return `${get('month')}-${get('day')} ${get('hour')}:${get('minute')}`
 }
 
-function calendarSummary(preview: SchedulePreview | null): { text: string; warning: boolean } {
-  if (!preview) return { text: '交易日历 · 正在判断', warning: false }
-  const calendar = preview.calendar
-  if (calendar.requirement === 'not_required') return { text: '无需交易日历 · 24/7', warning: false }
-  if (calendar.availability === 'available') {
-    const coverage = calendar.coverage_end ? ` · 覆盖至 ${calendar.coverage_end}` : ''
-    return { text: `${calendar.label ?? '交易日历'} · 可用${coverage}`, warning: false }
-  }
-  const reasonText: Record<ScheduleUnavailableReason, string> = {
-    not_configured: '不可用 · 按排程执行',
-    uncovered: '当前日期不可用 · 按排程执行',
-    read_failed: '暂时不可用 · 按排程执行',
-  }
-  const reason = calendar.unavailable_reason ?? 'read_failed'
-  return {
-    text: `${calendar.label ?? '交易日历'} · ${reasonText[reason]}`,
-    warning: reason === 'read_failed',
-  }
-}
-
 export function TimerEditor({ tradeChannel, scheduleKind, nightSchedule, value, onChange, layout = 'step' }: TimerEditorProps) {
   const v = value
   const tabFade = useRemountFade(v.timerTab)
   const [schedulePreview, setSchedulePreview] = useState<SchedulePreview | null>(null)
-  const [previewLoading, setPreviewLoading] = useState(false)
   const [previewLoadingMore, setPreviewLoadingMore] = useState(false)
   const [previewError, setPreviewError] = useState<string | null>(null)
   const [previewMoreError, setPreviewMoreError] = useState<string | null>(null)
@@ -276,7 +253,6 @@ export function TimerEditor({ tradeChannel, scheduleKind, nightSchedule, value, 
       previewResultKey.current = null
       previewCascadePending.current = false
       setSchedulePreview(null)
-      setPreviewLoading(false)
       setPreviewError(null)
       return
     }
@@ -290,7 +266,6 @@ export function TimerEditor({ tradeChannel, scheduleKind, nightSchedule, value, 
 
     const controller = new AbortController()
     const timer = window.setTimeout(() => {
-      setPreviewLoading(true)
       const limit = layout === 'page' ? previewLimitRef.current : PREVIEW_MIN_ITEMS
       void previewSchedule(tradeChannel, cronExpr, { limit }, controller.signal)
         .then((next) => {
@@ -301,13 +276,11 @@ export function TimerEditor({ tradeChannel, scheduleKind, nightSchedule, value, 
             setPreviewCascade((current) => ({ generation: current.generation + 1, active: true }))
           }
           previewCascadePending.current = false
-          setPreviewLoading(false)
         })
         .catch((error) => {
           if (controller.signal.aborted || requestId !== previewRequestId.current) return
           previewCascadePending.current = false
           setPreviewError(error instanceof Error ? error.message : String(error))
-          setPreviewLoading(false)
         })
     }, 250)
     return () => {
@@ -408,10 +381,6 @@ export function TimerEditor({ tradeChannel, scheduleKind, nightSchedule, value, 
     previewAppendController.current?.abort()
   }, [])
 
-  const summary = tradeChannel
-    ? calendarSummary(schedulePreview)
-    : { text: '交易日历 · 选择渠道后判断', warning: false }
-
   const setTab = (tab: 'quick' | 'advanced' | 'custom') => {
     if (tab === 'custom') {
       const rawCron = v.rawCron.trim()
@@ -446,8 +415,6 @@ export function TimerEditor({ tradeChannel, scheduleKind, nightSchedule, value, 
 
   const presetCardT =
     'transition-[border-color,background-color,box-shadow] duration-200 ease-[cubic-bezier(0.4,0,0.2,1)] motion-reduce:transition-none'
-
-  const summaryText = previewLoading && !schedulePreview ? '交易日历 · 正在判断' : summary.text
 
   /** 编辑区列：tabs + 当前 tab 内容 + 补发。 */
   const editorColumn = (
@@ -541,18 +508,9 @@ export function TimerEditor({ tradeChannel, scheduleKind, nightSchedule, value, 
 
   const previewHeader = (
     <>
-      <div className="mb-1.5 flex items-center justify-between gap-3">
+      <div className="mb-3 flex items-center justify-between gap-3">
         <div className="text-sm font-[640]">排程预览 · 北京时间</div>
-        {schedulePreview?.calendar.requirement === 'required' && (
-          <Link to="/settings/trading-calendar" className="flex-none text-[12px] text-accent hover:underline">
-            交易日历设置
-          </Link>
-        )}
       </div>
-      <OverflowText
-        className={`mb-2.5 min-w-0 text-xs ${summary.warning ? 'text-warn' : 'text-ink-3'}`}
-        text={summaryText}
-      />
     </>
   )
 
@@ -574,33 +532,16 @@ export function TimerEditor({ tradeChannel, scheduleKind, nightSchedule, value, 
   ) : schedulePreview?.items.length ? (
     <div key={previewCascade.generation} className="space-y-1.5">
       {schedulePreview.items.map((item, index) => {
-        const tradingDay = item.calendar_day.slice(5)
-        const legacy = item.using_legacy_fallback
-          ? `${item.label ?? '中国交易日历'} · 存量兼容闭市保护中（A 股日历未覆盖） · `
-          : ''
-        const text = item.reason_code === 'CALENDAR.NO_NIGHT_SESSION'
-          ? '无对应夜盘，已跳过'
-          : item.calendar_status === 'available_open'
-          ? `${legacy}${tradingDay} 交易日，执行`
-          : item.calendar_status === 'available_closed'
-            ? `${legacy}休市，已跳过`
-            : item.calendar_status === 'unavailable'
-              ? '日历不可用，按排程执行'
-              : '按排程执行'
-        const warning = item.calendar_status === 'unavailable'
-          && item.unavailable_reason === 'read_failed'
         return (
           <div
             key={item.scheduled_at}
-            className={`grid grid-cols-[92px_minmax(0,1fr)] gap-3 text-[13px] ${
-              warning ? 'text-warn' : item.action === 'skip' ? 'text-ink-3' : 'text-ink-2'
-            } ${cascadeRows ? 'schedule-preview-row-in' : ''}`}
+            className={`grid grid-cols-[92px_minmax(0,1fr)] gap-3 text-[13px] text-ink-2 ${cascadeRows ? 'schedule-preview-row-in' : ''}`}
             style={cascadeRows ? {
               animationDelay: `${Math.min(index * PREVIEW_CASCADE_DELAY_STEP, PREVIEW_CASCADE_DELAY_MAX)}ms`,
             } : undefined}
           >
             <span className="num">{formatScheduledAt(item.scheduled_at)}</span>
-            <span>{text}</span>
+            <span>按排程触发</span>
           </div>
         )
       })}

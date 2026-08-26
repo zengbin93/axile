@@ -106,7 +106,6 @@ _COMPONENT_PREFIXES: tuple[tuple[str, LogComponent], ...] = (
     ("axile.server.api", LogComponent.API),
     ("axile.server.execution.worker_backend", LogComponent.WORKER),
     ("axile.server.execution.scheduler", LogComponent.SCHEDULER),
-    ("axile.server.trading_calendar", LogComponent.CALENDAR),
     ("axile.server.execution_audit", LogComponent.AUDIT),
     ("axile.server.error_notifications", LogComponent.NOTIFICATION),
     ("axile.executor.feishu_notifications", LogComponent.NOTIFICATION),

@@ -1,26 +1,5 @@
 /** 首启初始化向导接口。 */
-import { apiGet, apiSend, apiUpload } from '@/lib/api/client'
-import type { CalendarFunctionResult } from '@/lib/api/tradingCalendar'
-
-export interface InitCalendarEntry {
-  calendar_id: string
-  cal_date: string
-  is_open: boolean
-}
-
-export interface InitTradingCalendar {
-  calendar_id: string
-  refresh_kind: 'csv' | 'python'
-  function_code?: string
-  entries: InitCalendarEntry[]
-}
-
-export interface InitCalendarPreview {
-  start: string
-  end: string
-  total: number
-  entries: InitCalendarEntry[]
-}
+import { apiGet, apiSend } from '@/lib/api/client'
 
 /** 向导各字段的预填值（对应后端 Settings 的向导字段）。 */
 export interface InitValues {
@@ -32,7 +11,6 @@ export interface InitValues {
   axile_log_rotation: string
   algorithm_modules: string[]
   algorithm_directories: string[]
-  trading_calendars?: InitTradingCalendar[]
 }
 
 /** 初始化就绪状态与预填值。 */
@@ -89,14 +67,6 @@ export function saveExecutionAlert(exeErrFeishuKey: string): Promise<TestResult>
     }
     return result
   })
-}
-
-export function previewInitCalendarCsv(calendarId: string, file: File): Promise<InitCalendarPreview> {
-  return apiUpload<InitCalendarPreview>(`/init/trading-calendar-csv?calendarId=${encodeURIComponent(calendarId)}`, file)
-}
-
-export function testInitCalendarFunction(calendarId: string, functionCode: string): Promise<CalendarFunctionResult> {
-  return apiSend<CalendarFunctionResult>('POST', '/init/test-trading-calendar-function', { calendarId, functionCode })
 }
 
 /** 保存初始化配置；成功后后端将自退出并由 supervisor 拉起重启。 */

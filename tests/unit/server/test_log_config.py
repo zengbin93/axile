@@ -86,7 +86,6 @@ def test_execution_log_context_defaults_to_none() -> None:
         ("axile.server.api.routes.account_crud", "接口"),
         ("axile.server.execution.worker_backend.worker", "任务"),
         ("axile.server.execution.scheduler", "调度"),
-        ("axile.server.trading_calendar", "日历"),
         ("axile.server.execution_audit", "审计"),
         ("sqlalchemy.engine", "数据库"),
         ("uvicorn.error", "服务"),

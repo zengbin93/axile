@@ -4,7 +4,6 @@ import { Link, useNavigate } from '@/components/ui/nav'
 
 const SETTINGS_NAV = [
   { to: '/settings', label: '飞书告警', exact: true },
-  { to: '/settings/trading-calendar', label: '交易日历', exact: false },
 ] as const
 
 /** 设置中心共享外壳：桌面侧栏、移动端横向导航，以及统一的页面级操作。 */

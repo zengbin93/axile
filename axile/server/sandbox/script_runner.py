@@ -26,9 +26,8 @@ import multiprocessing
 import sys
 import traceback
 from dataclasses import dataclass
-from datetime import date
 from multiprocessing.connection import Connection
-from typing import Any, cast
+from typing import cast
 
 from axile.server.sandbox.context_snapshot import ContextSnapshot, SnapshotContext
 
@@ -37,9 +36,7 @@ __all__ = [
     "DEFAULT_MEMORY_MB",
     "DEFAULT_WALL_TIMEOUT_SECONDS",
     "ScriptExecutionError",
-    "CalendarScriptResult",
     "ScriptResult",
-    "run_calendar_script",
     "run_portfolio_script",
 ]
 
@@ -126,15 +123,6 @@ class ScriptResult:
 
     ok: bool
     target: dict[str, float] | None = None
-    error: ScriptExecutionError | None = None
-
-
-@dataclass(slots=True)
-class CalendarScriptResult:
-    """自定义交易日历脚本的通用结果。"""
-
-    ok: bool
-    value: Any = None
     error: ScriptExecutionError | None = None
 
 
@@ -438,54 +426,6 @@ def _execute_user_code(code: str, context: object | None) -> dict[str, float]:
     return cast("dict[str, float]", calc_func(context))
 
 
-def _execute_calendar_code(code: str, calendar_id: str, start: date, end: date) -> object:
-    """执行交易日历函数并返回其原始结果。"""
-    import inspect
-
-    namespace: dict[str, object] = {"date": date}
-    exec(code, namespace)  # noqa: S102 - 受限子进程内执行用户脚本
-    function = namespace.get("get_trading_calendar")
-    if not callable(function):
-        raise ValueError("get_trading_calendar 函数未找到或不可调用")
-    signature = inspect.signature(function)
-    if len(signature.parameters) != 3:
-        raise ValueError("get_trading_calendar 必须定义为 get_trading_calendar(calendar_id, start, end)")
-    return function(calendar_id, start, end)
-
-
-def _calendar_child_entry(
-    conn: Connection,
-    code: str,
-    calendar_id: str,
-    start: date,
-    end: date,
-    cpu_seconds: int,
-    memory_mb: int,
-) -> None:
-    """在隔离子进程中执行交易日历函数。"""
-    _apply_resource_limits(cpu_seconds, memory_mb)
-    try:
-        value = _execute_calendar_code(code, calendar_id, start, end)
-    except BaseException as exc:  # noqa: BLE001 - 需把脚本错误结构化回传
-        line, offset, error_type, message = _extract_error_fields(exc)
-        payload = {
-            "ok": False,
-            "error_line": line,
-            "error_offset": offset,
-            "error_type": error_type,
-            "error_message": message,
-            "traceback": traceback.format_exc(),
-        }
-    else:
-        payload = {"ok": True, "value": value}
-    try:
-        conn.send(payload)
-    except (BrokenPipeError, OSError):
-        pass
-    finally:
-        conn.close()
-
-
 def _terminate(process: multiprocessing.process.BaseProcess) -> None:
     """
     强制终止子进程，先 terminate 再 kill，确保不留僵尸.
@@ -565,67 +505,6 @@ def run_portfolio_script(
             parent_conn.close()
         except OSError:  # pragma: no cover - 管道已关闭
             pass
-
-
-def run_calendar_script(
-    code: str,
-    calendar_id: str,
-    start: date,
-    end: date,
-    *,
-    wall_timeout: float = DEFAULT_WALL_TIMEOUT_SECONDS,
-    cpu_seconds: int = DEFAULT_CPU_SECONDS,
-    memory_mb: int = DEFAULT_MEMORY_MB,
-) -> CalendarScriptResult:
-    """在公共脚本沙箱中执行自定义交易日历函数。"""
-    ctx = multiprocessing.get_context("spawn")
-    parent_conn, child_conn = ctx.Pipe(duplex=False)
-    process = ctx.Process(
-        target=_calendar_child_entry,
-        args=(child_conn, code, calendar_id, start, end, cpu_seconds, memory_mb),
-        name="axile-calendar-script",
-        daemon=True,
-    )
-    process.start()
-    child_conn.close()
-    try:
-        if not parent_conn.poll(wall_timeout):
-            return CalendarScriptResult(
-                ok=False,
-                error=ScriptExecutionError(
-                    f"自定义交易日历脚本执行超时（超过 {wall_timeout:.0f} 秒），已终止",
-                    error_type="TimeoutError",
-                ),
-            )
-        try:
-            payload = cast("dict[str, object]", parent_conn.recv())
-        except EOFError:
-            process.join(timeout=1.0)
-            return CalendarScriptResult(
-                ok=False,
-                error=ScriptExecutionError(
-                    f"自定义交易日历脚本异常退出（exitcode={process.exitcode}）",
-                    error_type="ResourceLimitExceeded",
-                ),
-            )
-        if payload.get("ok"):
-            return CalendarScriptResult(ok=True, value=payload.get("value"))
-        error_type = cast(str, payload.get("error_type") or "RuntimeError")
-        message = cast(str, payload.get("error_message") or "") or error_type
-        return CalendarScriptResult(
-            ok=False,
-            error=ScriptExecutionError(
-                message,
-                error_line=cast("int | None", payload.get("error_line")),
-                error_offset=cast("int | None", payload.get("error_offset")),
-                error_type=error_type,
-                error_message=message,
-                formatted_traceback=cast(str, payload.get("traceback") or ""),
-            ),
-        )
-    finally:
-        _terminate(process)
-        parent_conn.close()
 
 
 def _collect_result(

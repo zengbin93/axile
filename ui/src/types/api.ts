@@ -302,7 +302,6 @@ export interface AccountNextRun {
   /** 服务端按北京时间计算的未来执行时刻，最多三项、升序排列。 */
   next_run_times: string[]
   /** 按交易日历过滤后，未来真正会执行的时刻。 */
-  next_execution_times: string[]
 }
 
 /* ============================ 组合 ============================ */

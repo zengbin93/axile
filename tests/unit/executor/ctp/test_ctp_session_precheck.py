@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import datetime
 from types import SimpleNamespace
 from zoneinfo import ZoneInfo
 
@@ -11,14 +11,6 @@ from openctp_ctp import thosttraderapi as td
 from axile.executor.ctp.ctp_execute import CTPExecutor
 
 _SHANGHAI = ZoneInfo("Asia/Shanghai")
-
-
-class _Calendar:
-    def __init__(self, days: dict[date, bool]) -> None:
-        self.days = days
-
-    def is_open(self, _calendar_id: str, day: date) -> bool | None:
-        return self.days.get(day)
 
 
 def _executor() -> CTPExecutor:
@@ -42,7 +34,6 @@ def _executor() -> CTPExecutor:
         "unknown2612": SimpleNamespace(ExchangeID="SHFE", ProductID="unknown"),
         "missingclass2612": SimpleNamespace(ExchangeID="SHFE", ProductID="ag"),
     }
-    executor._trading_calendar = _Calendar({date(2026, 8, 24): True, date(2026, 8, 25): True})
     return executor
 
 

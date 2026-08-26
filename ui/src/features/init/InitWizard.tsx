@@ -14,8 +14,6 @@ import {
 } from '@/components/ui/stringList'
 import { ErrorNotice } from '@/components/ui/ErrorNotice'
 import { Row, Section, TEXT } from '@/features/account/editUi'
-import { CalendarSetupStep } from '@/features/init/CalendarSetupStep'
-import type { CalendarSetupSnapshot } from '@/features/init/calendarSetupState'
 import { advancedConfigChanges } from '@/features/init/advancedConfig'
 import { WizardPage } from '@/features/setup/WizardNav'
 import { ApiError } from '@/lib/api/client'
@@ -78,7 +76,7 @@ const COPY: Record<WizardMode, Copy> = {
 }
 
 // 可选告警集成独立成步；数据库/环境/日志等有可用默认值，收进确认页高级选项。
-const INIT_STEP_LABELS = ['交易日历', '执行告警'] as const
+const INIT_STEP_LABELS = ['执行告警'] as const
 const EDIT_STEP_LABELS = ['执行告警'] as const
 
 /** 表单草稿；`algorithm_modules` / `algorithm_directories` 以每行一项的文本承载，保存时切分为数组。 */
@@ -254,10 +252,6 @@ export function InitWizard({
   const [step, setStep] = useState(0)
   const [saving, setSaving] = useState(false)
   const [dbTest, setDbTest] = useState<TestState>(null)
-  const [calendarSetup, setCalendarSetup] = useState<CalendarSetupSnapshot>({
-    calendars: [],
-    summary: [],
-  })
   const [feishuTest, setFeishuTest] = useState<TestState>(null)
   const [confirm, setConfirm] = useState<ConfirmSpec | null>(null)
   const [saveError, setSaveError] = useState<Error | null>(null)
@@ -324,7 +318,6 @@ export function InitWizard({
       }
       await saveInit({
         ...draft,
-        ...(!isEdit ? { trading_calendars: calendarSetup.calendars } : {}),
         algorithm_modules: splitLines(draft.algorithm_modules),
         algorithm_directories: splitLines(draft.algorithm_directories),
       })
@@ -352,8 +345,7 @@ export function InitWizard({
   }
 
   const confirmStep = steps.length - 1
-  const calendarStep = 0
-  const alertStep = isEdit ? 0 : 1
+  const alertStep = 0
   const nextDisabled =
     step === confirmStep && !draft.sqlalchemy_database_uri.trim()
   const saveDisabled = saving || !draft.sqlalchemy_database_uri.trim()
@@ -392,19 +384,9 @@ export function InitWizard({
           <div
             className={`flex-1 overflow-y-auto [scrollbar-gutter:stable] ${isEdit && editSection === 'advanced' ? 'pb-24' : ''}`}
           >
-            {!isEdit && step === calendarStep && (
-              <WizardPage
-                kicker={kickerOf(1)}
-                title="配置交易日历"
-                lead="为当前交易渠道选择一种日历刷新方式（选填）。未配置时自动排程继续执行，后续可在设置中补充或替换并添加人工覆盖。"
-              >
-                <CalendarSetupStep onChange={setCalendarSetup} />
-              </WizardPage>
-            )}
-
             {step === alertStep && (!isEdit || editSection === 'alert') && (
               <WizardPage
-                kicker={kickerOf(2)}
+                kicker={kickerOf(1)}
                 title="执行错误告警（选填）"
                 lead="任一账户执行异常时，axile 会把错误卡片推送到此飞书机器人；系统级，区别于各账户自己的「飞书通知」。留空则不推送。保存后立即生效；「测试推送」使用当前输入，不会保存配置。"
               >
@@ -478,14 +460,6 @@ export function InitWizard({
                 <div className="max-w-[560px]">
                   <dl className="rounded-[14px] border border-line bg-surface px-4 py-2 text-[14px]">
                     {[
-                      ...(!isEdit
-                        ? calendarSetup.summary.length > 0
-                          ? calendarSetup.summary.map((value, index) => [
-                              `交易日历 ${index + 1}`,
-                              value,
-                            ])
-                          : [['交易日历', '未配置，自动排程继续执行']]
-                        : []),
                       [
                         '执行告警',
                         draft.exe_err_feishu_key

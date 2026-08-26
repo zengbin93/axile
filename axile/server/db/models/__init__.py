@@ -80,11 +80,6 @@ from axile.server.db.models.target_weight_snapshot import (
     TargetWeightSnapshotPublic,
     TargetWeightSnapshotSource,
 )
-from axile.server.db.models.trading_calendar import (
-    TradingCalendarConfig,
-    TradingCalendarOverride,
-    TradingCalendarRecord,
-)
 
 Portfolio.model_rebuild()
 Account.model_rebuild()
@@ -155,9 +150,6 @@ __all__ = [
     "Message",
     "ListResponse",
     "ListResponsePage",
-    "TradingCalendarRecord",
-    "TradingCalendarConfig",
-    "TradingCalendarOverride",
     "AccountActivityListPublic",
     "ExecutionActivity",
     "ScheduleSkip",

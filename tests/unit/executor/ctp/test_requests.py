@@ -1,7 +1,7 @@
 """CTP 原生请求字段构造与调用测试。"""
 
 import threading
-from datetime import date, datetime
+from datetime import datetime
 from types import SimpleNamespace
 from unittest.mock import Mock
 from zoneinfo import ZoneInfo
@@ -283,14 +283,6 @@ def test_settlement_query_confirms_when_current_day_is_missing(config: CTPAccoun
     executor._trader_api.ReqSettlementInfoConfirm.assert_called_once()
 
 
-class _SessionCalendar:
-    def __init__(self, days: dict[date, bool]) -> None:
-        self.days = days
-
-    def is_open(self, _calendar_id: str, day: date) -> bool | None:
-        return self.days.get(day)
-
-
 _SHANGHAI = ZoneInfo("Asia/Shanghai")
 
 
@@ -306,15 +298,6 @@ def _submit_point_executor(config: CTPAccountConfig) -> CTPExecutor:
             ExchangeID="SHFE", ProductID="bu", ProductClass=td.THOST_FTDC_PC_Futures, PriceTick=1.0
         ),
     }
-    executor._trading_calendar = _SessionCalendar(
-        {
-            date(2026, 8, 21): True,
-            date(2026, 8, 22): False,
-            date(2026, 8, 23): False,
-            date(2026, 8, 24): True,
-            date(2026, 8, 25): True,
-        }
-    )
     executor._trader_api = Mock()
     executor._trader_api.ReqOrderInsert.return_value = 0
     executor._order_keys = {}
@@ -357,31 +340,14 @@ def test_place_order_blocks_at_submit_after_session_end(
     assert executor._order_keys == {}
 
 
-def test_place_order_blocks_at_submit_on_non_trading_day(
+def test_place_order_delegates_calendar_date_to_broker(
     config: CTPAccountConfig, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     executor = _submit_point_executor(config)
     _at_clock(monkeypatch, datetime(2026, 8, 22, 21, 29, tzinfo=_SHANGHAI))
 
-    with pytest.raises(AccountControlBlockedError, match="CTP.SESSION.CLOSED"):
-        executor._place_order_impl("ag2612", OrderDirection.BUY, OrderType.LIMIT, 1, 9000)
-
-    executor._trader_api.ReqOrderInsert.assert_not_called()
-    assert executor._order_keys == {}
-
-
-def test_place_order_blocks_at_submit_without_calendar(
-    config: CTPAccountConfig, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    executor = _submit_point_executor(config)
-    executor._trading_calendar = None
-    _at_clock(monkeypatch, datetime(2026, 8, 24, 21, 29, tzinfo=_SHANGHAI))
-
-    with pytest.raises(AccountControlBlockedError, match="CTP.SESSION.CALENDAR_UNAVAILABLE"):
-        executor._place_order_impl("ag2612", OrderDirection.BUY, OrderType.LIMIT, 1, 9000)
-
-    executor._trader_api.ReqOrderInsert.assert_not_called()
-    assert executor._order_keys == {}
+    executor._place_order_impl("ag2612", OrderDirection.BUY, OrderType.LIMIT, 1, 9000)
+    executor._trader_api.ReqOrderInsert.assert_called_once()
 
 
 def test_place_order_recheck_blocks_after_planning_crosses_session_boundary(

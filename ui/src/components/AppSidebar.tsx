@@ -4,7 +4,6 @@ import {
   Ban,
   BellRing,
   Boxes,
-  CalendarDays,
   ChartNoAxesCombined,
   ChevronDown,
   ChevronUp,
@@ -222,7 +221,6 @@ export function AppSidebar() {
             </NavSection>
 
             <NavSection label="系统">
-              <NavItem item={{ label: '交易日历', icon: CalendarDays, to: '/settings/trading-calendar', active: exact('/settings/trading-calendar') }} />
               <NavItem item={{ label: '飞书告警', icon: BellRing, to: '/settings', active: exact('/settings') }} />
               <NavItem item={{ label: '高级', icon: Settings2, to: '/settings/advanced', active: exact('/settings/advanced') }} />
             </NavSection>

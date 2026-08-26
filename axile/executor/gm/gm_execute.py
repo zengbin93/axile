@@ -157,8 +157,8 @@ class GMExecutor(AbstractExecutor, UnifiedCallbackClient):
             return False
 
     def _check_trading_time(self) -> bool:
-        """检查是否在交易时间."""
-        return self._is_channel_calendar_open()
+        """交易时间由 GM 与柜台在请求时校验."""
+        return True
 
     # ==================== 回调模式方法 ====================
 

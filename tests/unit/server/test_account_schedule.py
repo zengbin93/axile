@@ -1,49 +1,25 @@
-"""自动排程的日历判断、预览与统一活动流测试。"""
+"""自动排程预览与触发测试。"""
 
 from __future__ import annotations
 
 import asyncio
-from datetime import date, datetime, timezone
-from pathlib import Path
+from datetime import datetime, timezone
 from types import SimpleNamespace
-from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-from sqlmodel import SQLModel
+from pydantic import ValidationError
 
 from axile.common.trade_channel import TradeChannel
 from axile.server.api.routes import account_schedule
 from axile.server.cron import SCHEDULER_TIMEZONE, parse_cron_expr
-from axile.server.db.models import (
-    ExecuteRecord,
-    ExecutionActivity,
-    ScheduleSkip,
-    ScheduleSkipActivity,
-    TradingCalendarConfig,
-    TradingCalendarRecord,
-)
 from axile.server.execution import rebalance as rebalance_execution
 from axile.server.execution import scheduler as execution_scheduler
-from axile.server.trading_calendar import (
-    CalendarDayDecision,
-    CalendarDecisionStatus,
-    CalendarUnavailableReason,
-)
 
 
 class _SessionContext:
-    def __init__(
-        self,
-        account: object | None = None,
-        *,
-        added: list[object] | None = None,
-        fail_commit: bool = False,
-    ) -> None:
+    def __init__(self, account: object | None = None) -> None:
         self.account = account
-        self.added = added if added is not None else []
-        self.fail_commit = fail_commit
 
     async def __aenter__(self) -> "_SessionContext":
         return self
@@ -54,155 +30,39 @@ class _SessionContext:
     async def get(self, _model: object, _key: object) -> object | None:
         return self.account
 
-    def add(self, value: object) -> None:
-        self.added.append(value)
 
-    async def commit(self) -> None:
-        if self.fail_commit:
-            raise RuntimeError("database unavailable")
-
-
-def _account() -> SimpleNamespace:
-    return SimpleNamespace(id=7, is_started=True, cron_expr="30 9 * * *", trade_channel=TradeChannel.CTP)
-
-
-def _decision(
-    status: CalendarDecisionStatus,
-    reason: CalendarUnavailableReason | None = None,
-) -> CalendarDayDecision:
-    return CalendarDayDecision(
-        channel="ctp",
-        day=date(2026, 8, 24),
-        calendar_id="china",
-        label="中国交易日历",
-        status=status,
-        unavailable_reason=reason,
+def _account(*, started: bool = True) -> SimpleNamespace:
+    return SimpleNamespace(
+        id=7,
+        name="测试账户",
+        is_started=started,
+        cron_expr="30 9 * * *",
+        trade_channel=TradeChannel.CTP,
     )
 
 
-@pytest.mark.parametrize(
-    ("status", "reason"),
-    [
-        (CalendarDecisionStatus.NOT_REQUIRED, None),
-        (CalendarDecisionStatus.AVAILABLE_OPEN, None),
-        (CalendarDecisionStatus.UNAVAILABLE, CalendarUnavailableReason.NOT_CONFIGURED),
-        (CalendarDecisionStatus.UNAVAILABLE, CalendarUnavailableReason.UNCOVERED),
-        (CalendarDecisionStatus.UNAVAILABLE, CalendarUnavailableReason.READ_FAILED),
-    ],
-)
-def test_scheduled_rebalance_executes_unless_calendar_is_explicitly_closed(
-    monkeypatch: pytest.MonkeyPatch,
-    status: CalendarDecisionStatus,
-    reason: CalendarUnavailableReason | None,
-) -> None:
+def test_scheduled_rebalance_always_delegates_to_channel(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(execution_scheduler, "SessionLocal", lambda: _SessionContext(_account()))
-
-    async def evaluate(*_args: object) -> CalendarDayDecision:
-        return _decision(status, reason)
-
     executions: list[tuple[object, ...]] = []
 
     async def execute_trade(*args: object) -> None:
         executions.append(args)
 
-    monkeypatch.setattr(execution_scheduler, "evaluate_channel_calendar_moment", evaluate)
-    monkeypatch.setattr(rebalance_execution, "execute_trade", execute_trade)
-
-    asyncio.run(execution_scheduler.execute_scheduled_rebalance(7))
-    assert executions == [(7, None, "scheduler")]
-
-
-def test_gm_legacy_closed_day_skips_before_execution(monkeypatch: pytest.MonkeyPatch) -> None:
-    account = SimpleNamespace(id=7, is_started=True, cron_expr="30 9 * * *", trade_channel=TradeChannel.GM)
-    added: list[object] = []
-    sessions = iter([_SessionContext(account), _SessionContext(added=added)])
-    monkeypatch.setattr(execution_scheduler, "SessionLocal", lambda: next(sessions))
-
-    async def evaluate(*_args: object) -> CalendarDayDecision:
-        return CalendarDayDecision(
-            channel="gm",
-            day=date(2026, 8, 24),
-            calendar_id="china",
-            label="中国交易日历",
-            status=CalendarDecisionStatus.AVAILABLE_CLOSED,
-            using_legacy_fallback=True,
-        )
-
-    execute_trade = MagicMock()
-    monkeypatch.setattr(execution_scheduler, "evaluate_channel_calendar_moment", evaluate)
-    monkeypatch.setattr(rebalance_execution, "execute_trade", execute_trade)
-
-    asyncio.run(execution_scheduler.execute_scheduled_rebalance(7))
-
-    execute_trade.assert_not_called()
-    assert len(added) == 1
-    record = added[0]
-    assert isinstance(record, ScheduleSkip)
-    assert record.calendar_id == "china"
-    assert record.calendar_label == "中国交易日历"
-
-
-@pytest.mark.parametrize("fail_commit", [False, True])
-def test_closed_day_never_executes_even_if_skip_record_fails(
-    monkeypatch: pytest.MonkeyPatch,
-    fail_commit: bool,
-) -> None:
-    added: list[object] = []
-    sessions = iter(
-        [
-            _SessionContext(_account()),
-            _SessionContext(added=added, fail_commit=fail_commit),
-        ]
-    )
-    monkeypatch.setattr(execution_scheduler, "SessionLocal", lambda: next(sessions))
-
-    async def evaluate(*_args: object) -> CalendarDayDecision:
-        return _decision(CalendarDecisionStatus.AVAILABLE_CLOSED)
-
-    execute_trade = MagicMock()
-    monkeypatch.setattr(execution_scheduler, "evaluate_channel_calendar_moment", evaluate)
-    monkeypatch.setattr(rebalance_execution, "execute_trade", execute_trade)
-
-    asyncio.run(execution_scheduler.execute_scheduled_rebalance(7))
-
-    execute_trade.assert_not_called()
-    assert len(added) == 1
-    record = added[0]
-    assert isinstance(record, ScheduleSkip)
-    assert record.reason_code == "CALENDAR.CLOSED"
-    assert record.calendar_id == "china"
-
-
-def test_calendar_evaluation_exception_is_fail_open(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(execution_scheduler, "SessionLocal", lambda: _SessionContext(_account()))
-
-    async def evaluate(*_args: object) -> CalendarDayDecision:
-        raise RuntimeError("unexpected calendar failure")
-
-    executions: list[tuple[object, ...]] = []
-
-    async def execute_trade(*args: object) -> None:
-        executions.append(args)
-
-    monkeypatch.setattr(execution_scheduler, "evaluate_channel_calendar_moment", evaluate)
     monkeypatch.setattr(rebalance_execution, "execute_trade", execute_trade)
     asyncio.run(execution_scheduler.execute_scheduled_rebalance(7))
     assert executions == [(7, None, "scheduler")]
 
 
 def test_scheduled_rebalance_ignores_stale_job_for_stopped_account(monkeypatch: pytest.MonkeyPatch) -> None:
-    account = SimpleNamespace(is_started=False, cron_expr="30 9 * * *", trade_channel=TradeChannel.CTP)
-    monkeypatch.setattr(execution_scheduler, "SessionLocal", lambda: _SessionContext(account))
-
-    async def evaluate(*_args: object) -> CalendarDayDecision:
-        raise AssertionError("stopped account must not evaluate calendar")
-
-    monkeypatch.setattr(execution_scheduler, "evaluate_channel_calendar_moment", evaluate)
+    monkeypatch.setattr(execution_scheduler, "SessionLocal", lambda: _SessionContext(_account(started=False)))
+    execute_trade = MagicMock()
+    monkeypatch.setattr(rebalance_execution, "execute_trade", execute_trade)
     asyncio.run(execution_scheduler.execute_scheduled_rebalance(7))
+    execute_trade.assert_not_called()
 
 
-def test_create_job_targets_calendar_wrapper(monkeypatch: pytest.MonkeyPatch) -> None:
-    account = SimpleNamespace(id=7, name="测试账户", is_started=True, trade_channel=TradeChannel.CTP)
+def test_create_job_targets_scheduler_wrapper(monkeypatch: pytest.MonkeyPatch) -> None:
+    account = _account()
     scheduler = SimpleNamespace(add_job=MagicMock())
     monkeypatch.setattr(execution_scheduler, "SessionLocal", lambda: _SessionContext(account))
 
@@ -217,254 +77,43 @@ def test_create_job_targets_calendar_wrapper(monkeypatch: pytest.MonkeyPatch) ->
     assert kwargs["next_run_time"].tzinfo == SCHEDULER_TIMEZONE
 
 
-def test_next_schedule_times_deduplicates_and_uses_beijing_timezone() -> None:
-    start = datetime(2026, 8, 23, 8, 0, tzinfo=SCHEDULER_TIMEZONE)
-    values = account_schedule._next_schedule_times(
-        parse_cron_expr("30 9 * * * | 30 9 * * *"),
-        start=start,
-        limit=3,
-    )
-    assert [value.isoformat() for value in values] == [
-        "2026-08-23T09:30:00+08:00",
-        "2026-08-24T09:30:00+08:00",
-        "2026-08-25T09:30:00+08:00",
-    ]
-    continued = account_schedule._next_schedule_times(
-        parse_cron_expr("30 9 * * * | 30 9 * * *"),
-        start=values[0],
-        limit=2,
-        exclusive=True,
-    )
-    assert [value.isoformat() for value in continued] == [
-        "2026-08-24T09:30:00+08:00",
-        "2026-08-25T09:30:00+08:00",
-    ]
+def test_schedule_preview_returns_raw_cron_points_with_cursor(monkeypatch: pytest.MonkeyPatch) -> None:
+    evaluated = datetime(2026, 8, 26, 9, 0, tzinfo=SCHEDULER_TIMEZONE)
 
-
-def test_schedule_preview_maps_only_closed_to_skip(monkeypatch: pytest.MonkeyPatch) -> None:
-    closed_at = datetime(2026, 8, 24, 9, 30, tzinfo=SCHEDULER_TIMEZONE)
-    unavailable_at = datetime(2026, 8, 25, 9, 30, tzinfo=SCHEDULER_TIMEZONE)
-    later_at = datetime(2026, 8, 26, 9, 30, tzinfo=SCHEDULER_TIMEZONE)
-    monkeypatch.setattr(
-        account_schedule,
-        "_next_schedule_times",
-        lambda *_args, **_kwargs: [closed_at, unavailable_at, later_at],
-    )
-
-    async def summary(*_args: object, **_kwargs: object) -> account_schedule.SchedulePreviewCalendar:
-        return account_schedule.SchedulePreviewCalendar(
-            requirement="required",
-            availability="unavailable",
-            unavailable_reason=CalendarUnavailableReason.UNCOVERED,
-            calendar_id="china",
-            label="中国交易日历",
-        )
-
-    async def decision(_session: object, _channel: object, current: datetime) -> CalendarDayDecision:
-        if current.date() == closed_at.date():
-            return _decision(CalendarDecisionStatus.AVAILABLE_CLOSED)
-        return CalendarDayDecision(
-            channel="ctp",
-            day=unavailable_at.date(),
-            calendar_id="china",
-            status=CalendarDecisionStatus.UNAVAILABLE,
-            unavailable_reason=CalendarUnavailableReason.UNCOVERED,
-        )
-
-    monkeypatch.setattr(account_schedule, "_calendar_summary", summary)
-    monkeypatch.setattr(account_schedule, "evaluate_channel_calendar_moment", decision)
-    response = asyncio.run(
-        account_schedule.schedule_preview(
-            object(),  # type: ignore[arg-type]
-            account_schedule.SchedulePreviewRequest(
-                trade_channel=TradeChannel.CTP,
-                cron_expr="30 9 * * *",
-                limit=2,
-            ),
-        )
-    )
-    assert [item.action for item in response.items] == ["skip", "execute"]
-    assert response.items[1].unavailable_reason is CalendarUnavailableReason.UNCOVERED
-    assert response.has_more is True
-    assert response.next_cursor == unavailable_at
-
-
-def test_schedule_preview_uses_its_beijing_date_for_calendar_summary(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """跨 UTC/北京时间日界时，摘要与预览决策应查询同一自然日。"""
-    session_factory = asyncio.run(_create_database(tmp_path / "legacy-preview.db"))
-    utc_now = datetime(2026, 8, 23, 16, 30, tzinfo=timezone.utc)
-    scheduled_at = datetime(2026, 8, 24, 9, 30, tzinfo=SCHEDULER_TIMEZONE)
-
-    class FrozenDateTime(datetime):
+    class _Datetime(datetime):
         @classmethod
-        def now(cls, tz: object | None = None) -> datetime:
-            return utc_now.astimezone(tz)
+        def now(cls, tz: object = None) -> datetime:
+            return evaluated
 
-    monkeypatch.setattr(account_schedule, "datetime", FrozenDateTime)
-    monkeypatch.setattr(account_schedule, "_next_schedule_times", lambda *_args, **_kwargs: [scheduled_at])
-
-    async def exercise() -> account_schedule.SchedulePreviewResponse:
-        async with session_factory() as session:
-            session.add_all(
-                [
-                    TradingCalendarConfig(calendar_id="china", refresh_kind="tushare"),
-                    TradingCalendarRecord(calendar_id="china", cal_date=scheduled_at.date(), is_open=False),
-                ]
-            )
-            await session.commit()
-            return await account_schedule.schedule_preview(
-                session,
-                account_schedule.SchedulePreviewRequest(
-                    trade_channel=TradeChannel.CTP,
-                    cron_expr="30 9 * * *",
-                    limit=1,
-                ),
-            )
-
-    response = asyncio.run(exercise())
-    assert response.evaluated_at.date() == date(2026, 8, 24)
-    assert response.calendar.availability == "available"
-    assert response.items[0].action == "skip"
-    assert response.items[0].calendar_status is CalendarDecisionStatus.AVAILABLE_CLOSED
-
-
-def test_schedule_preview_exposes_legacy_fallback_source(monkeypatch: pytest.MonkeyPatch) -> None:
-    scheduled_at = datetime(2026, 8, 24, 9, 30, tzinfo=SCHEDULER_TIMEZONE)
-    monkeypatch.setattr(account_schedule, "_next_schedule_times", lambda *_args, **_kwargs: [scheduled_at])
-
-    async def summary(*_args: object, **_kwargs: object) -> account_schedule.SchedulePreviewCalendar:
-        return account_schedule.SchedulePreviewCalendar(
-            requirement="required",
-            availability="unavailable",
-            unavailable_reason=CalendarUnavailableReason.NOT_CONFIGURED,
-            calendar_id="ashare",
-            label="A 股交易日历",
-        )
-
-    async def decision(*_args: object) -> CalendarDayDecision:
-        return CalendarDayDecision(
-            channel="gm",
-            day=scheduled_at.date(),
-            calendar_id="china",
-            label="中国交易日历",
-            status=CalendarDecisionStatus.AVAILABLE_CLOSED,
-            using_legacy_fallback=True,
-            reason_code="CALENDAR.CLOSED",
-        )
-
-    monkeypatch.setattr(account_schedule, "_calendar_summary", summary)
-    monkeypatch.setattr(account_schedule, "evaluate_channel_calendar_moment", decision)
-    response = asyncio.run(
-        account_schedule.schedule_preview(
-            object(),  # type: ignore[arg-type]
-            account_schedule.SchedulePreviewRequest(
-                trade_channel=TradeChannel.GM,
-                cron_expr="30 9 * * *",
-                limit=1,
-            ),
-        )
+    monkeypatch.setattr(account_schedule, "datetime", _Datetime)
+    payload = account_schedule.SchedulePreviewRequest(
+        trade_channel=TradeChannel.CTP,
+        cron_expr="30 9 * * *",
+        limit=2,
     )
+    response = asyncio.run(account_schedule.schedule_preview(payload))
+    assert [item.scheduled_at.isoformat() for item in response.items] == [
+        "2026-08-26T09:30:00+08:00",
+        "2026-08-27T09:30:00+08:00",
+    ]
+    assert response.next_cursor == response.items[-1].scheduled_at
+    assert response.has_more is True
 
-    item = response.items[0]
-    assert item.action == "skip"
-    assert item.calendar_id == "china"
-    assert item.label == "中国交易日历"
-    assert item.using_legacy_fallback is True
-
-
-async def _create_database(path: Path) -> async_sessionmaker[AsyncSession]:
-    engine = create_async_engine(f"sqlite+aiosqlite:///{path}")
-    async with engine.begin() as connection:
-        await connection.run_sync(SQLModel.metadata.create_all)
-    return async_sessionmaker(engine, expire_on_commit=False)
-
-
-def test_activity_merges_sorts_and_pages_across_tables(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    session_factory = asyncio.run(_create_database(tmp_path / "activity.db"))
-
-    async def account_exists(*_args: object) -> object:
-        return SimpleNamespace(id=7)
-
-    monkeypatch.setattr(account_schedule, "_get_account_or_404", account_exists)
-
-    async def exercise() -> account_schedule.AccountActivityListPublic:
-        async with session_factory() as session:
-            session.add_all(
-                [
-                    ExecuteRecord(
-                        execution_id="exec-new",
-                        account_id=7,
-                        created_at="2026-08-24T12:00:00+08:00",
-                        raw_input={},
-                        raw_result={},
-                        is_success=1,
-                    ),
-                    ExecuteRecord(
-                        execution_id="exec-old",
-                        account_id=7,
-                        created_at="2026-08-24T10:00:00+08:00",
-                        raw_input={},
-                        raw_result={},
-                        is_success=0,
-                    ),
-                    ScheduleSkip(
-                        account_id=7,
-                        channel="ctp",
-                        triggered_at="2026-08-24T11:00:00+08:00",
-                        calendar_id="china",
-                        calendar_day=date(2026, 8, 24),
-                        calendar_label="中国交易日历",
-                    ),
-                    ScheduleSkip(
-                        account_id=7,
-                        channel="ctp",
-                        triggered_at="2026-08-24T09:00:00+08:00",
-                        calendar_id="china",
-                        calendar_day=date(2026, 8, 24),
-                        calendar_label="中国交易日历",
-                    ),
-                ]
-            )
-            await session.commit()
-            return await account_schedule.account_activity(session, 7, skip=1, limit=2)
-
-    result = asyncio.run(exercise())
-    assert result.count == 4
-    assert [item.kind for item in result.data] == ["schedule_skip", "execution"]
-    assert isinstance(result.data[0], ScheduleSkipActivity)
-    assert isinstance(result.data[1], ExecutionActivity)
-    assert result.data[1].record.execution_id == "exec-old"
+    continued = asyncio.run(
+        account_schedule.schedule_preview(payload.model_copy(update={"after": response.next_cursor}))
+    )
+    assert continued.items[0].scheduled_at.isoformat() == "2026-08-28T09:30:00+08:00"
 
 
-def test_schedule_preview_models_enforce_limits_and_serialize_timezone() -> None:
-    with pytest.raises(ValueError):
+def test_schedule_preview_models_enforce_limits_and_timezone() -> None:
+    with pytest.raises(ValidationError):
         account_schedule.SchedulePreviewRequest(
             trade_channel=TradeChannel.CTP,
             cron_expr="30 9 * * *",
             limit=101,
         )
-    with pytest.raises(ValueError):
-        account_schedule.SchedulePreviewRequest(
-            trade_channel=TradeChannel.CTP,
-            cron_expr="30 9 * * *",
-            after=datetime(2026, 8, 23, 9, 30),
-        )
-    cursor = datetime(2026, 8, 23, 9, 30, tzinfo=SCHEDULER_TIMEZONE)
     response = account_schedule.SchedulePreviewResponse(
-        evaluated_at=datetime(2026, 8, 23, 8, 0, tzinfo=SCHEDULER_TIMEZONE),
-        calendar=account_schedule.SchedulePreviewCalendar(
-            requirement="required",
-            availability="unavailable",
-            unavailable_reason=CalendarUnavailableReason.NOT_CONFIGURED,
-        ),
-        items=[],
-        next_cursor=cursor,
-        has_more=True,
+        evaluated_at=datetime(2026, 8, 26, tzinfo=timezone.utc),
+        items=[account_schedule.SchedulePreviewItem(scheduled_at=datetime(2026, 8, 27, tzinfo=timezone.utc))],
     )
-    payload: dict[str, Any] = response.model_dump(mode="json")
-    assert payload["timezone"] == "Asia/Shanghai"
-    assert payload["evaluated_at"].endswith("+08:00")
-    assert payload["next_cursor"].endswith("+08:00")
-    assert payload["has_more"] is True
+    assert response.timezone == "Asia/Shanghai"

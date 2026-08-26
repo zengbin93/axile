@@ -33,12 +33,14 @@ def test_migration_history_is_linear() -> None:
         "0003_plugin_network.py",
         "0004_account_asset_snapshot.py",
         "0005_target_weight_snapshot.py",
+        "0006_drop_trading_calendar.py",
     ]
     initial = _load_migration(migration_paths[0])
     calendar = _load_migration(migration_paths[1])
     plugin_network = _load_migration(migration_paths[2])
     account_asset_snapshot = _load_migration(migration_paths[3])
     target_weight_snapshot = _load_migration(migration_paths[4])
+    drop_trading_calendar = _load_migration(migration_paths[5])
     assert initial.revision == "0001"
     assert initial.down_revision is None
     assert calendar.revision == "0002"
@@ -49,6 +51,8 @@ def test_migration_history_is_linear() -> None:
     assert account_asset_snapshot.down_revision == "0003"
     assert target_weight_snapshot.revision == "0005"
     assert target_weight_snapshot.down_revision == "0004"
+    assert drop_trading_calendar.revision == "0006"
+    assert drop_trading_calendar.down_revision == "0005"
 
 
 def test_account_asset_snapshot_migration_backfills_execution_assets() -> None:
@@ -330,6 +334,32 @@ def test_trading_calendar_migration_adds_calendar_table() -> None:
             "last_sync_at",
             "updated_at",
         }
+
+
+def test_drop_trading_calendar_migration_preserves_schedule_history() -> None:
+    initial = _load_migration(_MIGRATIONS_DIR / "0001_initial.py")
+    calendar = _load_migration(_MIGRATIONS_DIR / "0002_trading_calendar.py")
+    migration = _load_migration(_MIGRATIONS_DIR / "0006_drop_trading_calendar.py")
+    engine = sa.create_engine("sqlite://")
+
+    with engine.begin() as connection:
+        operations = Operations(MigrationContext.configure(connection))
+        initial.op = operations
+        initial.upgrade()
+        calendar.op = operations
+        calendar.upgrade()
+        migration.op = operations
+        migration.upgrade()
+
+        table_names = set(sa.inspect(connection).get_table_names())
+        assert "schedule_skip" in table_names
+        assert "trading_calendar" not in table_names
+        assert "trading_calendar_override" not in table_names
+        assert "trading_calendar_config" not in table_names
+
+        migration.downgrade()
+        restored = set(sa.inspect(connection).get_table_names())
+        assert {"trading_calendar", "trading_calendar_override", "trading_calendar_config"} <= restored
 
 
 def test_plugin_network_migration_rewrites_account_config_and_downgrades() -> None:

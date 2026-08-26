@@ -19,7 +19,6 @@ dependencies = [
     "pydantic-settings>=2.8.1",
     "python-dotenv>=1.1.0",
     "sqlalchemy>=2.0.46",
-    "shinny-calendar>=1.0.2026,<2",
     "sqlmodel>=0.0.24",
     "streamlit>=1.41.0",
     "typer>=0.20.1",

@@ -23,7 +23,6 @@ import { PortfolioDetailPage } from '@/pages/PortfolioDetailPage'
 import { PortfolioEditPage } from '@/pages/PortfolioEditPage'
 import { Placeholder } from '@/pages/Placeholder'
 import { SystemConfigPage } from '@/pages/SystemConfigPage'
-import { TradingCalendarPage } from '@/pages/TradingCalendarPage'
 import { WizardLayout } from '@/features/setup/WizardLayout'
 import { SetupHub } from '@/pages/setup/SetupHub'
 import { PfName, PfDefine, PfDone } from '@/pages/setup/PortfolioSteps'
@@ -115,7 +114,6 @@ const router = createBrowserRouter([
           { path: 'portfolios/:id/edit', element: <PortfolioEditPage /> },
           { path: 'settings', element: <SystemConfigPage /> },
           { path: 'settings/advanced', element: <SystemConfigPage section="advanced" /> },
-          { path: 'settings/trading-calendar', element: <TradingCalendarPage /> },
           { path: '*', element: <Placeholder title="页面不存在" milestone="—" /> },
         ],
       },

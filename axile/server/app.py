@@ -24,7 +24,6 @@ from axile.server.execution.ctp_channels import prepare_china_channel_accounts, 
 from axile.server.execution.live import live_hub
 from axile.server.execution.worker_backend.manager import shutdown_worker_backend_manager
 from axile.server.initial_data import init_scheduler
-from axile.server.trading_calendar import apply_pending_initial_calendars, register_trading_calendar_job
 
 __all__ = [
     "ALGORITHM_DIRECTORIES_ENV",
@@ -218,8 +217,6 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         return
     _load_configured_algorithm_directories()
     _load_configured_algorithm_modules()
-    await apply_pending_initial_calendars()
-    register_trading_calendar_job(scheduler)
     register_china_channel_jobs(scheduler)
     scheduler.start()
     await init_scheduler()

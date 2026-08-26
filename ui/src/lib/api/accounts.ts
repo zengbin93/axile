@@ -13,33 +13,13 @@ import type {
   TargetWeightSnapshot,
 } from '@/types/api'
 
-export type ScheduleCalendarStatus = 'not_required' | 'available_open' | 'available_closed' | 'unavailable'
-export type ScheduleUnavailableReason = 'not_configured' | 'uncovered' | 'read_failed'
-
 export interface SchedulePreview {
   timezone: 'Asia/Shanghai'
   evaluated_at: string
-  calendar: {
-    requirement: 'required' | 'not_required'
-    availability: 'available' | 'unavailable' | 'not_required'
-    unavailable_reason: ScheduleUnavailableReason | null
-    calendar_id: string | null
-    label: string | null
-    coverage_start: string | null
-    coverage_end: string | null
-  }
   next_cursor: string | null
   has_more: boolean
   items: Array<{
     scheduled_at: string
-    calendar_day: string
-    calendar_status: ScheduleCalendarStatus
-    action: 'execute' | 'skip'
-    unavailable_reason: ScheduleUnavailableReason | null
-    calendar_id: string | null
-    label: string | null
-    using_legacy_fallback: boolean
-    reason_code: 'CALENDAR.CLOSED' | 'CALENDAR.NO_NIGHT_SESSION' | null
   }>
 }
 

@@ -414,7 +414,7 @@ export function AccountDetail({
         </div>
         <ScheduleSummary
           lastExecutedAt={item.last_exec_at}
-          nextRunAt={nextRun.data?.next_execution_times[0] ?? null}
+          nextRunAt={nextRun.data?.next_run_times[0] ?? null}
         />
 
         <div className="mt-6 border-t border-line pt-4">
@@ -708,7 +708,7 @@ export function AccountDetail({
           ) : nextRun.error && nextRun.data === null ? null : (
             <ScheduleTimeline
               lastExecutedAt={item.last_exec_at}
-              nextRunTimes={nextRun.data?.next_execution_times ?? []}
+              nextRunTimes={nextRun.data?.next_run_times ?? []}
             />
           )}
           <ErrorNotice

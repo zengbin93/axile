@@ -12,70 +12,16 @@ from axile.server.core.db import SessionLocal
 from axile.server.core.log_config import execution_log_context
 from axile.server.core.scheduler import Scheduler
 from axile.server.cron import SCHEDULER_TIMEZONE, is_blank_cron_expr
-from axile.server.db.models import Account, ScheduleSkip
+from axile.server.db.models import Account
 from axile.server.repositories import get_latest_portfolio_id_by_account_id
-from axile.server.trading_calendar import (
-    CalendarDayDecision,
-    CalendarDecisionStatus,
-    CalendarUnavailableReason,
-    evaluate_channel_calendar_moment,
-)
 
 
 async def execute_scheduled_rebalance(account_id: int) -> None:
-    """在进入执行锁前按北京时间和渠道日历判断一次 Cron 触发。"""
-    triggered_at = datetime.now(SCHEDULER_TIMEZONE)
-    decision: CalendarDayDecision | None = None
+    """确认账户仍可调度后执行一次 Cron 触发。"""
     async with SessionLocal() as session:
         account = await session.get(Account, account_id)
         if account is None or not account.is_started or is_blank_cron_expr(account.cron_expr):
             return
-        try:
-            decision = await evaluate_channel_calendar_moment(session, account.trade_channel, triggered_at)
-        except Exception:  # noqa: BLE001 - 任何日历异常都必须按排程放行
-            loguru.logger.bind(account_id=account_id, channel=str(account.trade_channel)).exception(
-                "交易日历判断失败，按排程执行"
-            )
-
-    context = {
-        "account_id": account_id,
-        "channel": str(account.trade_channel),
-        "calendar_id": decision.calendar_id if decision else None,
-        "calendar_day": (decision.day if decision else triggered_at.date()).isoformat(),
-    }
-    account_logger = loguru.logger.bind(**context)
-    if decision is not None and decision.status is CalendarDecisionStatus.AVAILABLE_CLOSED:
-        try:
-            async with SessionLocal() as session:
-                session.add(
-                    ScheduleSkip(
-                        account_id=account_id,
-                        channel=str(account.trade_channel),
-                        triggered_at=triggered_at.isoformat(),
-                        calendar_id=decision.calendar_id or "",
-                        calendar_day=decision.day,
-                        calendar_label=decision.label or "",
-                        reason_code=decision.reason_code or "CALENDAR.CLOSED",
-                    )
-                )
-                await session.commit()
-        except Exception:  # noqa: BLE001 - 记录失败不能改变休市决策
-            account_logger.exception("休市跳过记录写入失败")
-        account_logger.info("排程因明确休市跳过")
-        return
-
-    if decision is not None and decision.status is CalendarDecisionStatus.UNAVAILABLE:
-        reason = decision.unavailable_reason or CalendarUnavailableReason.READ_FAILED
-        if reason is CalendarUnavailableReason.READ_FAILED:
-            account_logger.warning(
-                "交易日历不可用，按排程执行 | unavailable_reason={} action=execute_without_calendar",
-                reason.value,
-            )
-        else:
-            account_logger.info(
-                "交易日历不可用，按排程执行 | unavailable_reason={} action=execute_without_calendar",
-                reason.value,
-            )
 
     from axile.server.execution import rebalance as rebalance_execution
 

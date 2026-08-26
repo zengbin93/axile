@@ -2,22 +2,19 @@
 
 from __future__ import annotations
 
-from datetime import date, datetime, time, timedelta
+from datetime import datetime
 from typing import TYPE_CHECKING, cast
-from zoneinfo import ZoneInfo
 
 from loguru import logger
 
 from axile.common.trade_channel import TradeChannel
 from axile.executor.algorithms.utils import clock_now
-from axile.executor.china_futures_session import is_regular_night_session_transition
 from axile.executor.execution_query_runtime import ExecutionQueryRuntime, ExecutionQueryRuntimeBridge
 from axile.executor.execution_runtime import ExecutionRuntime, ExecutionRuntimeBindings
 from axile.executor.models.unified_input import AccountConfig, UnifiedStandardInput
 
 if TYPE_CHECKING:
     from axile.executor.abstract_executor.base import AbstractExecutor
-    from axile.executor.trading_calendar import TradingCalendar
 
 
 def _executor(owner: object) -> AbstractExecutor:
@@ -53,106 +50,8 @@ class AbstractExecutorExecutionRuntimeHostMixin:
         executor._runtime_bindings = ExecutionRuntimeBindings()
         executor._active_execution_runtime = None
         executor._execution_query_runtime_bridge = ExecutionQueryRuntimeBridge(executor)
-        executor._trading_calendar = None
-        executor._channel_calendar_id = None
-        executor._channel_calendar_fallback_id = None
-
         if account_config is not None:
             executor._initialize_connection(account_config)
-
-    def set_trading_calendar(self, calendar: TradingCalendar | None) -> None:
-        """绑定执行器使用的本地交易日历读取器。"""
-        _executor(self)._trading_calendar = calendar
-
-    def set_channel_calendar(self, calendar_id: str | None, fallback_calendar_id: str | None = None) -> None:
-        """绑定当前渠道由插件声明的主日历及可选存量回退。"""
-        executor = _executor(self)
-        executor._channel_calendar_id = calendar_id
-        executor._channel_calendar_fallback_id = fallback_calendar_id
-
-    def _is_channel_calendar_open(self, day: date | None = None) -> bool:
-        """查询当前渠道声明的日历；主日历未覆盖时才读取存量回退。"""
-        executor = _executor(self)
-        calendar_id = cast("str | None", getattr(executor, "_channel_calendar_id", None))
-        if calendar_id is None:
-            return True
-        current = day or date.today()
-        calendar = cast("TradingCalendar | None", getattr(executor, "_trading_calendar", None))
-        if calendar is not None:
-            try:
-                is_open = calendar.is_open(calendar_id, current)
-                if is_open is not None:
-                    return is_open
-                fallback_id = cast("str | None", getattr(executor, "_channel_calendar_fallback_id", None))
-                if fallback_id is not None:
-                    fallback_open = calendar.is_open(fallback_id, current)
-                    if fallback_open is not None:
-                        return fallback_open
-                executor.logger.warning("{} {} 缺少有效交易日历，继续放行", calendar_id, current)
-            except Exception as exc:  # noqa: BLE001 - 日历故障按兼容口径降级
-                executor.logger.warning("读取 {} {} 交易日历失败，继续放行: {}", calendar_id, current, exc)
-        else:
-            executor.logger.warning("未绑定本地交易日历，{} {} 继续放行", calendar_id, current)
-        return True
-
-    def _is_calendar_open(self, calendar_id: str, day: date | None = None) -> bool:
-        """查询交易日历；未配置、缺失或读取失败时按原排程执行。"""
-        executor = _executor(self)
-        current = day or date.today()
-        calendar = cast("TradingCalendar | None", getattr(executor, "_trading_calendar", None))
-        if calendar is not None:
-            try:
-                is_open = calendar.is_open(calendar_id, current)
-                if is_open is not None:
-                    return is_open
-                executor.logger.warning("{} {} 缺少有效交易日历，继续放行", calendar_id, current)
-            except Exception as exc:  # noqa: BLE001 - 日历故障按兼容口径降级
-                executor.logger.warning("读取 {} {} 交易日历失败，继续放行: {}", calendar_id, current, exc)
-        else:
-            executor.logger.warning("未绑定本地交易日历，{} {} 继续放行", calendar_id, current)
-        return True
-
-    def _is_china_futures_session_open(self, now: datetime | None = None) -> bool:
-        """按上海自然时间和现有交易日历判断中国期货日夜盘。
-
-        00:00 至 02:30 仍属于前一自然日开始的夜盘。夜盘仅允许普通相邻
-        交易日，或周五至下周一的标准周末转换；节假日前不放行。这里只修正
-        日历归属，具体品种更窄的收盘时间仍由交易渠道校验。
-        """
-        current = now or datetime.now(ZoneInfo("Asia/Shanghai"))
-        current_time = current.timetz().replace(tzinfo=None)
-        if current_time >= time(21):
-            session_start_day = current.date()
-        elif current_time <= time(2, 30):
-            session_start_day = current.date() - timedelta(days=1)
-        else:
-            return self._is_channel_calendar_open(current.date())
-
-        executor = _executor(self)
-        calendar_id = cast("str | None", getattr(executor, "_channel_calendar_id", None))
-        calendar = cast("TradingCalendar | None", getattr(executor, "_trading_calendar", None))
-        if calendar_id is None or calendar is None:
-            return self._is_channel_calendar_open(session_start_day)
-
-        try:
-            session_state = calendar.is_open(calendar_id, session_start_day)
-            if session_state is None:
-                executor.logger.warning("{} {} 缺少有效交易日历，继续放行", calendar_id, session_start_day)
-                return True
-            if not session_state:
-                return False
-            for offset in range(1, 15):
-                candidate = session_start_day + timedelta(days=offset)
-                state = calendar.is_open(calendar_id, candidate)
-                if state is None:
-                    executor.logger.warning("{} {} 缺少有效交易日历，继续放行", calendar_id, candidate)
-                    return True
-                if state:
-                    return is_regular_night_session_transition(session_start_day, candidate)
-        except Exception as exc:  # noqa: BLE001 - 日历故障沿用现有兼容口径
-            executor.logger.warning("读取中国期货夜盘日历失败，继续放行: {}", exc)
-            return True
-        return False
 
     def _reset_execution_state(self, standard_input: UnifiedStandardInput) -> None:
         """
