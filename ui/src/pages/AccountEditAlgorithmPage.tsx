@@ -98,24 +98,46 @@ export function AccountEditAlgorithmPage() {
   if (account.error && !acc)
     return <EditError error={account.error} onRetry={account.refresh} />
 
-  if (account.loading || !ready || !acc || !trade || !descriptor)
+  const isReady = !(account.loading || !ready || !acc || !trade || !descriptor)
+  // 「当前配置」摘要常挂：加载（缓存）→ 就绪（草稿）只换文本、不换节点。
+  // view transition 的具名捕获认 DOM 节点——摘要若随加载/就绪分支整体重挂，
+  // 进行中的组动画会被浏览器杀掉（表现就是「正向 FLIP 不飞」）。
+  // 兜底链必须是 草稿 → 真源 → 缓存：acc 已到位而草稿未初始化的中间态若直接掉缓存
+  // （cachedConfig 在 acc 存在时为 null），摘要会消失一个 commit、换节点杀动画。
+  const savedTradeSum = acc ? describeAlgorithmRef(algorithmRefOf(acc.algorithm)) : null
+  const tradeSynopsis = trade
+    ? describeAlgorithmRef(trade)
+    : (savedTradeSum ?? cachedConfig?.algorithm ?? null)
+  // 「下单」值与 hero 配置带同文才挂共享名（草稿改了就退化为整页交叉淡，不做内容 morph）。
+  const tradeSame = trade == null || tradeSynopsis === savedTradeSum
+  const tradeVtStyle: CSSProperties | undefined =
+    tSelf && tradeSame
+      ? { viewTransitionName: accountConfigVtName(accountId, 'algorithm') }
+      : undefined
+
+  /** 标题 + 当前配置摘要：加载与就绪两态共用（同位同节点）；清仓行待就绪后追加。 */
+  const synopsis = tradeSynopsis != null && (
+    <EditSynopsis note={isReady ? '保存只更新算法引用，不影响定时与启停。' : undefined}>
+      <div className="grid grid-cols-[3rem_minmax(0,1fr)] gap-x-3 gap-y-0.5">
+        <span className="font-normal text-ink-3">下单</span>
+        <span className="inline-block" style={tradeVtStyle}>
+          {tradeSynopsis}
+        </span>
+        {isReady && (
+          <>
+            <span className="font-normal text-ink-3">清仓</span>
+            <span>{describeAlgorithmRef(empty)}</span>
+          </>
+        )}
+      </div>
+    </EditSynopsis>
+  )
+
+  if (!isReady)
     return (
       <section className="pb-24">
         {title}
-        {/* 缓存值充当 hero「算法」FLIP 的首帧落点；清仓行待真源到位再出。 */}
-        {cachedConfig != null && (
-          <EditSynopsis>
-            <div className="grid grid-cols-[3rem_minmax(0,1fr)] gap-x-3 gap-y-0.5">
-              <span className="font-normal text-ink-3">下单</span>
-              <span
-                className="inline-block"
-                style={tSelf ? { viewTransitionName: accountConfigVtName(accountId, 'algorithm') } : undefined}
-              >
-                {cachedConfig.algorithm}
-              </span>
-            </div>
-          </EditSynopsis>
-        )}
+        {synopsis}
         <EditLoading bare />
       </section>
     )
@@ -131,16 +153,6 @@ export function AccountEditAlgorithmPage() {
   const changes: string[] = []
   if (tradeChanged) changes.push('下单算法已改')
   if (emptyChanged) changes.push(empty ? '清仓算法已改' : '清仓算法已清除')
-
-  // 摘要随草稿更新；下单与清仓分行，避免两个配置槽挤成一个长句。
-  const tradeSum = describeAlgorithmRef(trade)
-  const emptySum = describeAlgorithmRef(empty)
-  // 「下单」值与 hero 配置带同文才挂共享名（草稿改了就退化为整页交叉淡，不做内容 morph）。
-  const savedTradeSum = describeAlgorithmRef(algorithmRefOf(acc.algorithm))
-  const tradeVtStyle: CSSProperties | undefined =
-    tSelf && tradeSum === savedTradeSum
-      ? { viewTransitionName: accountConfigVtName(accountId, 'algorithm') }
-      : undefined
 
   const save = async () => {
     if (err) return toast(`算法参数非法：${err}`)
@@ -191,14 +203,7 @@ export function AccountEditAlgorithmPage() {
   return (
     <section className="pb-24">
       {title}
-      <EditSynopsis note="保存只更新算法引用，不影响定时与启停。">
-        <div className="grid grid-cols-[3rem_minmax(0,1fr)] gap-x-3 gap-y-0.5">
-          <span className="font-normal text-ink-3">下单</span>
-          <span className="inline-block" style={tradeVtStyle}>{tradeSum}</span>
-          <span className="font-normal text-ink-3">清仓</span>
-          <span>{emptySum}</span>
-        </div>
-      </EditSynopsis>
+      {synopsis}
 
       <Section label="主交易">
         {slotRow('trade', '下单算法', trade, (v) => { setSaveError(null); setTrade(v ?? descriptor.defaults.trade_algorithm) })}

@@ -229,27 +229,62 @@ export function AccountEditPage({ section = 'basic' }: { section?: EditSection }
   if (account.error && !acc)
     return <EditError error={account.error} onRetry={account.refresh} />
 
+  // 「当前配置」摘要常挂：加载（缓存/真源）→ 就绪（草稿）只换文本、不换节点。
+  // view transition 的具名捕获认 DOM 节点——摘要若随加载/就绪分支整体重挂，
+  // 进行中的组动画会被浏览器杀掉（表现就是「正向 FLIP 不飞」）。
+  const draftNum = (s: string) => (s.trim() === '' ? null : Number(s) || 0)
+  const savedLeverageText = acc
+    ? describeLeverage(acc.long_leverage, acc.short_leverage, showShortLeverage)
+    : null
+  const savedSymbolsText = acc ? describeSymbolControl(acc.forbidden_symbols, acc.risk_symbols) : null
+  const draftLeverageText = draft
+    ? describeLeverage(
+        draftNum(draft.longLev),
+        showShortLeverage ? draftNum(draft.shortLev) : null,
+        showShortLeverage,
+      )
+    : null
+  const draftSymbolsText = draft ? describeSymbolControl(draft.forbidden, draft.risk) : null
+  const leverageSynopsis = draftLeverageText ?? savedLeverageText ?? cachedConfig?.leverage ?? null
+  const symbolsSynopsis = draftSymbolsText ?? savedSymbolsText ?? cachedConfig?.symbols ?? null
+  // 同文才挂名：草稿被改后文本分岔，挂名即成内容 morph（假连续），退化为整页交叉淡。
+  const leverageSame = draftLeverageText == null || draftLeverageText === savedLeverageText
+  const symbolsSame = draftSymbolsText == null || draftSymbolsText === savedSymbolsText
+
+  /** 标题 + 警告条 + 当前配置摘要：加载与就绪两态共用的页面 chrome（同位同节点）。 */
+  const pageChrome = (
+    <>
+      <div className="flex flex-wrap items-baseline gap-3">{titleName}</div>
+      <div className="mt-3 border-l-2 border-warn/60 bg-warn-tint/50 py-2 pl-3 pr-2 text-[13px] text-ink-2">
+        修改不会立即下单，从下次调仓开始生效。
+      </div>
+      {section === 'leverage' && leverageSynopsis != null && (
+        <EditSynopsis>
+          <span
+            className="inline-block"
+            style={leverageSame ? sectionVtStyle('leverage') : undefined}
+          >
+            {leverageSynopsis}
+          </span>
+        </EditSynopsis>
+      )}
+      {section === 'symbols' && symbolsSynopsis != null && (
+        <EditSynopsis>
+          <span
+            className="inline-block"
+            style={symbolsSame ? sectionVtStyle('symbols') : undefined}
+          >
+            {symbolsSynopsis}
+          </span>
+        </EditSynopsis>
+      )}
+    </>
+  )
+
   if (account.loading || !ready || !acc || !draft || (channelDescriptor == null && channelCatalogLoading)) {
-    // 加载中也要挂「当前配置」摘要（缓存值）：这是 hero 配置带 FLIP 的首帧落点。
-    const loadingSynopsis =
-      section === 'leverage'
-        ? cachedConfig?.leverage
-        : section === 'symbols'
-          ? cachedConfig?.symbols
-          : null
     return (
       <section className="pb-24">
-        <div className="flex flex-wrap items-baseline gap-3">{titleName}</div>
-        {loadingSynopsis != null && (
-          <EditSynopsis>
-            <span
-              className="inline-block"
-              style={sectionVtStyle(section === 'leverage' ? 'leverage' : 'symbols')}
-            >
-              {loadingSynopsis}
-            </span>
-          </EditSynopsis>
-        )}
+        {pageChrome}
         <EditLoading bare />
       </section>
     )
@@ -289,18 +324,6 @@ export function AccountEditPage({ section = 'basic' }: { section?: EditSection }
     levErr || timeoutErr || weightPrecisionErr || portfolios == null || portfoliosError || channelCatalogError,
   )
 
-  // 「当前配置」摘要随草稿走（改了立刻看得见）；仅草稿与真源同文时挂共享名——
-  // 不同文挂名即成内容 morph（假连续），此时退化为整页交叉淡。
-  const draftNum = (s: string) => (s.trim() === '' ? null : Number(s) || 0)
-  const savedLeverageText = describeLeverage(acc.long_leverage, acc.short_leverage, showShortLeverage)
-  const draftLeverageText = describeLeverage(
-    draftNum(d.longLev),
-    showShortLeverage ? draftNum(d.shortLev) : null,
-    showShortLeverage,
-  )
-  const savedSymbolsText = describeSymbolControl(acc.forbidden_symbols, acc.risk_symbols)
-  const draftSymbolsText = describeSymbolControl(d.forbidden, d.risk)
-
   const save = async () => {
     if (levErr) return toast(`杠杆有误：${levErr}`)
     if (timeoutErr) return toast(`执行超时有误：${timeoutErr}`)
@@ -322,33 +345,7 @@ export function AccountEditPage({ section = 'basic' }: { section?: EditSection }
 
   return (
     <section className="pb-24">
-      <div className="flex flex-wrap items-baseline gap-3">{titleName}</div>
-
-      <div className="mt-3 border-l-2 border-warn/60 bg-warn-tint/50 py-2 pl-3 pr-2 text-[13px] text-ink-2">
-        修改不会立即下单，从下次调仓开始生效。
-      </div>
-
-      {/* 「当前配置」摘要：hero 配置带值文本的 FLIP 落点（同文才挂名，见上）。 */}
-      {section === 'leverage' && (
-        <EditSynopsis>
-          <span
-            className="inline-block"
-            style={draftLeverageText === savedLeverageText ? sectionVtStyle('leverage') : undefined}
-          >
-            {draftLeverageText}
-          </span>
-        </EditSynopsis>
-      )}
-      {section === 'symbols' && (
-        <EditSynopsis>
-          <span
-            className="inline-block"
-            style={draftSymbolsText === savedSymbolsText ? sectionVtStyle('symbols') : undefined}
-          >
-            {draftSymbolsText}
-          </span>
-        </EditSynopsis>
-      )}
+      {pageChrome}
 
       {section === 'basic' && (
         <Section label="基本信息">
