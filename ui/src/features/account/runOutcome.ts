@@ -9,10 +9,10 @@ export type RunOutcome =
   | { kind: 'failed'; error: string }
 
 /**
- * 把任务终态 + 执行器输出翻成 toast / 错误横幅意图.
+ * 把任务终态 + 执行器输出翻成 toast 意图.
  *
- * 任务 ``SUCCEEDED`` 只表示进程跑完。全员 ``BLOCKED`` 是约束，不是「已按目标到位」，
- * 也不是「账户操作失败」。
+ * 任务 ``SUCCEEDED`` 只表示进程跑完。全员 ``BLOCKED`` 是约束，不是「已按目标到位」。
+ * ``failed`` 不弹 toast：账户状态行 / 近期执行已经承接同一次结果。
  */
 export function describeRunOutcome(
   kind: RunKind,

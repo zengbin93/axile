@@ -51,6 +51,7 @@ import {
 import { usePolling } from '@/lib/hooks/usePolling'
 import { useTargetSnapshot } from '@/lib/hooks/useTargetSnapshot'
 import { stateVerdict, gateOf, rebalancePlan, positionsOf, positionsOfAssets, type StatusLevel } from '@/lib/derive'
+import { shortErrorReason } from '@/lib/errorInfo'
 import { displayCurrencyUnit, fmtMoney, withCurrency } from '@/lib/format'
 import { describeCron } from '@/features/setup/cron'
 import { TimerQuickModal } from '@/features/setup/TimerQuickModal'
@@ -79,7 +80,6 @@ export function AccountDetail({
   const toast = useToastStore((s) => s.toast)
   const [timerOpen, setTimerOpen] = useState(false)
   const [refreshingAssets, setRefreshingAssets] = useState(false)
-  const [actionError, setActionError] = useState<Error | null>(null)
   // 启停乐观态：确认后立刻翻转，驱动按钮/状态句日记式换字；与 item 对齐后清除。
   const [startedOverride, setStartedOverride] = useState<boolean | null>(null)
   // 共享元素 FLIP 门控：
@@ -223,8 +223,7 @@ export function AccountDetail({
   const isExecuting = live != null && isExecutingStatus(live.status)
   const isQueued = isBusy && !isExecuting
   // 终止动作 + 防连点：点后乐观进「终止中…」并禁用按钮，执行离开运行态即复位。
-  const terminateAction = useTerminateAction(accountId, isBusy, activity.refresh)
-  const { terminating, terminate } = terminateAction
+  const { terminating, terminate } = useTerminateAction(accountId, isBusy, activity.refresh)
   const runKind = live?.kind ?? (runner.kind === 'clear' ? 'clear' : 'rebalance')
   const statusHeadline = isExecuting
     ? `正在${runVerb(runKind)}`
@@ -276,7 +275,6 @@ export function AccountDetail({
     : (cachedConfig?.algorithm ?? null)
   const onToggleStarted = async () => {
     const next = !isStarted
-    setActionError(null)
     setStartedOverride(next)
     try {
       await updateAccount(accountId, { is_started: next })
@@ -285,30 +283,28 @@ export function AccountDetail({
       onDashboardRefresh?.()
     } catch (e) {
       setStartedOverride(null)
-      setActionError(e instanceof Error ? e : new Error(String(e)))
+      toast(shortErrorReason(e))
     }
   }
   const onDelete = async () => {
-    setActionError(null)
     try {
       await deleteAccount(accountId)
       toast('账户已删除')
       onDashboardRefresh?.()
       navigate('/')
     } catch (e) {
-      setActionError(e instanceof Error ? e : new Error(String(e)))
+      toast(shortErrorReason(e))
     }
   }
   const onRefreshAssets = async () => {
     if (refreshingAssets || isExecuting) return
     setRefreshingAssets(true)
-    setActionError(null)
     try {
       await refreshAccountAssets(accountId)
       await Promise.all([assetSnapshots.refresh(), onDashboardRefresh?.()])
       toast('账户权益已刷新')
     } catch (e) {
-      setActionError(e instanceof Error ? e : new Error(String(e)))
+      toast(shortErrorReason(e))
     } finally {
       setRefreshingAssets(false)
     }
@@ -348,11 +344,6 @@ export function AccountDetail({
             onDelete={onDelete}
           />
         </div>
-        <ErrorNotice
-          title="账户操作失败"
-          error={actionError ?? runner.error ?? terminateAction.error}
-          variant="mutation"
-        />
 
         {/*
          * 状态区固定为「标题行 + 副行」两行结构，高度不随运行态增减（框不动，戏在框里演）。

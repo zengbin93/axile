@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test'
 import { describeRunOutcome } from './runOutcome'
 
-test('FAILED + BLOCKED → 非交易时段 toast，不展示错误横幅', () => {
+test('FAILED + BLOCKED → 非交易时段 toast，不当成操作失败', () => {
   const outcome = describeRunOutcome('exec', 'FAILED', 'BLOCKED', '5 个品种因交易时段不可执行')
   expect(outcome).toEqual({ kind: 'blocked', toast: '非交易时段，未下单' })
 })

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { terminateExecution } from '@/lib/api/executions'
+import { shortErrorReason } from '@/lib/errorInfo'
 import { useToastStore } from '@/stores/ui'
 
 /**
@@ -31,7 +32,6 @@ import { useToastStore } from '@/stores/ui'
 export function useTerminateAction(accountId: number, isRunning: boolean, onRequested?: () => void) {
   const toast = useToastStore((s) => s.toast)
   const [terminating, setTerminating] = useState(false)
-  const [error, setError] = useState<Error | null>(null)
   // 防连点：乐观态已进 terminating 时忽略后续点击（state 闭包会旧，用 ref 立即挡）。
   const pendingRef = useRef(false)
   // 回调用 ref 存最新引用，避免其身份变化重建 terminate（同 useExecutionRunner.settledRef）。
@@ -49,7 +49,6 @@ export function useTerminateAction(accountId: number, isRunning: boolean, onRequ
   const terminate = useCallback(async () => {
     if (pendingRef.current) return
     pendingRef.current = true
-    setError(null)
     setTerminating(true)
     try {
       await terminateExecution(accountId)
@@ -59,9 +58,9 @@ export function useTerminateAction(accountId: number, isRunning: boolean, onRequ
       // 请求失败回滚 pending，允许重试（后端幂等，重试无副作用）。
       pendingRef.current = false
       setTerminating(false)
-      setError(err instanceof Error ? err : new Error(String(err)))
+      toast(shortErrorReason(err))
     }
   }, [accountId, toast])
 
-  return { terminating, error, clearError: () => setError(null), terminate }
+  return { terminating, terminate }
 }

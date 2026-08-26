@@ -5,6 +5,7 @@ import {
   triggerExecute,
 } from '@/lib/api/executions'
 import { ApiError } from '@/lib/api/client'
+import { shortErrorReason } from '@/lib/errorInfo'
 import { describeRunOutcome, type RunKind } from '@/features/account/runOutcome'
 import { useToastStore } from '@/stores/ui'
 import type { ExecutionTaskStatus } from '@/types/api'
@@ -34,7 +35,6 @@ export function useExecutionRunner(accountId: number, onSettled?: () => void) {
     kind: null,
     executionId: null,
   })
-  const [error, setError] = useState<Error | null>(null)
   const pollRef = useRef<ReturnType<typeof setInterval> | undefined>(undefined)
   const settledRef = useRef(onSettled)
   settledRef.current = onSettled
@@ -52,7 +52,6 @@ export function useExecutionRunner(accountId: number, onSettled?: () => void) {
     async (kind: RunKind) => {
       if (runningRef.current) return
       runningRef.current = true
-      setError(null)
       // 乐观进执行：不等 trigger 返回，避免「点了没反应」。
       setState({ running: true, kind, executionId: null })
       try {
@@ -73,8 +72,8 @@ export function useExecutionRunner(accountId: number, onSettled?: () => void) {
               runningRef.current = false
               setState({ running: false, kind: null, executionId: null })
               const outcome = describeRunOutcome(kind, st.status, st.output_status, st.error)
-              if (outcome.kind === 'failed') setError(new Error(outcome.error))
-              else toast(outcome.toast)
+              // 跑完失败交给账户状态行 / 近期执行，不再叠一块横幅。
+              if (outcome.kind !== 'failed') toast(outcome.toast)
               settledRef.current?.()
             }
           } catch (err) {
@@ -82,7 +81,7 @@ export function useExecutionRunner(accountId: number, onSettled?: () => void) {
               stopPoll()
               runningRef.current = false
               setState({ running: false, kind: null, executionId: null })
-              setError(new Error('执行已结束或中断'))
+              toast('执行已结束或中断')
               settledRef.current?.()
             }
           }
@@ -90,11 +89,11 @@ export function useExecutionRunner(accountId: number, onSettled?: () => void) {
       } catch (err) {
         runningRef.current = false
         setState({ running: false, kind: null, executionId: null })
-        setError(err instanceof Error ? err : new Error(String(err)))
+        toast(shortErrorReason(err))
       }
     },
     [accountId, toast, stopPoll],
   )
 
-  return { ...state, error, clearError: () => setError(null), start }
+  return { ...state, start }
 }
