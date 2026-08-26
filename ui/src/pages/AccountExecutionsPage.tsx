@@ -8,11 +8,16 @@ import { useNavigate } from '@/components/ui/nav'
 import { buildRecentActivity, recentRowText, type RecentRow } from '@/features/account/recent'
 import { AccountPageTitle } from '@/features/account/pageHead'
 import { getAccountActivity } from '@/lib/api/accounts'
+import { displayCurrencyUnit } from '@/lib/format'
 import { usePolling } from '@/lib/hooks/usePolling'
 import { useDomainStore } from '@/stores/domain'
 
-function statusOf(row: RecentRow): { label: string; className: string; description: string } {
-  if (row.type === 'fill') return { label: '已完成', className: 'text-accent', description: `${recentRowText(row)} · ${row.amount}` }
+function statusOf(row: RecentRow, currency = ''): { label: string; className: string; description: string } {
+  if (row.type === 'fill') {
+    const unit = row.amount && row.amount !== '—' ? displayCurrencyUnit(currency) : ''
+    const amount = unit ? `${row.amount} ${unit}` : row.amount
+    return { label: '已完成', className: 'text-accent', description: `${recentRowText(row)} · ${amount}` }
+  }
   if (row.type === 'partial') return { label: '部分到位', className: 'text-warn', description: recentRowText(row) }
   if (row.type === 'fail') return { label: '需处理', className: 'text-warn', description: recentRowText(row) }
   if (row.type === 'terminated') return { label: '已终止', className: 'text-ink-2', description: recentRowText(row) }
@@ -73,7 +78,7 @@ export function AccountExecutionsPage() {
             <span>时间</span><span>结果</span><span>说明</span><span />
           </div>
           {rows.map((row) => {
-            const status = statusOf(row)
+            const status = statusOf(row, item?.currency)
             const executionId = 'executionId' in row ? row.executionId : null
             return (
               <button

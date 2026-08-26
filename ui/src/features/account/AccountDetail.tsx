@@ -742,14 +742,14 @@ export function AccountDetail({
                       <>
                         <span className="w-4 flex-none text-center text-ok">✓</span>
                         <OverflowText className="min-w-0 flex-1" text={recentRowText(row)} />
-                        <span className="num text-[13px] text-ink-2">{row.amount}</span>
+                        <RecentAmount amount={row.amount} currency={item.currency} />
                       </>
                     )}
                     {row.type === 'partial' && (
                       <>
                         <span className="w-4 flex-none text-center text-warn">⚠</span>
                         <OverflowText className="min-w-0 flex-1 text-ink-1" text={recentRowText(row)} />
-                        {row.amount ? <span className="num text-[13px] text-ink-2">{row.amount}</span> : null}
+                        <RecentAmount amount={row.amount} currency={item.currency} />
                       </>
                     )}
                     {row.type === 'noop' && (
@@ -798,6 +798,21 @@ export function AccountDetail({
         })()}
       </Card>
     </section>
+  )
+}
+
+/**
+ * 近期活动右侧权益：数字与页头同一口径，单位走渠道声明的简短名（CNY→元）。
+ * 无金额（部分执行未带回权益）不占位，避免空列把其它行挤歪。
+ */
+function RecentAmount({ amount, currency }: { amount: string; currency: string }) {
+  if (!amount) return null
+  const unit = amount === '—' ? '' : displayCurrencyUnit(currency)
+  return (
+    <span className="num whitespace-nowrap text-[13px] text-ink-2">
+      {amount}
+      {unit ? <span className="ml-1 font-medium text-ink-3">{unit}</span> : null}
+    </span>
   )
 }
 
