@@ -17,7 +17,12 @@ import { useTerminateAction } from '@/features/account/useTerminateAction'
 import { buildRecentActivity } from '@/features/account/recent'
 import { StaleDataStatus } from '@/features/account/StaleDataStatus'
 import { connectionStaleAt, localQueryError } from '@/features/account/staleData'
-import { currentHoldingPreview, formatHoldingQuantity, rebalanceTurnover } from '@/features/account/holdingPreview'
+import {
+  currentHoldingPreview,
+  formatHoldingQuantity,
+  rebalanceTurnover,
+  type CurrentHoldingPreview,
+} from '@/features/account/holdingPreview'
 import { ScheduleSummary, ScheduleTimeline, ScheduleTimelineSkeleton } from '@/features/account/ScheduleTimeline'
 import { accountAssetTerms, INTEGRITY_ICON, INTEGRITY_TEXT_CLASS, STATUS_TEXT_CLASS, channelLabel } from '@/features/dashboard/display'
 import { phaseLabel, runVerb } from '@/features/dashboard/execProgress'
@@ -555,21 +560,8 @@ export function AccountDetail({
                 <Skeleton className="h-4 w-44" />
                 <Skeleton className="h-2 w-full" />
               </div>
-              <div className="h-40 border-t border-line lg:border-t-0 lg:border-l lg:pl-5">
-                <div className="mr-2 grid h-8 grid-cols-[minmax(0,1fr)_42px_60px_66px] items-center gap-1.5">
-                  <Skeleton className="h-3 w-8" />
-                  <Skeleton className="h-3 w-7 justify-self-end" />
-                  <Skeleton className="h-3 w-12 justify-self-end" />
-                  <Skeleton className="h-3 w-8 justify-self-end" />
-                </div>
-                {Array.from({ length: 4 }, (_, index) => (
-                  <div key={index} className="grid h-8 grid-cols-[minmax(0,1fr)_42px_60px_66px] items-center gap-1.5 border-t border-line pr-2">
-                    <Skeleton className="h-3 w-12" />
-                    <Skeleton className="h-3 w-9 justify-self-end" />
-                    <Skeleton className="h-3 w-12 justify-self-end" />
-                    <Skeleton className="h-3 w-14 justify-self-end" />
-                  </div>
-                ))}
+              <div className="min-w-0 border-t border-line lg:border-t-0 lg:border-l lg:pl-5">
+                <HoldingsPreviewTable holdings={null} />
               </div>
             </SkeletonGroup>
           ) : comparisonError ? null : !weights.data?.calculated_at ? (
@@ -598,52 +590,8 @@ export function AccountDetail({
                   </>
                 )}
               </div>
-              <div className="h-40 border-t border-line lg:border-t-0 lg:border-l lg:pl-5">
-                <div aria-hidden className="mr-2 grid h-8 grid-cols-[minmax(0,1fr)_42px_60px_66px] items-center gap-1.5 text-[11px] font-medium text-ink-3">
-                  <span>品种</span>
-                  <span className="text-right">仓位</span>
-                  <span className="text-right">持仓/可用</span>
-                  <span className="text-right">市值</span>
-                </div>
-                <div
-                  role="list"
-                  aria-label="当前持仓"
-                  tabIndex={0}
-                  className="quiet-scrollbar h-32 overflow-y-auto overscroll-contain [scrollbar-gutter:stable] focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-2 focus-visible:outline-line"
-                >
-                  {currentHoldings.length === 0 ? (
-                    <div className="flex h-full items-center border-t border-line text-[13px] text-ink-3">当前空仓</div>
-                  ) : currentHoldings.map((holding) => {
-                    const volume = formatHoldingQuantity(holding.volume)
-                    const availableVolume = formatHoldingQuantity(holding.availableVolume)
-                    const quantityText = `${volume}/${availableVolume}`
-                    const quantityLabel = `持仓 ${volume}，可用 ${availableVolume}`
-                    const value = holding.value == null ? '—' : withCurrency(fmtMoney(holding.value), item.currency)
-                    return (
-                      <div role="listitem" key={holding.key} className="grid h-8 grid-cols-[minmax(0,1fr)_42px_60px_66px] items-center gap-1.5 border-t border-line text-[12.5px]">
-                        <OverflowText className="text-[13px] font-[560] text-ink-1" text={holding.symbol} />
-                        <span className="num min-w-0 truncate whitespace-nowrap text-right text-ink-2">
-                          {holding.direction === 'short' ? '空' : '多'}
-                          {holding.weight == null ? '—' : `${Math.abs(holding.weight).toFixed(1)}%`}
-                        </span>
-                        <span
-                          className="num min-w-0 truncate whitespace-nowrap text-right text-ink-2"
-                          aria-label={quantityLabel}
-                          title={quantityLabel}
-                        >
-                          {quantityText}
-                        </span>
-                        <span
-                          className="num min-w-0 truncate whitespace-nowrap text-right font-medium text-ink-1"
-                          aria-label={`市值 ${value}`}
-                          title={value}
-                        >
-                          {value}
-                        </span>
-                      </div>
-                    )
-                  })}
-                </div>
+              <div className="min-w-0 border-t border-line lg:border-t-0 lg:border-l lg:pl-5">
+                <HoldingsPreviewTable holdings={currentHoldings} currency={item.currency} />
               </div>
             </div>
           ) : null}
@@ -841,6 +789,95 @@ export function AccountDetail({
         })()}
       </Card>
     </section>
+  )
+}
+
+/**
+ * 账户详情「持仓 vs 目标」右栏的当前持仓快照。
+ *
+ * 表头与行同一张表，列宽按内容自动算。前三列 ``w-[1%]`` + nowrap 收缩到最宽格；
+ * 市值不收缩、右对齐，把右栏剩余宽度吃掉——数字贴栏的右缘，品种和仓位仍然挨着。
+ * 表头 sticky 钉在滚动容器顶。
+ */
+const PREVIEW_TH = 'sticky top-0 z-[1] h-8 bg-surface align-middle font-medium'
+const PREVIEW_COL = 'w-[1%] whitespace-nowrap'
+
+function HoldingsPreviewTable({
+  holdings,
+  currency = '',
+}: {
+  /** `null` = 对照仍在加载，表结构在、单元格骨架占位。 */
+  holdings: CurrentHoldingPreview[] | null
+  currency?: string
+}) {
+  return (
+    <div
+      tabIndex={0}
+      className="quiet-scrollbar h-40 min-w-0 overflow-y-auto overscroll-contain [scrollbar-gutter:stable] focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-2 focus-visible:outline-line"
+    >
+      <table aria-label="当前持仓" className="w-full border-separate border-spacing-0">
+        <thead>
+          <tr className="text-[11px] font-medium text-ink-3">
+            <th scope="col" className={`${PREVIEW_TH} ${PREVIEW_COL} border-b border-line pr-1.5 text-left`}>
+              品种
+            </th>
+            <th scope="col" className={`${PREVIEW_TH} ${PREVIEW_COL} border-b border-line px-1.5 text-right`}>
+              仓位
+            </th>
+            <th scope="col" className={`${PREVIEW_TH} ${PREVIEW_COL} border-b border-line px-1.5 text-right`}>
+              持仓/可用
+            </th>
+            <th scope="col" className={`${PREVIEW_TH} border-b border-line pl-1.5 text-right whitespace-nowrap`}>
+              市值
+            </th>
+          </tr>
+        </thead>
+        <tbody>
+          {holdings == null ? (
+            Array.from({ length: 4 }, (_, index) => (
+              <tr key={index} className="border-t border-line first:border-t-0">
+                <td className={`h-8 ${PREVIEW_COL} pr-1.5`}>
+                  <Skeleton className="h-3 w-12" />
+                </td>
+                <td className={`h-8 ${PREVIEW_COL} px-1.5`}>
+                  <Skeleton className="ml-auto h-3 w-9" />
+                </td>
+                <td className={`h-8 ${PREVIEW_COL} px-1.5`}>
+                  <Skeleton className="ml-auto h-3 w-12" />
+                </td>
+                <td className="h-8 pl-1.5 whitespace-nowrap">
+                  <Skeleton className="ml-auto h-3 w-14" />
+                </td>
+              </tr>
+            ))
+          ) : holdings.length === 0 ? (
+            <tr>
+              <td colSpan={4} className="h-32 text-[13px] text-ink-3">
+                当前空仓
+              </td>
+            </tr>
+          ) : (
+            holdings.map((holding) => {
+              const dir = holding.direction === 'short' ? '空' : '多'
+              const weight = holding.weight == null ? `${dir}—` : `${dir}${Math.abs(holding.weight).toFixed(1)}%`
+              const volume = formatHoldingQuantity(holding.volume)
+              const availableVolume = formatHoldingQuantity(holding.availableVolume)
+              const value = holding.value == null ? '—' : withCurrency(fmtMoney(holding.value), currency)
+              return (
+                <tr key={holding.key} className="border-t border-line text-[12.5px] first:border-t-0">
+                  <td className={`h-8 ${PREVIEW_COL} pr-1.5 text-[13px] font-[560] text-ink-1`}>{holding.symbol}</td>
+                  <td className={`num h-8 ${PREVIEW_COL} px-1.5 text-right text-ink-2`}>{weight}</td>
+                  <td className={`num h-8 ${PREVIEW_COL} px-1.5 text-right text-ink-2`}>
+                    {volume}/{availableVolume}
+                  </td>
+                  <td className="num h-8 pl-1.5 text-right font-medium whitespace-nowrap text-ink-1">{value}</td>
+                </tr>
+              )
+            })
+          )}
+        </tbody>
+      </table>
+    </div>
   )
 }
 
