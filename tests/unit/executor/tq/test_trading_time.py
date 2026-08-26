@@ -216,6 +216,7 @@ def test_engine_blocks_symbol_sessions_without_market_io(monkeypatch: pytest.Mon
     instance = TQExecutor(TQAccountConfig(account_mode="kq", tq_username="user", tq_password="secret"))
     market_requests: list[list[str]] = []
     try:
+        monkeypatch.setattr(instance, "_check_trading_time", lambda: True)
         monkeypatch.setattr(
             instance,
             "_check_symbol_trading_time",
@@ -292,6 +293,7 @@ def test_execute_blocks_unresolved_symbol_without_stopping_sibling(monkeypatch: 
     instance = TQExecutor(TQAccountConfig(account_mode="kq", tq_username="user", tq_password="secret"))
     market_requests: list[list[str]] = []
     try:
+        monkeypatch.setattr(instance, "_check_trading_time", lambda: True)
         monkeypatch.setattr(
             instance,
             "_check_tq_symbol_trading_time",
@@ -368,6 +370,7 @@ def test_engine_blocks_all_symbol_sessions_without_execution_io(monkeypatch: pyt
     instance = TQExecutor(TQAccountConfig(account_mode="kq", tq_username="user", tq_password="secret"))
     cancel_calls = 0
     try:
+        monkeypatch.setattr(instance, "_check_trading_time", lambda: True)
         monkeypatch.setattr(
             instance,
             "_check_symbol_trading_time",
@@ -398,8 +401,44 @@ def test_engine_blocks_all_symbol_sessions_without_execution_io(monkeypatch: pyt
         instance.close()
 
     assert output.status is ExecutionStatus.BLOCKED
-    assert output.error == "2 个品种因交易时段不可执行"
+    assert output.error is not None
+    assert "因交易时段不可执行" in output.error
+    assert "rb2610" in output.error
+    assert "ag2612" in output.error
     assert cancel_calls == 0
+
+
+def test_market_gap_blocks_before_symbol_planning(monkeypatch: pytest.MonkeyPatch) -> None:
+    """日夜盘缝走渠道级 BLOCKED，不按品种规划、不读行情。"""
+    api = FakeApi()
+    monkeypatch.setattr(TQExecutor, "_build_api", staticmethod(lambda _config: api))
+    instance = TQExecutor(TQAccountConfig(account_mode="kq", tq_username="user", tq_password="secret"))
+    try:
+        monkeypatch.setattr(
+            "axile.executor.tq.tq_execute.is_within_possible_china_futures_session",
+            lambda _now: False,
+        )
+        monkeypatch.setattr(instance, "get_market_data", lambda _symbols: pytest.fail("不应读取行情"))
+        monkeypatch.setattr(
+            instance,
+            "_check_symbol_trading_time",
+            lambda _symbol: pytest.fail("不应按品种判断时段"),
+        )
+        output = instance.execute(
+            UnifiedStandardInput(
+                channel_type=TradeChannel.TQ,
+                account_config=TQAccountConfig(account_mode="kq", tq_username="user", tq_password="secret"),
+                curr_target={"rb2610": 0.1},
+                algorithm={"method": "SINGLE-MAKER"},
+            ),
+            cleanup=False,
+        )
+    finally:
+        instance.close()
+
+    assert output.status is ExecutionStatus.BLOCKED
+    assert output.error == "当前不在交易时间"
+    assert output.symbol_results == {}
 
 
 def test_place_order_rechecks_current_symbol_before_submitting(

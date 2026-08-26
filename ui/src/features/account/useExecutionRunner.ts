@@ -4,12 +4,13 @@ import {
   triggerEmptyPositions,
   triggerExecute,
 } from '@/lib/api/executions'
+import { describeRunOutcome, type RunKind } from '@/features/account/runOutcome'
 import { useToastStore } from '@/stores/ui'
 import type { ExecutionTaskStatus } from '@/types/api'
 
 const TERMINAL: ExecutionTaskStatus[] = ['SUCCEEDED', 'FAILED', 'TERMINATED']
 
-export type RunKind = 'exec' | 'clear'
+export type { RunKind }
 
 interface RunnerState {
   /** 是否有执行在进行中。 */
@@ -69,10 +70,9 @@ export function useExecutionRunner(accountId: number, onSettled?: () => void) {
               stopPoll()
               runningRef.current = false
               setState({ running: false, kind: null, executionId: null })
-              const ok = st.status === 'SUCCEEDED'
-              if (ok) toast(kind === 'exec' ? '执行完成 · 已按目标到位' : '已清仓')
-              else if (st.status === 'TERMINATED') toast('执行已终止')
-              if (st.status === 'FAILED') setError(new Error(st.error ?? '执行失败，服务端未返回原因'))
+              const outcome = describeRunOutcome(kind, st.status, st.output_status, st.error)
+              if (outcome.kind === 'failed') setError(new Error(outcome.error))
+              else toast(outcome.toast)
               settledRef.current?.()
             }
           } catch {

@@ -277,6 +277,10 @@ export interface AccountDashboardItem {
   /** 最近一次执行是否成功（1/0）；无记录为 null。 */
   last_is_success: number | null
   last_exec_at: string | null
+  /** 最近一次执行器输出状态（SUCCEEDED/BLOCKED/FAILED 等）；无记录为 null。 */
+  last_output_status?: string | null
+  /** 持仓相对目标待调整品种数；缺快照或目标为 null，不无证推定 0。 */
+  off_symbol_count?: number | null
   /** 当前在途执行标识（取自后端并发锁，唯一真源）；无在途执行为 null。 */
   running_execution_id?: string | null
   /** 在途执行种类（rebalance/clear_positions 等）；无在途执行为 null。 */
@@ -424,6 +428,9 @@ export interface ExecuteRecord {
     task_status?: string
     /** 执行类型：``rebalance`` / ``clear_positions``。用于把成功「清仓」与「空跑」区分开。 */
     execution_kind?: string
+    /** 执行器输出状态（SUCCEEDED/NOOP/BLOCKED/PARTIAL/FAILED）。 */
+    status?: string
+    error?: string
   }
   is_success: number
   created_at: string
@@ -474,6 +481,8 @@ export interface ExecutionStatus {
   started_at: string | null
   finished_at: string | null
   error: string | null
+  /** 执行器输出状态（SUCCEEDED/NOOP/BLOCKED/PARTIAL/FAILED）；任务未结束或无记录时为 null。 */
+  output_status?: string | null
   record_id: number | null
   is_success: number | null
   cancel_requested_at: string | null

@@ -210,9 +210,12 @@ export function AccountDetail({
   const targetCount = Object.values(target).filter((weight) => Math.abs(weight) > 1e-9).length
   const turnover = rebalanceTurnover(plan)
   const currentHoldings = currentHoldingPreview(positions, item.total_asset)
-  // 在位性（风险轴）只由执行结果派生、不看 is_started；档位（模式）随乐观 is_started 变，便于启停后立刻日记式重写。
-  // 四象限判词：模式给风险改台词（暂停+偏离＝不会自愈，措辞最重）。
-  const state = stateVerdict({ ...item, is_started: isStarted })
+  // 在位性用现场 rebalancePlan（详情已有目标+持仓）；仪表盘 off_symbol_count 只作尚未对账时的回退。
+  const state = stateVerdict({
+    ...item,
+    is_started: isStarted,
+    off_symbol_count: comparisonReady ? plan.off : item.off_symbol_count,
+  })
   const gate = gateOf({ ...item, is_started: isStarted })
   // 执行态：服务端 live 优先，runner 仅首帧前乐观；驱动主句「正在执行/清仓」与生命体征。
   const isRunning = !!(live || runner.running)
@@ -226,8 +229,8 @@ export function AccountDetail({
     : `${INTEGRITY_ICON[state.integrity]} ${state.text}`
   // 「需要看看」兑现：空闲且上次失败时，状态行点进最近失败执行详情（与近期失败行同构）。
   const lastFailExecId =
-    !isRunning && state.integrity === 'off'
-      ? (recordList.find((r) => r.is_success !== 1 && r.execution_id)?.execution_id ?? null)
+    !isRunning && state.integrity === 'off' && item.last_output_status !== 'BLOCKED'
+      ? (recordList.find((r) => r.raw_result?.status !== 'BLOCKED' && r.is_success !== 1 && r.execution_id)?.execution_id ?? null)
       : null
   const statusNavId = runningExecId ?? lastFailExecId
   const goStatusNav = statusNavId
@@ -769,7 +772,16 @@ export function AccountDetail({
                         <span className="w-4 flex-none text-center text-ink-3">–</span>
                         <OverflowText
                           className="min-w-0 flex-1 text-ink-2"
-                          text={row.count > 1 ? `连续 ${row.count} 次排程因休市跳过` : '排程已跳过 · 当日休市'}
+                          text={row.count > 1 ? `连续 ${row.count} 次${row.reason}` : row.reason}
+                        />
+                      </>
+                    )}
+                    {row.type === 'blocked' && (
+                      <>
+                        <span className="w-4 flex-none text-center text-ink-3">–</span>
+                        <OverflowText
+                          className="min-w-0 flex-1 text-ink-2"
+                          text={`${row.count > 1 ? `${row.count} 次非交易时段` : '非交易时段，未下单'}${row.reason ? ` · ${row.reason}` : ''}`}
                         />
                       </>
                     )}

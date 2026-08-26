@@ -3,8 +3,8 @@ import { buildRecentActivity } from './recent'
 import type { AccountActivity, ExecutionActivity, ScheduleSkipActivity } from '../../lib/api/accounts'
 import type { ExecuteRecord } from '../../types/api'
 
-/** 造一条执行记录。kind: 'fill' | 'noop' | 'fail'。 */
-function rec(id: number, kind: 'fill' | 'noop' | 'fail'): ExecuteRecord {
+/** 造一条执行记录。kind: 'fill' | 'noop' | 'fail' | 'blocked'。 */
+function rec(id: number, kind: 'fill' | 'noop' | 'fail' | 'blocked'): ExecuteRecord {
   const base = {
     id,
     execution_id: `e${id}`,
@@ -12,6 +12,14 @@ function rec(id: number, kind: 'fill' | 'noop' | 'fail'): ExecuteRecord {
     raw_result: { account_assets: { total_asset: 1000 } },
   }
   if (kind === 'fail') return { ...base, is_success: 0, raw_input: {} }
+  if (kind === 'blocked') {
+    return {
+      ...base,
+      is_success: 0,
+      raw_input: {},
+      raw_result: { status: 'BLOCKED', error: '5 个品种因交易时段不可执行', account_assets: { total_asset: 1000 } },
+    }
+  }
   if (kind === 'noop') return { ...base, is_success: 1, raw_input: { curr_target: { rb2610: 0.5 }, last_target: { rb2610: 0.5 } } }
   return { ...base, is_success: 1, raw_input: { curr_target: { rb2610: 0.6 }, last_target: { rb2610: 0.5 } } }
 }
@@ -105,4 +113,16 @@ test('执行记录会切断休市跳过的连续分组', () => {
     skip(1, '2026-07-02T10:11:00+08:00'),
   ])
   expect(rows.map((row) => row.type)).toEqual(['skip', 'fill', 'skip'])
+})
+
+test('BLOCKED 不与失败折叠，并保留原因', () => {
+  const { rows } = buildRecentActivity(executions([rec(3, 'blocked'), rec(2, 'fail'), rec(1, 'blocked')]))
+  expect(rows.map((row) => row.type)).toEqual(['blocked', 'fail', 'blocked'])
+  expect(rows[0]).toMatchObject({ type: 'blocked', count: 1, reason: '5 个品种因交易时段不可执行' })
+})
+
+test('连续 BLOCKED 折叠成一行', () => {
+  const { rows } = buildRecentActivity(executions([rec(3, 'blocked'), rec(2, 'blocked')]))
+  expect(rows).toHaveLength(1)
+  expect(rows[0]).toMatchObject({ type: 'blocked', count: 2 })
 })

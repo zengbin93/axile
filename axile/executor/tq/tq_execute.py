@@ -14,6 +14,7 @@ from axile.common.trade_channel import TradeChannel
 from axile.domain.execution import ExecutionReasonFamily
 from axile.executor.abstract_executor.base import AbstractExecutor
 from axile.executor.account_control.exceptions import AccountControlBlockedError
+from axile.executor.china_futures_session import is_within_possible_china_futures_session
 from axile.executor.execution_engine import ExecutionEngine, _DispatchPlanningResult
 from axile.executor.models.execution_result import AlgorithmResult, ExecutionStatus
 from axile.executor.models.unified_account_assets import UnifiedAccountAssets
@@ -163,7 +164,8 @@ class TQExecutionEngine(ExecutionEngine):
                 for result in failed_results
             )
         ):
-            return f"{len(failed_results)} 个品种因交易时段不可执行"
+            names = ", ".join(result.symbol for result in failed_results)
+            return f"{names} 因交易时段不可执行"
         return super()._derive_dispatch_error(status, symbol_results)
 
 
@@ -218,8 +220,8 @@ class TQExecutor(AbstractExecutor):
 
     @override
     def _check_trading_time(self) -> bool:
-        # TQ 的交易时段必须按 symbol 判定，不能在这里用渠道级窗口提前阻断整批订单。
-        return True
+        # 日夜盘缝用钟整市场判断；盘中混合持仓仍按品种拦。
+        return is_within_possible_china_futures_session(datetime.now(_SHANGHAI))
 
     @staticmethod
     def _matched_trading_session(

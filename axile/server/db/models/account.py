@@ -387,6 +387,10 @@ class AccountDashboardItemPublic(SQLModel):
         最近一次执行是否成功（1/0）；无记录时为 ``None``。
     last_exec_at : Optional[str]
         最近一次执行的时间戳；无记录时为 ``None``。
+    last_output_status : Optional[str]
+        最近一次执行器输出状态（``SUCCEEDED`` / ``BLOCKED`` / ``FAILED`` 等）；无记录时为 ``None``。
+    off_symbol_count : Optional[int]
+        持仓相对目标待调整的品种数；缺少快照或目标时为 ``None``，不无证推定 0。
     running_execution_id : Optional[str]
         当前正在运行的执行链路标识；账户此刻无在途执行时为 ``None``。
         取自执行并发锁（唯一真源），使前端能看见调度器/他端发起的执行。
@@ -417,6 +421,8 @@ class AccountDashboardItemPublic(SQLModel):
     asset_observed_at: Optional[str] = None
     last_is_success: Optional[int] = None
     last_exec_at: Optional[str] = None
+    last_output_status: Optional[str] = None
+    off_symbol_count: Optional[int] = None
     running_execution_id: Optional[str] = None
     running_kind: Optional[str] = None
     running_phase: Optional[str] = None

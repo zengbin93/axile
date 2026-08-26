@@ -10,16 +10,18 @@
 import { formatMoney } from '@/lib/derive'
 import type { AccountActivity } from '@/lib/api/accounts'
 import type { ExecuteRecord } from '@/types/api'
+import { executionReasonText } from '@/features/account/executionReason'
 import { executionRecordError } from '@/features/account/executionRecordError'
 
-type Kind = 'fill' | 'clear' | 'noop' | 'fail' | 'terminated'
+type Kind = 'fill' | 'clear' | 'noop' | 'fail' | 'terminated' | 'blocked'
 
 export type RecentRow =
   | { type: 'fill'; key: string; time: string; executionId: string | null; desc: string; amount: string }
   | { type: 'noop'; key: string; time: string; count: number }
   | { type: 'fail'; key: string; time: string; count: number; saturated: boolean; executionId: string | null; reason: string }
+  | { type: 'blocked'; key: string; time: string; count: number; executionId: string | null; reason: string }
   | { type: 'terminated'; key: string; time: string; count: number; executionId: string | null }
-  | { type: 'skip'; key: string; time: string; count: number }
+  | { type: 'skip'; key: string; time: string; count: number; reason: string }
 
 /** 本次执行相对上次改动了多少个品种的目标。 */
 function changedCount(r: ExecuteRecord): number {
@@ -34,13 +36,15 @@ function changedCount(r: ExecuteRecord): number {
 }
 
 /**
- * 记录分类：终止 / 失败 / 清仓 / 空跑（成功但目标未变）/ 成交。
+ * 记录分类：终止 / 约束跳过 / 失败 / 清仓 / 空跑 / 成交。
  *
- * 先判 `task_status==='TERMINATED'`：终止是「人工/系统提前收尾」，非硬失败，不应计入「连续失败」。
+ * 先判 `task_status==='TERMINATED'`：终止是「人工/系统提前收尾」，非硬失败。
+ * 再判执行器 `BLOCKED`：非交易时段等约束，不进「连续失败」。
  * 再判成功清仓（`execution_kind==='clear_positions'`）：确有平仓成交，不应按调仓口径误判为「空跑」。
  */
 function kindOf(r: ExecuteRecord): Kind {
   if (r.raw_result?.task_status === 'TERMINATED') return 'terminated'
+  if (r.raw_result?.status === 'BLOCKED') return 'blocked'
   if (r.is_success !== 1) return 'fail'
   if (r.raw_result?.execution_kind === 'clear_positions') return 'clear'
   return changedCount(r) === 0 ? 'noop' : 'fill'
@@ -91,7 +95,13 @@ export function buildRecentActivity(
     if (current.kind === 'schedule_skip') {
       let j = i + 1
       while (j < activity.length && activity[j].kind === 'schedule_skip') j += 1
-      all.push({ type: 'skip', key: `s${current.id}`, time: current.occurred_at, count: j - i })
+      all.push({
+        type: 'skip',
+        key: `s${current.id}`,
+        time: current.occurred_at,
+        count: j - i,
+        reason: executionReasonText(current.reason_code, '排程已跳过'),
+      })
       i = j
       continue
     }
@@ -120,6 +130,15 @@ export function buildRecentActivity(
         time: latest.created_at,
         count: run.length,
         executionId: latest.execution_id ?? null,
+      })
+    } else if (k === 'blocked') {
+      all.push({
+        type: 'blocked',
+        key: `b${i}`,
+        time: latest.created_at,
+        count: run.length,
+        executionId: latest.execution_id ?? null,
+        reason: executionRecordError(latest),
       })
     } else {
       all.push({

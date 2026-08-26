@@ -10,7 +10,10 @@ from pydantic import BaseModel
 
 from axile.channels import get_channel
 from axile.common.trade_channel import TradeChannel
-from axile.executor.china_futures_session import is_regular_night_session_transition
+from axile.executor.china_futures_session import (
+    is_regular_night_session_transition,
+    is_within_possible_china_futures_session,
+)
 from axile.executor.trading_calendar import ShinnyTradingCalendar, TradingCalendar
 
 
@@ -30,7 +33,7 @@ class CalendarUnavailableReason(StrEnum):
     READ_FAILED = "read_failed"
 
 
-type CalendarSkipReason = Literal["CALENDAR.CLOSED", "CALENDAR.NO_NIGHT_SESSION"]
+type CalendarSkipReason = Literal["CALENDAR.CLOSED", "CALENDAR.NO_NIGHT_SESSION", "CALENDAR.SESSION_CLOSED"]
 
 
 class CalendarDayDecision(BaseModel):
@@ -109,6 +112,18 @@ def evaluate_channel_calendar_moment(
     """按渠道时段把一次触发映射到交易日并判断是否执行。"""
     channel_name = str(channel)
     descriptor = get_channel(channel_name).descriptor
+    if descriptor.schedule.kind == "cn_futures" and not is_within_possible_china_futures_session(current):
+        # 只把「今日开市」改写成市场缝；日历不可用 / 休市日保持原判定，避免盖掉 fail-open。
+        decision = evaluate_channel_calendar_day(channel, current.date(), calendar=calendar)
+        if decision.status is CalendarDecisionStatus.AVAILABLE_OPEN:
+            return decision.model_copy(
+                update={
+                    "status": CalendarDecisionStatus.AVAILABLE_CLOSED,
+                    "effective_is_open": False,
+                    "reason_code": "CALENDAR.SESSION_CLOSED",
+                }
+            )
+        return decision
     session_start = (
         _china_futures_night_start(current)
         if descriptor.schedule.kind == "cn_futures" and descriptor.schedule.night is not None

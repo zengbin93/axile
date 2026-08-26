@@ -46,6 +46,8 @@ from axile.server.execution.registry import (
     ExecutionTaskState,
     clear_running_execution,
     create_termination_controller,
+    execution_record_output_error,
+    execution_record_output_status,
     finalize_execution_task_state,
     get_execution_task_state,
     set_execution_task_state,
@@ -179,13 +181,16 @@ def _mark_execution_finished(
     error: Exception | None = None,
 ) -> None:
     """统一更新后台任务的完成态字段。"""
+    raw_result = None if record is None else getattr(record, "raw_result", None)
     update_execution_task_state(
         execution_id,
         status=status,
         finished_at=finished_at,
         record_id=None if record is None else record.id,
         is_success=0 if error is not None else None if record is None else record.is_success,
-        error=None if error is None else str(error),
+        # 异常优先；业务失败（如全员 BLOCKED）没有异常，必须从记录里把原因带出来。
+        error=str(error) if error is not None else execution_record_output_error(raw_result),
+        output_status=execution_record_output_status(raw_result),
     )
 
 
@@ -517,12 +522,15 @@ async def mark_inline_execution_succeeded(execution_id: str, record: ExecuteReco
     None
         该函数仅更新内存状态，不返回结果。
     """
+    raw_result = getattr(record, "raw_result", None)
     update_execution_task_state(
         execution_id,
         status=ExecutionTaskStatus.SUCCEEDED if record.is_success == 1 else ExecutionTaskStatus.FAILED,
         finished_at=now_str(),
         record_id=record.id,
         is_success=record.is_success,
+        error=execution_record_output_error(raw_result),
+        output_status=execution_record_output_status(raw_result),
     )
 
 

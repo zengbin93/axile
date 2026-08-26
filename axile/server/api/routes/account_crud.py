@@ -37,8 +37,13 @@ from axile.server.db.models import (
 )
 from axile.server.execution.ctp_channels import drop_account_worker, reconcile_china_channel_account
 from axile.server.execution.live import live_hub
-from axile.server.execution.registry import get_execution_task_state, get_running_execution_id
+from axile.server.execution.registry import (
+    execution_record_output_status,
+    get_execution_task_state,
+    get_running_execution_id,
+)
 from axile.server.execution.scheduler import create_job, delete_job
+from axile.server.integrity import count_off_symbols
 from axile.server.repositories import (
     add_record_portfolio_account,
     get_account_asset_snapshots_before_for_accounts,
@@ -47,6 +52,7 @@ from axile.server.repositories import (
     get_recent_account_asset_snapshots_for_accounts,
     get_recent_execute_records_for_accounts,
 )
+from axile.server.target_weight_snapshots import get_latest_account_target_snapshots_for_accounts
 from axile.server.trading_calendar import CalendarDecisionStatus, evaluate_channel_calendar_moment
 
 router = APIRouter()
@@ -409,8 +415,8 @@ async def account_dashboard(session: SessionDep, sched: SchedDep) -> AccountDash
     ``next_run_time`` 取自 APScheduler；把原本前端对每个账户分别发起的多次请求
     合并为一次，避免舰队页 N 账户 × 数次请求。
 
-    执行记录与今日基准都用窗口函数**批量**取回（每类一次查询，共 3 次），而不是在
-    账户循环里逐账户查询——后者是约 3×N 次的 N+1，账户越多查询数线性增长。
+    执行记录、资产快照、目标快照与今日基准都用窗口函数**批量**取回，而不是在
+    账户循环里逐账户查询——后者是 N+1，账户越多查询数线性增长。
     """
     accounts = (await session.execute(select(Account))).scalars().all()
     bindings = await get_portfolios_every_account(session)
@@ -421,6 +427,10 @@ async def account_dashboard(session: SessionDep, sched: SchedDep) -> AccountDash
     recent_by_account = await get_recent_account_asset_snapshots_for_accounts(
         session, account_ids, limit=_EQUITY_WINDOW
     )
+    target_pairs = [
+        (account_id, portfolio_id) for account_id, portfolio_id in bindings.items() if portfolio_id is not None
+    ]
+    targets_by_account = await get_latest_account_target_snapshots_for_accounts(session, target_pairs)
     before_by_account = await get_account_asset_snapshots_before_for_accounts(session, account_ids, day_start, limit=5)
     since_by_account = await get_earliest_account_asset_snapshots_since_for_accounts(
         session, account_ids, day_start, limit=5
@@ -473,6 +483,15 @@ async def account_dashboard(session: SessionDep, sched: SchedDep) -> AccountDash
             if running_phase is None:
                 running_phase = "triggered"
 
+        last_output_status = None if latest is None else execution_record_output_status(latest.raw_result)
+        target_snapshot = targets_by_account.get(account_id)
+        target_weights = None if target_snapshot is None else target_snapshot.normalized_weights
+        off_symbol_count = (
+            None
+            if latest_snapshot is None or not isinstance(target_weights, dict)
+            else count_off_symbols(positions, target_weights, _safe_total_asset(assets))
+        )
+
         items.append(
             AccountDashboardItemPublic(
                 account_id=account_id,
@@ -491,6 +510,8 @@ async def account_dashboard(session: SessionDep, sched: SchedDep) -> AccountDash
                 asset_observed_at=latest_snapshot.created_at if latest_snapshot is not None else None,
                 last_is_success=latest.is_success if latest is not None else None,
                 last_exec_at=latest.created_at if latest is not None else None,
+                last_output_status=last_output_status,
+                off_symbol_count=off_symbol_count,
                 running_execution_id=running_execution_id,
                 running_kind=running_kind,
                 running_phase=running_phase,

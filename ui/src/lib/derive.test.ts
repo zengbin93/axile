@@ -20,26 +20,30 @@ function item(over: Partial<AccountDashboardItem>): AccountDashboardItem {
     equity_series: [],
     last_is_success: null,
     last_exec_at: null,
+    last_output_status: null,
+    off_symbol_count: null,
     ...over,
   }
 }
 
-// ── 在位性（风险轴）：只由执行结果派生 ──
+// ── 在位性（风险轴）：只由持仓 vs 目标派生 ──
 
-test('上次成功 → 在位', () => {
-  expect(integrityOf(item({ last_is_success: 1, last_exec_at: '2026-07-21T12:00:00' })).integrity).toBe('aligned')
+test('off_symbol_count=0 → 在位（不看 last_is_success）', () => {
+  expect(integrityOf(item({ off_symbol_count: 0, last_is_success: 0, last_exec_at: '2026-07-21T12:00:00' })).integrity).toBe('aligned')
 })
 
-test('上次失败 → 偏离', () => {
-  expect(integrityOf(item({ last_is_success: 0, last_exec_at: '2026-07-21T12:53:25' })).integrity).toBe('off')
+test('off_symbol_count>0 → 偏离（不看 last_is_success）', () => {
+  const status = integrityOf(item({ off_symbol_count: 5, last_is_success: 1, last_exec_at: '2026-07-21T12:53:25' }))
+  expect(status.integrity).toBe('off')
+  expect(status.text).toBe('5 只待调整')
 })
 
-test('无记录 → 未知（不无证推定良好）', () => {
-  expect(integrityOf(item({ last_is_success: null, last_exec_at: null })).integrity).toBe('unknown')
+test('无记录且无数 → 未知（不无证推定良好）', () => {
+  expect(integrityOf(item({ last_is_success: null, last_exec_at: null, off_symbol_count: null })).integrity).toBe('unknown')
 })
 
-test('有记录但结果缺失 → 未知（比旧 statusFromItem 的「else→到位」更诚实）', () => {
-  expect(integrityOf(item({ last_is_success: null, last_exec_at: '2026-07-21T12:00:00' })).integrity).toBe('unknown')
+test('有执行但无数 → 未知', () => {
+  expect(integrityOf(item({ last_is_success: 0, last_exec_at: '2026-07-21T12:00:00', off_symbol_count: null })).integrity).toBe('unknown')
 })
 
 // ── 档位（模式轴）：只由 is_started 派生 ──
@@ -54,34 +58,65 @@ test('is_started=false → 暂停', () => {
 
 // ── 正交性：暂停不再吃掉失败（截图那格） ──
 
-test('暂停 + 上次失败：档位=暂停 且 在位性=偏离（两轴各说各的，失败不被遮）', () => {
-  const it = item({ is_started: false, last_is_success: 0, last_exec_at: '2026-07-21T12:53:25' })
+test('暂停 + 偏离：档位=暂停 且 在位性=偏离（两轴各说各的）', () => {
+  const it = item({ is_started: false, off_symbol_count: 5, last_exec_at: '2026-07-21T12:53:25' })
   expect(gateOf(it).gate).toBe('paused')
-  // 旧 statusFromItem 在这里会因 is_started=false 短路成「暂停」，把偏离吞掉。
   expect(integrityOf(it).integrity).toBe('off')
 })
 
 // ── 四象限判词：模式给风险改台词 ──
 
-test('自动 + 偏离 + 低敞口 → 会自动重试（不加重）', () => {
-  const v = stateVerdict(item({ is_started: true, last_is_success: 0, last_exec_at: '2026-07-21T12:53:25', total_asset: 1000, position_weights: [200] }))
+test('自动 + 偏离 + 盘中失败 + 低敞口 → 会自动重试（不加重）', () => {
+  const v = stateVerdict(item({
+    is_started: true,
+    off_symbol_count: 2,
+    last_output_status: 'FAILED',
+    last_is_success: 0,
+    last_exec_at: '2026-07-21T12:53:25',
+    total_asset: 1000,
+    position_weights: [200],
+  }))
   expect(v.text).toBe('上次未到位 · 将自动重试')
   expect(v.loud).toBe(false)
 })
 
-test('自动 + 偏离 + 高杠杆 → 敞口偏高（加重）', () => {
-  const v = stateVerdict(item({ is_started: true, last_is_success: 0, last_exec_at: 't', total_asset: 1000, position_weights: [900, 700] }))
+test('自动 + 偏离 + 盘中失败 + 高杠杆 → 敞口偏高（加重）', () => {
+  const v = stateVerdict(item({
+    is_started: true,
+    off_symbol_count: 2,
+    last_output_status: 'FAILED',
+    last_is_success: 0,
+    last_exec_at: 't',
+    total_asset: 1000,
+    position_weights: [900, 700],
+  }))
   expect(v.text).toContain('敞口偏高')
   expect(v.loud).toBe(true)
 })
 
 test('暂停 + 偏离 → 需手动（加重，最坏格）', () => {
-  const v = stateVerdict(item({ is_started: false, last_is_success: 0, last_exec_at: '2026-07-21T12:53:25' }))
-  expect(v.text).toContain('需手动')
+  const v = stateVerdict(item({ is_started: false, off_symbol_count: 5, last_exec_at: '2026-07-21T12:53:25' }))
+  expect(v.text).toBe('5 只待调整 · 自动纠偏已关，需手动')
   expect(v.loud).toBe(true)
 })
 
+test('自动 + 偏离 + BLOCKED → 下次排程，不说失败、不加重', () => {
+  const v = stateVerdict(item({
+    is_started: true,
+    off_symbol_count: 5,
+    last_output_status: 'BLOCKED',
+    last_is_success: 0,
+    next_run_time: '2026-08-26T21:15:00+08:00',
+    total_asset: 1000,
+    position_weights: [200],
+  }))
+  expect(v.text).toContain('5 只待调整')
+  expect(v.text).toContain('下次')
+  expect(v.text).toContain('21:15')
+  expect(v.loud).toBe(false)
+})
+
 test('在位 / 未知 与档位无关、皆不加重', () => {
-  expect(stateVerdict(item({ is_started: false, last_is_success: 1, last_exec_at: 't' })).loud).toBe(false)
-  expect(stateVerdict(item({ is_started: false, last_is_success: null })).loud).toBe(false)
+  expect(stateVerdict(item({ is_started: false, off_symbol_count: 0, last_exec_at: 't' })).loud).toBe(false)
+  expect(stateVerdict(item({ is_started: false, off_symbol_count: null })).loud).toBe(false)
 })

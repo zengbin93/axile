@@ -439,3 +439,77 @@ def test_timeout_termination_sends_alert(monkeypatch) -> None:
         assert len(sent) == 1
     finally:
         execution_registry._clear_execution_task_state(execution_id)
+
+
+def test_mark_inline_execution_copies_blocked_output_error() -> None:
+    """业务失败没有异常，完成态也必须把 output.error / status 写进轮询载荷。"""
+    execution_id = "exec-blocked-inline-1"
+    state = execution_registry.ExecutionTaskState(
+        execution_id=execution_id,
+        account_id=1,
+        execution_kind=ExecutionKind.REBALANCE,
+        status=ExecutionTaskStatus.RUNNING,
+        created_at="2026-08-26T20:34:24",
+    )
+    execution_registry.set_execution_task_state(execution_id, state)
+    record = SimpleNamespace(
+        id=6,
+        is_success=0,
+        raw_result={"status": "BLOCKED", "error": "5 个品种因交易时段不可执行"},
+    )
+
+    try:
+        asyncio.run(execution_lifecycle.mark_inline_execution_succeeded(execution_id, record))
+        current = execution_registry.get_execution_task_state(execution_id)
+    finally:
+        execution_registry._clear_execution_task_state(execution_id)
+
+    assert current is not None
+    assert current.status == ExecutionTaskStatus.FAILED
+    assert current.is_success == 0
+    assert current.error == "5 个品种因交易时段不可执行"
+    assert current.output_status == "BLOCKED"
+    assert current.record_id == 6
+
+
+def test_mark_execution_finished_copies_record_error_unless_exception() -> None:
+    """worker 收尾：有记录时拷贝 output；有异常时异常字符串优先。"""
+    execution_id = "exec-worker-blocked-1"
+    state = execution_registry.ExecutionTaskState(
+        execution_id=execution_id,
+        account_id=1,
+        execution_kind=ExecutionKind.REBALANCE,
+        status=ExecutionTaskStatus.RUNNING,
+        created_at="2026-08-26T20:34:24",
+    )
+    execution_registry.set_execution_task_state(execution_id, state)
+    record = SimpleNamespace(
+        id=8,
+        is_success=0,
+        raw_result={"status": "BLOCKED", "error": "当前不在交易时间"},
+    )
+
+    try:
+        execution_lifecycle._mark_execution_finished(
+            execution_id,
+            status=ExecutionTaskStatus.FAILED,
+            finished_at="2026-08-26T20:34:30",
+            record=record,
+        )
+        blocked = execution_registry.get_execution_task_state(execution_id)
+        assert blocked is not None
+        assert blocked.error == "当前不在交易时间"
+        assert blocked.output_status == "BLOCKED"
+
+        execution_lifecycle._mark_execution_finished(
+            execution_id,
+            status=ExecutionTaskStatus.FAILED,
+            finished_at="2026-08-26T20:34:31",
+            error=RuntimeError("worker exploded"),
+        )
+        failed = execution_registry.get_execution_task_state(execution_id)
+        assert failed is not None
+        assert failed.error == "worker exploded"
+        assert failed.output_status is None
+    finally:
+        execution_registry._clear_execution_task_state(execution_id)

@@ -100,3 +100,24 @@ def test_holiday_eve_has_no_corresponding_night_session() -> None:
 
     assert decision.status is CalendarDecisionStatus.AVAILABLE_CLOSED
     assert decision.reason_code == "CALENDAR.NO_NIGHT_SESSION"
+
+
+def test_weekday_session_gap_is_closed_before_day_calendar() -> None:
+    """工作日 20:34 是市场缝，不能因为「今日开市」就放行。"""
+    decision = evaluate_channel_calendar_moment(
+        TradeChannel.CTP,
+        datetime(2026, 8, 26, 20, 34, tzinfo=_SHANGHAI),
+        calendar=_Calendar({date(2026, 8, 26): True}),
+    )
+    assert decision.status is CalendarDecisionStatus.AVAILABLE_CLOSED
+    assert decision.reason_code == "CALENDAR.SESSION_CLOSED"
+
+
+def test_night_open_is_not_session_gap() -> None:
+    decision = evaluate_channel_calendar_moment(
+        TradeChannel.CTP,
+        datetime(2026, 8, 26, 21, 15, tzinfo=_SHANGHAI),
+        calendar=_Calendar({date(2026, 8, 26): True, date(2026, 8, 27): True}),
+    )
+    assert decision.status is CalendarDecisionStatus.AVAILABLE_OPEN
+    assert decision.reason_code is None

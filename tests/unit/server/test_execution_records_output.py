@@ -1,0 +1,105 @@
+"""执行输出落库：受约束尝试与故障共享未成功事实，但保留不同状态。"""
+
+from __future__ import annotations
+
+import asyncio
+from types import SimpleNamespace
+
+from axile.common.trade_channel import TradeChannel
+from axile.domain.execution import ExecutionKind
+from axile.executor.models.execution_result import ExecutionStatus
+from axile.executor.models.unified_account_assets import UnifiedAccountAssets
+from axile.executor.models.unified_output import UnifiedStandardOutput
+from axile.server.execution.execution_records_output import append_execute_record_from_output
+from tests.unit.server._execution_test_support import build_account
+
+
+def _output(*, status: ExecutionStatus, error: str | None, success: bool) -> UnifiedStandardOutput:
+    return UnifiedStandardOutput(
+        account_assets=UnifiedAccountAssets(available_cash=1.0, total_asset=1.0, market_value=0.0, positions=[]),
+        memory={},
+        inputs=None,
+        execution_time=0.1,
+        channel_type=TradeChannel.TQ,
+        symbol_results={},
+        status=status,
+        error=error,
+        success=success,
+    )
+
+
+def test_blocked_output_persists_as_unsuccessful_attempt(monkeypatch) -> None:
+    """全员 BLOCKED 未完成执行，保留 ``is_success=0`` 与输出状态。"""
+    captured: dict[str, object] = {}
+
+    async def fake_success(account, raw_input, result, execution_id=None, execution_kind=None):
+        captured["path"] = "success"
+        captured["execution_kind"] = execution_kind
+        captured["result_status"] = result.get("status")
+        return SimpleNamespace(id=11, is_success=1, raw_result=result)
+
+    async def fake_error(**kwargs: object):
+        captured["path"] = "error"
+        captured["msg"] = kwargs.get("msg")
+        return SimpleNamespace(id=12, is_success=0)
+
+    monkeypatch.setattr(
+        "axile.server.execution.execution_records_output.append_success_execute_record",
+        fake_success,
+    )
+    monkeypatch.setattr(
+        "axile.server.execution.execution_records_output.append_error_execute_record",
+        fake_error,
+    )
+
+    output = _output(status=ExecutionStatus.BLOCKED, error="rb2610 因交易时段不可执行", success=False)
+    record = asyncio.run(
+        append_execute_record_from_output(
+            account=build_account(),
+            raw_input={"curr_target": {"rb2610": 0.1}},
+            result={"status": "BLOCKED", "error": output.error, "success": False},
+            output=output,
+            execution_id="exec-blocked-persist",
+            execution_kind=ExecutionKind.REBALANCE,
+        )
+    )
+    assert captured["path"] == "error"
+    assert captured["msg"] == "rb2610 因交易时段不可执行"
+    assert record.is_success == 0
+
+
+def test_failed_output_still_persists_as_error(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    async def fake_success(*_args: object, **_kwargs: object):
+        captured["path"] = "success"
+        return SimpleNamespace(id=11, is_success=1)
+
+    async def fake_error(**kwargs: object):
+        captured["path"] = "error"
+        captured["msg"] = kwargs.get("msg")
+        return SimpleNamespace(id=12, is_success=0)
+
+    monkeypatch.setattr(
+        "axile.server.execution.execution_records_output.append_success_execute_record",
+        fake_success,
+    )
+    monkeypatch.setattr(
+        "axile.server.execution.execution_records_output.append_error_execute_record",
+        fake_error,
+    )
+
+    output = _output(status=ExecutionStatus.FAILED, error="下单失败", success=False)
+    record = asyncio.run(
+        append_execute_record_from_output(
+            account=build_account(),
+            raw_input={},
+            result={"status": "FAILED", "error": "下单失败", "success": False},
+            output=output,
+            execution_id="exec-failed-persist",
+            execution_kind=ExecutionKind.REBALANCE,
+        )
+    )
+    assert captured["path"] == "error"
+    assert captured["msg"] == "下单失败"
+    assert record.is_success == 0

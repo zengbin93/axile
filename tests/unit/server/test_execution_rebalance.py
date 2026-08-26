@@ -812,19 +812,20 @@ def test_trade_prepares_execution_runtime_before_pre_execute_audit_events(
 
 
 @pytest.mark.parametrize(
-    ("output_status", "error_message", "expected_event_status"),
+    ("output_status", "error_message", "expected_event_status", "expected_is_success"),
     [
-        (ExecutionStatus.BLOCKED, "当前不在交易时间", ExecutionEventStatus.WARNING),
-        (ExecutionStatus.FAILED, "执行失败", ExecutionEventStatus.ERROR),
+        (ExecutionStatus.BLOCKED, "当前不在交易时间", ExecutionEventStatus.WARNING, 0),
+        (ExecutionStatus.FAILED, "执行失败", ExecutionEventStatus.ERROR, 0),
     ],
 )
-def test_trade_persists_unsuccessful_output_without_marking_success(
+def test_trade_completion_event_matches_output_status(
     monkeypatch: pytest.MonkeyPatch,
     output_status: ExecutionStatus,
     error_message: str,
     expected_event_status: ExecutionEventStatus,
+    expected_is_success: int,
 ) -> None:
-    """非成功输出不应落成 success=1，execution_completed 状态也要与结果对齐。"""
+    """完成事件按输出分级；BLOCKED 与 FAILED 均未成功，但事件严重度不同。"""
     account = build_account()
     captured_events: list[dict[str, object]] = []
     captured_error_record: dict[str, object] = {}
@@ -885,7 +886,7 @@ def test_trade_persists_unsuccessful_output_without_marking_success(
                 "execution_id": execution_id,
             }
         )
-        return SimpleNamespace(id=301, is_success=0), raw_result
+        return SimpleNamespace(id=301, is_success=expected_is_success), raw_result
 
     monkeypatch.setattr(rebalance_execution, "SessionLocal", lambda: FakeSession())
     monkeypatch.setattr(
@@ -909,7 +910,7 @@ def test_trade_persists_unsuccessful_output_without_marking_success(
     )
 
     assert record.id == 301
-    assert record.is_success == 0
+    assert record.is_success == expected_is_success
     assert captured_error_record["account_id"] == 1
     assert captured_error_record["execution_id"] == "exec-unsuccessful-1"
     assert captured_error_record["msg"] == error_message

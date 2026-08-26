@@ -140,6 +140,11 @@ def test_dashboard_aggregates_account(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(account_crud, "get_account_asset_snapshots_before_for_accounts", _no_baseline_records)
     monkeypatch.setattr(account_crud, "get_earliest_account_asset_snapshots_since_for_accounts", _no_baseline_records)
 
+    async def _no_targets(_session: object, _pairs: object) -> dict[int, object]:
+        return {}
+
+    monkeypatch.setattr(account_crud, "get_latest_account_target_snapshots_for_accounts", _no_targets)
+
     app = _build_app(_Session([account]), _Scheduler(_Job(None)))
     response = TestClient(app).get("/account/dashboard")
 
@@ -156,6 +161,8 @@ def test_dashboard_aggregates_account(monkeypatch: pytest.MonkeyPatch) -> None:
     assert item["equity_series"] == [100.0, 102.0]  # 升序:旧→新
     assert item["asset_observed_at"] == "2026-07-02T09:03:00"
     assert item["last_is_success"] == 1
+    assert item["last_output_status"] is None
+    assert item["off_symbol_count"] is None
     assert item["is_scheduled"] is True
     assert item["next_run_time"] is None
 
@@ -179,6 +186,11 @@ def test_dashboard_handles_account_without_records(monkeypatch: pytest.MonkeyPat
     monkeypatch.setattr(account_crud, "get_account_asset_snapshots_before_for_accounts", _no_baseline_records)
     monkeypatch.setattr(account_crud, "get_earliest_account_asset_snapshots_since_for_accounts", _no_baseline_records)
 
+    async def _no_targets(_session: object, _pairs: object) -> dict[int, object]:
+        return {}
+
+    monkeypatch.setattr(account_crud, "get_latest_account_target_snapshots_for_accounts", _no_targets)
+
     app = _build_app(_Session([account]), _Scheduler(job=None))
     response = TestClient(app).get("/account/dashboard")
 
@@ -191,4 +203,57 @@ def test_dashboard_handles_account_without_records(monkeypatch: pytest.MonkeyPat
     assert item["equity_series"] == []
     assert item["asset_observed_at"] is None
     assert item["last_is_success"] is None
+    assert item["last_output_status"] is None
+    assert item["off_symbol_count"] is None
     assert item["is_scheduled"] is False
+
+
+def test_dashboard_counts_off_symbols_from_target_and_snapshot(monkeypatch: pytest.MonkeyPatch) -> None:
+    """有持仓快照和目标时，off_symbol_count 按 rebalancePlan 口径计算。"""
+    account = build_account(id=1, name="acc", is_started=True)
+    snapshots = [
+        _snapshot(
+            1000.0,
+            [{"symbol": "RM611", "market_value": 460, "direction": "空头"}],
+            "2026-08-26T20:34:00",
+        )
+    ]
+    records = [
+        SimpleNamespace(
+            raw_result={"status": "BLOCKED", "error": "5 个品种因交易时段不可执行"},
+            raw_input={},
+            is_success=0,
+            created_at="2026-08-26T20:34:30",
+        )
+    ]
+
+    async def _bindings(_session: object) -> dict[int, int]:
+        return {1: 7}
+
+    async def _recent(_session: object, _account_ids: object, limit: int = 20) -> dict[int, list[object]]:
+        return {1: list(records)}
+
+    async def _snapshots(_session: object, _account_ids: object, limit: int = 20) -> dict[int, list[object]]:
+        return {1: list(snapshots)}
+
+    async def _no_baseline_records(*_args: object, **_kwargs: object) -> dict[int, list[object]]:
+        return {}
+
+    async def _targets(_session: object, _pairs: object) -> dict[int, object]:
+        return {
+            1: SimpleNamespace(
+                normalized_weights={"TA701": -0.07, "c2611": 0.03, "m2701": -0.06, "rb2610": 0.12},
+            )
+        }
+
+    monkeypatch.setattr(account_crud, "get_portfolios_every_account", _bindings)
+    monkeypatch.setattr(account_crud, "get_recent_execute_records_for_accounts", _recent)
+    monkeypatch.setattr(account_crud, "get_recent_account_asset_snapshots_for_accounts", _snapshots)
+    monkeypatch.setattr(account_crud, "get_account_asset_snapshots_before_for_accounts", _no_baseline_records)
+    monkeypatch.setattr(account_crud, "get_earliest_account_asset_snapshots_since_for_accounts", _no_baseline_records)
+    monkeypatch.setattr(account_crud, "get_latest_account_target_snapshots_for_accounts", _targets)
+
+    app = _build_app(_Session([account]), _Scheduler(_Job(None)))
+    item = TestClient(app).get("/account/dashboard").json()["data"][0]
+    assert item["last_output_status"] == "BLOCKED"
+    assert item["off_symbol_count"] == 5

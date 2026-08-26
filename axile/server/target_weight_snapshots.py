@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Literal
 
+from sqlalchemy import func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col, desc, select
 
@@ -67,6 +68,63 @@ async def get_latest_account_target_snapshot(
         .order_by(desc(TargetWeightSnapshot.id))
         .limit(1)
     )
+
+
+async def get_latest_account_target_snapshots_for_accounts(
+    session: AsyncSession,
+    pairs: list[tuple[int, int]],
+) -> dict[int, TargetWeightSnapshot]:
+    """
+    一次查出多个账户在各自当前组合下最新的归一化目标快照.
+
+    Parameters
+    ----------
+    session : AsyncSession
+        当前数据库会话。
+    pairs : list[tuple[int, int]]
+        ``(account_id, portfolio_id)`` 列表；只返回仍匹配该组合的快照。
+
+    Returns
+    -------
+    dict[int, TargetWeightSnapshot]
+        账户 ID 到最新归一化快照的映射；没有快照的账户不出现。
+
+    Notes
+    -----
+    仪表盘按账户循环取目标会变成 N+1。这里用窗口函数一次取回，与执行记录
+    批量查询同一形状。
+    """
+    if not pairs:
+        return {}
+
+    wanted = set(pairs)
+    account_ids = [account_id for account_id, _portfolio_id in pairs]
+    portfolio_ids = list({portfolio_id for _account_id, portfolio_id in pairs})
+    row_number = (
+        func.row_number().over(
+            partition_by=(col(TargetWeightSnapshot.account_id), col(TargetWeightSnapshot.portfolio_id)),
+            order_by=desc(col(TargetWeightSnapshot.id)),
+        )
+    ).label("rn")
+    ranked = (
+        select(TargetWeightSnapshot, row_number)
+        .where(
+            col(TargetWeightSnapshot.account_id).in_(account_ids),
+            col(TargetWeightSnapshot.portfolio_id).in_(portfolio_ids),
+            col(TargetWeightSnapshot.normalized_weights).is_not(None),
+        )
+        .subquery()
+    )
+    stmt = select(TargetWeightSnapshot).from_statement(select(ranked).where(ranked.c.rn <= 1))
+
+    latest: dict[int, TargetWeightSnapshot] = {}
+    for snapshot in (await session.execute(stmt)).scalars().all():
+        if snapshot.account_id is None:
+            continue
+        if (snapshot.account_id, snapshot.portfolio_id) not in wanted:
+            continue
+        latest[snapshot.account_id] = snapshot
+    return latest
 
 
 def target_snapshot_public(

@@ -96,6 +96,8 @@ def test_get_execution_status_uses_persisted_task_status_and_termination_metadat
     assert payload["execution_kind"] == ExecutionKind.REBALANCE
     assert payload["cancel_reason"] == "manual stop"
     assert payload["terminate_mode"] == ExecutionTerminateMode.CANCEL_PENDING
+    assert payload["error"] is None
+    assert payload["output_status"] is None
 
 
 def test_request_execution_termination_marks_running_task_terminating() -> None:
@@ -189,6 +191,7 @@ def test_registry_helper_functions_cover_status_serialization_and_registration(
             "started_at": "2026-03-22T18:00:00",
             "finished_at": None,
             "error": None,
+            "output_status": None,
             "record_id": None,
             "is_success": None,
             "cancel_requested_at": None,
@@ -224,6 +227,7 @@ def test_registry_helper_functions_cover_status_serialization_and_registration(
         "started_at": None,
         "finished_at": "2026-03-22T17:00:00",
         "error": None,
+        "output_status": None,
         "record_id": 501,
         "is_success": 0,
         "cancel_requested_at": None,
@@ -543,3 +547,36 @@ def test_finalize_execution_task_state_ignores_non_terminal() -> None:
         assert retained.task is not None
     finally:
         execution_registry._clear_execution_task_state(execution_id)
+
+
+@pytest.mark.parametrize(
+    ("raw_result", "expected_error"),
+    [
+        ({"status": "BLOCKED", "error": "5 个品种因交易时段不可执行"}, "5 个品种因交易时段不可执行"),
+        ({"status": "FAILED", "msg": "调仓执行失败"}, "调仓执行失败"),
+        ({"status": "BLOCKED", "memory": {"message": "当前不在交易时间"}}, "当前不在交易时间"),
+    ],
+)
+def test_persisted_execution_status_reads_output_error_and_status(
+    raw_result: dict[str, object],
+    expected_error: str,
+) -> None:
+    """回放应读 output.status，错误句按 error → msg → memory.message 回退。"""
+    record = SimpleNamespace(
+        execution_id="exec-blocked-1",
+        account_id=1,
+        raw_result=raw_result,
+        is_success=0,
+        created_at="2026-08-26T20:34:30",
+        id=6,
+    )
+    payload = execution_registry._build_persisted_execution_status(record)
+    assert payload["error"] == expected_error
+    assert payload["output_status"] == raw_result["status"]
+
+
+def test_execution_record_output_error_prefers_error_over_msg() -> None:
+    """标准输出落库字段是 error；msg 只作旧记录兜底。"""
+    raw_result = {"error": "5 个品种因交易时段不可执行", "msg": "执行未成功完成", "status": "BLOCKED"}
+    assert execution_registry.execution_record_output_error(raw_result) == "5 个品种因交易时段不可执行"
+    assert execution_registry.execution_record_output_status(raw_result) == "BLOCKED"

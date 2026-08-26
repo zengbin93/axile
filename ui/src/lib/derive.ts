@@ -4,6 +4,7 @@
  * 后端不下发「到位/背离」verdict，也无手续费汇总（见方案已知缺口）；这里用
  * 现有字段做诚实的粗粒度派生：能确定的说确定，不能确定的不编。
  */
+import { formatPlannedAt } from '@/features/account/scheduleTime'
 import type { AccountAssets, AccountDashboardItem, ExecuteRecord, LatestWeights, Position } from '@/types/api'
 
 /**
@@ -55,23 +56,19 @@ export interface GateStatus {
 /**
  * 从仪表盘项派生**在位性**（风险轴）。
  *
- * 只认执行结果（`last_is_success`/`last_exec_at`），**刻意不看 `is_started`**——
- * 这正是修掉「暂停吃掉失败」的关键：暂停是模式，遮不住偏离。
+ * 只认持仓 vs 目标（`off_symbol_count`），**刻意不看 `is_started`，也不看 `last_is_success`**。
+ * 上次执行成败是尝试质量，不是钱在不在目标上；闭市拒绝下单不能冒充偏离证据。
  *
- * 诚实律：默认「未知」，「在位」要靠证据挣——仅上次执行明确成功（`last_is_success===1`）
- * 才敢称在位；明确失败（`===0`）即偏离；其余（无记录/结果缺失）一律未知，不无证推定良好。
- *
- * Notes
- * -----
- * 单个 `last_is_success` 布尔无法区分「连续多次失败」，故偏离暂只此一档；加重（bad）留待有
- * 失败计数时再分。
+ * 诚实律：默认「未知」，「在位」要靠证据挣——只有服务端给出 `off_symbol_count===0`
+ * 才敢称在位；`>0` 即偏离；缺快照或目标一律未知，不无证推定良好。
  */
 export function integrityOf(item: AccountDashboardItem): IntegrityStatus {
-  if (item.last_is_success === 1) return { integrity: 'aligned', text: '已按策略到位' }
-  if (item.last_is_success === 0) return { integrity: 'off', text: '上次未到位 · 需要看看' }
-  // last_is_success == null：区分「从未执行」与「有记录但结果缺失」，两者皆未知。
-  if (item.last_exec_at == null) return { integrity: 'unknown', text: '尚无执行记录 · 先跑一次对账' }
-  return { integrity: 'unknown', text: '执行结果未知 · 需要看看' }
+  if (item.off_symbol_count == null) {
+    if (item.last_exec_at == null) return { integrity: 'unknown', text: '尚无执行记录 · 先跑一次对账' }
+    return { integrity: 'unknown', text: '目标或持仓未知 · 需要看看' }
+  }
+  if (item.off_symbol_count === 0) return { integrity: 'aligned', text: '已按策略到位' }
+  return { integrity: 'off', text: `${item.off_symbol_count} 只待调整` }
 }
 
 /**
@@ -100,30 +97,33 @@ export function grossExposure(item: AccountDashboardItem): number {
   return gross / item.total_asset
 }
 
+function lastAttemptFailed(item: AccountDashboardItem): boolean {
+  const status = item.last_output_status
+  if (status === 'FAILED' || status === 'PARTIAL') return true
+  return status !== 'BLOCKED' && item.last_is_success === 0
+}
+
 /**
- * 由在位性 × 档位 × 敞口合成判词与音量.
+ * 由在位性 × 档位 × 上次尝试性质合成判词与音量.
  *
- * 模式给风险改台词、敞口再分档：`暂停+偏离` 自动纠偏已关、不会自愈（最重）；`自动+偏离且高杠杆`
- * 会自愈但敞口大（也加重）；`自动+偏离且低敞口`（较轻）。在位 / 未知与档位无关，保持中性安静、
- * 沿用 :func:`integrityOf` 的措辞。取乐观档位时，先把 `is_started` override 进 `item` 再传入。
-
- * Parameters
- * ----------
- * item : AccountDashboardItem
- *     仪表盘项（`is_started` 可为乐观覆盖值）。
-
- * Returns
- * -------
- * StateVerdict
- *     判词主句与音量；`loud` 在「暂停且偏离」或「偏离且高杠杆」为真。
+ * 偏离本身来自仓位差。暂停+偏离最重（不会自愈）；自动+盘中失败才说「未到位将重试」；
+ * 自动+闭市拒绝说「N 只待调整 · 下次 …」，不把约束写成故障。
  */
 export function stateVerdict(item: AccountDashboardItem): StateVerdict {
   const { integrity, text } = integrityOf(item)
   if (integrity !== 'off') return { integrity, text, loud: false }
-  // 音量分档：暂停+偏离＝不会自愈（最重）；自动+偏离但高杠杆＝会自愈但高敞口、也加重；自动+低敞口＝较轻。
-  if (gateOf(item).gate === 'paused') return { integrity, text: '上次未到位 · 自动纠偏已关，需手动', loud: true }
-  if (grossExposure(item) > 1) return { integrity, text: '上次未到位 · 将自动重试 · 敞口偏高', loud: true }
-  return { integrity, text: '上次未到位 · 将自动重试', loud: false }
+  const countText = item.off_symbol_count != null ? `${item.off_symbol_count} 只待调整` : text
+  if (gateOf(item).gate === 'paused') return { integrity, text: `${countText} · 自动纠偏已关，需手动`, loud: true }
+  if (item.last_output_status === 'BLOCKED') {
+    const next = item.next_run_time ? formatPlannedAt(item.next_run_time) : null
+    return { integrity, text: next ? `${countText} · 下次 ${next}` : countText, loud: false }
+  }
+  if (lastAttemptFailed(item)) {
+    if (grossExposure(item) > 1) return { integrity, text: '上次未到位 · 将自动重试 · 敞口偏高', loud: true }
+    return { integrity, text: '上次未到位 · 将自动重试', loud: false }
+  }
+  if (grossExposure(item) > 1) return { integrity, text: `${countText} · 将自动重试 · 敞口偏高`, loud: true }
+  return { integrity, text: `${countText} · 将自动重试`, loud: false }
 }
 
 /** 敞口条分段颜色：按序渐隐的品牌蓝。 */
@@ -177,7 +177,7 @@ export function positionsOfAssets(assets: AccountAssets | null | undefined): Pos
   return Array.isArray(assets?.positions) ? assets.positions : []
 }
 
-/** 调仓阈值：|当前−目标| 小于此百分点视为「到位」。 */
+/** 调仓阈值：|当前−目标| 小于此百分点视为「到位」。与 ``axile/server/integrity.py`` 同步。 */
 export const REBALANCE_THRESHOLD = 0.5
 
 /** 单只调仓动作分类。 */

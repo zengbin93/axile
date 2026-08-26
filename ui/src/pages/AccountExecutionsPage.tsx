@@ -15,7 +15,20 @@ function statusOf(row: RecentRow): { label: string; className: string; descripti
   if (row.type === 'fill') return { label: '已完成', className: 'text-accent', description: `${row.desc} · ${row.amount}` }
   if (row.type === 'fail') return { label: '需处理', className: 'text-warn', description: row.reason || '执行失败' }
   if (row.type === 'terminated') return { label: '已终止', className: 'text-ink-2', description: row.count > 1 ? `${row.count} 次执行已终止` : '执行已终止' }
-  if (row.type === 'skip') return { label: '已跳过', className: 'text-ink-2', description: row.count > 1 ? `${row.count} 次因休市跳过` : '排程因休市跳过' }
+  if (row.type === 'skip') {
+    return {
+      label: '已跳过',
+      className: 'text-ink-2',
+      description: row.count > 1 ? `${row.count} 次${row.reason}` : row.reason,
+    }
+  }
+  if (row.type === 'blocked') {
+    return {
+      label: '未开盘',
+      className: 'text-ink-2',
+      description: row.reason || (row.count > 1 ? `${row.count} 次非交易时段` : '非交易时段，未下单'),
+    }
+  }
   return { label: '无变动', className: 'text-ink-2', description: row.count > 1 ? `${row.count} 次目标未变` : '目标未变，无需调仓' }
 }
 

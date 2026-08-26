@@ -20,6 +20,7 @@ const REASON_CODE_LABEL: Record<string, string> = {
   'COMMON.EXECUTION_TERMINATION_ACKED': '已确认终止',
   'CALENDAR.CLOSED': '休市，已跳过',
   'CALENDAR.NO_NIGHT_SESSION': '无对应夜盘，已跳过',
+  'CALENDAR.SESSION_CLOSED': '非交易时段，已跳过',
   'RISK.FORBIDDEN': '受账户交易限制',
 }
 

@@ -230,7 +230,10 @@ def test_ctp_engine_blocks_all_session_rejections_without_execution_io() -> None
     output = executor.execute(_input(), cleanup=False)
 
     assert output.status == ExecutionStatus.BLOCKED
-    assert output.error == "2 个品种因交易时段不可执行"
+    assert output.error is not None
+    assert "因交易时段不可执行" in output.error
+    assert "IF2609" in output.error
+    assert "ag2612" in output.error
     assert set(output.symbol_results) == {"IF2609", "ag2612"}
     assert executor.market_data_requests == []
     assert executor.websocket_requests == []

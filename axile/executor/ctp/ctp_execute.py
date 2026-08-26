@@ -23,6 +23,7 @@ from axile.domain.execution import ExecutionReasonFamily
 from axile.executor.abstract_executor.base import AbstractExecutor
 from axile.executor.account_control.exceptions import AccountControlBlockedError
 from axile.executor.algorithms.utils import clock_now
+from axile.executor.china_futures_session import is_within_possible_china_futures_session
 from axile.executor.constants.order_status import OrderStatus
 from axile.executor.ctp.converters import (
     account_to_unified,
@@ -158,7 +159,8 @@ class CtpExecutionEngine(ExecutionEngine):
                 for result in failed_results
             )
         ):
-            return f"{len(failed_results)} 个品种因交易时段不可执行"
+            names = ", ".join(result.symbol for result in failed_results)
+            return f"{names} 因交易时段不可执行"
         return super()._derive_dispatch_error(status, symbol_results)
 
 
@@ -364,9 +366,9 @@ class CTPExecutor(AbstractExecutor, UnifiedCallbackClient):
         return not self._closed and self._trader_connected and self._market_connected
 
     @override
-    def _check_trading_time(self):
-        """CTP 时段准入由 CTP 品种编排器负责。"""
-        return True
+    def _check_trading_time(self) -> bool:
+        """市场缝用钟判断；盘中品种时段仍由 CTP 编排器负责。"""
+        return is_within_possible_china_futures_session(datetime.now(_SHANGHAI))
 
     @override
     def _execution_engine(self) -> ExecutionEngine:

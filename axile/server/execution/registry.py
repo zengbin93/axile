@@ -43,6 +43,7 @@ class ExecutionTaskState:
     started_at: str | None = None
     finished_at: str | None = None
     error: str | None = None
+    output_status: str | None = None
     record_id: int | None = None
     is_success: int | None = None
     task: asyncio.Task[object] | None = None
@@ -313,6 +314,7 @@ def _serialize_execution_task_state(state: ExecutionTaskState) -> dict[str, obje
         "started_at": state.started_at,
         "finished_at": state.finished_at,
         "error": state.error,
+        "output_status": state.output_status,
         "record_id": state.record_id,
         "is_success": state.is_success,
         "cancel_requested_at": state.cancel_requested_at,
@@ -357,6 +359,42 @@ def _coerce_execution_terminate_mode(value: object) -> ExecutionTerminateMode | 
     return None
 
 
+def _coerce_optional_text(value: object) -> str | None:
+    """把任意值收敛为非空字符串；空白与非字符串视为缺失."""
+    if isinstance(value, str) and value.strip():
+        return value
+    return None
+
+
+def execution_record_output_status(raw_result: object) -> str | None:
+    """从执行记录结果中读取执行器 ``status``（如 ``BLOCKED``）。"""
+    if not isinstance(raw_result, dict):
+        return None
+    return _coerce_optional_text(raw_result.get("status"))
+
+
+def execution_record_output_error(raw_result: object) -> str | None:
+    """
+    从执行记录结果中读取人话错误.
+
+    UnifiedStandardOutput 落库字段是 ``error``；旧失败记录可能只有 ``msg``；
+    渠道级非交易时段还会把句子放在 ``memory.message``。轮询接口必须按这个
+    顺序回放，不能只读 ``msg``，否则会出现「服务端未返回原因」。
+    """
+    if not isinstance(raw_result, dict):
+        return None
+    error = _coerce_optional_text(raw_result.get("error"))
+    if error is not None:
+        return error
+    msg = _coerce_optional_text(raw_result.get("msg"))
+    if msg is not None:
+        return msg
+    memory = raw_result.get("memory")
+    if isinstance(memory, dict):
+        return _coerce_optional_text(memory.get("message"))
+    return None
+
+
 def _build_persisted_execution_status(record: ExecuteRecord) -> dict[str, object]:
     """根据执行记录回放任务生命周期状态."""
     task_status = _coerce_execution_task_status(record.raw_result.get("task_status"))
@@ -374,7 +412,10 @@ def _build_persisted_execution_status(record: ExecuteRecord) -> dict[str, object
         "created_at": record.created_at,
         "started_at": None,
         "finished_at": cast("str | None", termination.get("finished_at")) or record.created_at,
-        "error": None if task_status == ExecutionTaskStatus.TERMINATED else record.raw_result.get("msg"),
+        "error": (
+            None if task_status == ExecutionTaskStatus.TERMINATED else execution_record_output_error(record.raw_result)
+        ),
+        "output_status": execution_record_output_status(record.raw_result),
         "record_id": record.id,
         "is_success": record.is_success,
         "cancel_requested_at": cast("str | None", termination.get("requested_at")),
