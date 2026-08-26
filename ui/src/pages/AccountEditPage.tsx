@@ -432,7 +432,7 @@ export function AccountEditPage({ section = 'basic' }: { section?: EditSection }
           </div>
           </Section>
           <Section label="权重精度">
-            <div className="flex flex-col gap-1">
+            <div className="w-fit">
               <label htmlFor="edit-weight-precision" className="sr-only">
                 权重精度
               </label>

@@ -375,7 +375,7 @@ export function TimerCustom({ rawCron, rawErr, onRawCron }: TimerCustomProps) {
         value={rawCron}
         onChange={(e) => onRawCron(e.target.value)}
         placeholder="0 8 * * * | 0 20 * * 0,2,4"
-        className="mt-4 min-h-[76px] w-full resize-y rounded-[9px] border border-ink-3/30 bg-surface p-3 font-mono text-xs text-ink-1 outline-none placeholder:text-ink-3 focus:border-accent"
+        className="mt-4 min-h-[144px] w-full resize-y rounded-[9px] border border-ink-3/30 bg-surface p-3 font-mono text-xs text-ink-1 outline-none placeholder:text-ink-3 focus:border-accent"
       />
       {rawErr && <div className="mt-1.5 text-xs text-warn">{rawErr}</div>}
     </div>
