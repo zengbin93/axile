@@ -5,8 +5,8 @@
  * 仍由各自的完整编辑器承载。保存保持最小 PATCH + 底栏变更摘要。
  */
 
-import { useCallback, useEffect, useState } from 'react'
-import { useParams } from 'react-router'
+import { useCallback, useEffect, useState, type CSSProperties } from 'react'
+import { useParams, useViewTransitionState } from 'react-router'
 import { useNavigate } from '@/components/ui/nav'
 import { ErrorNotice } from '@/components/ui/ErrorNotice'
 import { Skeleton } from '@/components/ui/Skeleton'
@@ -19,6 +19,13 @@ import { leverageError } from '@/features/account/leverage'
 import { AccountPageTitle } from '@/features/account/pageHead'
 import { WeightPrecisionInput } from '@/features/account/WeightPrecisionInput'
 import { weightPrecisionError } from '@/features/account/weightPrecision'
+import {
+  accountConfigVtName,
+  describeLeverage,
+  describeSymbolControl,
+  readAccountConfigSummary,
+  writeAccountConfigSummary,
+} from '@/features/account/configSummary'
 import { getAccount, updateAccount } from '@/lib/api/accounts'
 import { testFeishu, type TestResult } from '@/lib/api/init'
 import { usePolling } from '@/lib/hooks/usePolling'
@@ -30,6 +37,7 @@ import {
   EditError,
   EditLoading,
   EditSaveBar,
+  EditSynopsis,
   Row,
   Section,
   Toggle,
@@ -177,10 +185,25 @@ export function AccountEditPage({ section = 'basic' }: { section?: EditSection }
   })
   const acc = account.data
   const channelDescriptor = useChannelDescriptor(acc?.trade_channel)
+  const showShortLeverage = channelDescriptor?.ui.show_short_leverage ?? true
   const item = accounts?.find((a) => a.account_id === accountId) ?? null
   // 首帧用仪表盘缓存名/渠道挂标题，避免等 getAccount 时落点缺失、FLIP 断档，
   // 也避免 Chip 在过渡尾巴上闪现。
   const displayName = acc?.name ?? item?.name
+
+  // Hero 配置带值 ↔ 本页「当前配置」摘要值的 FLIP：useViewTransitionState 对过渡的
+  // current/next 双向匹配，两侧用同一精确路径判定即去程返程一致挂名。本页首帧必冷
+  // （usePolling 无跨页缓存），落点靠模块级摘要缓存同步读出；真源到位即写新值。
+  const tSelfSection = useViewTransitionState(`/accounts/${accountId}/edit/${section}`)
+  const cachedConfig = acc ? null : readAccountConfigSummary(accountId)
+  useEffect(() => {
+    if (acc) writeAccountConfigSummary(accountId, acc, { showShortLeverage })
+  }, [acc, accountId, showShortLeverage])
+  /** 当前分区（杠杆/品种）的共享名 style；其余分区不挂。 */
+  const sectionVtStyle = (kind: 'leverage' | 'symbols'): CSSProperties | undefined =>
+    tSelfSection && section === kind
+      ? { viewTransitionName: accountConfigVtName(accountId, kind) }
+      : undefined
 
   const [ready, setReady] = useState(false)
   const [draft, setDraft] = useState<Draft | null>(null)
@@ -206,15 +229,32 @@ export function AccountEditPage({ section = 'basic' }: { section?: EditSection }
   if (account.error && !acc)
     return <EditError error={account.error} onRetry={account.refresh} />
 
-  if (account.loading || !ready || !acc || !draft || (channelDescriptor == null && channelCatalogLoading))
+  if (account.loading || !ready || !acc || !draft || (channelDescriptor == null && channelCatalogLoading)) {
+    // 加载中也要挂「当前配置」摘要（缓存值）：这是 hero 配置带 FLIP 的首帧落点。
+    const loadingSynopsis =
+      section === 'leverage'
+        ? cachedConfig?.leverage
+        : section === 'symbols'
+          ? cachedConfig?.symbols
+          : null
     return (
       <section className="pb-24">
         <div className="flex flex-wrap items-baseline gap-3">{titleName}</div>
+        {loadingSynopsis != null && (
+          <EditSynopsis>
+            <span
+              className="inline-block"
+              style={sectionVtStyle(section === 'leverage' ? 'leverage' : 'symbols')}
+            >
+              {loadingSynopsis}
+            </span>
+          </EditSynopsis>
+        )}
         <EditLoading bare />
       </section>
     )
+  }
 
-  const showShortLeverage = channelDescriptor?.ui.show_short_leverage ?? true
   const d = draft
   const set = (patch: Partial<Draft>) => {
     setSaveError(null)
@@ -249,6 +289,18 @@ export function AccountEditPage({ section = 'basic' }: { section?: EditSection }
     levErr || timeoutErr || weightPrecisionErr || portfolios == null || portfoliosError || channelCatalogError,
   )
 
+  // 「当前配置」摘要随草稿走（改了立刻看得见）；仅草稿与真源同文时挂共享名——
+  // 不同文挂名即成内容 morph（假连续），此时退化为整页交叉淡。
+  const draftNum = (s: string) => (s.trim() === '' ? null : Number(s) || 0)
+  const savedLeverageText = describeLeverage(acc.long_leverage, acc.short_leverage, showShortLeverage)
+  const draftLeverageText = describeLeverage(
+    draftNum(d.longLev),
+    showShortLeverage ? draftNum(d.shortLev) : null,
+    showShortLeverage,
+  )
+  const savedSymbolsText = describeSymbolControl(acc.forbidden_symbols, acc.risk_symbols)
+  const draftSymbolsText = describeSymbolControl(d.forbidden, d.risk)
+
   const save = async () => {
     if (levErr) return toast(`杠杆有误：${levErr}`)
     if (timeoutErr) return toast(`执行超时有误：${timeoutErr}`)
@@ -256,7 +308,9 @@ export function AccountEditPage({ section = 'basic' }: { section?: EditSection }
     if (!dirty) return toast('没有改动')
     setSaveError(null)
     try {
-      await updateAccount(accountId, patch)
+      const updated = await updateAccount(accountId, patch)
+      // 保存响应直接写摘要缓存：返回详情时 hero 配置带首帧即新值，FLIP 落地同文。
+      writeAccountConfigSummary(accountId, updated, { showShortLeverage })
       toast('账户已更新')
       void refreshAccounts()
       account.refresh()
@@ -273,6 +327,28 @@ export function AccountEditPage({ section = 'basic' }: { section?: EditSection }
       <div className="mt-3 border-l-2 border-warn/60 bg-warn-tint/50 py-2 pl-3 pr-2 text-[13px] text-ink-2">
         修改不会立即下单，从下次调仓开始生效。
       </div>
+
+      {/* 「当前配置」摘要：hero 配置带值文本的 FLIP 落点（同文才挂名，见上）。 */}
+      {section === 'leverage' && (
+        <EditSynopsis>
+          <span
+            className="inline-block"
+            style={draftLeverageText === savedLeverageText ? sectionVtStyle('leverage') : undefined}
+          >
+            {draftLeverageText}
+          </span>
+        </EditSynopsis>
+      )}
+      {section === 'symbols' && (
+        <EditSynopsis>
+          <span
+            className="inline-block"
+            style={draftSymbolsText === savedSymbolsText ? sectionVtStyle('symbols') : undefined}
+          >
+            {draftSymbolsText}
+          </span>
+        </EditSynopsis>
+      )}
 
       {section === 'basic' && (
         <Section label="基本信息">

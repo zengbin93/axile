@@ -8,7 +8,7 @@
  *
  * 同页 Tab 内容区优先 ``panel-fade-in``（见 theme.css），勿与 Segmented 滑块抢 root VT。
  */
-import { useEffect, useRef, type MutableRefObject } from 'react'
+import { useEffect, useRef } from 'react'
 import { flushSync } from 'react-dom'
 
 /** 带 `startViewTransition` 能力的 document（渐进增强，避免 TS 报缺方法）。 */
@@ -41,23 +41,33 @@ export function withViewTransition(update: () => void): void {
 }
 
 /**
- * 首帧不播 ``panel-fade-in``，仅在组件已挂载后的 key 重挂才允许入场。
+ * 仅当 key 相对上次提交发生变化的那一帧返回 true，配合 ``key={k}`` 重挂播 ``panel-fade-in``。
  *
- * 对齐动效铁律「首帧就位，不入场表演」：初次渲染返回空串；effect 之后
- * ``.current === true``，配合 ``key={...} className={allow.current ? 'panel-fade-in' : ''}``
- * 在 Tab/主锚 swap 时淡入。
-
+ * 对齐动效铁律「首帧就位，不入场表演」：首帧与挂载后的无关重渲染都返回 false，只有
+ * key 真变（节点被重挂成新 DOM）的那次渲染才放行入场淡入。
+ *
+ * 为何不沿用「mount 后置 true」的 ref 闸门：渲染期读 ref 时，挂载后的任意无关重渲染
+ * （如约 250ms 后到点的预览 loading）都会把动画类补挂到存续节点上，浏览器对新增
+ * animation 类会从头重播——表现为每次打开页面都闪一下。比较「本次 key 与上次提交的
+ * key」则只在新节点诞生的那一帧成立，存续节点永远拿不到这个类。
+ *
+ * Parameters
+ * ----------
+ * key : unknown
+ *     与被动画节点 ``key`` 同源的身份值（tab、主锚身份、开关态等）。
+ *
  * Returns
  * -------
- * MutableRefObject<boolean>
- *     渲染期可读；勿对其赋值，由 hook 在 mount 后置 true。
+ * boolean
+ *     本帧是否应挂 ``panel-fade-in``。
  */
-export function usePanelFadeReady(): MutableRefObject<boolean> {
-  const allow = useRef(false)
+export function useRemountFade(key: unknown): boolean {
+  const committed = useRef(key)
+  const changed = committed.current !== key
   useEffect(() => {
-    allow.current = true
-  }, [])
-  return allow
+    committed.current = key
+  })
+  return changed
 }
 
 /** 标准 200ms 布局过渡（目录宽/透明度）；reduce 时由 utility 关掉。 */

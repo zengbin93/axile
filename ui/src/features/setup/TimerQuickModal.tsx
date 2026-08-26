@@ -9,7 +9,7 @@ import { useEffect, useState } from 'react'
 import { Link } from '@/components/ui/nav'
 import { Select } from '@/components/ui/Select'
 import { ErrorNotice } from '@/components/ui/ErrorNotice'
-import { MOTION_LAYOUT, usePanelFadeReady } from '@/lib/viewTransition'
+import { MOTION_LAYOUT, useRemountFade } from '@/lib/viewTransition'
 import {
   DEFAULT_PRESET,
   PRESETS,
@@ -116,9 +116,9 @@ function TimerQuickModalReady({
 }: TimerQuickModalProps & { scheduleKind: ScheduleKind; nightSchedule?: NightSchedule | null }) {
   const toast = useToastStore((s) => s.toast)
   const market = scheduleKind
-  const bodyFade = usePanelFadeReady()
-
   const [state, setState] = useState<TimerEditorState>(() => draftFromCron(market, cronExpr, nightSchedule).state)
+  // 开关切到「开」的那一帧才播入场；初次以开挂载不播（首帧就位）。
+  const autoOnFade = useRemountFade(state.autoOn)
   const [fromComplex, setFromComplex] = useState(false)
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<Error | null>(null)
@@ -244,7 +244,7 @@ function TimerQuickModalReady({
                   }`}
                 >
                   <div className="overflow-hidden">
-                    <div className={`space-y-4 ${state.autoOn && bodyFade.current ? 'panel-fade-in' : ''}`}>
+                    <div className={`space-y-4 ${state.autoOn && autoOnFade ? 'panel-fade-in' : ''}`}>
                       <div>
                         <div className="mb-2 text-sm font-[640]">节奏</div>
                         <div className="flex flex-wrap gap-2">

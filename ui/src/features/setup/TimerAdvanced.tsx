@@ -4,7 +4,7 @@
  * 排版：主锚（时刻/频率名）居中，频率全贴合 Segmented 贴顶，周几围下；多条时右侧目录。
  * 动效约定：
  * - 单↔双栏：目录 width/opacity 状态类过渡 200ms（Drawer 语汇，非入场表演）
- * - 主锚日频↔周期：key 重挂 + panel-fade-in（首帧不播，见 usePanelFadeReady）
+ * - 主锚日频↔周期：key 重挂 + panel-fade-in（仅身份变的那一帧播，见 useRemountFade）
  * - 频率：Segmented 滑块；周几/目录：transition-colors 200ms
  * - 无生命体征 loop；Mac 滚轮菜单自带 select-pop-in
  */
@@ -12,7 +12,7 @@
 import { MacTimePicker } from '@/components/ui/MacTimePicker'
 import { OverflowText } from '@/components/ui/OverflowText'
 import { Segmented } from '@/components/ui/Segmented'
-import { MOTION_LAYOUT, usePanelFadeReady } from '@/lib/viewTransition'
+import { MOTION_LAYOUT, useRemountFade } from '@/lib/viewTransition'
 import type { ScheduleKind } from '@/features/setup/cron'
 import {
   isRuleComplete,
@@ -155,9 +155,9 @@ export function TimerAdvanced({ market, rules, selectedId, onChangeRules }: Time
     (selected.freq === 'd1' || selected.freq === 'm240') &&
     !isValidTime(selected.time)
 
-  const heroFade = usePanelFadeReady()
   // 主锚身份：日频合为一类，周期按 freq 分，避免 15↔60 无谓重挂闪。
   const heroKey = showTime ? 'd1-time' : `interval-${selected?.freq ?? 'm15'}`
+  const heroFade = useRemountFade(heroKey)
 
   const replaceSelected = (patch: Partial<ScheduleRule>) => {
     if (!selected) return
@@ -236,7 +236,7 @@ export function TimerAdvanced({ market, rules, selectedId, onChangeRules }: Time
       <div
         key={heroKey}
         className={`mt-6 flex min-h-[88px] flex-col items-center justify-center gap-3 ${
-          heroFade.current ? 'panel-fade-in' : ''
+          heroFade ? 'panel-fade-in' : ''
         }`}
       >
         {showTime ? (

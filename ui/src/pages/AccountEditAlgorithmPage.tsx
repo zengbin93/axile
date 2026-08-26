@@ -4,8 +4,8 @@
  * 主交易 + 清仓算法完整编辑器；保存只 PATCH 算法相关字段，成功后回到编辑总览。
  */
 
-import { useCallback, useEffect, useState } from 'react'
-import { useParams } from 'react-router'
+import { useCallback, useEffect, useState, type CSSProperties } from 'react'
+import { useParams, useViewTransitionState } from 'react-router'
 import { useNavigate } from '@/components/ui/nav'
 import { getAccount, updateAccount } from '@/lib/api/accounts'
 import { usePolling } from '@/lib/hooks/usePolling'
@@ -13,6 +13,11 @@ import { useDomainStore } from '@/stores/domain'
 import { useToastStore } from '@/stores/ui'
 import { AccountPageTitle } from '@/features/account/pageHead'
 import { useChannelDescriptor } from '@/stores/channels'
+import {
+  accountConfigVtName,
+  readAccountConfigSummary,
+  writeAccountConfigSummary,
+} from '@/features/account/configSummary'
 import {
   algorithmRefOf,
   describeAlgorithmRef,
@@ -53,6 +58,18 @@ export function AccountEditAlgorithmPage() {
   const acc = account.data
   const cachedAccount = accounts?.find((item) => item.account_id === accountId) ?? null
   const descriptor = useChannelDescriptor(acc?.trade_channel)
+
+  // Hero 配置带「算法」值 ↔ 本页「当前配置 · 下单」摘要的 FLIP：门控与缓存协议
+  // 同浅配置页（见 AccountEditPage）——首帧落点靠缓存，真源/保存响应写新值。
+  const tSelf = useViewTransitionState(`/accounts/${accountId}/edit/algorithm`)
+  const cachedConfig = acc ? null : readAccountConfigSummary(accountId)
+  useEffect(() => {
+    if (acc && descriptor) {
+      writeAccountConfigSummary(accountId, acc, {
+        showShortLeverage: descriptor.ui.show_short_leverage,
+      })
+    }
+  }, [acc, descriptor, accountId])
   const title = (
     <div className="flex flex-wrap items-baseline gap-3">
       <AccountPageTitle
@@ -85,6 +102,20 @@ export function AccountEditAlgorithmPage() {
     return (
       <section className="pb-24">
         {title}
+        {/* 缓存值充当 hero「算法」FLIP 的首帧落点；清仓行待真源到位再出。 */}
+        {cachedConfig != null && (
+          <EditSynopsis>
+            <div className="grid grid-cols-[3rem_minmax(0,1fr)] gap-x-3 gap-y-0.5">
+              <span className="font-normal text-ink-3">下单</span>
+              <span
+                className="inline-block"
+                style={tSelf ? { viewTransitionName: accountConfigVtName(accountId, 'algorithm') } : undefined}
+              >
+                {cachedConfig.algorithm}
+              </span>
+            </div>
+          </EditSynopsis>
+        )}
         <EditLoading bare />
       </section>
     )
@@ -104,6 +135,12 @@ export function AccountEditAlgorithmPage() {
   // 摘要随草稿更新；下单与清仓分行，避免两个配置槽挤成一个长句。
   const tradeSum = describeAlgorithmRef(trade)
   const emptySum = describeAlgorithmRef(empty)
+  // 「下单」值与 hero 配置带同文才挂共享名（草稿改了就退化为整页交叉淡，不做内容 morph）。
+  const savedTradeSum = describeAlgorithmRef(algorithmRefOf(acc.algorithm))
+  const tradeVtStyle: CSSProperties | undefined =
+    tSelf && tradeSum === savedTradeSum
+      ? { viewTransitionName: accountConfigVtName(accountId, 'algorithm') }
+      : undefined
 
   const save = async () => {
     if (err) return toast(`算法参数非法：${err}`)
@@ -118,7 +155,11 @@ export function AccountEditAlgorithmPage() {
     setSaving(true)
     setSaveError(null)
     try {
-      await updateAccount(accountId, patch)
+      const updated = await updateAccount(accountId, patch)
+      // 保存响应直接写摘要缓存：返回详情时 hero「算法」值首帧即新值，FLIP 落地同文。
+      writeAccountConfigSummary(accountId, updated, {
+        showShortLeverage: descriptor.ui.show_short_leverage,
+      })
       toast('执行算法已更新')
       void refreshAccounts()
       account.refresh()
@@ -153,7 +194,7 @@ export function AccountEditAlgorithmPage() {
       <EditSynopsis note="保存只更新算法引用，不影响定时与启停。">
         <div className="grid grid-cols-[3rem_minmax(0,1fr)] gap-x-3 gap-y-0.5">
           <span className="font-normal text-ink-3">下单</span>
-          <span>{tradeSum}</span>
+          <span className="inline-block" style={tradeVtStyle}>{tradeSum}</span>
           <span className="font-normal text-ink-3">清仓</span>
           <span>{emptySum}</span>
         </div>

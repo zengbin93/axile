@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react'
 import { useViewTransitionState } from 'react-router'
 import { RefreshCw } from 'lucide-react'
 import { Link, useNavigate } from '@/components/ui/nav'
@@ -24,6 +24,13 @@ import { phaseLabel, runVerb } from '@/features/dashboard/execProgress'
 import { useRunning } from '@/stores/liveExec'
 import { useDomainStore } from '@/stores/domain'
 import { algorithmRefOf, describeAlgorithmRef } from '@/features/setup/algorithms'
+import {
+  accountConfigVtName,
+  describeLeverage,
+  describeSymbolControl,
+  readAccountConfigSummary,
+  writeAccountConfigSummary,
+} from '@/features/account/configSummary'
 import {
   getAccount,
   getAccountAssetSnapshots,
@@ -227,35 +234,34 @@ export function AccountDetail({
   const cronExpr = account.data?.cron_expr ?? ''
   const cronHuman = cronExpr && scheduleKind ? describeCron(scheduleKind, cronExpr, channelSchedule?.night) : null
 
-  // Hero 配置带（杠杆 / 品种控制 / 算法）与组合名：组合名取自领域 store，其余取自
-  // 本组件已在轮询的账户详情——零新增请求。它们是配置事实而非盈亏或偏离：保持中性色、
-  // 不挂动效；各项兼作对应编辑分区的安静入口（hover 出下划线，点击进编辑）。
+  // Hero 配置带（杠杆 / 品种控制 / 算法）：取自本组件已在轮询的账户详情，零新增请求。
+  // 配置事实而非盈亏或偏离：中性色、零动效；每项兼作对应编辑分区的入口。
+  // 值文本与编辑分区页「当前配置」摘要是同一句话的两个落点：去往/离开该分区时挂
+  // 共享名做平移 + 微缩（身份对 + 几何真变）；模块级摘要缓存保证两端首帧都有落点。
   const acc = account.data
-  /** 配置带常挂：详情未加载时值位骨架占位（null），加载失败显示 —。 */
-  const configLoading = acc == null && account.loading
+  const tEditLeverage = useViewTransitionState(`/accounts/${accountId}/edit/leverage`)
+  const tEditSymbols = useViewTransitionState(`/accounts/${accountId}/edit/symbols`)
+  const tEditAlgorithm = useViewTransitionState(`/accounts/${accountId}/edit/algorithm`)
+  const showShortLeverage = channelDescriptor?.ui.show_short_leverage ?? true
+  // 真源到位即写缓存：编辑页首帧同步读出，FLIP 落点不断档。
+  useEffect(() => {
+    if (acc) writeAccountConfigSummary(accountId, acc, { showShortLeverage })
+  }, [acc, accountId, showShortLeverage])
+  const cachedConfig = acc ? null : readAccountConfigSummary(accountId)
+  /** 配置带常挂：详情未加载且缓存未命中时值位骨架占位（null）。 */
+  const configLoading = acc == null && account.loading && cachedConfig == null
   const portfolioName =
     portfolioId != null ? (portfolios?.find((p) => p.id === portfolioId)?.name ?? null) : null
-  const showShortLeverage = channelDescriptor?.ui.show_short_leverage ?? true
-  const fmtLev = (v: number | null) => (v == null ? '—' : `${Number.isInteger(v) ? v : v.toFixed(1)}×`)
   const leverageText = acc
-    ? showShortLeverage
-      ? `多 ${fmtLev(acc.long_leverage)} / 空 ${fmtLev(acc.short_leverage)}`
-      : fmtLev(acc.long_leverage)
-    : null
-  const forbiddenCount = acc?.forbidden_symbols?.length ?? 0
-  const riskCount = acc?.risk_symbols?.length ?? 0
+    ? describeLeverage(acc.long_leverage, acc.short_leverage, showShortLeverage)
+    : (cachedConfig?.leverage ?? null)
   const symbolsText = acc
-    ? forbiddenCount + riskCount === 0
-      ? '未设限'
-      : [
-          forbiddenCount > 0 ? `禁投 ${forbiddenCount}` : null,
-          riskCount > 0 ? `风险 ${riskCount}` : null,
-        ]
-          .filter(Boolean)
-          .join('、')
-    : null
+    ? describeSymbolControl(acc.forbidden_symbols, acc.risk_symbols)
+    : (cachedConfig?.symbols ?? null)
   // 算法摘要不收短：TARGET-POS-TASK 等直接给完整参数句，配置带里整项分组 + 截断兜底。
-  const algorithmText = acc ? describeAlgorithmRef(algorithmRefOf(acc.algorithm)) : null
+  const algorithmText = acc
+    ? describeAlgorithmRef(algorithmRefOf(acc.algorithm))
+    : (cachedConfig?.algorithm ?? null)
   const onToggleStarted = async () => {
     const next = !isStarted
     setActionError(null)
@@ -485,8 +491,9 @@ export function AccountDetail({
         {/*
          * 配置带：hero 最后一层（名称 → 状态 → 资产 → 配置），label 领值的「· 外分组」
          * 形态——每项是独立 inline 单元，折行只发生在项间，算法参数句内部的「·」不再
-         * 与分段符糊成一片。带常挂（值位骨架占位），卡高不随账户详情到位而长个。
+         * 与分段符糊成一片。带常挂（缓存/骨架占位），卡高不随账户详情到位而长个。
          * 算法项吃剩余宽、OverflowText 截断 + hover 播全句；整项可点跳编辑分区。
+         * 值文本挂共享名：与目标编辑页的「当前配置」摘要值配对 FLIP（各自门控）。
          */}
         <div className="mt-4 flex flex-wrap items-center gap-x-6 gap-y-1.5 border-t border-line pt-3.5 text-[13px]">
           <HeroConfigItem
@@ -494,12 +501,14 @@ export function AccountDetail({
             to={`/accounts/${accountId}/edit/leverage`}
             title="杠杆设置"
             value={configLoading ? null : (leverageText ?? '—')}
+            vtName={tEditLeverage ? accountConfigVtName(accountId, 'leverage') : undefined}
           />
           <HeroConfigItem
             label="品种"
             to={`/accounts/${accountId}/edit/symbols`}
             title="品种控制"
             value={configLoading ? null : (symbolsText ?? '—')}
+            vtName={tEditSymbols ? accountConfigVtName(accountId, 'symbols') : undefined}
           />
           <HeroConfigItem
             label="算法"
@@ -507,6 +516,7 @@ export function AccountDetail({
             title="执行算法"
             value={configLoading ? null : (algorithmText ?? '—')}
             grow
+            vtName={tEditAlgorithm ? accountConfigVtName(accountId, 'algorithm') : undefined}
           />
         </div>
       </Card>
@@ -838,6 +848,7 @@ function HeroConfigItem({
   title,
   value,
   grow = false,
+  vtName,
 }: {
   label: string
   to: string
@@ -846,7 +857,10 @@ function HeroConfigItem({
   value: string | null
   /** 占满剩余宽并允许截断（算法长句用）。 */
   grow?: boolean
+  /** 正在去往/离开对应编辑分区时为共享名（值文本 FLIP 配对）；否则不挂。 */
+  vtName?: string
 }) {
+  const vtStyle: CSSProperties | undefined = vtName ? { viewTransitionName: vtName } : undefined
   return (
     <Link
       to={to}
@@ -857,9 +871,14 @@ function HeroConfigItem({
       {value === null ? (
         <SkeletonText className="w-14" />
       ) : grow ? (
-        <OverflowText className="num min-w-0 flex-1 font-medium text-ink-1 group-hover:underline" text={value} />
+        // 壳包 OverflowText：共享名挂在与值同盒的 wrapper 上，不进 marquee 组件内部。
+        <span className="block min-w-0 flex-1" style={vtStyle}>
+          <OverflowText className="num font-medium text-ink-1 group-hover:underline" text={value} />
+        </span>
       ) : (
-        <span className="num whitespace-nowrap font-medium text-ink-1 group-hover:underline">{value}</span>
+        <span className="num whitespace-nowrap font-medium text-ink-1 group-hover:underline" style={vtStyle}>
+          {value}
+        </span>
       )}
     </Link>
   )

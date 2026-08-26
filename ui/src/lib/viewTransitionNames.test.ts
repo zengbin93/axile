@@ -16,6 +16,7 @@ const ALLOWED_VT_PREFIXES = [
   'portfolio-name-',
   'equity-amount-',
   'edit-shell-',
+  'account-config-',
   'app-nav-selection',
 ] as const
 
@@ -80,7 +81,7 @@ describe('viewTransitionName inventory (FLIP-only)', () => {
     expect(hits).toEqual([])
   })
 
-  it('所有 viewTransitionName 字面量仅属四类 FLIP 前缀', () => {
+  it('所有 viewTransitionName 字面量仅属允许集的 FLIP 前缀', () => {
     const bad: string[] = []
     for (const file of files) {
       const text = readFileSync(file, 'utf8')

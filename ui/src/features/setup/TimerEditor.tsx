@@ -10,7 +10,7 @@ import { Link } from '@/components/ui/nav'
 import { OverflowText } from '@/components/ui/OverflowText'
 import { Segmented } from '@/components/ui/Segmented'
 import { Select } from '@/components/ui/Select'
-import { MOTION_LAYOUT, usePanelFadeReady } from '@/lib/viewTransition'
+import { MOTION_LAYOUT, useRemountFade } from '@/lib/viewTransition'
 import {
   DEFAULT_PRESET,
   PRESETS,
@@ -138,8 +138,8 @@ function calendarSummary(preview: SchedulePreview | null): { text: string; warni
 }
 
 export function TimerEditor({ tradeChannel, scheduleKind, nightSchedule, value, onChange }: TimerEditorProps) {
-  const tabFade = usePanelFadeReady()
   const v = value
+  const tabFade = useRemountFade(v.timerTab)
   const [schedulePreview, setSchedulePreview] = useState<SchedulePreview | null>(null)
   const [previewLoading, setPreviewLoading] = useState(false)
   const [previewError, setPreviewError] = useState<string | null>(null)
@@ -175,6 +175,9 @@ export function TimerEditor({ tradeChannel, scheduleKind, nightSchedule, value, 
   const rawErr = v.timerTab === 'custom' && !customEmpty ? cronError(v.rawCron) : null
   const cronList = v.autoOn ? resolveCronList(scheduleKind, v, nightSchedule) : []
   const cronExpr = rawErr ? '' : cronToExpr(cronList)
+  // 是否会发起预览请求（与下方 effect 的提前返回条件一致）：首帧据此直接上骨架，
+  // 避免「占位文案 → 骨架 → 列表」三段跳闪。
+  const expectPreview = Boolean(tradeChannel) && v.autoOn && !rawErr && Boolean(cronExpr)
 
   useEffect(() => {
     if (previousChannel.current !== tradeChannel) {
@@ -288,7 +291,7 @@ export function TimerEditor({ tradeChannel, scheduleKind, nightSchedule, value, 
               />
             </div>
 
-            <div key={v.timerTab} className={tabFade.current ? 'panel-fade-in' : undefined}>
+            <div key={v.timerTab} className={tabFade ? 'panel-fade-in' : undefined}>
               {v.timerTab === 'quick' ? (
                 <div>
                   <div className="mb-2">
@@ -373,7 +376,7 @@ export function TimerEditor({ tradeChannel, scheduleKind, nightSchedule, value, 
                 <p className="text-[13px] text-ink-3">输入自定义节奏后显示。</p>
               ) : previewError ? (
                 <p className="border-l-2 border-warn px-3 text-[13px] text-warn">预览暂不可用，仍可保存。{previewError}</p>
-              ) : previewLoading && !schedulePreview ? (
+              ) : expectPreview && !schedulePreview ? (
                 <div className="space-y-2" aria-label="正在加载排程预览">{Array.from({ length: 4 }, (_, index) => <div key={index} className="h-4 w-full animate-pulse rounded bg-fill motion-reduce:animate-none" />)}</div>
               ) : schedulePreview?.items.length ? (
                 <div className="space-y-1.5">
