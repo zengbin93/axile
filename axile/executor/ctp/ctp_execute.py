@@ -12,13 +12,16 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
-from typing import TypeVar, override
+from typing import TypeVar, cast, override
+from zoneinfo import ZoneInfo
 
 from openctp_ctp import thostmduserapi as md
 from openctp_ctp import thosttraderapi as td
 
 from axile.common.trade_channel import TradeChannel
+from axile.domain.execution import ExecutionReasonFamily
 from axile.executor.abstract_executor.base import AbstractExecutor
+from axile.executor.algorithms.utils import clock_now
 from axile.executor.constants.order_status import OrderStatus
 from axile.executor.ctp.converters import (
     account_to_unified,
@@ -53,6 +56,12 @@ from axile.executor.ctp.requests import (
     resolve_offset,
 )
 from axile.executor.ctp.spi import MarketSpi, TraderSpi
+from axile.executor.ctp_product_sessions import (
+    decide_ctp_product_session,
+    get_ctp_product_sessions,
+)
+from axile.executor.execution_engine import ExecutionEngine, _DispatchPlanningResult
+from axile.executor.models.execution_result import AlgorithmResult, ExecutionStatus
 from axile.executor.models.unified_account_assets import UnifiedAccountAssets
 from axile.executor.models.unified_callback import (
     UnifiedCallbackClient,
@@ -61,6 +70,7 @@ from axile.executor.models.unified_input import AccountConfig, CTPAccountConfig,
 from axile.executor.models.unified_order import OrderType, UnifiedOrder
 
 _CZCE_FUTURE_ALIAS = re.compile(r"^(?P<product>[A-Za-z]+)(?P<year>\d{2})(?P<month>\d{2})$")
+_SHANGHAI = ZoneInfo("Asia/Shanghai")
 _ValueT = TypeVar("_ValueT")
 
 
@@ -92,6 +102,63 @@ def _copy_native_row(row):
             continue
         values[name] = value
     return SimpleNamespace(**values)
+
+
+class CtpExecutionEngine(ExecutionEngine):
+    """CTP 的品种时段筛选与 scoped cancel 编排器。"""
+
+    def _build_symbol_algorithm_plans(self, standard_input: UnifiedStandardInput) -> _DispatchPlanningResult:
+        account_assets, effective_curr_target, symbols = self._build_symbol_planning_context(standard_input)
+        owner = cast("CTPExecutor", self._owner)
+        allowed_symbols: list[str] = []
+        planning_failures: list[AlgorithmResult] = []
+        for symbol in symbols:
+            reason_code = owner._get_ctp_session_block_reason(symbol)
+            if reason_code is None:
+                allowed_symbols.append(symbol)
+                continue
+            planning_failures.append(
+                self._build_failed_algorithm_result(
+                    symbol=symbol,
+                    algorithm_name=self._get_symbol_algorithm_name(standard_input, symbol),
+                    error=reason_code,
+                    status=ExecutionStatus.BLOCKED,
+                    account_assets=account_assets,
+                    memory={
+                        "symbol_decision_reason_code": reason_code,
+                        "symbol_decision_reason_family": ExecutionReasonFamily.MARKET_RULE.value,
+                    },
+                )
+            )
+        return self._build_symbol_algorithm_plans_for_symbols(
+            standard_input=standard_input,
+            account_assets=account_assets,
+            symbols=allowed_symbols,
+            effective_curr_target=effective_curr_target,
+            planning_failures=planning_failures,
+        )
+
+    def _derive_dispatch_error(
+        self,
+        status: ExecutionStatus,
+        symbol_results: dict[str, AlgorithmResult],
+    ) -> str | None:
+        failed_results = [
+            result
+            for result in symbol_results.values()
+            if result.status not in {ExecutionStatus.SUCCEEDED, ExecutionStatus.NOOP}
+        ]
+        if (
+            status == ExecutionStatus.BLOCKED
+            and failed_results
+            and all(
+                isinstance(result.memory.get("symbol_decision_reason_code"), str)
+                and str(result.memory["symbol_decision_reason_code"]).startswith("CTP.SESSION.")
+                for result in failed_results
+            )
+        ):
+            return f"{len(failed_results)} 个品种因交易时段不可执行"
+        return super()._derive_dispatch_error(status, symbol_results)
 
 
 class CTPExecutor(AbstractExecutor, UnifiedCallbackClient):
@@ -297,7 +364,35 @@ class CTPExecutor(AbstractExecutor, UnifiedCallbackClient):
 
     @override
     def _check_trading_time(self):
-        return self._is_china_futures_session_open()
+        """CTP 时段准入由 CTP 品种编排器负责。"""
+        return True
+
+    @override
+    def _execution_engine(self) -> ExecutionEngine:
+        return CtpExecutionEngine(self, self.require_execution_runtime())
+
+    def _get_ctp_session_block_reason(self, symbol: str) -> str | None:
+        """返回 CTP 合约当前不可交易时的稳定原因码。"""
+        instrument = self._instruments.get(symbol)
+        if instrument is None:
+            return "CTP.SESSION.NO_METADATA"
+        exchange_id = str(getattr(instrument, "ExchangeID", "") or "")
+        product_id = str(getattr(instrument, "ProductID", "") or "")
+        if not exchange_id or not product_id:
+            return "CTP.SESSION.NO_METADATA"
+        if getattr(instrument, "ProductClass", None) != td.THOST_FTDC_PC_Futures:
+            return "CTP.SESSION.NO_SESSION_TABLE"
+        sessions = get_ctp_product_sessions(exchange_id, product_id)
+        if not sessions:
+            return "CTP.SESSION.NO_SESSION_TABLE"
+        calendar = self._trading_calendar
+        if calendar is None:
+            return "CTP.SESSION.CALENDAR_UNAVAILABLE"
+        return decide_ctp_product_session(
+            sessions,
+            now=clock_now(tz=_SHANGHAI),
+            calendar_is_open=lambda day: calendar.is_open("china", day),
+        ).reason_code
 
     @override
     def _normalize_connected_standard_input(self, standard_input: UnifiedStandardInput) -> UnifiedStandardInput:

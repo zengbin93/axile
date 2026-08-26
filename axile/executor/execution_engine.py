@@ -392,26 +392,52 @@ class ExecutionEngine:
         standard_input: UnifiedStandardInput,
     ) -> _DispatchPlanningResult:
         """为本次执行规划按品种算法计划."""
-        planning_account_assets = self._owner.get_account_assets()
-        effective_curr_target = self._build_effective_curr_target(standard_input, planning_account_assets)
-        symbols = self._owner.get_all_symbols(effective_curr_target, standard_input.last_target)
-        if not symbols:
-            raise ValueError("当前输入没有可执行的 symbol")
-
-        planning_market_data, target_volumes = self._plan_target_volumes_for_symbols(
+        account_assets, effective_curr_target, symbols = self._build_symbol_planning_context(standard_input)
+        return self._build_symbol_algorithm_plans_for_symbols(
             standard_input=standard_input,
-            account_assets=planning_account_assets,
+            account_assets=account_assets,
             symbols=symbols,
             effective_curr_target=effective_curr_target,
         )
 
+    def _build_symbol_planning_context(
+        self,
+        standard_input: UnifiedStandardInput,
+    ) -> tuple[UnifiedAccountAssets, dict[str, float], list[str]]:
+        """取得通用 planning 使用的账户快照、目标权重与候选 symbol。"""
+        account_assets = self._owner.get_account_assets()
+        effective_curr_target = self._build_effective_curr_target(standard_input, account_assets)
+        symbols = self._owner.get_all_symbols(effective_curr_target, standard_input.last_target)
+        if not symbols:
+            raise ValueError("当前输入没有可执行的 symbol")
+        return account_assets, effective_curr_target, symbols
+
+    def _get_symbol_algorithm_name(self, standard_input: UnifiedStandardInput, symbol: str) -> str:
+        """解析单个 symbol 最终使用的算法名称。"""
+        resolved_algorithm = standard_input.get_resolved_symbol_algorithm(symbol)
+        return str(resolved_algorithm.get("method", standard_input.algorithm.get("method", "SINGLE-MAKER")))
+
+    def _build_symbol_algorithm_plans_for_symbols(
+        self,
+        *,
+        standard_input: UnifiedStandardInput,
+        account_assets: UnifiedAccountAssets,
+        symbols: list[str],
+        effective_curr_target: dict[str, float],
+        planning_failures: list[AlgorithmResult] | None = None,
+    ) -> _DispatchPlanningResult:
+        """为明确给定的 symbol 集合组装通用算法计划。"""
+        planning_failures = list(planning_failures or [])
+        planning_market_data, target_volumes = self._plan_target_volumes_for_symbols(
+            standard_input=standard_input,
+            account_assets=account_assets,
+            symbols=symbols,
+            effective_curr_target=effective_curr_target,
+        )
         plans: list[_PlannedSymbolAlgorithm] = []
-        planning_failures: list[AlgorithmResult] = []
         for symbol in symbols:
             resolved_algorithm = standard_input.get_resolved_symbol_algorithm(symbol)
-            algorithm_name = str(
-                resolved_algorithm.get("method", standard_input.algorithm.get("method", "SINGLE-MAKER"))
-            )
+            algorithm_name = self._get_symbol_algorithm_name(standard_input, symbol)
             target_volume = target_volumes.get(symbol)
             if target_volume is None:
                 planning_failures.append(
@@ -423,7 +449,7 @@ class ExecutionEngine:
                             effective_curr_target,
                             planning_market_data,
                         ),
-                        account_assets=planning_account_assets,
+                        account_assets=account_assets,
                         first_tick=clone_price_data(planning_market_data.get(symbol)),
                     )
                 )
@@ -435,14 +461,14 @@ class ExecutionEngine:
                     params=resolved_algorithm.get("params"),
                     trade_rule=dict(standard_input.trade_rules.get(symbol, {})),
                     audit_context=self._build_symbol_audit_context(standard_input, symbol, algorithm_name),
-                    current_volume=self._owner.get_current_volume(symbol, planning_account_assets),
+                    current_volume=self._owner.get_current_volume(symbol, account_assets),
                     final_target_volume=target_volume,
                 )
             )
         return _DispatchPlanningResult(
             plans=plans,
             planning_failures=planning_failures,
-            account_assets=planning_account_assets,
+            account_assets=account_assets,
             market_data=planning_market_data,
         )
 
@@ -550,7 +576,7 @@ class ExecutionEngine:
         )
 
     def _prepare_account_for_symbol_dispatch(self, dispatch_phases: _DispatchPhases) -> None:
-        """在真正分发 symbol 算法前完成账户级准备动作。"""
+        """在真正分发 symbol 算法前完成默认账户级撤单。"""
         if not dispatch_phases.phase_one_tasks and not dispatch_phases.phase_two_plans:
             return
         self._owner.handle_termination_checkpoint()
@@ -853,7 +879,19 @@ class ExecutionEngine:
                 continue
             is_skipped = result.status == ExecutionStatus.NOOP
             event_type = ExecutionEventType.SYMBOL_SKIPPED if is_skipped else ExecutionEventType.SYMBOL_DECISION_MADE
-            reason_code = "COMMON.SYMBOL_SKIPPED" if is_skipped else "COMMON.SYMBOL_DECISION_MADE"
+            decision_reason_code = result.memory.get("symbol_decision_reason_code")
+            decision_reason_family = result.memory.get("symbol_decision_reason_family")
+            reason_code = (
+                decision_reason_code
+                if isinstance(decision_reason_code, str)
+                else ("COMMON.SYMBOL_SKIPPED" if is_skipped else "COMMON.SYMBOL_DECISION_MADE")
+            )
+            reason_family = (
+                ExecutionReasonFamily(decision_reason_family)
+                if isinstance(decision_reason_family, str)
+                and decision_reason_family in ExecutionReasonFamily._value2member_map_
+                else _SYMBOL_EVENT_REASON_FAMILY_MAP.get(result.status, ExecutionReasonFamily.SYSTEM)
+            )
             details: dict[str, object] = {
                 "decision": {
                     "symbol": result.symbol,
@@ -868,7 +906,7 @@ class ExecutionEngine:
             self._runtime.emit_audit_event(
                 event_type=event_type,
                 status=_SYMBOL_EVENT_STATUS_MAP.get(result.status, ExecutionEventStatus.INFO),
-                reason_family=_SYMBOL_EVENT_REASON_FAMILY_MAP.get(result.status, ExecutionReasonFamily.SYSTEM),
+                reason_family=reason_family,
                 reason_code=reason_code,
                 symbol=result.symbol,
                 details=details,
@@ -901,6 +939,14 @@ class ExecutionEngine:
             algorithm=algorithm_name,
         )
 
+    def _derive_dispatch_error(
+        self,
+        status: ExecutionStatus,
+        symbol_results: dict[str, AlgorithmResult],
+    ) -> str | None:
+        """根据整体状态提取通用顶层错误信息。"""
+        return _derive_dispatch_error(status, symbol_results)
+
     def _build_symbol_results(
         self,
         results: list[AlgorithmResult],
@@ -927,7 +973,7 @@ class ExecutionEngine:
         """直接根据 symbol 级 `AlgorithmResult` 列表构造统一输出."""
         symbol_results = self._build_symbol_results(results)
         status = _derive_dispatch_status(symbol_results)
-        error = _derive_dispatch_error(status, symbol_results)
+        error = self._derive_dispatch_error(status, symbol_results)
 
         return UnifiedStandardOutput(
             account_assets=self._owner.get_account_assets(),
