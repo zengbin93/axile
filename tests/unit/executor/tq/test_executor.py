@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import date, timedelta
 from types import SimpleNamespace
 
 import pytest
@@ -8,6 +9,7 @@ from axile.executor.models.unified_account_assets import UnifiedAccountAssets
 from axile.executor.models.unified_input import TQAccountConfig
 from axile.executor.models.unified_order import OrderDirection, OrderType
 from axile.executor.tq import TQExecutor
+from axile.executor.tq.tq_execute import TQTradingTimeCheck, TQTradingTimeStatus
 
 
 class FakeApi:
@@ -65,6 +67,14 @@ class FakeApi:
     def get_quote(self, _symbol: str) -> dict[str, object]:
         return self.quote
 
+    def get_trading_calendar(self, start: date, end: date) -> object:
+        rows = []
+        current = start
+        while current <= end:
+            rows.append({"date": current, "trading": current.weekday() < 5})
+            current += timedelta(days=1)
+        return SimpleNamespace(to_dict=lambda _orient: rows)
+
     def get_account(self) -> dict[str, object]:
         return {"available": 900_000, "balance": 1_000_000}
 
@@ -120,8 +130,15 @@ def executor(monkeypatch: pytest.MonkeyPatch) -> tuple[TQExecutor, FakeApi]:
         instance.close()
 
 
-def test_executor_converts_queries_and_order_primitives(executor: tuple[TQExecutor, FakeApi]) -> None:
+def test_executor_converts_queries_and_order_primitives(
+    executor: tuple[TQExecutor, FakeApi], monkeypatch: pytest.MonkeyPatch
+) -> None:
     instance, api = executor
+    monkeypatch.setattr(
+        instance,
+        "_check_tq_symbol_trading_time",
+        lambda _api, _sessions, _now: TQTradingTimeCheck(TQTradingTimeStatus.OPEN),
+    )
 
     market = instance.get_market_data(["rb2610"])
     assets = instance.get_account_assets()
