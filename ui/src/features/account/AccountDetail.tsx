@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState, type CSSProperties } from 're
 import { useViewTransitionState } from 'react-router'
 import { RefreshCw } from 'lucide-react'
 import { Link, useNavigate } from '@/components/ui/nav'
-import { Card, SectionLabel, Chip } from '@/components/ui/Card'
+import { Card, Chip } from '@/components/ui/Card'
 import { DriftBar } from '@/components/viz/DriftBar'
 import { Sparkline } from '@/components/viz/Sparkline'
 import { InkRewrite } from '@/components/ui/InkRewrite'
@@ -537,9 +537,7 @@ export function AccountDetail({
         </div>
       </Card>
 
-      {/* Vitals */}
-      <SectionLabel>状态</SectionLabel>
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+      <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-3">
         <Card className="px-6 py-4 md:col-span-2">
           <div className="mb-3 flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1.5">
             <h3 className="mr-auto text-[13px] font-semibold text-ink-2">持仓 vs 目标</h3>
@@ -967,8 +965,7 @@ export function AccountDetailSkeleton() {
           <Skeleton className="h-3.5 w-64" />
         </div>
       </Card>
-      <SectionLabel>状态</SectionLabel>
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+      <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-3">
         <Card className="min-h-[190px] px-6 py-4 md:col-span-2">
           <Skeleton className="h-4 w-24" />
           <div className="mt-4 grid gap-5 lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
