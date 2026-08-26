@@ -6,13 +6,16 @@ import threading
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from enum import StrEnum
-from typing import Any, override
+from typing import Any, cast, override
 from uuid import uuid4
 from zoneinfo import ZoneInfo
 
 from axile.common.trade_channel import TradeChannel
+from axile.domain.execution import ExecutionReasonFamily
 from axile.executor.abstract_executor.base import AbstractExecutor
 from axile.executor.account_control.exceptions import AccountControlBlockedError
+from axile.executor.execution_engine import ExecutionEngine, _DispatchPlanningResult
+from axile.executor.models.execution_result import AlgorithmResult, ExecutionStatus
 from axile.executor.models.unified_account_assets import UnifiedAccountAssets
 from axile.executor.models.unified_callback import OrderUpdateCallback, PriceDataCallback, TradeRecordCallback
 from axile.executor.models.unified_input import AccountConfig, TQAccountConfig, UnifiedStandardInput
@@ -39,8 +42,9 @@ _NIGHT_0230 = ((21 * 3600, 26 * 3600 + 30 * 60),)
 # - CZCE: https://www.czce.com.cn/cn/jysj/
 # - GFEX: https://www.gfex.com.cn/gfex/jysj/index.html
 # - CFFEX: https://www.cffex.com.cn/jygl/
-# 仅覆盖下表列出的期货品种；期权、组合及表外品种一律拒绝新单。交易所调整
-# 交易时段时，必须手动更新此表和上述核对日期；这不是对“当前可交易”的承诺。
+# 仅覆盖下表列出的期货品种；期权、组合及表外品种一律拒绝新单。GFEX 的 pd、pt
+# 目前有意排除。交易所调整交易时段时，必须手动更新此表和上述核对日期；这不是对
+# “当前可交易”的承诺。
 _TQ_TRADING_SESSIONS = {
     **{("SHFE", product): (_DAY, _NIGHT_23) for product in ("rb", "hc", "fu", "bu", "ru", "br", "sp", "op")},
     **{("SHFE", product): (_DAY, _NIGHT_01) for product in ("cu", "al", "ao", "ad", "zn", "pb", "ni", "sn", "ss")},
@@ -69,11 +73,13 @@ _TQ_TRADING_SESSIONS = {
             "v",
             "eg",
             "pp",
+            "l_f",
+            "pp_f",
             "eb",
             "bz",
         )
     },
-    **{("DCE", product): (_DAY, ()) for product in ("jd", "lh", "lg", "fb", "bb")},
+    **{("DCE", product): (_DAY, ()) for product in ("jd", "lh", "lg", "fb", "bb", "v_f")},
     **{
         ("CZCE", product): (_DAY, _NIGHT_23)
         for product in ("FG", "TA", "PR", "PX", "PL", "MA", "SA", "SH", "SR", "CF", "CY", "OI", "RM", "PF", "ZC")
@@ -102,6 +108,62 @@ class TQTradingTimeCheck:
     @property
     def error(self) -> str | None:
         return None if self.status is TQTradingTimeStatus.OPEN else self.status.value
+
+
+class TQExecutionEngine(ExecutionEngine):
+    """TQ 品种时段筛选编排器。"""
+
+    def _build_symbol_algorithm_plans(self, standard_input: UnifiedStandardInput) -> _DispatchPlanningResult:
+        account_assets, effective_curr_target, symbols = self._build_symbol_planning_context(standard_input)
+        owner = cast("TQExecutor", self._owner)
+        allowed_symbols: list[str] = []
+        planning_failures: list[AlgorithmResult] = []
+        for symbol in symbols:
+            check = owner._check_symbol_trading_time(symbol)
+            if check.error is None:
+                allowed_symbols.append(symbol)
+                continue
+            planning_failures.append(
+                self._build_failed_algorithm_result(
+                    symbol=symbol,
+                    algorithm_name=self._get_symbol_algorithm_name(standard_input, symbol),
+                    error=check.error,
+                    status=ExecutionStatus.BLOCKED,
+                    account_assets=account_assets,
+                    memory={
+                        "symbol_decision_reason_code": check.error,
+                        "symbol_decision_reason_family": ExecutionReasonFamily.MARKET_RULE.value,
+                    },
+                )
+            )
+        return self._build_symbol_algorithm_plans_for_symbols(
+            standard_input=standard_input,
+            account_assets=account_assets,
+            symbols=allowed_symbols,
+            effective_curr_target=effective_curr_target,
+            planning_failures=planning_failures,
+        )
+
+    def _derive_dispatch_error(
+        self,
+        status: ExecutionStatus,
+        symbol_results: dict[str, AlgorithmResult],
+    ) -> str | None:
+        failed_results = [
+            result
+            for result in symbol_results.values()
+            if result.status not in {ExecutionStatus.SUCCEEDED, ExecutionStatus.NOOP}
+        ]
+        if (
+            status == ExecutionStatus.BLOCKED
+            and failed_results
+            and all(
+                result.memory.get("symbol_decision_reason_family") == ExecutionReasonFamily.MARKET_RULE.value
+                for result in failed_results
+            )
+        ):
+            return f"{len(failed_results)} 个品种因交易时段不可执行"
+        return super()._derive_dispatch_error(status, symbol_results)
 
 
 class TQExecutor(AbstractExecutor):
@@ -282,14 +344,13 @@ class TQExecutor(AbstractExecutor):
         return self._check_symbol_trading_times([symbol], local_now.astimezone(_SHANGHAI))[symbol]
 
     @override
-    def _get_symbol_trading_time_blocks(self, symbols: list[str]) -> dict[str, str]:
-        checks = self._check_symbol_trading_times(list(dict.fromkeys(symbols)), datetime.now(_SHANGHAI))
-        return {symbol: check.error for symbol, check in checks.items() if check.error is not None}
-
-    @override
     def _normalize_connected_standard_input(self, standard_input: UnifiedStandardInput) -> UnifiedStandardInput:
         """使用 TqSdk 合约目录将输入代码统一为 Axile 合约代码."""
         return self._require_runtime().resolver.normalize_input(standard_input)
+
+    @override
+    def _execution_engine(self) -> ExecutionEngine:
+        return TQExecutionEngine(self, self.require_execution_runtime())
 
     @override
     def _validate_input(self, standard_input: UnifiedStandardInput) -> None:

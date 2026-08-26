@@ -6,8 +6,13 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from axile.executor.models.unified_input import TQAccountConfig
+from axile.common.trade_channel import TradeChannel
+from axile.domain.execution import ExecutionReasonFamily
+from axile.executor.models.execution_result import AlgorithmResult, ExecutionStatus
+from axile.executor.models.unified_account_assets import UnifiedAccountAssets
+from axile.executor.models.unified_input import TQAccountConfig, UnifiedStandardInput
 from axile.executor.models.unified_order import OrderDirection, OrderType
+from axile.executor.models.unified_price import UnifiedPriceData
 from axile.executor.tq import TQExecutor
 from axile.executor.tq.tq_execute import TQTradingTimeCheck, TQTradingTimeStatus
 
@@ -32,6 +37,9 @@ class FakeApi:
         "SHFE.xx2601",
         "INE.sc2609",
         "DCE.a2609",
+        "DCE.l_f2609",
+        "DCE.pp_f2609",
+        "DCE.v_f2609",
         "CZCE.TA609",
         "GFEX.si2609",
         "CFFEX.IF2609",
@@ -142,6 +150,9 @@ def test_symbol_trading_time_respects_product_sessions(
     [
         ("sc2609", "2026-08-22T02:29:59"),
         ("a2609", "2026-08-21T22:59:59"),
+        ("l_f2609", "2026-08-21T22:59:59"),
+        ("pp_f2609", "2026-08-21T22:59:59"),
+        ("v_f2609", "2026-08-24T09:30:00"),
         ("TA609", "2026-08-21T22:59:59"),
         ("si2609", "2026-08-24T09:30:00"),
         ("IF2609", "2026-08-24T09:30:00"),
@@ -197,6 +208,122 @@ def test_calendar_failure_or_missing_date_fail_closed(executor: tuple[TQExecutor
     assert instance._check_symbol_trading_time("rb2610", _at("2026-08-24T09:30:00")).status is (
         TQTradingTimeStatus.CALENDAR_UNAVAILABLE
     )
+
+
+def test_engine_blocks_symbol_sessions_without_market_io(monkeypatch: pytest.MonkeyPatch) -> None:
+    api = FakeApi()
+    monkeypatch.setattr(TQExecutor, "_build_api", staticmethod(lambda _config: api))
+    instance = TQExecutor(TQAccountConfig(account_mode="kq", tq_username="user", tq_password="secret"))
+    market_requests: list[list[str]] = []
+    try:
+        monkeypatch.setattr(
+            instance,
+            "_check_symbol_trading_time",
+            lambda symbol: TQTradingTimeCheck(
+                TQTradingTimeStatus.CLOSED if symbol == "rb2610" else TQTradingTimeStatus.OPEN
+            ),
+        )
+        monkeypatch.setattr(
+            instance,
+            "get_account_assets",
+            lambda: UnifiedAccountAssets(available_cash=1_000, total_asset=1_000, market_value=0, positions=[]),
+        )
+        monkeypatch.setattr(instance, "_calculate_generic_volume", lambda *_args, **_kwargs: 1.0)
+        monkeypatch.setattr(
+            instance,
+            "get_market_data",
+            lambda symbols: (
+                market_requests.append(symbols)
+                or {
+                    symbol: UnifiedPriceData(
+                        symbol=symbol,
+                        last_price=100,
+                        bid_price=99,
+                        ask_price=101,
+                        bid_volume=1,
+                        ask_volume=1,
+                        volume=1,
+                        turnover=100,
+                        timestamp=1,
+                        update_time="2026-08-24T09:30:00",
+                    )
+                    for symbol in symbols
+                }
+            ),
+        )
+        monkeypatch.setattr(instance, "initialize_websocket", lambda _symbols: None)
+        monkeypatch.setattr(instance, "cancel_all_orders", lambda: None)
+        monkeypatch.setattr(
+            "axile.executor.execution_engine.resolve_algorithm",
+            lambda _name, _session: (
+                lambda _session, algorithm_input: AlgorithmResult(
+                    symbol=algorithm_input.symbol,
+                    algorithm="SINGLE-MAKER",
+                    target_volume=algorithm_input.target_volume,
+                )
+            ),
+        )
+
+        output = instance.execute(
+            UnifiedStandardInput(
+                channel_type=TradeChannel.TQ,
+                account_config=TQAccountConfig(account_mode="kq", tq_username="user", tq_password="secret"),
+                curr_target={"rb2610": 0.1, "ag2612": 0.2},
+                algorithm={"method": "SINGLE-MAKER"},
+            ),
+            cleanup=False,
+        )
+    finally:
+        instance.close()
+
+    blocked = output.symbol_results["rb2610"]
+    assert output.status is ExecutionStatus.PARTIAL
+    assert blocked.status is ExecutionStatus.BLOCKED
+    assert blocked.memory == {
+        "symbol_decision_reason_code": TQTradingTimeStatus.CLOSED.value,
+        "symbol_decision_reason_family": ExecutionReasonFamily.MARKET_RULE.value,
+    }
+    assert market_requests == [["ag2612"]]
+
+
+def test_engine_blocks_all_symbol_sessions_without_execution_io(monkeypatch: pytest.MonkeyPatch) -> None:
+    api = FakeApi()
+    monkeypatch.setattr(TQExecutor, "_build_api", staticmethod(lambda _config: api))
+    instance = TQExecutor(TQAccountConfig(account_mode="kq", tq_username="user", tq_password="secret"))
+    cancel_calls = 0
+    try:
+        monkeypatch.setattr(
+            instance,
+            "_check_symbol_trading_time",
+            lambda _symbol: TQTradingTimeCheck(TQTradingTimeStatus.CLOSED),
+        )
+        monkeypatch.setattr(
+            instance,
+            "get_account_assets",
+            lambda: UnifiedAccountAssets(available_cash=1_000, total_asset=1_000, market_value=0, positions=[]),
+        )
+        monkeypatch.setattr(instance, "get_market_data", lambda _symbols: pytest.fail("不应读取行情"))
+
+        def cancel_all_orders() -> None:
+            nonlocal cancel_calls
+            cancel_calls += 1
+
+        monkeypatch.setattr(instance, "cancel_all_orders", cancel_all_orders)
+        output = instance.execute(
+            UnifiedStandardInput(
+                channel_type=TradeChannel.TQ,
+                account_config=TQAccountConfig(account_mode="kq", tq_username="user", tq_password="secret"),
+                curr_target={"rb2610": 0.1, "ag2612": 0.2},
+                algorithm={"method": "SINGLE-MAKER"},
+            ),
+            cleanup=False,
+        )
+    finally:
+        instance.close()
+
+    assert output.status is ExecutionStatus.BLOCKED
+    assert output.error == "2 个品种因交易时段不可执行"
+    assert cancel_calls == 0
 
 
 def test_place_order_rechecks_current_symbol_before_submitting(
