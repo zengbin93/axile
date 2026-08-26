@@ -29,9 +29,9 @@ describe('describeSymbolControl', () => {
   })
 
   it('按类计数，缺类不报', () => {
-    expect(describeSymbolControl(['BTCUSDT', 'ETHUSDT'], null)).toBe('禁投 2')
-    expect(describeSymbolControl(null, ['SOLUSDT'])).toBe('风险 1')
-    expect(describeSymbolControl(['BTCUSDT'], ['SOLUSDT', 'DOGEUSDT'])).toBe('禁投 1、风险 2')
+    expect(describeSymbolControl(['rb2610', 'ag2612'], null)).toBe('禁投 2')
+    expect(describeSymbolControl(null, ['cu2610'])).toBe('风险 1')
+    expect(describeSymbolControl(['rb2610'], ['ag2612', 'cu2610'])).toBe('禁投 1、风险 2')
   })
 })
 
@@ -47,7 +47,7 @@ describe('配置摘要缓存', () => {
   const acc = {
     long_leverage: 3,
     short_leverage: 2,
-    forbidden_symbols: ['BTCUSDT'],
+    forbidden_symbols: ['rb2610'],
     risk_symbols: null,
     algorithm: { method: 'TWAP', params: {} },
   } as unknown as Account

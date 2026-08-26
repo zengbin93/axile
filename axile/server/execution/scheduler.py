@@ -65,8 +65,10 @@ async def execute_scheduled_rebalance(account_id: int) -> None:
 
     if decision is not None and decision.status is CalendarDecisionStatus.UNAVAILABLE:
         reason = decision.unavailable_reason or CalendarUnavailableReason.READ_FAILED
-        log = account_logger.warning if reason is CalendarUnavailableReason.READ_FAILED else account_logger.info
-        log("交易日历不可用，按排程执行 | unavailable_reason={} action=execute_without_calendar", reason.value)
+        account_logger.bind(
+            unavailable_reason=reason.value,
+            action="execute_without_calendar",
+        ).warning("交易日历不可用，按排程执行")
 
     from axile.server.execution import rebalance as rebalance_execution
 

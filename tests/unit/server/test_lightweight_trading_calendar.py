@@ -72,6 +72,22 @@ def test_friday_night_maps_to_monday_trading_day() -> None:
     assert decision.day == date(2026, 8, 24)
 
 
+@pytest.mark.parametrize(
+    "moment",
+    [
+        datetime(2026, 8, 24, 21, 30, tzinfo=_SHANGHAI),
+        datetime(2026, 8, 25, 1, 30, tzinfo=_SHANGHAI),
+    ],
+)
+def test_adjacent_night_and_early_morning_map_to_next_trading_day(moment: datetime) -> None:
+    calendar = _Calendar({date(2026, 8, 24): True, date(2026, 8, 25): True})
+
+    decision = evaluate_channel_calendar_moment(TradeChannel.CTP, moment, calendar=calendar)
+
+    assert decision.status is CalendarDecisionStatus.AVAILABLE_OPEN
+    assert decision.day == date(2026, 8, 25)
+
+
 def test_holiday_eve_has_no_corresponding_night_session() -> None:
     days = {date(2026, 9, 30): True, date(2026, 10, 8): True}
     days.update({date(2026, 10, day): False for day in range(1, 8)})

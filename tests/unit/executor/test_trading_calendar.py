@@ -16,6 +16,7 @@ def test_shinny_calendar_covers_workday_weekend_and_holiday() -> None:
 def test_shinny_calendar_returns_none_outside_contract() -> None:
     calendar = ShinnyTradingCalendar()
 
+    assert calendar.is_open("china", date(2026, 12, 31)) is True
     assert calendar.is_open("vendor", date(2026, 1, 5)) is None
     assert calendar.is_open("china", date(2002, 12, 31)) is None
     assert calendar.is_open("china", date(2027, 1, 1)) is None

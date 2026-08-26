@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import inspect
 import sys
-from datetime import datetime
+from datetime import date, datetime
 from types import ModuleType, SimpleNamespace
 from typing import Any, get_args, get_type_hints
 
@@ -135,6 +135,38 @@ def _build_executor() -> GMExecutor:
         "order_volume": gm_api_bridge_module.order_volume,
     }[request.operation](**request.as_kwargs())
     return executor
+
+
+class _TradingCalendarStub:
+    def __init__(self, state: bool | None = True, *, error: Exception | None = None) -> None:
+        self.state = state
+        self.error = error
+
+    def is_open(self, calendar_id: str, _day: date) -> bool | None:
+        assert calendar_id == "china"
+        if self.error is not None:
+            raise self.error
+        return self.state
+
+
+@pytest.mark.parametrize(
+    ("calendar", "expected"),
+    [
+        (_TradingCalendarStub(True), True),
+        (_TradingCalendarStub(False), False),
+        (_TradingCalendarStub(None), True),
+        (_TradingCalendarStub(error=RuntimeError("unavailable")), True),
+    ],
+)
+def test_gm_channel_calendar_preserves_fail_open_contract(
+    calendar: _TradingCalendarStub,
+    expected: bool,
+) -> None:
+    executor = _build_executor()
+    executor._channel_calendar_id = "china"
+    executor._trading_calendar = calendar
+
+    assert executor._check_trading_time() is expected
 
 
 def test_convert_gm_order_to_unified_uses_client_order_id_as_unified_order_id() -> None:
