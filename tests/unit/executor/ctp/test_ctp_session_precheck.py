@@ -66,3 +66,25 @@ def test_session_check_blocks_unknown_product_and_options_without_session_table(
 
     for symbol in ("unknown2612", "ag2609C5000", "missingclass2612"):
         assert executor._get_ctp_session_block_reason(symbol) == "CTP.SESSION.NO_SESSION_TABLE"
+
+
+def test_session_check_blocks_only_the_structurally_invalid_symbol(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "axile.executor.ctp.ctp_execute.clock_now",
+        lambda **_kwargs: datetime(2026, 8, 24, 21, 29, tzinfo=_SHANGHAI),
+    )
+    executor = _executor()
+
+    assert executor._get_ctp_session_block_reason("unknown2612") == "CTP.SESSION.NO_SESSION_TABLE"
+    assert executor._get_ctp_session_block_reason("ag2612") is None
+
+
+def test_session_check_fails_closed_for_every_symbol_when_snapshot_expired(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "axile.executor.ctp.ctp_execute.clock_now",
+        lambda **_kwargs: datetime(2027, 8, 25, 21, 29, tzinfo=_SHANGHAI),
+    )
+    executor = _executor()
+
+    for symbol in ("ag2612", "IF2609"):
+        assert executor._get_ctp_session_block_reason(symbol) == "CTP.SESSION.DATA_UNAVAILABLE"

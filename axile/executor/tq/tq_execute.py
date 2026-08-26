@@ -45,6 +45,14 @@ _NIGHT_0230 = ((21 * 3600, 26 * 3600 + 30 * 60),)
 # 仅覆盖下表列出的期货品种；期权、组合及表外品种一律拒绝新单。GFEX 的 pd、pt
 # 目前有意排除。交易所调整交易时段时，必须手动更新此表和上述核对日期；这不是对
 # “当前可交易”的承诺。
+#
+# 快照新鲜度为渠道级：_TQ_SESSIONS_GENERATED_AT 超过 _TQ_SESSIONS_MAX_AGE 后
+# 整个 TQSDK 渠道的时段数据视为失效（SESSION_DATA_EXPIRED），所有品种一并
+# fail-closed，不存在“部分品种新鲜、部分过期”的状态。临近有效期须更新快照并随
+# 版本发布——_TQ_SESSIONS_MAX_AGE 是该渠道的硬性停摆开关。本表数据与 CTP 渠道
+# 完全独立，不读取 CTP 的时段数据或连接状态。
+_TQ_SESSIONS_GENERATED_AT = date(2026, 8, 25)
+_TQ_SESSIONS_MAX_AGE = timedelta(days=180)
 _TQ_TRADING_SESSIONS = {
     **{("SHFE", product): (_DAY, _NIGHT_23) for product in ("rb", "hc", "fu", "bu", "ru", "br", "sp", "op")},
     **{("SHFE", product): (_DAY, _NIGHT_01) for product in ("cu", "al", "ao", "ad", "zn", "pb", "ni", "sn", "ss")},
@@ -99,6 +107,12 @@ class TQTradingTimeStatus(StrEnum):
     CLOSED = "CLOSED"
     QUOTE_TRADING_TIME_UNAVAILABLE = "QUOTE_TRADING_TIME_UNAVAILABLE"
     CALENDAR_UNAVAILABLE = "CALENDAR_UNAVAILABLE"
+    SESSION_DATA_EXPIRED = "SESSION_DATA_EXPIRED"
+
+
+def _tq_sessions_data_expired(now: date) -> bool:
+    """纯新鲜度判定：静态时段快照是否已超出最大有效期（时钟由调用方注入）。"""
+    return now - _TQ_SESSIONS_GENERATED_AT > _TQ_SESSIONS_MAX_AGE
 
 
 @dataclass(frozen=True, slots=True)
@@ -291,6 +305,8 @@ class TQExecutor(AbstractExecutor):
     ) -> TQTradingTimeCheck:
         if sessions is None:
             return TQTradingTimeCheck(TQTradingTimeStatus.QUOTE_TRADING_TIME_UNAVAILABLE)
+        if _tq_sessions_data_expired(now.date()):
+            return TQTradingTimeCheck(TQTradingTimeStatus.SESSION_DATA_EXPIRED)
         session = self._matched_trading_session(*sessions, now)
         if session is None:
             return TQTradingTimeCheck(TQTradingTimeStatus.CLOSED)
