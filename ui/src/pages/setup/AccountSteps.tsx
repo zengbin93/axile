@@ -9,6 +9,7 @@ import { WizardPage, WizardNav } from '@/features/setup/WizardNav'
 import { Segmented } from '@/components/ui/Segmented'
 import { ConditionalReveal } from '@/components/ui/ConditionalReveal'
 import { Skeleton } from '@/components/ui/Skeleton'
+import { WeightBars } from '@/components/viz/WeightBars'
 import { ErrorNotice } from '@/components/ui/ErrorNotice'
 import { ConnectionField } from '@/components/ui/ConnectionField'
 import { DirectoryPicker } from '@/components/ui/DirectoryPicker'
@@ -782,12 +783,7 @@ export function AcctConfirm() {
               {previewState.status === 'loading' && <div aria-busy="true"><Skeleton className="h-4 w-full" /><Skeleton className="mt-3 h-4 w-4/5" /><Skeleton className="mt-3 h-4 w-3/5" /></div>}
               <ErrorNotice title="试跑失败" error={previewState.status === 'error' ? previewState.message : null} onRetry={preview} />
               {previewState.status === 'success' && previewState.rows.length === 0 && <div className="py-5 text-center text-[14px] text-ink-3">无目标持仓。</div>}
-              {previewState.status === 'success' && previewState.rows.map(([sym, w]) => (
-                <div key={sym} className="flex items-center justify-between border-b border-line py-2.5 text-[15px] last:border-b-0">
-                  <span className="font-[520]">{sym}</span>
-                  <span className={`num text-ink-2 ${w < 0 ? 'text-bad' : ''}`}>{(w * 100).toFixed(1)}%</span>
-                </div>
-              ))}
+              {previewState.status === 'success' && <WeightBars weights={previewState.rows} />}
             </div>
           </div>
           <ErrorNotice title="创建账户失败" error={createError} variant="mutation" onRetry={submit} />

@@ -113,11 +113,12 @@ export function previewSchedule(
   tradeChannel: string,
   cronExpr: string,
   signal?: AbortSignal,
+  limit = 5,
 ): Promise<SchedulePreview> {
   return apiSend<SchedulePreview>('POST', '/account/schedule-preview', {
     trade_channel: tradeChannel,
     cron_expr: cronExpr,
-    limit: 5,
+    limit,
   }, signal)
 }
 

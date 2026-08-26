@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Check } from 'lucide-react'
 import { PythonFunctionEditor } from '@/components/ui/PythonFunctionEditor'
-import { OverflowText } from '@/components/ui/OverflowText'
+import { WeightBars } from '@/components/viz/WeightBars'
 import { Select } from '@/components/ui/Select'
 import { validateCustomCalc } from '@/lib/api/portfolios'
 import { useDomainStore } from '@/stores/domain'
@@ -99,14 +99,7 @@ function WeightResult({ target }: { target: Record<string, number> }) {
       {entries.length === 0 ? (
         <p className="text-[13px] text-ink-3">返回空仓 {'{}'}</p>
       ) : (
-        <div className="grid gap-2 text-[13px]">
-          {entries.map(([symbol, weight]) => (
-            <div key={symbol} className="flex items-center gap-3 border-t border-line pt-2 first:border-0 first:pt-0">
-              <OverflowText className="min-w-0 flex-1 font-[520]" text={symbol} />
-              <span className="num text-ink-2">{weight.toFixed(4)}</span>
-            </div>
-          ))}
-        </div>
+        <WeightBars weights={entries} format="raw" />
       )}
     </div>
   )

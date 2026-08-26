@@ -3,11 +3,12 @@
  *
  * 总开关 + 快捷|高级|自定义 + 补发 + 排程预览。
  * ``layout='step'``（默认，向导窄栏）：单栏，预览在底部。
- * ``layout='page'``（账户编辑页宽栏）：预览升为右栏 sticky，日历摘要归入预览头部。
+ * ``layout='page'``（账户编辑页宽栏）：页面级两列，预览为右侧通高列，
+ * 日历摘要归入预览头部，预览条目更密（12 条）。
  * 动效与 :component:`AcctTimer` 原实现一致：panel-fade / grid 展开 / Segmented 滑块。
  */
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { Link } from '@/components/ui/nav'
 import { OverflowText } from '@/components/ui/OverflowText'
 import { Segmented } from '@/components/ui/Segmented'
@@ -94,7 +95,8 @@ export interface TimerEditorProps {
   onChange: (next: TimerEditorState | ((prev: TimerEditorState) => TimerEditorState)) => void
   /**
    * 排布上下文。``'step'``（默认）：向导窄栏单栏，预览在底部；
-   * ``'page'``：账户编辑页宽栏，预览升为右栏 sticky（窄视口自动退回单栏）。
+   * ``'page'``：账户编辑页宽栏，预览为右侧通高列（高度由页面高度链决定、
+   * 与编辑列解耦，两列各自滚动、页面不滚；窄视口自动退回单栏）。
    */
   layout?: 'page' | 'step'
 }
@@ -203,7 +205,8 @@ export function TimerEditor({ tradeChannel, scheduleKind, nightSchedule, value, 
     const timer = window.setTimeout(() => {
       setPreviewLoading(true)
       setPreviewError(null)
-      void previewSchedule(tradeChannel, cronExpr, controller.signal)
+      // page 布局的右列通高，条目拉满（100，后端上限）让栏有内容质量；step 底部通栏维持 5 条。
+      void previewSchedule(tradeChannel, cronExpr, controller.signal, layout === 'page' ? 100 : 5)
         .then((next) => {
           if (requestId !== previewRequestId.current) return
           setSchedulePreview(next)
@@ -219,7 +222,7 @@ export function TimerEditor({ tradeChannel, scheduleKind, nightSchedule, value, 
       window.clearTimeout(timer)
       controller.abort()
     }
-  }, [tradeChannel, v.autoOn, rawErr, cronExpr])
+  }, [tradeChannel, v.autoOn, rawErr, cronExpr, layout])
 
   useEffect(() => () => { previewRequestId.current += 1 }, [])
 
@@ -371,7 +374,10 @@ export function TimerEditor({ tradeChannel, scheduleKind, nightSchedule, value, 
     </>
   )
 
-  const previewBody = !tradeChannel ? (
+  // !v.autoOn 只在 page 布局可达（step 的预览随总开关收进折叠区，不会渲染）。
+  const previewBody = !v.autoOn ? (
+    <p className="text-[13px] text-ink-3">开启自动调仓后显示。</p>
+  ) : !tradeChannel ? (
     <p className="text-[13px] text-ink-3">选择交易渠道后显示。</p>
   ) : rawErr ? (
     <p className="text-[13px] text-ink-3">修正自定义节奏后显示。</p>
@@ -406,9 +412,11 @@ export function TimerEditor({ tradeChannel, scheduleKind, nightSchedule, value, 
     <p className="text-[13px] text-ink-3">选择有效节奏后显示。</p>
   )
 
-  // page 布局：预览升右栏 sticky（窄视口退回单栏卡片）；step：底部通栏。
+  // page 布局：预览是页面级右列——与编辑流同起于开关行，高度由外层高度链（视口）
+  // 决定、与左列内容完全解耦，两列各自内部滚动，页面本身不滚。常挂载：关自动调仓
+  // 时显示提示而非整列消失，避免开关切换引发布局跳动。step 布局：底部通栏。
   const previewPanel = layout === 'page' ? (
-    <aside className="rounded-[14px] border border-line bg-surface px-4 py-3.5 min-[1120px]:sticky min-[1120px]:top-4 min-[1120px]:max-h-[calc(100vh-160px)] min-[1120px]:overflow-y-auto">
+    <aside className="rounded-[14px] border border-line bg-surface px-4 py-3.5 min-[1120px]:min-h-0 min-[1120px]:overflow-y-auto">
       {previewHeader}
       {previewBody}
     </aside>
@@ -419,39 +427,53 @@ export function TimerEditor({ tradeChannel, scheduleKind, nightSchedule, value, 
     </div>
   )
 
+  const switchRow = (
+    <div className="flex items-center gap-3">
+      <Switch ariaLabel="自动调仓" on={v.autoOn} onClick={() => patch({ autoOn: !v.autoOn })} />
+      <div>
+        <div className="text-sm font-[640]">{v.autoOn ? '自动调仓已开' : '自动调仓已关'}</div>
+        <div className="text-xs text-ink-3">{v.autoOn ? '按下面的节奏自动执行' : '仅手动 / 外接触发'}</div>
+      </div>
+    </div>
+  )
+
+  const autoOnCollapse = (children: ReactNode) => (
+    <div
+      className={`grid transition-[grid-template-rows,opacity] ${MOTION_LAYOUT} ${
+        v.autoOn ? 'grid-rows-[1fr] opacity-100' : 'grid-rows-[0fr] opacity-0'
+      }`}
+    >
+      {/* 收放（grid-fr + opacity）已是全部连续性，不再叠 panel-fade-in：
+          一个对象只跑一套范式；且该类若在挂载后的无关重渲染补挂，会重播入场闪一下。 */}
+      <div className="overflow-hidden">{children}</div>
+    </div>
+  )
+
+  if (layout === 'page') {
+    // 高度链：AppShell(h-full) → section(h-full flex-col) → 包装(flex-1 min-h-0)
+    // → 此处 h-full → grid 单行 minmax(0,1fr)，两列拉伸充满、各自滚动。
+    return (
+      <div className="min-[1120px]:h-full">
+        <div className="grid grid-cols-1 gap-6 min-[1120px]:h-full min-[1120px]:grid-cols-[minmax(0,1fr)_300px] min-[1120px]:grid-rows-[minmax(0,1fr)]">
+          <div className="min-w-0 space-y-5 min-[1120px]:min-h-0 min-[1120px]:overflow-y-auto">
+            {switchRow}
+            {autoOnCollapse(<div className="space-y-5">{editorColumn}</div>)}
+          </div>
+          {previewPanel}
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="space-y-5">
-      <div className="flex items-center gap-3">
-        <Switch ariaLabel="自动调仓" on={v.autoOn} onClick={() => patch({ autoOn: !v.autoOn })} />
-        <div>
-          <div className="text-sm font-[640]">{v.autoOn ? '自动调仓已开' : '自动调仓已关'}</div>
-          <div className="text-xs text-ink-3">{v.autoOn ? '按下面的节奏自动执行' : '仅手动 / 外接触发'}</div>
-        </div>
-      </div>
-
-      <div
-        className={`grid transition-[grid-template-rows,opacity] ${MOTION_LAYOUT} ${
-          v.autoOn ? 'grid-rows-[1fr] opacity-100' : 'grid-rows-[0fr] opacity-0'
-        }`}
-      >
-        {/* 收放（grid-fr + opacity）已是全部连续性，不再叠 panel-fade-in：
-            一个对象只跑一套范式；且该类若在挂载后的无关重渲染补挂，会重播入场闪一下。
-            用 overflow-clip 而非 overflow-hidden：clip 不产生滚动容器，
-            page 布局下不会把右栏预览的 sticky 失效掉。 */}
-        <div className="overflow-clip">
-          {layout === 'page' ? (
-            <div className="grid grid-cols-1 items-start gap-6 min-[1120px]:grid-cols-[minmax(0,1fr)_300px]">
-              <div className="min-w-0 space-y-5">{editorColumn}</div>
-              {previewPanel}
-            </div>
-          ) : (
-            <div className="space-y-5">
-              {editorColumn}
-              {previewPanel}
-            </div>
-          )}
-        </div>
-      </div>
+      {switchRow}
+      {autoOnCollapse(
+        <div className="space-y-5">
+          {editorColumn}
+          {previewPanel}
+        </div>,
+      )}
     </div>
   )
 }

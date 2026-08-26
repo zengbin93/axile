@@ -106,14 +106,16 @@ export function AccountEditTimerPage() {
     }
   }
 
+  // 宽视口下撑起高度链（h-full → flex-1 min-h-0），让 TimerEditor 的预览右列
+  // 通高到底部保存栏上方（父级 pb-16 ≈ 保存栏高，故此处 pb 让位）；窄视口保持自然流。
   return (
-    <section className="pb-24">
+    <section className="pb-24 min-[1120px]:flex min-[1120px]:h-full min-[1120px]:flex-col min-[1120px]:pb-2">
       {title}
       <EditSynopsis note="时间均为北京时间；保存只更新自动执行计划，不改启停状态。">
         {timerSummary}
       </EditSynopsis>
 
-      <div className="mt-6">
+      <div className="mt-6 min-[1120px]:min-h-0 min-[1120px]:flex-1">
         <TimerEditor
           tradeChannel={acc.trade_channel}
           scheduleKind={scheduleKind}

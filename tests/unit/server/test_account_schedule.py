@@ -426,7 +426,7 @@ def test_schedule_preview_models_enforce_limits_and_serialize_timezone() -> None
         account_schedule.SchedulePreviewRequest(
             trade_channel=TradeChannel.CTP,
             cron_expr="30 9 * * *",
-            limit=11,
+            limit=101,
         )
     response = account_schedule.SchedulePreviewResponse(
         evaluated_at=datetime(2026, 8, 23, 8, 0, tzinfo=SCHEDULER_TIMEZONE),

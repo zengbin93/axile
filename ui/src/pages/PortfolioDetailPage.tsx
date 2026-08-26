@@ -3,9 +3,8 @@ import { useParams, useViewTransitionState } from 'react-router'
 import { Link, useNavigate } from '@/components/ui/nav'
 import { Card, SectionLabel, Chip } from '@/components/ui/Card'
 import { Skeleton, SkeletonLines } from '@/components/ui/Skeleton'
-import { ExposureBar } from '@/components/viz/ExposureBar'
+import { WeightBars } from '@/components/viz/WeightBars'
 import { ConfirmModal, type ConfirmSpec } from '@/components/ui/ConfirmModal'
-import { OverflowText } from '@/components/ui/OverflowText'
 import { ErrorNotice } from '@/components/ui/ErrorNotice'
 import { getPortfolio, getPortfolioTargetSnapshot, refreshPortfolioTargetSnapshot } from '@/lib/api/portfolios'
 import { useDomainStore } from '@/stores/domain'
@@ -65,6 +64,7 @@ export function PortfolioDetailPage() {
     .filter(([, w]) => Math.abs(w) > 1e-9)
     .sort((a, b) => Math.abs(b[1]) - Math.abs(a[1]))
   const coverage = targetRows.reduce((s, [, w]) => s + Math.abs(w), 0) * 100
+  const net = targetRows.reduce((s, [, w]) => s + w, 0) * 100
 
   const runFanout = () => {
     if (!boundAccount) return
@@ -168,20 +168,10 @@ export function PortfolioDetailPage() {
         )}
         {targetRows.length > 0 && (
           <>
-            <div className="mb-1 text-[13px] text-ink-2">
-              {targetRows.length} 只 · 最大 {targetRows[0][0]} {(targetRows[0][1] * 100).toFixed(1)}%
+            <div className="mb-2 text-[13px] text-ink-2">
+              {targetRows.length} 只 · 净 <span className="num">{net.toFixed(1)}%</span> / 总 <span className="num">{coverage.toFixed(1)}%</span>
             </div>
-            <ExposureBar weights={targetRows.map(([, w]) => w)} />
-            <div className="mt-2">
-              {targetRows.map(([sym, w]) => (
-                <div key={sym} className="flex items-center gap-3 border-t border-line py-2.5 text-[13.5px] first:border-t-0">
-                  <OverflowText className="min-w-0 flex-1" text={sym} />
-                  <span className={`num w-16 flex-none text-right font-semibold ${w < 0 ? 'text-bad' : ''}`}>
-                    {(w * 100).toFixed(1)}%
-                  </span>
-                </div>
-              ))}
-            </div>
+            <WeightBars weights={targetRows} />
           </>
         )}
       </Card>

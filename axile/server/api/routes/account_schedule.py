@@ -39,7 +39,7 @@ class SchedulePreviewRequest(BaseModel):
 
     trade_channel: TradeChannel
     cron_expr: str
-    limit: int = Field(default=5, ge=1, le=10)
+    limit: int = Field(default=5, ge=1, le=100)
 
 
 class SchedulePreviewCalendar(BaseModel):
