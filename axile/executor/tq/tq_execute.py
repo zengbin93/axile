@@ -355,10 +355,6 @@ class TQExecutor(AbstractExecutor):
     @override
     def _validate_input(self, standard_input: UnifiedStandardInput) -> None:
         super()._validate_input(standard_input)
-        resolver = self._require_runtime().resolver
-        for symbol, target in standard_input.curr_target.items():
-            if target != 0:
-                resolver.to_tq(symbol, for_trade=True)
 
     @override
     def get_account_assets(self) -> UnifiedAccountAssets:

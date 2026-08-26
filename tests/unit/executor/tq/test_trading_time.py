@@ -286,6 +286,82 @@ def test_engine_blocks_symbol_sessions_without_market_io(monkeypatch: pytest.Mon
     assert market_requests == [["ag2612"]]
 
 
+def test_execute_blocks_unresolved_symbol_without_stopping_sibling(monkeypatch: pytest.MonkeyPatch) -> None:
+    api = FakeApi()
+    monkeypatch.setattr(TQExecutor, "_build_api", staticmethod(lambda _config: api))
+    instance = TQExecutor(TQAccountConfig(account_mode="kq", tq_username="user", tq_password="secret"))
+    market_requests: list[list[str]] = []
+    try:
+        monkeypatch.setattr(
+            instance,
+            "_check_tq_symbol_trading_time",
+            lambda _api, _sessions, _now: TQTradingTimeCheck(TQTradingTimeStatus.OPEN),
+        )
+        monkeypatch.setattr(
+            instance,
+            "get_account_assets",
+            lambda: UnifiedAccountAssets(available_cash=1_000, total_asset=1_000, market_value=0, positions=[]),
+        )
+        monkeypatch.setattr(instance, "_calculate_generic_volume", lambda *_args, **_kwargs: 1.0)
+        monkeypatch.setattr(
+            instance,
+            "get_market_data",
+            lambda symbols: (
+                market_requests.append(symbols)
+                or {
+                    symbol: UnifiedPriceData(
+                        symbol=symbol,
+                        last_price=100,
+                        bid_price=99,
+                        ask_price=101,
+                        bid_volume=1,
+                        ask_volume=1,
+                        volume=1,
+                        turnover=100,
+                        timestamp=1,
+                        update_time="2026-08-24T09:30:00",
+                    )
+                    for symbol in symbols
+                }
+            ),
+        )
+        monkeypatch.setattr(instance, "initialize_websocket", lambda _symbols: None)
+        monkeypatch.setattr(instance, "cancel_all_orders", lambda: None)
+        monkeypatch.setattr(
+            "axile.executor.execution_engine.resolve_algorithm",
+            lambda _name, _session: (
+                lambda _session, algorithm_input: AlgorithmResult(
+                    symbol=algorithm_input.symbol,
+                    algorithm="SINGLE-MAKER",
+                    target_volume=algorithm_input.target_volume,
+                )
+            ),
+        )
+
+        output = instance.execute(
+            UnifiedStandardInput(
+                channel_type=TradeChannel.TQ,
+                account_config=TQAccountConfig(account_mode="kq", tq_username="user", tq_password="secret"),
+                curr_target={"rb2610": 0.1, "SHFE.missing2601": 0.1},
+                algorithm={"method": "SINGLE-MAKER"},
+            ),
+            cleanup=False,
+        )
+    finally:
+        instance.close()
+
+    blocked = output.symbol_results["SHFE.missing2601"]
+    assert output.status is ExecutionStatus.PARTIAL
+    assert output.symbol_results["rb2610"].status is ExecutionStatus.SUCCEEDED
+    assert blocked.status is ExecutionStatus.BLOCKED
+    assert blocked.error == TQTradingTimeStatus.QUOTE_TRADING_TIME_UNAVAILABLE.value
+    assert blocked.memory == {
+        "symbol_decision_reason_code": TQTradingTimeStatus.QUOTE_TRADING_TIME_UNAVAILABLE.value,
+        "symbol_decision_reason_family": ExecutionReasonFamily.MARKET_RULE.value,
+    }
+    assert market_requests == [["rb2610"]]
+
+
 def test_engine_blocks_all_symbol_sessions_without_execution_io(monkeypatch: pytest.MonkeyPatch) -> None:
     api = FakeApi()
     monkeypatch.setattr(TQExecutor, "_build_api", staticmethod(lambda _config: api))
