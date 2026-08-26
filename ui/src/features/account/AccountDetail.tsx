@@ -15,6 +15,8 @@ import { AccountActions } from '@/features/account/AccountActions'
 import { useExecutionRunner } from '@/features/account/useExecutionRunner'
 import { useTerminateAction } from '@/features/account/useTerminateAction'
 import { buildRecentActivity } from '@/features/account/recent'
+import { StaleDataStatus } from '@/features/account/StaleDataStatus'
+import { connectionStaleAt, localQueryError } from '@/features/account/staleData'
 import { currentHoldingPreview, formatHoldingQuantity, rebalanceTurnover } from '@/features/account/holdingPreview'
 import { ScheduleSummary, ScheduleTimeline, ScheduleTimelineSkeleton } from '@/features/account/ScheduleTimeline'
 import { accountAssetTerms, INTEGRITY_ICON, INTEGRITY_TEXT_CLASS, STATUS_TEXT_CLASS, channelLabel } from '@/features/dashboard/display'
@@ -47,11 +49,18 @@ interface AccountDetailProps {
   accountId: number
   /** 若来自仪表盘可直接传入聚合项，省一次请求；否则组件自取。 */
   item: AccountDashboardItem
+  /** 顶栏已确认网络级失联；详情页据此收起重复的缓存刷新错误。 */
+  connectionUnavailable?: boolean
   /** 仪表盘数据刷新回调（执行/启停后触发）。 */
   onDashboardRefresh?: () => void
 }
 
-export function AccountDetail({ accountId, item, onDashboardRefresh }: AccountDetailProps) {
+export function AccountDetail({
+  accountId,
+  item,
+  connectionUnavailable = false,
+  onDashboardRefresh,
+}: AccountDetailProps) {
   const navigate = useNavigate()
   const toast = useToastStore((s) => s.toast)
   const [timerOpen, setTimerOpen] = useState(false)
@@ -104,6 +113,19 @@ export function AccountDetail({ accountId, item, onDashboardRefresh }: AccountDe
     `account:${accountId}:target-snapshot`,
   )
 
+  const accountFreshness = { error: account.error, stale: account.stale, updatedAt: account.updatedAt }
+  const activityFreshness = { error: activity.error, stale: activity.stale, updatedAt: activity.updatedAt }
+  const nextRunFreshness = { error: nextRun.error, stale: nextRun.stale, updatedAt: nextRun.updatedAt }
+  const assetFreshness = {
+    error: assetSnapshots.error,
+    stale: assetSnapshots.stale,
+    updatedAt: assetSnapshots.updatedAt,
+  }
+  const targetFreshness = { error: weights.error, stale: weights.stale, updatedAt: weights.updatedAt }
+  const automaticStaleAt = connectionStaleAt(connectionUnavailable, [accountFreshness, nextRunFreshness])
+  const activityStaleAt = connectionStaleAt(connectionUnavailable, [activityFreshness])
+  const comparisonStaleAt = connectionStaleAt(connectionUnavailable, [assetFreshness, targetFreshness])
+
   const runner = useExecutionRunner(accountId, () => {
     activity.refresh()
     void weights.reloadSnapshot()
@@ -112,11 +134,36 @@ export function AccountDetail({ accountId, item, onDashboardRefresh }: AccountDe
   // 服务端真源的在途执行（SSE/轮询汇入 liveExec store）：任何来源发起的执行都可见。
   const live = useRunning(accountId)
   const reloadTargetSnapshot = weights.reloadSnapshot
+  const refreshAccount = account.refresh
+  const refreshActivity = activity.refresh
+  const refreshNextRun = nextRun.refresh
+  const refreshAssetSnapshots = assetSnapshots.refresh
   const previousLiveRef = useRef(live)
   useEffect(() => {
     if (previousLiveRef.current && !live) void reloadTargetSnapshot()
     previousLiveRef.current = live
   }, [live, reloadTargetSnapshot])
+  // 顶栏的单次重试恢复连接后，立即同步详情页查询，不再等待各自的轮询间隔。
+  const connectionUnavailableRef = useRef(connectionUnavailable)
+  useEffect(() => {
+    const restored = connectionUnavailableRef.current && !connectionUnavailable
+    connectionUnavailableRef.current = connectionUnavailable
+    if (!restored) return
+    void Promise.all([
+      refreshAccount(),
+      refreshActivity(),
+      refreshNextRun(),
+      refreshAssetSnapshots(),
+      reloadTargetSnapshot(),
+    ])
+  }, [
+    connectionUnavailable,
+    refreshAccount,
+    refreshActivity,
+    refreshNextRun,
+    refreshAssetSnapshots,
+    reloadTargetSnapshot,
+  ])
   // 当前在途执行 id：优先服务端真源，退回本地 runner（首帧前）。用于「一行可点跳详情」。
   const runningExecId = live?.executionId ?? runner.executionId
 
@@ -403,6 +450,7 @@ export function AccountDetail({ accountId, item, onDashboardRefresh }: AccountDe
         <Card className="px-6 py-4 md:col-span-2">
           <div className="mb-3 flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1.5">
             <h3 className="mr-auto text-[13px] font-semibold text-ink-2">持仓 vs 目标</h3>
+            <StaleDataStatus updatedAt={comparisonStaleAt} />
             <TargetSnapshotControl
               snapshot={weights.data}
               loading={weights.loading}
@@ -531,15 +579,18 @@ export function AccountDetail({ accountId, item, onDashboardRefresh }: AccountDe
         <Card className="px-6 py-4">
           <div className="mb-3 flex items-center justify-between gap-2">
             <h3 className="text-[13px] font-semibold text-ink-2">自动执行</h3>
-            <button
-              type="button"
-              disabled={!scheduleKind}
-              title={!scheduleKind ? '渠道能力加载中' : undefined}
-              className="cursor-pointer text-[12.5px] font-semibold text-accent hover:underline disabled:cursor-default disabled:text-ink-3 disabled:no-underline"
-              onClick={() => setTimerOpen(true)}
-            >
-              调整
-            </button>
+            <div className="flex min-w-0 items-center gap-3">
+              <StaleDataStatus updatedAt={automaticStaleAt} />
+              <button
+                type="button"
+                disabled={!scheduleKind}
+                title={!scheduleKind ? '渠道能力加载中' : undefined}
+                className="cursor-pointer text-[12.5px] font-semibold text-accent hover:underline disabled:cursor-default disabled:text-ink-3 disabled:no-underline"
+                onClick={() => setTimerOpen(true)}
+              >
+                调整
+              </button>
+            </div>
           </div>
           <button
             type="button"
@@ -567,7 +618,7 @@ export function AccountDetail({ accountId, item, onDashboardRefresh }: AccountDe
           </button>
           <ErrorNotice
             title="账户节奏加载失败"
-            error={account.error}
+            error={localQueryError(connectionUnavailable, accountFreshness)}
             variant={account.stale ? 'stale' : 'compact'}
             updatedAt={account.updatedAt}
             onRetry={account.refresh}
@@ -582,7 +633,7 @@ export function AccountDetail({ accountId, item, onDashboardRefresh }: AccountDe
           )}
           <ErrorNotice
             title="自动执行计划加载失败"
-            error={nextRun.error}
+            error={localQueryError(connectionUnavailable, nextRunFreshness)}
             variant={nextRun.stale ? 'stale' : 'compact'}
             updatedAt={nextRun.updatedAt}
             onRetry={nextRun.refresh}
@@ -605,18 +656,21 @@ export function AccountDetail({ accountId, item, onDashboardRefresh }: AccountDe
       />
 
       {/* 近期活动 */}
-      <div className="mx-0.5 mt-6 mb-3 flex items-center justify-between">
+      <div className="mx-0.5 mt-6 mb-3 flex flex-wrap items-center justify-between gap-x-3 gap-y-1.5">
         <span className="text-xs font-semibold tracking-wide text-ink-3">近期活动</span>
-        <Link to={`/accounts/${accountId}/history`} className="text-[12.5px] font-semibold text-accent hover:underline">
-          完整回看 / 绩效 →
-        </Link>
+        <div className="flex min-w-0 items-center gap-3">
+          <StaleDataStatus updatedAt={activityStaleAt} />
+          <Link to={`/accounts/${accountId}/history`} className="text-[12.5px] font-semibold text-accent hover:underline">
+            完整回看 / 绩效 →
+          </Link>
+        </div>
       </div>
       <Card className="overflow-hidden">
         {activity.loading && <div className="px-6 py-4 text-[14px] text-ink-2">加载中…</div>}
         <div className="px-6">
           <ErrorNotice
             title="近期活动加载失败"
-            error={activity.error}
+            error={localQueryError(connectionUnavailable, activityFreshness)}
             variant={activity.stale ? 'stale' : 'section'}
             updatedAt={activity.updatedAt}
             onRetry={activity.refresh}

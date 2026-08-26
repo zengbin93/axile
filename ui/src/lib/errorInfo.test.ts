@@ -1,11 +1,18 @@
 import { describe, expect, it } from 'bun:test'
 
 import { ApiError } from '@/lib/api/client'
-import { errorInfo, redactErrorText, shortErrorReason } from './errorInfo'
+import { errorInfo, isConnectionError, redactErrorText, shortErrorReason } from './errorInfo'
 
 describe('errorInfo', () => {
   it('turns fetch failures into an actionable service message', () => {
     expect(shortErrorReason(new TypeError('Failed to fetch'))).toBe('无法连接 axile 服务')
+  })
+
+  it('distinguishes network failures from HTTP and business errors', () => {
+    expect(isConnectionError(new TypeError('Failed to fetch'))).toBe(true)
+    expect(isConnectionError(new TypeError('Load failed'))).toBe(true)
+    expect(isConnectionError(new Error('Failed to fetch'))).toBe(false)
+    expect(isConnectionError(new Error('HTTP 503'))).toBe(false)
   })
 
   it('redacts common secret assignments and URL parameters', () => {

@@ -20,6 +20,12 @@ export function redactErrorText(value: string): string {
     .replace(URL_SECRET, '$1[已隐藏]')
 }
 
+/** 判断浏览器 fetch 是否在收到 HTTP 响应前失败。 */
+export function isConnectionError(error: unknown): boolean {
+  if (!(error instanceof TypeError)) return false
+  return ['Failed to fetch', 'Load failed', 'NetworkError when attempting to fetch resource.'].includes(error.message)
+}
+
 export function shortErrorReason(error: unknown, maxLength = 160): string {
   const raw = error instanceof Error ? error.message : String(error ?? '')
   const normalized = redactErrorText(raw).replace(/\s+/g, ' ').trim()
