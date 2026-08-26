@@ -21,6 +21,7 @@ from openctp_ctp import thosttraderapi as td
 from axile.common.trade_channel import TradeChannel
 from axile.domain.execution import ExecutionReasonFamily
 from axile.executor.abstract_executor.base import AbstractExecutor
+from axile.executor.account_control.exceptions import AccountControlBlockedError
 from axile.executor.algorithms.utils import clock_now
 from axile.executor.constants.order_status import OrderStatus
 from axile.executor.ctp.converters import (
@@ -58,6 +59,7 @@ from axile.executor.ctp.requests import (
 from axile.executor.ctp.spi import MarketSpi, TraderSpi
 from axile.executor.ctp_product_sessions import (
     decide_ctp_product_session,
+    decide_ctp_session_data_freshness,
     get_ctp_product_sessions,
 )
 from axile.executor.execution_engine import ExecutionEngine, _DispatchPlanningResult
@@ -385,12 +387,15 @@ class CTPExecutor(AbstractExecutor, UnifiedCallbackClient):
         sessions = get_ctp_product_sessions(exchange_id, product_id)
         if not sessions:
             return "CTP.SESSION.NO_SESSION_TABLE"
+        now = clock_now(tz=_SHANGHAI)
+        if not decide_ctp_session_data_freshness(now=now.date()):
+            return "CTP.SESSION.DATA_UNAVAILABLE"
         calendar = self._trading_calendar
         if calendar is None:
             return "CTP.SESSION.CALENDAR_UNAVAILABLE"
         return decide_ctp_product_session(
             sessions,
-            now=clock_now(tz=_SHANGHAI),
+            now=now,
             calendar_is_open=lambda day: calendar.is_open("china", day),
         ).reason_code
 
@@ -492,6 +497,16 @@ class CTPExecutor(AbstractExecutor, UnifiedCallbackClient):
             raise ValueError(f"限价 {price} 不符合 tick {tick}")
         raw = kwargs.get("offset_flag", kwargs.get("offset", "open"))
         offset = resolve_offset(raw)
+        reason_code = self._get_ctp_session_block_reason(symbol)
+        if reason_code is not None:
+            raise AccountControlBlockedError(
+                reason_code,
+                account_id=None,
+                execution_id=None,
+                channel=TradeChannel.CTP,
+                operation="place_order",
+                symbol=symbol,
+            )
         c = self._config()
         ref = self._new_ref()
         r = build_order_insert(
