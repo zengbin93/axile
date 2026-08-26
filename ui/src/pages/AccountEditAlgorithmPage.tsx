@@ -14,6 +14,7 @@ import { useToastStore } from '@/stores/ui'
 import { AccountPageTitle } from '@/features/account/pageHead'
 import { useChannelDescriptor } from '@/stores/channels'
 import {
+  algorithmRefOf,
   describeAlgorithmRef,
   validateAlgorithmRef,
   type AlgorithmRef,
@@ -28,13 +29,6 @@ import {
   Section,
 } from '@/features/account/editUi'
 import type { Account, AlgorithmSlot } from '@/types/api'
-
-function refFromAccount(algo: unknown): AlgorithmRef | null {
-  if (!algo || typeof algo !== 'object') return null
-  const v = algo as { method?: unknown; params?: unknown }
-  if (typeof v.method !== 'string') return null
-  return { method: v.method, params: (v.params ?? {}) as Record<string, unknown> }
-}
 
 function norm(v: unknown): string {
   return JSON.stringify(v ?? null)
@@ -79,8 +73,8 @@ export function AccountEditAlgorithmPage() {
 
   useEffect(() => {
     if (!acc || !descriptor || ready) return
-    setTrade(refFromAccount(acc.algorithm) ?? descriptor.defaults.trade_algorithm)
-    setEmpty(refFromAccount(acc.empty_positions_algorithm))
+    setTrade(algorithmRefOf(acc.algorithm) ?? descriptor.defaults.trade_algorithm)
+    setEmpty(algorithmRefOf(acc.empty_positions_algorithm))
     setReady(true)
   }, [acc, descriptor, ready])
 
@@ -95,8 +89,8 @@ export function AccountEditAlgorithmPage() {
       </section>
     )
 
-  const origTrade = refFromAccount(acc.algorithm) ?? descriptor.defaults.trade_algorithm
-  const origEmpty = refFromAccount(acc.empty_positions_algorithm)
+  const origTrade = algorithmRefOf(acc.algorithm) ?? descriptor.defaults.trade_algorithm
+  const origEmpty = algorithmRefOf(acc.empty_positions_algorithm)
 
   const tradeChanged = norm(trade) !== norm(origTrade)
   const emptyChanged = norm(empty) !== norm(origEmpty)

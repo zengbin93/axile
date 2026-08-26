@@ -616,7 +616,6 @@ export function AcctTimer() {
     timerTab: acct.timerTab,
     scheduleRules: acct.scheduleRules,
     selectedRuleId: acct.selectedRuleId,
-    customCronOn: acct.customCronOn,
   }
 
   return (
@@ -641,7 +640,6 @@ export function AcctTimer() {
                   timerTab: v.timerTab,
                   scheduleRules: v.scheduleRules,
                   selectedRuleId: v.selectedRuleId,
-                  customCronOn: v.customCronOn,
                 })
               }}
             />

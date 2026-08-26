@@ -44,14 +44,12 @@ export interface AccountDraft {
   supN: number
   supM: number
   rawCron: string
-  /** 定时 UI：快捷 | 高级。 */
+  /** 定时 UI：快捷 | 高级 | 自定义。 */
   timerTab: TimerTab
   /** 高级：时间规则；length≥2 时显示右栏组合列表。 */
   scheduleRules: ScheduleRule[]
   /** 高级当前编辑的规则 id。 */
   selectedRuleId: string
-  /** 高级底部自定义表达式模式。 */
-  customCronOn: boolean
 }
 
 interface WizardState {
@@ -93,7 +91,6 @@ export function initialTimerForSchedule(schedule: ScheduleKind) {
     timerTab: 'quick' as TimerTab,
     scheduleRules: [rule],
     selectedRuleId: rule.id,
-    customCronOn: false,
   }
 }
 
@@ -114,7 +111,6 @@ const initialAcct: AccountDraft = {
   timerTab: 'quick',
   scheduleRules: [],
   selectedRuleId: '',
-  customCronOn: false,
 }
 
 /** 建号/建组合向导的跨步骤草稿。 */

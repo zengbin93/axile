@@ -23,7 +23,7 @@ import {
   type ScheduleKind,
   type TimerEditorState,
 } from '@/features/setup/cron'
-import { TimerAdvanced, TimerCustomCron } from '@/features/setup/TimerAdvanced'
+import { TimerAdvanced, TimerCustom } from '@/features/setup/TimerAdvanced'
 import { previewSchedule, type SchedulePreview, type ScheduleUnavailableReason } from '@/lib/api/accounts'
 import type { TradeChannel } from '@/types/api'
 
@@ -139,7 +139,6 @@ function calendarSummary(preview: SchedulePreview | null): { text: string; warni
 
 export function TimerEditor({ tradeChannel, scheduleKind, nightSchedule, value, onChange }: TimerEditorProps) {
   const tabFade = usePanelFadeReady()
-  const bodyFade = usePanelFadeReady()
   const v = value
   const [schedulePreview, setSchedulePreview] = useState<SchedulePreview | null>(null)
   const [previewLoading, setPreviewLoading] = useState(false)
@@ -163,7 +162,6 @@ export function TimerEditor({ tradeChannel, scheduleKind, nightSchedule, value, 
         presetIds: [DEFAULT_PRESET[scheduleKind]],
         nightOn: false,
         rawCron: '',
-        customCronOn: false,
         scheduleRules: [rule],
         selectedRuleId: rule.id,
         timerTab: 'quick',
@@ -173,7 +171,8 @@ export function TimerEditor({ tradeChannel, scheduleKind, nightSchedule, value, 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scheduleKind])
 
-  const rawErr = v.customCronOn && v.rawCron.trim() ? cronError(v.rawCron) : null
+  const customEmpty = v.timerTab === 'custom' && !v.rawCron.trim()
+  const rawErr = v.timerTab === 'custom' && !customEmpty ? cronError(v.rawCron) : null
   const cronList = v.autoOn ? resolveCronList(scheduleKind, v, nightSchedule) : []
   const cronExpr = rawErr ? '' : cronToExpr(cronList)
 
@@ -218,7 +217,14 @@ export function TimerEditor({ tradeChannel, scheduleKind, nightSchedule, value, 
     ? calendarSummary(schedulePreview)
     : { text: '交易日历 · 选择渠道后判断', warning: false }
 
-  const setTab = (tab: 'quick' | 'advanced') => {
+  const setTab = (tab: 'quick' | 'advanced' | 'custom') => {
+    if (tab === 'custom') {
+      const rawCron = v.rawCron.trim()
+        ? v.rawCron
+        : cronToExpr(resolveCronList(scheduleKind, v, nightSchedule))
+      patch({ timerTab: 'custom', rawCron })
+      return
+    }
     if (tab === 'advanced') {
       if (v.scheduleRules.length >= 1) {
         patch({
@@ -231,7 +237,7 @@ export function TimerEditor({ tradeChannel, scheduleKind, nightSchedule, value, 
       patch({ timerTab: 'advanced', scheduleRules: [rule], selectedRuleId: rule.id })
       return
     }
-    patch({ timerTab: 'quick', customCronOn: false })
+    patch({ timerTab: 'quick' })
   }
 
   const togglePreset = (id: string) => {
@@ -266,13 +272,14 @@ export function TimerEditor({ tradeChannel, scheduleKind, nightSchedule, value, 
               一个对象只跑一套范式；且该类若在挂载后的无关重渲染补挂，会重播入场闪一下。 */}
           <div className="space-y-5">
             <div className="flex items-center justify-between gap-3">
-              <Segmented<'quick' | 'advanced'>
+              <Segmented<'quick' | 'advanced' | 'custom'>
                 size="sm"
                 value={v.timerTab}
                 onChange={setTab}
                 options={[
                   { value: 'quick', label: '快捷' },
                   { value: 'advanced', label: '高级' },
+                  { value: 'custom', label: '自定义' },
                 ]}
               />
               <OverflowText
@@ -321,23 +328,37 @@ export function TimerEditor({ tradeChannel, scheduleKind, nightSchedule, value, 
                     </div>
                   )}
                 </div>
-              ) : (
+              ) : v.timerTab === 'advanced' ? (
                 <TimerAdvanced
                   market={scheduleKind}
                   rules={v.scheduleRules}
                   selectedId={v.selectedRuleId}
-                  customCronOn={v.customCronOn}
                   onChangeRules={(scheduleRules, selectedRuleId) => patch({ scheduleRules, selectedRuleId })}
+                />
+              ) : (
+                <TimerCustom
+                  rawCron={v.rawCron}
+                  rawErr={rawErr}
+                  onRawCron={(rawCron) => patch({ rawCron })}
                 />
               )}
             </div>
 
-            <SupRow
-              supN={v.supN}
-              supM={v.supM}
-              onN={(supN) => patch({ supN })}
-              onM={(supM) => patch({ supM })}
-            />
+            <div
+              inert={v.timerTab === 'custom'}
+              className={`grid transition-[grid-template-rows] ${MOTION_LAYOUT} ${
+                v.timerTab === 'custom' ? 'grid-rows-[0fr]' : 'grid-rows-[1fr]'
+              }`}
+            >
+              <div className="min-h-0 overflow-hidden">
+                <SupRow
+                  supN={v.supN}
+                  supM={v.supM}
+                  onN={(supN) => patch({ supN })}
+                  onM={(supM) => patch({ supM })}
+                />
+              </div>
+            </div>
 
             <div className="min-h-[152px] border-y border-line py-3">
               <div className="mb-2 flex items-center justify-between gap-3">
@@ -347,7 +368,9 @@ export function TimerEditor({ tradeChannel, scheduleKind, nightSchedule, value, 
               {!tradeChannel ? (
                 <p className="text-[13px] text-ink-3">选择交易渠道后显示。</p>
               ) : rawErr ? (
-                <p className="text-[13px] text-ink-3">修正 Cron 表达式后显示。</p>
+                <p className="text-[13px] text-ink-3">修正自定义节奏后显示。</p>
+              ) : customEmpty ? (
+                <p className="text-[13px] text-ink-3">输入自定义节奏后显示。</p>
               ) : previewError ? (
                 <p className="border-l-2 border-warn px-3 text-[13px] text-warn">预览暂不可用，仍可保存。{previewError}</p>
               ) : previewLoading && !schedulePreview ? (
@@ -378,26 +401,6 @@ export function TimerEditor({ tradeChannel, scheduleKind, nightSchedule, value, 
               )}
             </div>
 
-            <div
-              className={`grid transition-[grid-template-rows,opacity] ${MOTION_LAYOUT} ${
-                v.timerTab === 'advanced' ? 'grid-rows-[1fr] opacity-100' : 'grid-rows-[0fr] opacity-0'
-              }`}
-            >
-              <div className="overflow-hidden">
-                <TimerCustomCron
-                  customCronOn={v.customCronOn}
-                  rawCron={v.rawCron}
-                  rawErr={rawErr}
-                  onCustomCronOn={(customCronOn) =>
-                    patch({
-                      customCronOn,
-                      rawCron: customCronOn ? v.rawCron : '',
-                    })
-                  }
-                  onRawCron={(rawCron) => patch({ rawCron, customCronOn: true })}
-                />
-              </div>
-            </div>
           </div>
         </div>
       </div>
@@ -405,8 +408,8 @@ export function TimerEditor({ tradeChannel, scheduleKind, nightSchedule, value, 
   )
 }
 
-/** 自定义模式开启时的表达式错误；无则 null。 */
+/** 自定义模式的内容错误；无则 null。 */
 export function timerEditorError(state: TimerEditorState): string | null {
-  if (!state.autoOn || !state.customCronOn) return null
-  return state.rawCron.trim() ? cronError(state.rawCron) : null
+  if (!state.autoOn || state.timerTab !== 'custom') return null
+  return state.rawCron.trim() ? cronError(state.rawCron) : '自定义节奏不能为空。'
 }

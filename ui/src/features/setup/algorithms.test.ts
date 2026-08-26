@@ -3,6 +3,7 @@ import { describe, it, expect } from 'bun:test'
 import {
   POV_DEFAULT_PARAMS,
   TWAP_DEFAULT_PARAMS,
+  algorithmRefOf,
   defaultAlgorithm,
   describeAlgorithmRef,
   describeSingleMakerParams,
@@ -16,6 +17,24 @@ import {
   validateAlgorithmRef,
   validateAlgorithmParams,
 } from './algorithms'
+
+describe('algorithmRefOf · 账户 JSON 安全还原', () => {
+  it('还原合法引用，params 缺省补空对象', () => {
+    expect(algorithmRefOf({ method: 'TWAP', params: { slices: 10 } })).toEqual({
+      method: 'TWAP',
+      params: { slices: 10 },
+    })
+    expect(algorithmRefOf({ method: 'POV' })).toEqual({ method: 'POV', params: {} })
+  })
+
+  it('结构不符一律返回 null', () => {
+    expect(algorithmRefOf(null)).toBeNull()
+    expect(algorithmRefOf(undefined)).toBeNull()
+    expect(algorithmRefOf('TWAP')).toBeNull()
+    expect(algorithmRefOf({ params: {} })).toBeNull()
+    expect(algorithmRefOf({ method: 42 })).toBeNull()
+  })
+})
 
 describe('validateAlgorithmParams', () => {
   it('拒绝 max_wait_seconds=0（越界）', () => {
@@ -117,6 +136,11 @@ describe('describeSingleMakerParams · 当前执行摘要', () => {
     const params = { ...resolveAlgorithm('balance').params, on_missing_book: 'market' }
     expect(describeSingleMakerParams(params)).toContain('盘口缺失时直接市价成交')
     expect(describeAlgorithmRef({ method: 'SINGLE-MAKER', params })).toBe('挂单追单（自定义）')
+  })
+
+  it('意图摘要剥掉选择器引导文案「（推荐）」', () => {
+    expect(describeAlgorithmRef(resolveAlgorithm('balance'))).toBe('平衡')
+    expect(describeAlgorithmRef(resolveAlgorithm('save'))).toBe('省成本')
   })
 
   it('TARGET-POS-TASK 摘要显示有效等待与追单参数', () => {

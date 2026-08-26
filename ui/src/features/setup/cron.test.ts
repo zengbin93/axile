@@ -14,6 +14,7 @@ import {
   type ScheduleRule,
   type TimerIntent,
 } from './cron'
+import { timerEditorError } from './TimerEditor'
 
 /** 构造一个定时意图，默认无补发（supN=0）便于断言精确值。 */
 function intent(patch: Partial<TimerIntent> = {}): TimerIntent {
@@ -25,7 +26,6 @@ function intent(patch: Partial<TimerIntent> = {}): TimerIntent {
     timerTab: 'quick',
     scheduleRules: [],
     selectedRuleId: '',
-    customCronOn: false,
     ...patch,
   }
 }
@@ -139,11 +139,10 @@ describe('compileScheduleRule · 可调时刻与周几', () => {
 })
 
 describe('resolveCronList · 优先级', () => {
-  it('自定义模式开 + rawCron 最高优先', () => {
+  it('自定义 tab 只使用 rawCron', () => {
     const t = intent({
-      customCronOn: true,
       rawCron: '5 9 * * 1-5 | 50 14 * * 1-5',
-      timerTab: 'advanced',
+      timerTab: 'custom',
       scheduleRules: [rule()],
       presetIds: ['d1'],
     })
@@ -162,6 +161,11 @@ describe('resolveCronList · 优先级', () => {
 
   it('空意图返回空数组', () => {
     expect(resolveCronList('continuous', intent())).toEqual([])
+  })
+
+  it('自定义 tab 内容为空时不回退到高级规则', () => {
+    const t = intent({ timerTab: 'custom', scheduleRules: [rule()] })
+    expect(resolveCronList('continuous', t)).toEqual([])
   })
 
   it('仅 rawCron 无 tab（编辑页）仍走表达式', () => {
@@ -279,7 +283,6 @@ describe('parseTimerIntent · 编辑页回填', () => {
     expect(s.presetIds).toEqual(['m15'])
     expect(s.supN).toBe(2)
     expect(s.supM).toBe(1)
-    expect(s.customCronOn).toBe(false)
     expect(timerStateToCronExpr('continuous', s)).toBe('0,1,2,15,16,17,30,31,32,45,46,47 * * * *')
   })
 
@@ -287,7 +290,6 @@ describe('parseTimerIntent · 编辑页回填', () => {
     const s = parseTimerIntent('continuous', '0 21 * * *')
     expect(s.autoOn).toBe(true)
     expect(s.timerTab).toBe('advanced')
-    expect(s.customCronOn).toBe(false)
     expect(s.scheduleRules).toHaveLength(1)
     expect(s.scheduleRules![0]!.freq).toBe('d1')
     expect(s.scheduleRules![0]!.time).toBe('21:00')
@@ -296,15 +298,30 @@ describe('parseTimerIntent · 编辑页回填', () => {
   it('多条日频 → 高级多规则', () => {
     const s = parseTimerIntent('continuous', '0 8 * * * | 0 20 * * *')
     expect(s.timerTab).toBe('advanced')
-    expect(s.customCronOn).toBe(false)
     expect(s.scheduleRules).toHaveLength(2)
     expect(s.scheduleRules!.map((r) => r.time).sort()).toEqual(['08:00', '20:00'])
   })
 
-  it('无法结构化 → 高级自定义模式', () => {
+  it('无法结构化 → 自定义模式', () => {
     const s = parseTimerIntent('continuous', '7 3 * * * | */5 * * * *')
-    expect(s.timerTab).toBe('advanced')
-    expect(s.customCronOn).toBe(true)
+    expect(s.timerTab).toBe('custom')
     expect(s.rawCron).toContain('7 3 * * *')
+    expect(timerStateToCronExpr('continuous', s)).toBe('7 3 * * * | */5 * * * *')
+  })
+})
+
+describe('timerEditorError · 自定义模式', () => {
+  const state = parseTimerIntent('continuous', '7 3 * * * | */5 * * * *')
+
+  it('自动调仓开启时拒绝空内容与错误格式', () => {
+    expect(timerEditorError({ ...state, rawCron: '' })).toBe('自定义节奏不能为空。')
+    expect(timerEditorError({ ...state, rawCron: '7 3 * *' })).toBe(
+      '自定义节奏格式有误：每条规则须包含 5 项（分、时、日、月、星期）。',
+    )
+  })
+
+  it('内容有效或自动调仓关闭时不报错', () => {
+    expect(timerEditorError(state)).toBeNull()
+    expect(timerEditorError({ ...state, autoOn: false, rawCron: '' })).toBeNull()
   })
 })

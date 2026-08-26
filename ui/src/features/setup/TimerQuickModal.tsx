@@ -59,8 +59,8 @@ function draftFromCron(
   night?: NightSchedule | null,
 ): { state: TimerEditorState; fromComplex: boolean } {
   const parsed = parseTimerIntent(market, cronExpr, night)
-  const quick = parsed.timerTab === 'quick' && !parsed.customCronOn
-  if (quick) return { state: { ...parsed, timerTab: 'quick', customCronOn: false, rawCron: '' }, fromComplex: false }
+  const quick = parsed.timerTab === 'quick'
+  if (quick) return { state: { ...parsed, timerTab: 'quick', rawCron: '' }, fromComplex: false }
 
   // 有表达式但非快捷：保留开关，预设回到市场默认，避免误把高级时刻当已选中。
   const base = defaultTimerEditorState(market)
@@ -69,21 +69,19 @@ function draftFromCron(
       ...base,
       autoOn: parsed.autoOn,
       timerTab: 'quick',
-      customCronOn: false,
       rawCron: '',
     },
     fromComplex: parsed.autoOn,
   }
 }
 
-/** 编译时强制快捷意图（弹层不允许 custom / advanced 编译路径）。 */
+/** 编译时强制快捷意图（弹层不允许自定义 / 高级编译路径）。 */
 function asQuickIntent(market: ScheduleKind, s: TimerEditorState): TimerEditorState {
   const id = s.presetIds[0] ?? DEFAULT_PRESET[market]
   const rule = ruleFromPreset(market, id)
   return {
     ...s,
     timerTab: 'quick',
-    customCronOn: false,
     rawCron: '',
     presetIds: [id],
     scheduleRules: [rule],
@@ -155,7 +153,6 @@ function TimerQuickModalReady({
       scheduleRules: [rule],
       selectedRuleId: rule.id,
       timerTab: 'quick',
-      customCronOn: false,
       rawCron: '',
     })
     setFromComplex(false)
@@ -330,7 +327,7 @@ function TimerQuickModalReady({
                     className="text-[12.5px] font-semibold text-accent hover:underline"
                     onClick={onClose}
                   >
-                    高级节奏 · 多时刻 / Cron 表达式 →
+                    更多节奏 · 多时刻与自定义 →
                   </Link>
                 </div>
               </div>

@@ -177,7 +177,7 @@ export function compileCustom(
 /* ------------------ 高级：结构化时间规则 ------------------ */
 
 /** 定时页 tab。 */
-export type TimerTab = 'quick' | 'advanced'
+export type TimerTab = 'quick' | 'advanced' | 'custom'
 
 /**
  * 高级编辑器中的一条时间规则。
@@ -363,7 +363,7 @@ export function compileScheduleRules(
  * Notes
  * -----
  * 向导跨步骤保存此意图以便回显与再编辑；``cron_expr`` 由 :func:`resolveCronList` 现算。
- * 优先级：自定义表达式（customCronOn + rawCron）> 高级 tab 规则 > 快捷预设。
+ * 当前 tab 是唯一生效来源：自定义表达式 / 高级规则 / 快捷预设。
  */
 export interface TimerIntent {
   presetIds: string[]
@@ -371,14 +371,12 @@ export interface TimerIntent {
   supN: number
   supM: number
   rawCron: string
-  /** 快捷 | 高级；缺省时若仅有 rawCron 则按表达式（编辑页）。 */
+  /** 快捷 | 高级 | 自定义；缺省时若仅有 rawCron 则按表达式（兼容旧调用）。 */
   timerTab?: TimerTab
   /** 高级：时间规则列表；长度 ≥2 时 UI 显示右栏组合列表。 */
   scheduleRules?: ScheduleRule[]
   /** 高级右栏当前选中的规则 id。 */
   selectedRuleId?: string
-  /** 高级底部「自定义模式」：开启后以 rawCron 为准。 */
-  customCronOn?: boolean
   /**
    * @deprecated 兼容旧测试/调用：等价于「高级 + 单条 customFreq 规则」。
    * resolve 时若未提供 scheduleRules 且 customOn，仍走 compileCustom。
@@ -389,7 +387,7 @@ export interface TimerIntent {
 }
 
 /**
- * 按优先级收敛出 cron 列表：自定义表达式 > 高级规则 > 旧 customOn > 预设。
+ * 按当前 tab 收敛出 cron 列表，并兼容旧 customOn / 无 tab 调用。
 
  * Parameters
  * ----------
@@ -405,8 +403,7 @@ export interface TimerIntent {
  */
 export function resolveCronList(market: ScheduleKind, t: TimerIntent, night?: NightSchedule | null): string[] {
   const raw = t.rawCron.trim()
-  // 自定义模式开，或以「无 tab / 无高级规则」的裸表达式路径（账户编辑页）。
-  if (raw && (t.customCronOn || (t.timerTab == null && !t.scheduleRules?.length && !t.customOn))) {
+  if (t.timerTab === 'custom') {
     return raw
       .split('|')
       .map((s) => s.trim())
@@ -446,7 +443,7 @@ export function cronError(raw: string): string | null {
     .map((s) => s.trim())
     .filter(Boolean)
   const bad = rules.some((s) => s.split(/\s+/).length !== 5)
-  return bad ? 'Cron 格式有误：每条规则须为 5 段（分 时 日 月 周）。' : null
+  return bad ? '自定义节奏格式有误：每条规则须包含 5 项（分、时、日、月、星期）。' : null
 }
 
 /** 拼成后端要的单字符串（`|` 分隔）。 */
@@ -646,7 +643,6 @@ export interface TimerEditorState extends TimerIntent {
   timerTab: TimerTab
   scheduleRules: ScheduleRule[]
   selectedRuleId: string
-  customCronOn: boolean
 }
 
 /** 构造一份「关自动 + 市场默认节奏」草稿（打开开关后可立刻用）。 */
@@ -662,7 +658,6 @@ export function defaultTimerEditorState(market: ScheduleKind): TimerEditorState 
     timerTab: 'quick',
     scheduleRules: [rule],
     selectedRuleId: rule.id,
-    customCronOn: false,
   }
 }
 
@@ -769,7 +764,6 @@ export function parseTimerIntent(
       timerTab: 'quick',
       scheduleRules: [rule],
       selectedRuleId: rule.id,
-      customCronOn: false,
     }
   }
 
@@ -785,7 +779,6 @@ export function parseTimerIntent(
       timerTab: 'advanced',
       scheduleRules: daily,
       selectedRuleId: daily[0]!.id,
-      customCronOn: false,
     }
   }
 
@@ -803,10 +796,9 @@ export function parseTimerIntent(
     supN: 0,
     supM: 1,
     rawCron: raw,
-    timerTab: 'advanced',
+    timerTab: 'custom',
     scheduleRules: [rule],
     selectedRuleId: rule.id,
-    customCronOn: true,
   }
 }
 

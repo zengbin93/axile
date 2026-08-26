@@ -5,7 +5,6 @@
  * 动效约定：
  * - 单↔双栏：目录 width/opacity 状态类过渡 200ms（Drawer 语汇，非入场表演）
  * - 主锚日频↔周期：key 重挂 + panel-fade-in（首帧不播，见 usePanelFadeReady）
- * - 自定义区：textarea panel-fade-in
  * - 频率：Segmented 滑块；周几/目录：transition-colors 200ms
  * - 无生命体征 loop；Mac 滚轮菜单自带 select-pop-in
  */
@@ -45,40 +44,16 @@ const FREQ_TITLE: Record<CustomFreq, string> = {
 const CHIP_T =
   'transition-colors duration-200 ease-[cubic-bezier(0.4,0,0.2,1)] motion-reduce:transition-none'
 
-/** 与定时页总开关同款。 */
-function Switch({ on, onClick }: { on: boolean; onClick: () => void }) {
-  return (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={on}
-      onClick={onClick}
-      className={`relative h-[27px] w-[46px] flex-none rounded-full transition-colors ${MOTION_LAYOUT} ${
-        on ? 'bg-accent' : 'bg-border-strong'
-      }`}
-    >
-      <span
-        className={`absolute top-[3px] h-[21px] w-[21px] rounded-full bg-surface shadow transition-all ${MOTION_LAYOUT} ${
-          on ? 'left-[22px]' : 'left-[3px]'
-        }`}
-      />
-    </button>
-  )
-}
-
 export interface TimerAdvancedProps {
   market: ScheduleKind
   rules: ScheduleRule[]
   selectedId: string
-  customCronOn: boolean
   onChangeRules: (rules: ScheduleRule[], selectedId: string) => void
 }
 
-export interface TimerCustomCronProps {
-  customCronOn: boolean
+export interface TimerCustomProps {
   rawCron: string
   rawErr: string | null
-  onCustomCronOn: (on: boolean) => void
   onRawCron: (v: string) => void
 }
 
@@ -170,7 +145,7 @@ function DayStrip({
 /**
  * 高级节奏编辑器。
  */
-export function TimerAdvanced({ market, rules, selectedId, customCronOn, onChangeRules }: TimerAdvancedProps) {
+export function TimerAdvanced({ market, rules, selectedId, onChangeRules }: TimerAdvancedProps) {
   const multi = rules.length >= 2
   const selected = rules.find((r) => r.id === selectedId) ?? rules[0]
   const showTime = selected?.freq === 'd1'
@@ -247,10 +222,8 @@ export function TimerAdvanced({ market, rules, selectedId, customCronOn, onChang
 
   if (!selected) return null
 
-  const dim = customCronOn
-
   const surface = (
-    <div className={`flex flex-col items-center px-5 py-6 ${dim ? 'pointer-events-none opacity-40' : ''}`}>
+    <div className="flex flex-col items-center px-5 py-6">
       <Segmented<CustomFreq>
         size="sm"
         value={selected.freq}
@@ -329,7 +302,7 @@ export function TimerAdvanced({ market, rules, selectedId, customCronOn, onChang
     <div
       className={`flex shrink-0 flex-col overflow-hidden border-l transition-[width,opacity,border-color] ${MOTION_LAYOUT} ${
         multi
-          ? `w-[156px] border-line sm:w-[176px] ${dim ? 'pointer-events-none opacity-40' : 'opacity-100'}`
+          ? 'w-[156px] border-line opacity-100 sm:w-[176px]'
           : 'pointer-events-none w-0 border-transparent opacity-0'
       }`}
       aria-hidden={!multi}
@@ -387,51 +360,30 @@ export function TimerAdvanced({ market, rules, selectedId, customCronOn, onChang
   )
 
   return (
-    <div className="flex items-stretch overflow-hidden rounded-[14px] border border-line bg-surface">
-      <div
-        className={`min-w-0 flex-1 transition-opacity ${MOTION_LAYOUT} ${dim ? 'opacity-40' : 'opacity-100'}`}
-      >
-        {surface}
-      </div>
+    <div className="flex min-h-[320px] items-stretch overflow-hidden rounded-[14px] border border-line bg-surface">
+      <div className="min-w-0 flex-1">{surface}</div>
       {catalog}
     </div>
   )
 }
 
 /**
- * 高级 tab 最底部的自定义表达式开关与编辑区。
+ * 自定义执行节奏编辑区。
  */
-export function TimerCustomCron({ customCronOn, rawCron, rawErr, onCustomCronOn, onRawCron }: TimerCustomCronProps) {
-  const fade = usePanelFadeReady()
+export function TimerCustom({ rawCron, rawErr, onRawCron }: TimerCustomProps) {
   return (
-    <div className="border-t border-line pt-4">
-      <div className="flex items-center justify-between gap-3">
-        <div>
-          <div className="text-[14px] font-[640]">Cron 表达式</div>
-          <div className="text-xs text-ink-3">开启后以 Cron 为准，上方图形配置不再生效</div>
-        </div>
-        <Switch on={customCronOn} onClick={() => onCustomCronOn(!customCronOn)} />
+    <div className="flex min-h-[320px] flex-col rounded-[14px] border border-line bg-surface px-5 py-6">
+      <div className="text-[14px] font-[640]">自定义执行节奏</div>
+      <div className="mt-1 text-xs text-ink-3">
+        北京时间 · 每条规则包含分、时、日、月、星期；多条使用 | 分隔
       </div>
-      {/* grid-rows 过渡：开时展开，关时收起，避免硬切 */}
-      <div
-        className={`grid transition-[grid-template-rows,opacity] ${MOTION_LAYOUT} ${
-          customCronOn ? 'mt-3 grid-rows-[1fr] opacity-100' : 'grid-rows-[0fr] opacity-0'
-        }`}
-      >
-        <div className="overflow-hidden">
-          <div className={customCronOn && fade.current ? 'panel-fade-in' : ''}>
-            <div className="mb-1.5 text-xs text-ink-3">多条用 | 分隔 · 北京时间 · 5 段 Cron</div>
-            <textarea
-              value={rawCron}
-              onChange={(e) => onRawCron(e.target.value)}
-              placeholder="0 8 * * * | 0 20 * * 0,2,4"
-              tabIndex={customCronOn ? 0 : -1}
-              className="min-h-[80px] w-full rounded-[9px] border border-ink-3/30 bg-surface p-3 font-mono text-xs outline-none focus:border-ink-2"
-            />
-            {rawErr && <div className="mt-1 text-xs text-warn">{rawErr}</div>}
-          </div>
-        </div>
-      </div>
+      <textarea
+        value={rawCron}
+        onChange={(e) => onRawCron(e.target.value)}
+        placeholder="0 8 * * * | 0 20 * * 0,2,4"
+        className="mt-5 min-h-[180px] w-full resize-y rounded-[9px] border border-ink-3/30 bg-surface p-3 font-mono text-xs text-ink-1 outline-none placeholder:text-ink-3 focus:border-accent"
+      />
+      {rawErr && <div className="mt-1.5 text-xs text-warn">{rawErr}</div>}
     </div>
   )
 }

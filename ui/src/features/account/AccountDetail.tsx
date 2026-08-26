@@ -22,6 +22,8 @@ import { ScheduleSummary, ScheduleTimeline, ScheduleTimelineSkeleton } from '@/f
 import { accountAssetTerms, INTEGRITY_ICON, INTEGRITY_TEXT_CLASS, STATUS_TEXT_CLASS, channelLabel } from '@/features/dashboard/display'
 import { phaseLabel, runVerb } from '@/features/dashboard/execProgress'
 import { useRunning } from '@/stores/liveExec'
+import { useDomainStore } from '@/stores/domain'
+import { algorithmRefOf, describeAlgorithmRef } from '@/features/setup/algorithms'
 import {
   getAccount,
   getAccountAssetSnapshots,
@@ -77,8 +79,11 @@ export function AccountDetail({
   const nameVt = tDetail || tEdit
   const amountVt = tHistory
   const assetTerms = accountAssetTerms(item.trade_channel)
-  const channelSchedule = useChannelDescriptor(item.trade_channel)?.schedule
+  const channelDescriptor = useChannelDescriptor(item.trade_channel)
+  const channelSchedule = channelDescriptor?.schedule
   const scheduleKind = channelSchedule?.kind
+  // 组合名：领域 store 已在应用根加载（PortfolioLite 带 name），取名不增请求；未加载/找不到退回 #id。
+  const portfolios = useDomainStore((s) => s.portfolios)
 
   const isStarted = startedOverride ?? item.is_started
   useEffect(() => {
@@ -221,6 +226,36 @@ export function AccountDetail({
   // 命不中则退为「自定义执行节奏」。未来时刻统一使用服务端 APScheduler 真源，不在此处近似推算。
   const cronExpr = account.data?.cron_expr ?? ''
   const cronHuman = cronExpr && scheduleKind ? describeCron(scheduleKind, cronExpr, channelSchedule?.night) : null
+
+  // Hero 配置带（杠杆 / 品种控制 / 算法）与组合名：组合名取自领域 store，其余取自
+  // 本组件已在轮询的账户详情——零新增请求。它们是配置事实而非盈亏或偏离：保持中性色、
+  // 不挂动效；各项兼作对应编辑分区的安静入口（hover 出下划线，点击进编辑）。
+  const acc = account.data
+  /** 配置带常挂：详情未加载时值位骨架占位（null），加载失败显示 —。 */
+  const configLoading = acc == null && account.loading
+  const portfolioName =
+    portfolioId != null ? (portfolios?.find((p) => p.id === portfolioId)?.name ?? null) : null
+  const showShortLeverage = channelDescriptor?.ui.show_short_leverage ?? true
+  const fmtLev = (v: number | null) => (v == null ? '—' : `${Number.isInteger(v) ? v : v.toFixed(1)}×`)
+  const leverageText = acc
+    ? showShortLeverage
+      ? `多 ${fmtLev(acc.long_leverage)} / 空 ${fmtLev(acc.short_leverage)}`
+      : fmtLev(acc.long_leverage)
+    : null
+  const forbiddenCount = acc?.forbidden_symbols?.length ?? 0
+  const riskCount = acc?.risk_symbols?.length ?? 0
+  const symbolsText = acc
+    ? forbiddenCount + riskCount === 0
+      ? '未设限'
+      : [
+          forbiddenCount > 0 ? `禁投 ${forbiddenCount}` : null,
+          riskCount > 0 ? `风险 ${riskCount}` : null,
+        ]
+          .filter(Boolean)
+          .join('、')
+    : null
+  // 算法摘要不收短：TARGET-POS-TASK 等直接给完整参数句，配置带里整项分组 + 截断兜底。
+  const algorithmText = acc ? describeAlgorithmRef(algorithmRefOf(acc.algorithm)) : null
   const onToggleStarted = async () => {
     const next = !isStarted
     setActionError(null)
@@ -413,9 +448,13 @@ export function AccountDetail({
                 )}
                 {portfolioId != null && (
                   <>
-                    {' · '}
-                    <Link to={`/portfolios/${portfolioId}`} className="font-semibold text-accent hover:underline">
-                      组合 #{portfolioId}
+                    {' · 组合 '}
+                    {/* 组合名是自由文本、长度无界：槽位截断 + hover 原地播全名（OverflowText 既有模式）。 */}
+                    <Link
+                      to={`/portfolios/${portfolioId}`}
+                      className="inline-flex min-w-0 max-w-60 align-middle font-semibold text-accent hover:underline"
+                    >
+                      <OverflowText className="min-w-0" text={portfolioName ?? `#${portfolioId}`} />
                     </Link>
                   </>
                 )}
@@ -441,6 +480,34 @@ export function AccountDetail({
               </span>
             </Link>
           </div>
+        </div>
+
+        {/*
+         * 配置带：hero 最后一层（名称 → 状态 → 资产 → 配置），label 领值的「· 外分组」
+         * 形态——每项是独立 inline 单元，折行只发生在项间，算法参数句内部的「·」不再
+         * 与分段符糊成一片。带常挂（值位骨架占位），卡高不随账户详情到位而长个。
+         * 算法项吃剩余宽、OverflowText 截断 + hover 播全句；整项可点跳编辑分区。
+         */}
+        <div className="mt-4 flex flex-wrap items-center gap-x-6 gap-y-1.5 border-t border-line pt-3.5 text-[13px]">
+          <HeroConfigItem
+            label="杠杆"
+            to={`/accounts/${accountId}/edit/leverage`}
+            title="杠杆设置"
+            value={configLoading ? null : (leverageText ?? '—')}
+          />
+          <HeroConfigItem
+            label="品种"
+            to={`/accounts/${accountId}/edit/symbols`}
+            title="品种控制"
+            value={configLoading ? null : (symbolsText ?? '—')}
+          />
+          <HeroConfigItem
+            label="算法"
+            to={`/accounts/${accountId}/edit/algorithm`}
+            title="执行算法"
+            value={configLoading ? null : (algorithmText ?? '—')}
+            grow
+          />
         </div>
       </Card>
 
@@ -764,6 +831,40 @@ export function AccountDetail({
   )
 }
 
+/** Hero 配置带单项：label 领着值，整体是一个跳编辑分区的安静链接；值未就位时骨架占位。 */
+function HeroConfigItem({
+  label,
+  to,
+  title,
+  value,
+  grow = false,
+}: {
+  label: string
+  to: string
+  title: string
+  /** `null` = 账户详情仍在加载，值位骨架占位。 */
+  value: string | null
+  /** 占满剩余宽并允许截断（算法长句用）。 */
+  grow?: boolean
+}) {
+  return (
+    <Link
+      to={to}
+      title={title}
+      className={`group flex min-w-0 items-center gap-1.5 ${grow ? 'min-w-48 flex-1' : 'flex-none'}`}
+    >
+      <span className="flex-none text-ink-3">{label}</span>
+      {value === null ? (
+        <SkeletonText className="w-14" />
+      ) : grow ? (
+        <OverflowText className="num min-w-0 flex-1 font-medium text-ink-1 group-hover:underline" text={value} />
+      ) : (
+        <span className="num whitespace-nowrap font-medium text-ink-1 group-hover:underline">{value}</span>
+      )}
+    </Link>
+  )
+}
+
 /** 仪表盘与账户路由共用的冷拉骨架。 */
 export function AccountDetailSkeleton() {
   return (
@@ -776,6 +877,11 @@ export function AccountDetailSkeleton() {
           <Skeleton className="h-4 w-20" />
           <Skeleton className="mt-2 h-10 w-64" />
           <Skeleton className="mt-2 h-4 w-48" />
+        </div>
+        <div className="mt-4 flex gap-6 border-t border-line pt-3.5">
+          <Skeleton className="h-3.5 w-28" />
+          <Skeleton className="h-3.5 w-24" />
+          <Skeleton className="h-3.5 w-64" />
         </div>
       </Card>
       <SectionLabel>状态</SectionLabel>
