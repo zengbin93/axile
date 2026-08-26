@@ -18,6 +18,7 @@ import {
   restoreCalendarOverrides,
   saveCalendarFunction,
   saveCalendarOverrides,
+  saveShinnyCalendar,
   validateCalendarFunction,
   type CalendarDiagnostic,
   type CalendarFunctionResult,
@@ -100,7 +101,10 @@ export function TradingCalendarPage() {
     void getCalendarRequirements().then((requirements) => {
       const options = requirements.map((item) => ({
         value: item.calendar_id,
-        label: `${item.label} · ${item.channel_labels.join('、')}`,
+        label: `${item.label} · ${[
+          item.channel_labels.join('、'),
+          item.legacy_fallback_channel_labels.length ? `${item.legacy_fallback_channel_labels.join('、')} 存量兼容保护` : '',
+        ].filter(Boolean).join(' · ')}`,
       }))
       setCalendarOptions(options.length > 0 ? options : [{ value: 'china', label: '中国交易日历' }])
       setCalendarId((current) => options.some((item) => item.value === current) ? current : options[0]?.value ?? current)
@@ -231,6 +235,37 @@ export function TradingCalendarPage() {
     })
   }
 
+  const saveShinny = () => {
+    replaceWithConfirmation('Shinny', async () => {
+      setSaving(true)
+      setSaveError(null)
+      try {
+        await saveShinnyCalendar(calendarId)
+        toast('Shinny 日历已刷新并保存')
+        await afterReplacement()
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        setSaveError(message)
+      } finally {
+        setSaving(false)
+      }
+    })
+  }
+
+  const refreshConfiguredCalendar = async () => {
+    setMutating(true)
+    setActionError(null)
+    try {
+      const result = await refreshCalendar(calendarId)
+      toast(result.message)
+      await calendar.refresh()
+    } catch (error) {
+      setActionError(error instanceof Error ? error : new Error(String(error)))
+    } finally {
+      setMutating(false)
+    }
+  }
+
   const saveEdits = async () => {
     const entries = Object.entries(edits).map(([calDate, isOpen]) => ({ calDate, isOpen }))
     setMutating(true)
@@ -300,7 +335,7 @@ export function TradingCalendarPage() {
           {!status ? Array.from({ length: 4 }, (_, index) => (
             <div key={index} className="min-h-[66px] bg-surface px-4 py-3"><Skeleton className="h-3 w-16" /><Skeleton className="mt-2 h-4 w-28" /></div>
           )) : [
-            ['刷新方式', status?.refreshKind === 'python' ? '自定义函数' : status?.refreshKind === 'csv' ? 'CSV' : '未配置'],
+            ['刷新方式', status?.refreshKind === 'python' ? '自定义函数' : status?.refreshKind === 'shinny' ? 'Shinny 交易日历' : status?.refreshKind === 'csv' ? 'CSV' : '未配置'],
             ['有效覆盖', status?.coverageStart ? `${status.coverageStart} 至 ${status.coverageEnd}` : '暂无'],
             ['同步状态', status?.lastSyncAt ? status.lastSyncAt.replace('T', ' ') : '尚未同步'],
             ['人工调整', `${status?.overrideCount ?? 0} 条`],
@@ -316,13 +351,17 @@ export function TradingCalendarPage() {
             <Segmented
               size="sm"
               value={mode}
-              options={[{ value: 'csv', label: 'CSV' }, { value: 'python', label: '自定义函数' }]}
+              options={[
+                { value: 'csv', label: 'CSV' },
+                { value: 'python', label: '自定义函数' },
+                { value: 'shinny', label: 'Shinny 交易日历' },
+              ]}
               onChange={(value) => setMode(value as CalendarRefreshKind)}
             />
           </div>
           <p className="mt-1 text-[12.5px] text-ink-2">成功替换基础日历时，人工调整会一并清除。</p>
 
-          {(['csv', 'python'] as const).map((kind) => {
+          {(['csv', 'python', 'shinny'] as const).map((kind) => {
             const active = mode === kind
             return (
               <div key={kind} inert={!active} className={`grid transition-[grid-template-rows] duration-200 motion-reduce:transition-none ${active ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'}`}>
@@ -355,7 +394,7 @@ export function TradingCalendarPage() {
                           </div>
                         )}
                       </>
-                    ) : (
+                    ) : kind === 'python' ? (
                       <>
                         <PythonFunctionEditor code={code} onChange={setCode} running={running} result={functionResult} onRun={() => void runFunction()} disabled={saving} resultContent={functionResult?.valid ? <p className="mt-3 text-[13px] text-ink-2">返回 {functionResult.entries.length} 个连续自然日。</p> : null} />
                         <div className="mt-3 flex flex-wrap gap-2">
@@ -364,10 +403,25 @@ export function TradingCalendarPage() {
                             {saving ? '正在生成并保存…' : '保存并刷新'}
                           </button>
                           {status?.refreshKind === 'python' && (
-                            <button disabled={mutating} className="inline-flex items-center gap-1.5 rounded-[8px] border border-line px-4 py-2 text-[13px] text-ink-2 disabled:opacity-45" onClick={async () => { setMutating(true); try { const result = await refreshCalendar(calendarId); toast(result.message); await calendar.refresh() } finally { setMutating(false) } }}>{mutating ? <LoaderCircle size={14} className="animate-spin motion-reduce:animate-none" /> : <RefreshCw size={14} />} {mutating ? '刷新中…' : '立即刷新'}</button>
+                            <button disabled={mutating} className="inline-flex items-center gap-1.5 rounded-[8px] border border-line px-4 py-2 text-[13px] text-ink-2 disabled:opacity-45" onClick={() => void refreshConfiguredCalendar()}>{mutating ? <LoaderCircle size={14} className="animate-spin motion-reduce:animate-none" /> : <RefreshCw size={14} />} {mutating ? '刷新中…' : '立即刷新'}</button>
                           )}
                         </div>
                         <ErrorNotice title="保存自定义函数失败" error={saveError} variant="mutation" onRetry={saveFunction} />
+                      </>
+                    ) : (
+                      <>
+                        <p className="text-[13px] leading-relaxed text-ink-2">使用 Shinny 物化 A 股与国内期货共用的交易日历，固定按每个自然日 <span className="num">00:00</span> 判断。内置节假日仅覆盖至 <span className="num">2026-12-31</span>；之后不会生成日历记录。需要交易所级调整时，可使用 CSV 或自定义函数。</p>
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          <button className="inline-flex items-center gap-1.5 rounded-[8px] bg-ink-1 px-4 py-2 text-[13px] text-surface disabled:cursor-default disabled:opacity-45" disabled={saving || !['china', 'ashare'].includes(calendarId)} onClick={saveShinny}>
+                            {saving ? <LoaderCircle size={14} className="animate-spin motion-reduce:animate-none" /> : <Save size={14} />}
+                            {saving ? '正在生成并保存…' : '使用 Shinny 保存并刷新'}
+                          </button>
+                          {status?.refreshKind === 'shinny' && (
+                            <button disabled={mutating} className="inline-flex items-center gap-1.5 rounded-[8px] border border-line px-4 py-2 text-[13px] text-ink-2 disabled:opacity-45" onClick={() => void refreshConfiguredCalendar()}>{mutating ? <LoaderCircle size={14} className="animate-spin motion-reduce:animate-none" /> : <RefreshCw size={14} />} {mutating ? '刷新中…' : '立即刷新'}</button>
+                          )}
+                        </div>
+                        {!['china', 'ashare'].includes(calendarId) && <p className="mt-2 text-[12.5px] text-warn">Shinny 仅支持中国和 A 股交易日历。</p>}
+                        <ErrorNotice title="保存 Shinny 日历失败" error={saveError} variant="mutation" onRetry={saveShinny} />
                       </>
                     )}
                   </div>

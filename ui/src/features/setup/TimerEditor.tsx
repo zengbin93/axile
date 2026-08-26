@@ -262,7 +262,9 @@ export function TimerEditor({ tradeChannel, scheduleKind, nightSchedule, value, 
         }`}
       >
         <div className="overflow-hidden">
-          <div className={`space-y-5 ${v.autoOn && bodyFade.current ? 'panel-fade-in' : ''}`}>
+          {/* 收放（grid-fr + opacity）已是全部连续性，不再叠 panel-fade-in：
+              一个对象只跑一套范式；且该类若在挂载后的无关重渲染补挂，会重播入场闪一下。 */}
+          <div className="space-y-5">
             <div className="flex items-center justify-between gap-3">
               <Segmented<'quick' | 'advanced'>
                 size="sm"
@@ -354,12 +356,15 @@ export function TimerEditor({ tradeChannel, scheduleKind, nightSchedule, value, 
                 <div className="space-y-1.5">
                   {schedulePreview.items.map((item) => {
                     const tradingDay = item.calendar_day.slice(5)
+                    const legacy = item.using_legacy_fallback
+                      ? `${item.label ?? '中国交易日历'} · 存量兼容闭市保护中（A 股日历未覆盖） · `
+                      : ''
                     const text = item.reason_code === 'CALENDAR.NO_NIGHT_SESSION'
                       ? '无对应夜盘，已跳过'
                       : item.calendar_status === 'available_open'
-                      ? `${tradingDay} 交易日，执行`
+                      ? `${legacy}${tradingDay} 交易日，执行`
                       : item.calendar_status === 'available_closed'
-                        ? '休市，已跳过'
+                        ? `${legacy}休市，已跳过`
                         : item.calendar_status === 'unavailable'
                           ? '日历不可用，按排程执行'
                           : '按排程执行'

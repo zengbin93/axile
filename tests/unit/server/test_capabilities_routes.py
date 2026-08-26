@@ -85,7 +85,7 @@ def test_channels_reports_missing_dependency_with_install_extra(
 def test_calendar_requirements_group_shared_available_channels(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """CTP、GM 与 TqSdk 共用 china，聚合接口只返回一份稳定需求。"""
+    """期货与 A 股分别聚合到各自稳定的日历需求。"""
     monkeypatch.setattr(channel_capabilities.importlib.util, "find_spec", lambda _name: object())
 
     response = client.get("/api/v1/capabilities/calendar-requirements")
@@ -95,7 +95,17 @@ def test_calendar_requirements_group_shared_available_channels(
         {
             "calendar_id": "china",
             "label": "中国交易日历",
-            "channels": ["ctp", "gm", "tq"],
-            "channel_labels": ["CTP", "掘金", "天勤"],
-        }
+            "channels": ["ctp", "tq"],
+            "channel_labels": ["CTP", "天勤"],
+            "legacy_fallback_channels": ["gm"],
+            "legacy_fallback_channel_labels": ["掘金"],
+        },
+        {
+            "calendar_id": "ashare",
+            "label": "A 股交易日历",
+            "channels": ["gm"],
+            "channel_labels": ["掘金"],
+            "legacy_fallback_channels": [],
+            "legacy_fallback_channel_labels": [],
+        },
     ]

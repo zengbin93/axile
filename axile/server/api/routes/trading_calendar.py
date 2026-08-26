@@ -6,11 +6,14 @@ from datetime import date, timedelta
 from typing import Annotated
 
 from fastapi import APIRouter, File, HTTPException, Query, UploadFile
+from loguru import logger
 from pydantic import BaseModel, Field
 
 from axile.server.api.deps import SessionDep
 from axile.server.trading_calendar import (
     CALENDAR_ID,
+    CALENDAR_INITIAL_HISTORY_DAYS,
+    CALENDAR_TARGET_FUTURE_DAYS,
     CalendarDiagnosticEntry,
     CalendarFunctionResult,
     CalendarImportPreview,
@@ -28,11 +31,17 @@ from axile.server.trading_calendar import (
     parse_calendar_csv,
     run_calendar_function,
     save_calendar_function,
+    save_shinny_calendar,
     set_calendar_overrides,
     sync_calendar_python,
+    sync_calendar_shinny,
 )
 
 router = APIRouter(prefix="/market/trading-calendar", tags=["market"])
+
+
+def _today() -> date:
+    return date.today()
 
 
 class FunctionRequest(BaseModel):
@@ -155,15 +164,39 @@ async def update_calendar_function(session: SessionDep, payload: FunctionRequest
     return await get_calendar_status(session, payload.calendar_id)
 
 
+@router.put("/shinny", response_model=CalendarStatus, response_model_by_alias=True)
+async def update_shinny_calendar(
+    session: SessionDep,
+    calendar_id: Annotated[str, Query(alias="calendarId", min_length=1)] = CALENDAR_ID,
+) -> CalendarStatus:
+    """物化 Shinny A 股和国内期货共用日历；内置数据仅覆盖至 2026 年。"""
+    today = _today()
+    if today > date(2026, 12, 31):
+        raise HTTPException(status_code=422, detail="Shinny 内置节假日仅覆盖至 2026-12-31")
+    try:
+        await save_shinny_calendar(
+            session,
+            calendar_id=calendar_id,
+            start=today - timedelta(days=CALENDAR_INITIAL_HISTORY_DAYS),
+            end=today + timedelta(days=CALENDAR_TARGET_FUTURE_DAYS),
+        )
+    except ValueError as exc:
+        logger.warning("刷新 {} Shinny 交易日历失败: {}", calendar_id, type(exc).__name__)
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return await get_calendar_status(session, calendar_id)
+
+
 @router.post("/refresh", response_model=OperationResult)
 async def refresh_calendar(
     calendar_id: Annotated[str, Query(alias="calendarId", min_length=1)] = CALENDAR_ID,
 ) -> OperationResult:
-    """立即执行一次已配置的 Python 刷新。"""
+    """立即执行一次已配置的 Python 或 Shinny 刷新。"""
     refreshed = await sync_calendar_python(calendar_id=calendar_id, force=True)
+    if not refreshed:
+        refreshed = await sync_calendar_shinny(calendar_id=calendar_id, force=True)
     return OperationResult(
         ok=refreshed,
-        message="刷新完成" if refreshed else "未刷新：未配置 Python、已有刷新运行或函数执行失败",
+        message="刷新完成" if refreshed else "未刷新：未配置自动刷新、已有刷新运行或数据拉取失败",
     )
 
 

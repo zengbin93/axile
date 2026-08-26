@@ -150,7 +150,7 @@ export function CalendarSetupStep({ onChange }: { onChange: (value: CalendarSetu
         <div className="mb-4 divide-y divide-line border-y border-line">
           {calendars.map((calendar) => (
             <button key={calendar.calendar_id} type="button" className={`flex w-full items-center gap-3 px-3 py-3 text-left ${calendar.calendar_id === active.calendar_id ? 'bg-accent-soft' : ''}`} onClick={() => setActiveId(calendar.calendar_id)}>
-              <span className="min-w-0 flex-1"><span className="block text-[14px] font-[620]">{calendar.label}</span><OverflowText className="text-[12px] text-ink-3" text={`${calendar.channel_labels.join('、')} 使用`} /></span>
+              <span className="min-w-0 flex-1"><span className="block text-[14px] font-[620]">{calendar.label}</span><OverflowText className="text-[12px] text-ink-3" text={`${calendar.channel_labels.join('、')} 使用${calendar.legacy_fallback_channel_labels.length ? `；${calendar.legacy_fallback_channel_labels.join('、')} 存量兼容保护` : ''}`} /></span>
               <span className="text-[12px] text-ink-2">{calendar.selectedMethod ? '已配置' : '未配置'}</span>
             </button>
           ))}
@@ -159,7 +159,7 @@ export function CalendarSetupStep({ onChange }: { onChange: (value: CalendarSetu
 
       <div className="mb-4">
         <h2 className="text-[16px] font-[650]">{active.label} <span className="font-normal text-ink-3">· {active.channel_labels.join('、')} 使用</span></h2>
-        <p className="mt-1 text-[13px] text-ink-2">选择一种刷新方式；不配置也可以继续，自动排程会按原节奏执行。</p>
+        <p className="mt-1 text-[13px] text-ink-2">选择一种刷新方式；不配置也可以继续，自动排程会按原节奏执行。{active.legacy_fallback_channel_labels.length ? `${active.legacy_fallback_channel_labels.join('、')} 的存量配置仅在 A 股日历未覆盖时提供兼容保护。` : ''}</p>
       </div>
 
       {CALENDAR_METHODS.map((method) => {

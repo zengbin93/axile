@@ -230,6 +230,7 @@ def test_init_save_writes_config_and_schedules_restart(
     assert response.json()["ok"] is True
     written = toml_path.read_text(encoding="utf-8")
     assert 'exe_err_feishu_key = "bot-key-123"' in written
+    assert "tushare_token" not in written
     assert "./my_algos" in written
     assert restarted.get("done") is True
 

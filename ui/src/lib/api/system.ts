@@ -11,6 +11,8 @@ export interface CalendarRequirement {
   label: string
   channels: string[]
   channel_labels: string[]
+  legacy_fallback_channels: string[]
+  legacy_fallback_channel_labels: string[]
 }
 
 /** 探测后端存活。`GET /utils/health-check/` 返回裸 `true`。 */

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -16,7 +16,14 @@ from sqlmodel import SQLModel
 from axile.common.trade_channel import TradeChannel
 from axile.server.api.routes import account_schedule
 from axile.server.cron import SCHEDULER_TIMEZONE, parse_cron_expr
-from axile.server.db.models import ExecuteRecord, ExecutionActivity, ScheduleSkip, ScheduleSkipActivity
+from axile.server.db.models import (
+    ExecuteRecord,
+    ExecutionActivity,
+    ScheduleSkip,
+    ScheduleSkipActivity,
+    TradingCalendarConfig,
+    TradingCalendarRecord,
+)
 from axile.server.execution import rebalance as rebalance_execution
 from axile.server.execution import scheduler as execution_scheduler
 from axile.server.trading_calendar import (
@@ -103,6 +110,36 @@ def test_scheduled_rebalance_executes_unless_calendar_is_explicitly_closed(
 
     asyncio.run(execution_scheduler.execute_scheduled_rebalance(7))
     assert executions == [(7, None, "scheduler")]
+
+
+def test_gm_legacy_closed_day_skips_before_execution(monkeypatch: pytest.MonkeyPatch) -> None:
+    account = SimpleNamespace(id=7, is_started=True, cron_expr="30 9 * * *", trade_channel=TradeChannel.GM)
+    added: list[object] = []
+    sessions = iter([_SessionContext(account), _SessionContext(added=added)])
+    monkeypatch.setattr(execution_scheduler, "SessionLocal", lambda: next(sessions))
+
+    async def evaluate(*_args: object) -> CalendarDayDecision:
+        return CalendarDayDecision(
+            channel="gm",
+            day=date(2026, 8, 24),
+            calendar_id="china",
+            label="中国交易日历",
+            status=CalendarDecisionStatus.AVAILABLE_CLOSED,
+            using_legacy_fallback=True,
+        )
+
+    execute_trade = MagicMock()
+    monkeypatch.setattr(execution_scheduler, "evaluate_channel_calendar_moment", evaluate)
+    monkeypatch.setattr(rebalance_execution, "execute_trade", execute_trade)
+
+    asyncio.run(execution_scheduler.execute_scheduled_rebalance(7))
+
+    execute_trade.assert_not_called()
+    assert len(added) == 1
+    record = added[0]
+    assert isinstance(record, ScheduleSkip)
+    assert record.calendar_id == "china"
+    assert record.calendar_label == "中国交易日历"
 
 
 @pytest.mark.parametrize("fail_commit", [False, True])
@@ -199,7 +236,7 @@ def test_schedule_preview_maps_only_closed_to_skip(monkeypatch: pytest.MonkeyPat
     unavailable_at = datetime(2026, 8, 25, 9, 30, tzinfo=SCHEDULER_TIMEZONE)
     monkeypatch.setattr(account_schedule, "_next_schedule_times", lambda *_args, **_kwargs: [closed_at, unavailable_at])
 
-    async def summary(*_args: object) -> account_schedule.SchedulePreviewCalendar:
+    async def summary(*_args: object, **_kwargs: object) -> account_schedule.SchedulePreviewCalendar:
         return account_schedule.SchedulePreviewCalendar(
             requirement="required",
             availability="unavailable",
@@ -233,6 +270,91 @@ def test_schedule_preview_maps_only_closed_to_skip(monkeypatch: pytest.MonkeyPat
     )
     assert [item.action for item in response.items] == ["skip", "execute"]
     assert response.items[1].unavailable_reason is CalendarUnavailableReason.UNCOVERED
+
+
+def test_schedule_preview_uses_its_beijing_date_for_calendar_summary(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """跨 UTC/北京时间日界时，摘要与预览决策应查询同一自然日。"""
+    session_factory = asyncio.run(_create_database(tmp_path / "legacy-preview.db"))
+    utc_now = datetime(2026, 8, 23, 16, 30, tzinfo=timezone.utc)
+    scheduled_at = datetime(2026, 8, 24, 9, 30, tzinfo=SCHEDULER_TIMEZONE)
+
+    class FrozenDateTime(datetime):
+        @classmethod
+        def now(cls, tz: object | None = None) -> datetime:
+            return utc_now.astimezone(tz)
+
+    monkeypatch.setattr(account_schedule, "datetime", FrozenDateTime)
+    monkeypatch.setattr(account_schedule, "_next_schedule_times", lambda *_args, **_kwargs: [scheduled_at])
+
+    async def exercise() -> account_schedule.SchedulePreviewResponse:
+        async with session_factory() as session:
+            session.add_all(
+                [
+                    TradingCalendarConfig(calendar_id="china", refresh_kind="tushare"),
+                    TradingCalendarRecord(calendar_id="china", cal_date=scheduled_at.date(), is_open=False),
+                ]
+            )
+            await session.commit()
+            return await account_schedule.schedule_preview(
+                session,
+                account_schedule.SchedulePreviewRequest(
+                    trade_channel=TradeChannel.CTP,
+                    cron_expr="30 9 * * *",
+                    limit=1,
+                ),
+            )
+
+    response = asyncio.run(exercise())
+    assert response.evaluated_at.date() == date(2026, 8, 24)
+    assert response.calendar.availability == "available"
+    assert response.items[0].action == "skip"
+    assert response.items[0].calendar_status is CalendarDecisionStatus.AVAILABLE_CLOSED
+
+
+def test_schedule_preview_exposes_legacy_fallback_source(monkeypatch: pytest.MonkeyPatch) -> None:
+    scheduled_at = datetime(2026, 8, 24, 9, 30, tzinfo=SCHEDULER_TIMEZONE)
+    monkeypatch.setattr(account_schedule, "_next_schedule_times", lambda *_args, **_kwargs: [scheduled_at])
+
+    async def summary(*_args: object, **_kwargs: object) -> account_schedule.SchedulePreviewCalendar:
+        return account_schedule.SchedulePreviewCalendar(
+            requirement="required",
+            availability="unavailable",
+            unavailable_reason=CalendarUnavailableReason.NOT_CONFIGURED,
+            calendar_id="ashare",
+            label="A 股交易日历",
+        )
+
+    async def decision(*_args: object) -> CalendarDayDecision:
+        return CalendarDayDecision(
+            channel="gm",
+            day=scheduled_at.date(),
+            calendar_id="china",
+            label="中国交易日历",
+            status=CalendarDecisionStatus.AVAILABLE_CLOSED,
+            using_legacy_fallback=True,
+            reason_code="CALENDAR.CLOSED",
+        )
+
+    monkeypatch.setattr(account_schedule, "_calendar_summary", summary)
+    monkeypatch.setattr(account_schedule, "evaluate_channel_calendar_moment", decision)
+    response = asyncio.run(
+        account_schedule.schedule_preview(
+            object(),  # type: ignore[arg-type]
+            account_schedule.SchedulePreviewRequest(
+                trade_channel=TradeChannel.GM,
+                cron_expr="30 9 * * *",
+                limit=1,
+            ),
+        )
+    )
+
+    item = response.items[0]
+    assert item.action == "skip"
+    assert item.calendar_id == "china"
+    assert item.label == "中国交易日历"
+    assert item.using_legacy_fallback is True
 
 
 async def _create_database(path: Path) -> async_sessionmaker[AsyncSession]:
