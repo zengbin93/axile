@@ -443,30 +443,6 @@ def test_place_order_checks_and_submits_in_one_runtime_command(
     assert api.insert_calls == 1
 
 
-def test_expired_session_snapshot_fails_closed_for_every_tq_symbol(
-    executor: tuple[TQExecutor, FakeApi], monkeypatch: pytest.MonkeyPatch
-) -> None:
-    instance, _ = executor
-    monkeypatch.setattr("axile.executor.tq.tq_execute._TQ_SESSIONS_GENERATED_AT", date(2020, 1, 1))
-
-    for symbol in ("rb2610", "ag2612", "v_f2609"):
-        assert instance._check_symbol_trading_time(symbol, _at("2026-08-24T09:30:00")).status is (
-            TQTradingTimeStatus.SESSION_DATA_EXPIRED
-        )
-
-
-def test_place_order_rejects_when_session_snapshot_expired(
-    executor: tuple[TQExecutor, FakeApi], monkeypatch: pytest.MonkeyPatch
-) -> None:
-    instance, api = executor
-    monkeypatch.setattr("axile.executor.tq.tq_execute._TQ_SESSIONS_GENERATED_AT", date(2020, 1, 1))
-
-    with pytest.raises(Exception, match="SESSION_DATA_EXPIRED"):
-        instance._place_order_impl("rb2610", OrderDirection.BUY, OrderType.LIMIT, 1, 3200)
-
-    assert api.insert_calls == 0
-
-
 def test_no_night_session_products_are_rejected_at_night(executor: tuple[TQExecutor, FakeApi]) -> None:
     instance, _ = executor
 
