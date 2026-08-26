@@ -35,7 +35,7 @@ export interface SchedulePreview {
     unavailable_reason: 'uncovered' | 'read_failed' | null
     calendar_id: string | null
     label: string | null
-    reason_code: 'CALENDAR.CLOSED' | 'CALENDAR.NO_NIGHT_SESSION' | 'BUSY' | null
+    reason_code: 'CALENDAR.CLOSED' | 'CALENDAR.NO_NIGHT_SESSION' | 'CALENDAR.SESSION_CLOSED' | 'BUSY' | null
   }>
 }
 
@@ -44,7 +44,7 @@ export interface ScheduleSkipActivity {
   occurred_at: string
   id: number
   channel: string
-  reason_code: 'CALENDAR.CLOSED' | 'CALENDAR.NO_NIGHT_SESSION' | 'BUSY'
+  reason_code: 'CALENDAR.CLOSED' | 'CALENDAR.NO_NIGHT_SESSION' | 'CALENDAR.SESSION_CLOSED' | 'BUSY'
   calendar_day: string
   calendar_id: string
   calendar_label: string

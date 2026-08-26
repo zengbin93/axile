@@ -256,6 +256,37 @@ def test_schedule_preview_returns_raw_cron_points_with_cursor(monkeypatch: pytes
     assert continued.items[0].scheduled_at.isoformat() == "2026-08-28T09:30:00+08:00"
 
 
+def test_schedule_preview_keeps_session_gap_points_and_marks_them_skipped(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    evaluated = datetime(2026, 8, 27, 1, 33, tzinfo=SCHEDULER_TIMEZONE)
+
+    class _Datetime(datetime):
+        @classmethod
+        def now(cls, tz: object = None) -> datetime:
+            return evaluated
+
+    monkeypatch.setattr(account_schedule, "datetime", _Datetime)
+    response = asyncio.run(
+        account_schedule.schedule_preview(
+            account_schedule.SchedulePreviewRequest(
+                trade_channel=TradeChannel.CTP,
+                cron_expr="34 1 * * * | 30 2 * * *",
+                after=evaluated,
+                limit=2,
+            )
+        )
+    )
+
+    assert [item.scheduled_at.isoformat() for item in response.items] == [
+        "2026-08-27T01:34:00+08:00",
+        "2026-08-27T02:30:00+08:00",
+    ]
+    assert [item.action for item in response.items] == ["execute", "skip"]
+    assert [item.reason_code for item in response.items] == [None, "CALENDAR.SESSION_CLOSED"]
+    assert response.items[1].calendar_status is CalendarDecisionStatus.AVAILABLE_CLOSED
+
+
 def test_schedule_preview_keeps_weekend_points_and_marks_them_skipped(monkeypatch: pytest.MonkeyPatch) -> None:
     evaluated = datetime(2026, 8, 28, 15, 1, tzinfo=SCHEDULER_TIMEZONE)
 

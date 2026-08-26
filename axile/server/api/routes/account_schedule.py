@@ -27,6 +27,7 @@ from axile.server.db.models import (
 from axile.server.db.models.schedule import ScheduleSkipReason
 from axile.server.trading_calendar import (
     CalendarDecisionStatus,
+    CalendarSkipReason,
     CalendarUnavailableReason,
     evaluate_channel_calendar_moment,
 )
@@ -65,7 +66,7 @@ class SchedulePreviewItem(BaseModel):
     unavailable_reason: CalendarUnavailableReason | None = None
     calendar_id: str | None = None
     label: str | None = None
-    reason_code: Literal["CALENDAR.CLOSED", "CALENDAR.NO_NIGHT_SESSION"] | None = None
+    reason_code: CalendarSkipReason | None = None
 
 
 class SchedulePreviewResponse(BaseModel):

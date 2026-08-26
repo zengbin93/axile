@@ -12,6 +12,7 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { Segmented } from '@/components/ui/Segmented'
 import { Select } from '@/components/ui/Select'
 import { MOTION_LAYOUT, useRemountFade } from '@/lib/viewTransition'
+import { executionReasonText } from '@/features/account/executionReason'
 import {
   DEFAULT_PRESET,
   PRESETS,
@@ -552,15 +553,13 @@ export function TimerEditor({ tradeChannel, scheduleKind, nightSchedule, value, 
     <div key={previewCascade.generation} className="space-y-1.5">
       {schedulePreview.items.map((item, index) => {
         const tradingDay = item.calendar_day.slice(5)
-        const text = item.reason_code === 'CALENDAR.NO_NIGHT_SESSION'
-          ? '无对应夜盘，已跳过'
-          : item.calendar_status === 'available_open'
-            ? `${tradingDay} 交易日，执行`
-            : item.calendar_status === 'available_closed'
-              ? '休市，已跳过'
-              : item.calendar_status === 'unavailable'
-                ? '日历不可用，按排程执行'
-                : '按排程执行'
+        const text = item.calendar_status === 'available_open'
+          ? `${tradingDay} 交易日，执行`
+          : item.calendar_status === 'available_closed'
+            ? executionReasonText(item.reason_code, '休市，已跳过')
+            : item.calendar_status === 'unavailable'
+              ? '日历不可用，按排程执行'
+              : '按排程执行'
         const warning = item.calendar_status === 'unavailable'
         return (
           <div
