@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react'
+import type { CSSProperties, ReactNode } from 'react'
 
 /** 白底圆角卡片，全站统一容器。 */
 export function Card({
@@ -30,10 +30,20 @@ export function SectionLabel({ children }: { children: ReactNode }) {
 }
 
 /** 圆角小胶囊标签。 */
-export function Chip({ children, className = '' }: { children: ReactNode; className?: string }) {
+export function Chip({
+  children,
+  className = '',
+  style,
+}: {
+  children: ReactNode
+  className?: string
+  /** 共享元素 FLIP 等场景的直挂样式（viewTransitionName 由调用方按身份协议门控）。 */
+  style?: CSSProperties
+}) {
   return (
     <span
       className={`rounded-chip bg-fill px-2.5 py-[3px] text-xs text-ink-2 ${className}`}
+      style={style}
     >
       {children}
     </span>

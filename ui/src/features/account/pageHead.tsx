@@ -66,7 +66,13 @@ export function AccountPageTitle({
           {name ?? `账户 #${accountId}`}
         </span>
       </h1>
-      {channel && <Chip>{channelLabel(channel, market ?? '')}</Chip>}
+      {channel && (
+        // 渠道徽章与账户名同一逻辑单元：复用 nameVt 开关同轨飞行；name 不挂名的过渡
+        // （同槽互切）徽章也绝不挂，避免独自被抠到不同步的轨道上「晃」。
+        <Chip style={nameVt ? { viewTransitionName: `account-channel-${accountId}` } : undefined}>
+          {channelLabel(channel, market ?? '')}
+        </Chip>
+      )}
     </>
   )
 }

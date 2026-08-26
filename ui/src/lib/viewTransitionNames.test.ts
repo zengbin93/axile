@@ -13,6 +13,7 @@ const UI_SRC = join(import.meta.dir, '..')
 /** 允许的共享名角色前缀。 */
 const ALLOWED_VT_PREFIXES = [
   'account-name-',
+  'account-channel-',
   'portfolio-name-',
   'equity-amount-',
   'edit-shell-',

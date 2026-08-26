@@ -50,7 +50,11 @@ function FleetCard({
         >
           {item.name}
         </span>
-        <span className="rounded-chip bg-fill px-2 py-0.5 text-[11px] text-ink-2">
+        {/* 渠道徽章与账户名同一逻辑单元：同门控挂名、同轨飞行，不与名字撕开。 */}
+        <span
+          className="rounded-chip bg-fill px-2 py-0.5 text-[11px] text-ink-2"
+          style={transitioning ? { viewTransitionName: `account-channel-${item.account_id}` } : undefined}
+        >
           {channelLabel(item.trade_channel, '')}
         </span>
         {gate.gate === 'paused' && (

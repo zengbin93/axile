@@ -317,7 +317,10 @@ export function AccountDetail({
           >
             {item.name}
           </span>
-          <Chip>{channelLabel(item.trade_channel, item.market)}</Chip>
+          {/* 渠道徽章与账户名同一逻辑单元：随名字同门控挂名、同轨飞行（nameVt）。 */}
+          <Chip style={nameVt ? { viewTransitionName: `account-channel-${accountId}` } : undefined}>
+            {channelLabel(item.trade_channel, item.market)}
+          </Chip>
           {gate.gate === 'paused' && <Chip>{gate.label}</Chip>}
           <AccountActions
             name={item.name}
