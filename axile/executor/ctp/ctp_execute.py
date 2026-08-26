@@ -387,7 +387,15 @@ class CTPExecutor(AbstractExecutor, UnifiedCallbackClient):
         if not sessions:
             return "CTP.SESSION.NO_SESSION_TABLE"
         now = clock_now(tz=_SHANGHAI)
-        return decide_ctp_product_session(sessions, now=now).reason_code
+        calendar = self._trading_calendar
+        calendar_id = self._channel_calendar_id
+        if calendar is None or calendar_id is None:
+            return "CTP.SESSION.CALENDAR_UNAVAILABLE"
+        return decide_ctp_product_session(
+            sessions,
+            now=now,
+            calendar_is_open=lambda day: calendar.is_open(calendar_id, day),
+        ).reason_code
 
     @override
     def _normalize_connected_standard_input(self, standard_input: UnifiedStandardInput) -> UnifiedStandardInput:

@@ -5,6 +5,7 @@ from pydantic import BaseModel
 
 from axile.channels import (
     ChannelAccountForm,
+    ChannelCalendar,
     ChannelDefaults,
     ChannelLeverage,
     ChannelPortfolioPreset,
@@ -45,6 +46,7 @@ class ChannelCapabilityPublic(BaseModel):
     defaults: ChannelDefaults
     leverage: ChannelLeverage
     account_form: ChannelAccountForm
+    calendar: ChannelCalendar | None
     schedule: ChannelSchedule
     portfolio: ChannelPortfolioPreset
     available: bool

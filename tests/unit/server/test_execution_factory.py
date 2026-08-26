@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 import pandas as pd
 import pytest
@@ -10,6 +11,7 @@ import pytest
 from axile.channels import (
     AlgorithmReference,
     ChannelAccountForm,
+    ChannelCalendar,
     ChannelDefaults,
     ChannelDescriptor,
     ChannelLeverage,
@@ -37,7 +39,11 @@ def _target_transform(config: dict[str, float], frame: pd.DataFrame) -> pd.DataF
 
 def _plugin() -> ChannelPlugin:
     def create_executor(config: BaseAccountConfig) -> SimpleNamespace:
-        return SimpleNamespace(config=config)
+        return SimpleNamespace(
+            config=config,
+            set_trading_calendar=MagicMock(),
+            set_channel_calendar=MagicMock(),
+        )
 
     return ChannelPlugin(
         descriptor=ChannelDescriptor(
@@ -56,6 +62,7 @@ def _plugin() -> ChannelPlugin:
             ),
             leverage=ChannelLeverage(min=0, max=2, step=0.1),
             account_form=ChannelAccountForm(),
+            calendar=ChannelCalendar(calendar_id="china", label="中国交易日历"),
             portfolio=ChannelPortfolioPreset(market_label="Vendor", example_symbols=("DEMO",)),
         ),
         account_config_model=_Config,
@@ -79,6 +86,8 @@ def test_create_executor_instance_uses_registered_plugin(monkeypatch: pytest.Mon
         )
         assert isinstance(executor.config, _Config)
         assert executor.config.channel_type == "factory-demo"
+        executor.set_trading_calendar.assert_called_once()
+        executor.set_channel_calendar.assert_called_once_with("china")
     finally:
         registry._reset_registry_for_tests()
 

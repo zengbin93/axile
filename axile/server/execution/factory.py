@@ -2,6 +2,7 @@
 
 from axile.channels import get_channel
 from axile.executor.abstract_executor.base import AbstractExecutor
+from axile.executor.trading_calendar import ShinnyTradingCalendar
 from axile.server.db.models import Account
 
 
@@ -32,4 +33,11 @@ def create_executor_instance(account: Account) -> AbstractExecutor:
     config_data["channel_type"] = account.trade_channel
     config = plugin.account_config_model.model_validate(config_data)
     executor = plugin.create_executor(config)
+    set_trading_calendar = getattr(executor, "set_trading_calendar", None)
+    if callable(set_trading_calendar):
+        set_trading_calendar(ShinnyTradingCalendar())
+    declaration = plugin.descriptor.calendar
+    set_channel_calendar = getattr(executor, "set_channel_calendar", None)
+    if callable(set_channel_calendar):
+        set_channel_calendar(declaration.calendar_id if declaration is not None else None)
     return executor

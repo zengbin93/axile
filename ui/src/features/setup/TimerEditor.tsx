@@ -137,6 +137,21 @@ function formatScheduledAt(value: string): string {
   return `${get('month')}-${get('day')} ${get('hour')}:${get('minute')}`
 }
 
+function calendarSummary(preview: SchedulePreview | null): { text: string; warning: boolean } {
+  if (!preview) return { text: '交易日历 · 正在判断', warning: false }
+  const calendar = preview.calendar
+  if (calendar.requirement === 'not_required') return { text: '无需交易日历 · 24/7', warning: false }
+  if (calendar.availability === 'available') {
+    const coverage = calendar.coverage_end ? ` · 覆盖至 ${calendar.coverage_end}` : ''
+    return { text: `${calendar.label ?? '中国交易日历'} · 可用${coverage}`, warning: false }
+  }
+  const reason = calendar.unavailable_reason === 'uncovered' ? '日期超出覆盖' : '读取失败'
+  return {
+    text: `${calendar.label ?? '中国交易日历'} · ${reason}，按排程执行`,
+    warning: true,
+  }
+}
+
 export function TimerEditor({ tradeChannel, scheduleKind, nightSchedule, value, onChange, layout = 'step' }: TimerEditorProps) {
   const v = value
   const tabFade = useRemountFade(v.timerTab)
@@ -415,6 +430,7 @@ export function TimerEditor({ tradeChannel, scheduleKind, nightSchedule, value, 
 
   const presetCardT =
     'transition-[border-color,background-color,box-shadow] duration-200 ease-[cubic-bezier(0.4,0,0.2,1)] motion-reduce:transition-none'
+  const summary = calendarSummary(schedulePreview)
 
   /** 编辑区列：tabs + 当前 tab 内容 + 补发。 */
   const editorColumn = (
@@ -508,8 +524,11 @@ export function TimerEditor({ tradeChannel, scheduleKind, nightSchedule, value, 
 
   const previewHeader = (
     <>
-      <div className="mb-3 flex items-center justify-between gap-3">
+      <div className="mb-1.5 flex items-center justify-between gap-3">
         <div className="text-sm font-[640]">排程预览 · 北京时间</div>
+      </div>
+      <div className={`mb-2.5 text-xs ${summary.warning ? 'text-warn' : 'text-ink-3'}`}>
+        {summary.text}
       </div>
     </>
   )
@@ -532,16 +551,29 @@ export function TimerEditor({ tradeChannel, scheduleKind, nightSchedule, value, 
   ) : schedulePreview?.items.length ? (
     <div key={previewCascade.generation} className="space-y-1.5">
       {schedulePreview.items.map((item, index) => {
+        const tradingDay = item.calendar_day.slice(5)
+        const text = item.reason_code === 'CALENDAR.NO_NIGHT_SESSION'
+          ? '无对应夜盘，已跳过'
+          : item.calendar_status === 'available_open'
+            ? `${tradingDay} 交易日，执行`
+            : item.calendar_status === 'available_closed'
+              ? '休市，已跳过'
+              : item.calendar_status === 'unavailable'
+                ? '日历不可用，按排程执行'
+                : '按排程执行'
+        const warning = item.calendar_status === 'unavailable'
         return (
           <div
             key={item.scheduled_at}
-            className={`grid grid-cols-[92px_minmax(0,1fr)] gap-3 text-[13px] text-ink-2 ${cascadeRows ? 'schedule-preview-row-in' : ''}`}
+            className={`grid grid-cols-[92px_minmax(0,1fr)] gap-3 text-[13px] ${
+              warning ? 'text-warn' : item.action === 'skip' ? 'text-ink-3' : 'text-ink-2'
+            } ${cascadeRows ? 'schedule-preview-row-in' : ''}`}
             style={cascadeRows ? {
               animationDelay: `${Math.min(index * PREVIEW_CASCADE_DELAY_STEP, PREVIEW_CASCADE_DELAY_MAX)}ms`,
             } : undefined}
           >
             <span className="num">{formatScheduledAt(item.scheduled_at)}</span>
-            <span>按排程触发</span>
+            <span>{text}</span>
           </div>
         )
       })}

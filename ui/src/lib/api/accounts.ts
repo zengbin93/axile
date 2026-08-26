@@ -16,10 +16,26 @@ import type {
 export interface SchedulePreview {
   timezone: 'Asia/Shanghai'
   evaluated_at: string
+  calendar: {
+    requirement: 'required' | 'not_required'
+    availability: 'available' | 'unavailable' | 'not_required'
+    unavailable_reason: 'uncovered' | 'read_failed' | null
+    calendar_id: string | null
+    label: string | null
+    coverage_start: string | null
+    coverage_end: string | null
+  }
   next_cursor: string | null
   has_more: boolean
   items: Array<{
     scheduled_at: string
+    calendar_day: string
+    calendar_status: 'available_open' | 'available_closed' | 'unavailable' | 'not_required'
+    action: 'execute' | 'skip'
+    unavailable_reason: 'uncovered' | 'read_failed' | null
+    calendar_id: string | null
+    label: string | null
+    reason_code: 'CALENDAR.CLOSED' | 'CALENDAR.NO_NIGHT_SESSION' | null
   }>
 }
 

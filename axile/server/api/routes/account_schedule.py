@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from typing import Literal, cast
 
 from apscheduler.triggers.cron import CronTrigger  # type: ignore[import-not-found]
@@ -12,6 +12,7 @@ from sqlmodel import col, desc, func, select
 
 from axile.channels import get_channel
 from axile.common.trade_channel import TradeChannel
+from axile.executor.trading_calendar import SHINNY_COVERAGE_END, SHINNY_COVERAGE_START
 from axile.server.api.deps import SessionDep
 from axile.server.api.routes.account_support import _get_account_or_404
 from axile.server.cron import SCHEDULER_TIMEZONE, is_blank_cron_expr, parse_cron_expr
@@ -22,6 +23,11 @@ from axile.server.db.models import (
     ExecutionActivity,
     ScheduleSkip,
     ScheduleSkipActivity,
+)
+from axile.server.trading_calendar import (
+    CalendarDecisionStatus,
+    CalendarUnavailableReason,
+    evaluate_channel_calendar_moment,
 )
 
 router = APIRouter()
@@ -36,10 +42,29 @@ class SchedulePreviewRequest(BaseModel):
     limit: int = Field(default=5, ge=1, le=100)
 
 
+class SchedulePreviewCalendar(BaseModel):
+    """排程预览对应渠道的轻量日历摘要。"""
+
+    requirement: Literal["required", "not_required"]
+    availability: Literal["available", "unavailable", "not_required"]
+    unavailable_reason: CalendarUnavailableReason | None = None
+    calendar_id: str | None = None
+    label: str | None = None
+    coverage_start: date | None = None
+    coverage_end: date | None = None
+
+
 class SchedulePreviewItem(BaseModel):
-    """单个未来 Cron 触发点。"""
+    """单个未来 Cron 触发点及其轻量日历动作。"""
 
     scheduled_at: datetime
+    calendar_day: date
+    calendar_status: CalendarDecisionStatus
+    action: Literal["execute", "skip"]
+    unavailable_reason: CalendarUnavailableReason | None = None
+    calendar_id: str | None = None
+    label: str | None = None
+    reason_code: Literal["CALENDAR.CLOSED", "CALENDAR.NO_NIGHT_SESSION"] | None = None
 
 
 class SchedulePreviewResponse(BaseModel):
@@ -47,6 +72,7 @@ class SchedulePreviewResponse(BaseModel):
 
     timezone: Literal["Asia/Shanghai"] = "Asia/Shanghai"
     evaluated_at: datetime
+    calendar: SchedulePreviewCalendar
     items: list[SchedulePreviewItem]
     next_cursor: datetime | None = None
     has_more: bool = False
@@ -86,6 +112,23 @@ def _next_schedule_times(
     return result
 
 
+def _calendar_summary(channel: TradeChannel, current: datetime) -> SchedulePreviewCalendar:
+    """返回渠道当前使用的 Shinny 日历摘要。"""
+    declaration = get_channel(str(channel)).descriptor.calendar
+    if declaration is None:
+        return SchedulePreviewCalendar(requirement="not_required", availability="not_required")
+    decision = evaluate_channel_calendar_moment(channel, current)
+    return SchedulePreviewCalendar(
+        requirement="required",
+        availability=("unavailable" if decision.status is CalendarDecisionStatus.UNAVAILABLE else "available"),
+        unavailable_reason=decision.unavailable_reason,
+        calendar_id=declaration.calendar_id,
+        label=declaration.label,
+        coverage_start=SHINNY_COVERAGE_START,
+        coverage_end=SHINNY_COVERAGE_END,
+    )
+
+
 @router.post("/schedule-preview", response_model=SchedulePreviewResponse)
 async def schedule_preview(payload: SchedulePreviewRequest) -> SchedulePreviewResponse:
     """按时间游标只读预览未来 Cron 触发点及其交易日历动作。"""
@@ -95,8 +138,9 @@ async def schedule_preview(payload: SchedulePreviewRequest) -> SchedulePreviewRe
         raise _field_error("trade_channel", str(exc)) from exc
 
     evaluated_at = datetime.now(SCHEDULER_TIMEZONE)
+    calendar = _calendar_summary(payload.trade_channel, evaluated_at)
     if is_blank_cron_expr(payload.cron_expr):
-        return SchedulePreviewResponse(evaluated_at=evaluated_at, items=[])
+        return SchedulePreviewResponse(evaluated_at=evaluated_at, calendar=calendar, items=[])
     try:
         triggers = parse_cron_expr(payload.cron_expr)
     except ValueError as exc:
@@ -111,9 +155,25 @@ async def schedule_preview(payload: SchedulePreviewRequest) -> SchedulePreviewRe
     )
     has_more = len(scheduled) > payload.limit
     page = scheduled[: payload.limit]
-    items = [SchedulePreviewItem(scheduled_at=value.astimezone(SCHEDULER_TIMEZONE)) for value in page]
+    items = []
+    for scheduled_at in page:
+        local_time = scheduled_at.astimezone(SCHEDULER_TIMEZONE)
+        decision = evaluate_channel_calendar_moment(payload.trade_channel, local_time)
+        items.append(
+            SchedulePreviewItem(
+                scheduled_at=local_time,
+                calendar_day=decision.day,
+                calendar_status=decision.status,
+                action="skip" if decision.status is CalendarDecisionStatus.AVAILABLE_CLOSED else "execute",
+                unavailable_reason=decision.unavailable_reason,
+                calendar_id=decision.calendar_id,
+                label=decision.label,
+                reason_code=decision.reason_code,
+            )
+        )
     return SchedulePreviewResponse(
         evaluated_at=evaluated_at,
+        calendar=calendar,
         items=items,
         next_cursor=items[-1].scheduled_at if items else None,
         has_more=has_more,
@@ -175,7 +235,7 @@ async def account_activity(
             calendar_id=row.calendar_id,
             calendar_day=row.calendar_day,
             calendar_label=row.calendar_label,
-            reason_code="CALENDAR.CLOSED",
+            reason_code=cast("Literal['CALENDAR.CLOSED', 'CALENDAR.NO_NIGHT_SESSION']", row.reason_code),
         )
         for row in skip_rows
     )
@@ -193,6 +253,7 @@ async def account_activity(
 
 
 __all__ = [
+    "SchedulePreviewCalendar",
     "SchedulePreviewItem",
     "SchedulePreviewRequest",
     "SchedulePreviewResponse",

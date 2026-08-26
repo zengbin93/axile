@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, time
+from datetime import date, datetime, time
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -25,6 +25,10 @@ def _session(begin: str, end: str) -> CtpProductSession:
         time_begin=time.fromisoformat(begin),
         time_end=time.fromisoformat(end),
     )
+
+
+def _calendar(days: dict[date, bool]):
+    return lambda day: days.get(day)
 
 
 @pytest.mark.parametrize(
@@ -50,7 +54,8 @@ def test_product_session_uses_left_closed_right_open_intervals(
     now: str, sessions: list[CtpProductSession], expected: bool
 ) -> None:
     moment = datetime.fromisoformat(now).replace(tzinfo=_SHANGHAI)
-    decision = decide_ctp_product_session(sessions, now=moment)
+    calendar = _calendar({date(2026, 8, 24): True, date(2026, 8, 25): True})
+    decision = decide_ctp_product_session(sessions, now=moment, calendar_is_open=calendar)
 
     assert decision.allowed is expected
     assert decision.reason_code == (None if expected else "CTP.SESSION.CLOSED")
@@ -70,18 +75,53 @@ def test_products_are_decided_independently_at_2129(
     product_id: str, sessions: list[CtpProductSession], expected: bool
 ) -> None:
     now = datetime(2026, 8, 24, 21, 29, tzinfo=_SHANGHAI)
-    decision = decide_ctp_product_session(sessions, now=now)
+    calendar = _calendar({date(2026, 8, 24): True, date(2026, 8, 25): True})
+    decision = decide_ctp_product_session(sessions, now=now, calendar_is_open=calendar)
 
     assert decision.allowed is expected
     assert decision.reason_code == (None if expected else "CTP.SESSION.CLOSED")
     assert product_id
 
 
-@pytest.mark.parametrize("day", [22, 23, 24])
-def test_product_session_decision_is_independent_of_calendar_date(day: int) -> None:
-    now = datetime(2026, 8, day, 21, 29, tzinfo=_SHANGHAI)
-    decision = decide_ctp_product_session([_session("21:00", "02:30")], now=now)
+@pytest.mark.parametrize("hour", [0, 1])
+def test_friday_night_continues_into_saturday_as_monday_trading_day(hour: int) -> None:
+    now = datetime(2026, 8, 22, hour, 30, tzinfo=_SHANGHAI)
+    calendar = _calendar(
+        {date(2026, 8, 21): True, date(2026, 8, 22): False, date(2026, 8, 23): False, date(2026, 8, 24): True}
+    )
+    decision = decide_ctp_product_session([_session("21:00", "02:30")], now=now, calendar_is_open=calendar)
     assert decision.allowed is True
+
+
+def test_night_session_is_closed_before_holiday_transition() -> None:
+    now = datetime(2026, 10, 1, 0, 30, tzinfo=_SHANGHAI)
+    calendar = _calendar(
+        {
+            date(2026, 9, 30): True,
+            date(2026, 10, 1): False,
+            date(2026, 10, 2): False,
+            date(2026, 10, 3): False,
+            date(2026, 10, 4): False,
+            date(2026, 10, 5): False,
+            date(2026, 10, 6): False,
+            date(2026, 10, 7): False,
+            date(2026, 10, 8): True,
+        }
+    )
+    decision = decide_ctp_product_session([_session("21:00", "02:30")], now=now, calendar_is_open=calendar)
+    assert decision.allowed is False
+    assert decision.reason_code == "CTP.SESSION.CLOSED"
+
+
+def test_night_session_fails_closed_when_next_trading_day_is_unavailable() -> None:
+    now = datetime(2026, 8, 24, 21, 29, tzinfo=_SHANGHAI)
+    decision = decide_ctp_product_session(
+        [_session("21:00", "02:30")],
+        now=now,
+        calendar_is_open=_calendar({date(2026, 8, 24): True}),
+    )
+    assert decision.allowed is False
+    assert decision.reason_code == "CTP.SESSION.CALENDAR_UNAVAILABLE"
 
 
 def test_static_futures_table_has_expected_coverage() -> None:
@@ -125,6 +165,13 @@ def test_static_futures_table_has_expected_coverage() -> None:
 
 def test_product_session_fails_closed_without_static_session_data() -> None:
     now = datetime(2026, 8, 25, 9, 30, tzinfo=_SHANGHAI)
-    decision = decide_ctp_product_session([], now=now)
+    decision = decide_ctp_product_session([], now=now, calendar_is_open=lambda _day: True)
     assert decision.allowed is False
     assert decision.reason_code == "CTP.SESSION.NO_SESSION_TABLE"
+
+
+def test_product_session_fails_closed_when_calendar_is_unavailable() -> None:
+    now = datetime(2026, 8, 25, 9, 30, tzinfo=_SHANGHAI)
+    decision = decide_ctp_product_session([_session("09:00", "10:15")], now=now, calendar_is_open=lambda _day: None)
+    assert decision.allowed is False
+    assert decision.reason_code == "CTP.SESSION.CALENDAR_UNAVAILABLE"

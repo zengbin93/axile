@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from typing import TYPE_CHECKING, cast
 
 from loguru import logger
@@ -15,6 +15,7 @@ from axile.executor.models.unified_input import AccountConfig, UnifiedStandardIn
 
 if TYPE_CHECKING:
     from axile.executor.abstract_executor.base import AbstractExecutor
+    from axile.executor.trading_calendar import TradingCalendar
 
 
 def _executor(owner: object) -> AbstractExecutor:
@@ -50,8 +51,38 @@ class AbstractExecutorExecutionRuntimeHostMixin:
         executor._runtime_bindings = ExecutionRuntimeBindings()
         executor._active_execution_runtime = None
         executor._execution_query_runtime_bridge = ExecutionQueryRuntimeBridge(executor)
+        executor._trading_calendar = None
+        executor._channel_calendar_id = None
         if account_config is not None:
             executor._initialize_connection(account_config)
+
+    def set_trading_calendar(self, calendar: TradingCalendar | None) -> None:
+        """绑定执行器使用的轻量交易日历。"""
+        _executor(self)._trading_calendar = calendar
+
+    def set_channel_calendar(self, calendar_id: str | None) -> None:
+        """绑定当前渠道声明的共享交易日历。"""
+        _executor(self)._channel_calendar_id = calendar_id
+
+    def _is_channel_calendar_open(self, day: date | None = None) -> bool:
+        """查询渠道日历；未覆盖或读取失败时沿用旧版 fail-open。"""
+        executor = _executor(self)
+        calendar_id = cast("str | None", getattr(executor, "_channel_calendar_id", None))
+        if calendar_id is None:
+            return True
+        current = day or date.today()
+        calendar = cast("TradingCalendar | None", getattr(executor, "_trading_calendar", None))
+        if calendar is not None:
+            try:
+                is_open = calendar.is_open(calendar_id, current)
+                if is_open is not None:
+                    return is_open
+                executor.logger.warning("{} {} 缺少有效交易日历，继续放行", calendar_id, current)
+            except Exception as exc:  # noqa: BLE001 - 日历故障沿用兼容口径放行
+                executor.logger.warning("读取 {} {} 交易日历失败，继续放行: {}", calendar_id, current, exc)
+        else:
+            executor.logger.warning("未绑定本地交易日历，{} {} 继续放行", calendar_id, current)
+        return True
 
     def _reset_execution_state(self, standard_input: UnifiedStandardInput) -> None:
         """

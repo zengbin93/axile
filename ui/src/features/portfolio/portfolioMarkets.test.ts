@@ -23,6 +23,7 @@ function channel(
     install_extra: null,
     market,
     schedule: { kind: 'continuous' },
+    calendar: null,
     currency: 'CNY',
     units: {
       quantity_kind: 'custom',

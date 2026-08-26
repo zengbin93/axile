@@ -42,6 +42,7 @@ def test_channels_reports_all_available_when_deps_present(client: TestClient, mo
         assert "quantity_kind" in item["units"]
         assert "show_short_leverage" in item["ui"]
         assert item["schedule"]["kind"] in {"continuous", "cn_stock", "cn_futures"}
+        assert item["calendar"] == {"calendar_id": "china", "label": "中国交易日历"}
         assert "market_label" in item["portfolio"]
         assert "example_symbols" in item["portfolio"]
 

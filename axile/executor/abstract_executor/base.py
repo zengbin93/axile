@@ -24,6 +24,7 @@ if TYPE_CHECKING:
     from axile.common.trade_channel import TradeChannel
     from axile.executor.execution_query_runtime import ExecutionQueryRuntimeBridge
     from axile.executor.execution_runtime import ExecutionRuntime, ExecutionRuntimeBindings
+    from axile.executor.trading_calendar import TradingCalendar
 
 type ObjectDict = dict[str, object]
 type AuditContext = ObjectDict
@@ -64,6 +65,8 @@ class AbstractExecutor(
     _runtime_bindings: ExecutionRuntimeBindings
     _active_execution_runtime: ExecutionRuntime | None
     _execution_query_runtime_bridge: ExecutionQueryRuntimeBridge
+    _trading_calendar: TradingCalendar | None
+    _channel_calendar_id: str | None
 
     @abstractmethod
     def _initialize_connection(self, account_config: AccountConfig) -> None:

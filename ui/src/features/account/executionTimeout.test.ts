@@ -10,6 +10,7 @@ describe('defaultExecutionTimeoutForChannel', () => {
         channel: 'paper', label: '纸面交易', description: '', icon: 'P', available: true,
         missing_packages: [], install_extra: '', market: 'demo-market', currency: 'CNY',
         schedule: { kind: 'continuous' },
+        calendar: null,
         units: {
           quantity_kind: 'custom', quantity_label: '', quantity_max_decimals: 6,
           price_label: '', notional_label: '',

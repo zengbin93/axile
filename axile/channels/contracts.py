@@ -265,6 +265,13 @@ class ChannelAccountForm(_FrozenDescriptorModel):
     notices: tuple[ChannelAccountNotice, ...] = ()
 
 
+class ChannelCalendar(_FrozenDescriptorModel):
+    """描述渠道使用的共享交易日历。"""
+
+    calendar_id: str = Field(pattern=r"^[a-z][a-z0-9_-]*$")
+    label: str = Field(min_length=1)
+
+
 class ChannelNightSchedule(_FrozenDescriptorModel):
     """描述渠道快捷排程可合并的夜盘触发时点。"""
 
@@ -319,6 +326,8 @@ class ChannelDescriptor(_FrozenDescriptorModel):
         账户连接表单定义。
     schedule : ChannelSchedule
         渠道在公共前端采用的定时规则类型。
+    calendar : ChannelCalendar | None
+        渠道使用的共享交易日历；为空表示无需交易日历。
     portfolio : ChannelPortfolioPreset
         组合向导使用的市场名称与示例标的。
     """
@@ -335,6 +344,7 @@ class ChannelDescriptor(_FrozenDescriptorModel):
     leverage: ChannelLeverage
     account_form: ChannelAccountForm
     schedule: ChannelSchedule
+    calendar: ChannelCalendar | None = None
     portfolio: ChannelPortfolioPreset
 
 
