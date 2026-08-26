@@ -4,7 +4,7 @@
  * 总开关 + 快捷|高级|自定义 + 补发 + 排程预览。
  * ``layout='step'``（默认，向导窄栏）：单栏，预览在底部。
  * ``layout='page'``（账户编辑页宽栏）：页面级两列，预览为右侧通高列，
- * 日历摘要归入预览头部，预览条目更密（12 条）。
+ * 日历摘要归入预览头部，预览条数按右栏实际可视高度自适应。
  * 动效与 :component:`AcctTimer` 原实现一致：panel-fade / grid 展开 / Segmented 滑块。
  */
 
@@ -31,6 +31,14 @@ import { previewSchedule, type SchedulePreview, type ScheduleUnavailableReason }
 import type { TradeChannel } from '@/types/api'
 
 export type { TimerEditorState }
+
+const PREVIEW_ROW_PITCH = 26
+const PREVIEW_MIN_ITEMS = 5
+const PREVIEW_MAX_ITEMS = 100
+const PREVIEW_WIDE_QUERY = '(min-width: 1120px)'
+const PREVIEW_CASCADE_DELAY_STEP = 16
+const PREVIEW_CASCADE_DELAY_MAX = 160
+const PREVIEW_CASCADE_SETTLE_MS = 380
 
 /** 自动调仓总开关（accent，与成败红绿解耦）。 */
 function Switch({ on, ariaLabel, onClick }: { on: boolean; ariaLabel: string; onClick: () => void }) {
@@ -152,7 +160,11 @@ export function TimerEditor({ tradeChannel, scheduleKind, nightSchedule, value, 
   const [schedulePreview, setSchedulePreview] = useState<SchedulePreview | null>(null)
   const [previewLoading, setPreviewLoading] = useState(false)
   const [previewError, setPreviewError] = useState<string | null>(null)
+  const [previewLimit, setPreviewLimit] = useState(PREVIEW_MIN_ITEMS)
+  const [previewCascade, setPreviewCascade] = useState({ generation: 0, active: false })
   const previewRequestId = useRef(0)
+  const previewListRef = useRef<HTMLDivElement | null>(null)
+  const previewResultCron = useRef<string | null>(null)
   const previousChannel = useRef(tradeChannel)
 
   const patch = (p: Partial<TimerEditorState>) => {
@@ -188,14 +200,62 @@ export function TimerEditor({ tradeChannel, scheduleKind, nightSchedule, value, 
   // 避免「占位文案 → 骨架 → 列表」三段跳闪。
   const expectPreview = Boolean(tradeChannel) && v.autoOn && !rawErr && Boolean(cronExpr)
 
+  // 右栏列表区是真实可视槽：直接量它的高度换算请求条数，窗口尺寸变化由
+  // ResizeObserver 驱动；窄视口退回 5 条，避免自然高度布局形成测量反馈环。
+  useEffect(() => {
+    if (layout !== 'page') {
+      setPreviewLimit(PREVIEW_MIN_ITEMS)
+      return
+    }
+    const list = previewListRef.current
+    if (!list) return
+    const media = window.matchMedia(PREVIEW_WIDE_QUERY)
+    const updateLimit = () => {
+      if (!media.matches) {
+        setPreviewLimit(PREVIEW_MIN_ITEMS)
+        return
+      }
+      const height = list.clientHeight
+      if (height <= 0) return
+      const next = Math.min(
+        PREVIEW_MAX_ITEMS,
+        Math.max(PREVIEW_MIN_ITEMS, Math.ceil(height / PREVIEW_ROW_PITCH) + 1),
+      )
+      setPreviewLimit((current) => (current === next ? current : next))
+    }
+    updateLimit()
+    const observer = new ResizeObserver(updateLimit)
+    observer.observe(list)
+    media.addEventListener('change', updateLimit)
+    return () => {
+      observer.disconnect()
+      media.removeEventListener('change', updateLimit)
+    }
+  }, [layout])
+
+  // 重算级联只覆盖新数据换入的约 340ms；随后移除 animation class，确保
+  // ResizeObserver 导致的增减行静默发生，不把窗口调整误演成「重新排程」。
+  useEffect(() => {
+    if (!previewCascade.active) return
+    const generation = previewCascade.generation
+    const timer = window.setTimeout(() => {
+      setPreviewCascade((current) => (
+        current.generation === generation ? { ...current, active: false } : current
+      ))
+    }, PREVIEW_CASCADE_SETTLE_MS)
+    return () => window.clearTimeout(timer)
+  }, [previewCascade.active, previewCascade.generation])
+
   useEffect(() => {
     if (previousChannel.current !== tradeChannel) {
       previousChannel.current = tradeChannel
+      previewResultCron.current = null
       setSchedulePreview(null)
       setPreviewError(null)
     }
     const requestId = ++previewRequestId.current
     if (!tradeChannel || !v.autoOn || rawErr || !cronExpr) {
+      previewResultCron.current = null
       setSchedulePreview(null)
       setPreviewLoading(false)
       setPreviewError(null)
@@ -205,11 +265,18 @@ export function TimerEditor({ tradeChannel, scheduleKind, nightSchedule, value, 
     const timer = window.setTimeout(() => {
       setPreviewLoading(true)
       setPreviewError(null)
-      // page 布局的右列通高，条目拉满（100，后端上限）让栏有内容质量；step 底部通栏维持 5 条。
-      void previewSchedule(tradeChannel, cronExpr, controller.signal, layout === 'page' ? 100 : 5)
+      const limit = layout === 'page' ? previewLimit : PREVIEW_MIN_ITEMS
+      void previewSchedule(tradeChannel, cronExpr, controller.signal, limit)
         .then((next) => {
           if (requestId !== previewRequestId.current) return
+          const shouldCascade = layout === 'page'
+            && previewResultCron.current != null
+            && previewResultCron.current !== cronExpr
+          previewResultCron.current = cronExpr
           setSchedulePreview(next)
+          if (shouldCascade) {
+            setPreviewCascade((current) => ({ generation: current.generation + 1, active: true }))
+          }
           setPreviewLoading(false)
         })
         .catch((error) => {
@@ -222,7 +289,7 @@ export function TimerEditor({ tradeChannel, scheduleKind, nightSchedule, value, 
       window.clearTimeout(timer)
       controller.abort()
     }
-  }, [tradeChannel, v.autoOn, rawErr, cronExpr, layout])
+  }, [tradeChannel, v.autoOn, rawErr, cronExpr, layout, previewLimit])
 
   useEffect(() => () => { previewRequestId.current += 1 }, [])
 
@@ -374,6 +441,8 @@ export function TimerEditor({ tradeChannel, scheduleKind, nightSchedule, value, 
     </>
   )
 
+  const cascadeRows = layout === 'page' && previewCascade.active
+
   // !v.autoOn 只在 page 布局可达（step 的预览随总开关收进折叠区，不会渲染）。
   const previewBody = !v.autoOn ? (
     <p className="text-[13px] text-ink-3">开启自动调仓后显示。</p>
@@ -388,8 +457,8 @@ export function TimerEditor({ tradeChannel, scheduleKind, nightSchedule, value, 
   ) : expectPreview && !schedulePreview ? (
     <div className="space-y-2" aria-label="正在加载排程预览">{Array.from({ length: 4 }, (_, index) => <div key={index} className="h-4 w-full animate-pulse rounded bg-fill motion-reduce:animate-none" />)}</div>
   ) : schedulePreview?.items.length ? (
-    <div className="space-y-1.5">
-      {schedulePreview.items.map((item) => {
+    <div key={previewCascade.generation} className="space-y-1.5">
+      {schedulePreview.items.map((item, index) => {
         const tradingDay = item.calendar_day.slice(5)
         const legacy = item.using_legacy_fallback
           ? `${item.label ?? '中国交易日历'} · 存量兼容闭市保护中（A 股日历未覆盖） · `
@@ -405,7 +474,20 @@ export function TimerEditor({ tradeChannel, scheduleKind, nightSchedule, value, 
               : '按排程执行'
         const warning = item.calendar_status === 'unavailable'
           && item.unavailable_reason === 'read_failed'
-        return <div key={item.scheduled_at} className={`grid grid-cols-[92px_minmax(0,1fr)] gap-3 text-[13px] ${warning ? 'text-warn' : item.action === 'skip' ? 'text-ink-3' : 'text-ink-2'}`}><span className="num">{formatScheduledAt(item.scheduled_at)}</span><span>{text}</span></div>
+        return (
+          <div
+            key={item.scheduled_at}
+            className={`grid grid-cols-[92px_minmax(0,1fr)] gap-3 text-[13px] ${
+              warning ? 'text-warn' : item.action === 'skip' ? 'text-ink-3' : 'text-ink-2'
+            } ${cascadeRows ? 'schedule-preview-row-in' : ''}`}
+            style={cascadeRows ? {
+              animationDelay: `${Math.min(index * PREVIEW_CASCADE_DELAY_STEP, PREVIEW_CASCADE_DELAY_MAX)}ms`,
+            } : undefined}
+          >
+            <span className="num">{formatScheduledAt(item.scheduled_at)}</span>
+            <span>{text}</span>
+          </div>
+        )
       })}
     </div>
   ) : (
@@ -416,9 +498,14 @@ export function TimerEditor({ tradeChannel, scheduleKind, nightSchedule, value, 
   // 决定、与左列内容完全解耦，两列各自内部滚动，页面本身不滚。常挂载：关自动调仓
   // 时显示提示而非整列消失，避免开关切换引发布局跳动。step 布局：底部通栏。
   const previewPanel = layout === 'page' ? (
-    <aside className="rounded-[14px] border border-line bg-surface px-4 py-3.5 min-[1120px]:min-h-0 min-[1120px]:overflow-y-auto">
-      {previewHeader}
-      {previewBody}
+    <aside className="flex flex-col rounded-[14px] border border-line bg-surface px-4 py-3.5 min-[1120px]:min-h-0">
+      <div className="flex-none">{previewHeader}</div>
+      <div
+        ref={previewListRef}
+        className="quiet-scrollbar min-h-0 flex-1 min-[1120px]:overflow-y-auto min-[1120px]:overscroll-contain min-[1120px]:[scrollbar-gutter:stable]"
+      >
+        {previewBody}
+      </div>
     </aside>
   ) : (
     <div className="min-h-[152px] border-y border-line py-3">

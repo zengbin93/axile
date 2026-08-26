@@ -397,7 +397,8 @@ export function AccountEditPage({ section = 'basic' }: { section?: EditSection }
       )}
 
       {section === 'leverage' && (
-        <Section label="杠杆设置">
+        <>
+          <Section label="杠杆设置">
           <div className="flex flex-wrap gap-x-8 gap-y-3 md:col-span-2">
           <div className="flex flex-col gap-1">
             <label htmlFor="edit-long-leverage" className="text-[13px] text-ink-2">
@@ -428,20 +429,23 @@ export function AccountEditPage({ section = 'basic' }: { section?: EditSection }
               />
             </div>
           )}
-          <div className="flex flex-col gap-1">
-            <label htmlFor="edit-weight-precision" className="text-[13px] text-ink-2">
-              权重精度
-            </label>
-            <WeightPrecisionInput
-              id="edit-weight-precision"
-              value={d.weightPrecision}
-              invalid={Boolean(weightPrecisionErr)}
-              error={weightPrecisionErr}
-              onChange={(weightPrecision) => set({ weightPrecision })}
-            />
           </div>
-          </div>
-        </Section>
+          </Section>
+          <Section label="权重精度">
+            <div className="flex flex-col gap-1">
+              <label htmlFor="edit-weight-precision" className="sr-only">
+                权重精度
+              </label>
+              <WeightPrecisionInput
+                id="edit-weight-precision"
+                value={d.weightPrecision}
+                invalid={Boolean(weightPrecisionErr)}
+                error={weightPrecisionErr}
+                onChange={(weightPrecision) => set({ weightPrecision })}
+              />
+            </div>
+          </Section>
+        </>
       )}
 
       {section === 'symbols' && (

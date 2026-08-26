@@ -304,6 +304,32 @@
 }
 
 /*
+ * 排程预览「重算级联」：只在已有排程因规则变更而重算时挂载。
+ * 下一触发点从上到下依次换入，方向与时间顺序一致；标题/日历摘要钉死不动。
+ * 首帧与窗口 resize 增减行均不挂本类，reduce 偏好下完全关闭。
+ */
+@keyframes schedule-preview-row-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.schedule-preview-row-in {
+  animation: schedule-preview-row-in 180ms cubic-bezier(0.4, 0, 0.2, 1) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .schedule-preview-row-in {
+    animation: none;
+  }
+}
+
+/*
  * 单行省略文本的悬停播放。静态层负责省略号与占位；播放层延迟出现后仅移动自身，
  * 不改变槽位 footprint。移出时 animation 被移除，文本立即回到开头。
  */
