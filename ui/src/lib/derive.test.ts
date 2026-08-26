@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { integrityOf, gateOf, rebalancePlan, stateVerdict } from './derive'
+import { integrityOf, gateOf, observedTotalAsset, rebalancePlan, stateVerdict } from './derive'
 import type { AccountDashboardItem, Position } from '../types/api'
 
 /** 造一个仪表盘项；只填两轴关心的字段，其余给中性占位。 */
@@ -150,4 +150,12 @@ test('有 quantities 时 1 手可交易差额计待调整', () => {
   const plan = rebalancePlan(positions, { rb2610: 0.13 }, TONIGHT_EQUITY, { rb2610: 4 })
   expect(plan.off).toBe(1)
   expect(plan.buys).toBe(1)
+})
+
+test('观测权益优先快照，0 也是有效值', () => {
+  expect(observedTotalAsset({ total_asset: 880_000 }, 995_215.24)).toBe(880_000)
+  expect(observedTotalAsset({ total_asset: 0 }, 995_215.24)).toBe(0)
+  expect(observedTotalAsset({ positions: [] }, 995_215.24)).toBe(995_215.24)
+  expect(observedTotalAsset(undefined, 995_215.24)).toBe(995_215.24)
+  expect(observedTotalAsset(undefined, undefined)).toBe(0)
 })

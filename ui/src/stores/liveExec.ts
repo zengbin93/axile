@@ -155,3 +155,8 @@ export const useLiveExecStore = create<LiveExecState>((set) => ({
 export function useRunning(accountId: number): RunEntry | null {
   return useLiveExecStore((s) => s.running.get(accountId) ?? null)
 }
+
+/** 在途执行从有到无：此时执行记录与资产快照已落库，观测面应立刻重读。 */
+export function executionJustSettled(previous: RunEntry | null, current: RunEntry | null): boolean {
+  return previous != null && current == null
+}

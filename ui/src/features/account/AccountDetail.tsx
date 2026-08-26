@@ -26,7 +26,7 @@ import {
 import { ScheduleSummary, ScheduleTimeline, ScheduleTimelineSkeleton } from '@/features/account/ScheduleTimeline'
 import { accountAssetTerms, INTEGRITY_ICON, INTEGRITY_TEXT_CLASS, STATUS_TEXT_CLASS, channelLabel } from '@/features/dashboard/display'
 import { isExecutingStatus, phaseLabel, runVerb } from '@/features/dashboard/execProgress'
-import { useRunning } from '@/stores/liveExec'
+import { executionJustSettled, useRunning } from '@/stores/liveExec'
 import { useDomainStore } from '@/stores/domain'
 import { algorithmRefOf, describeAlgorithmRef } from '@/features/setup/algorithms'
 import {
@@ -50,7 +50,7 @@ import {
 } from '@/lib/api/accounts'
 import { usePolling } from '@/lib/hooks/usePolling'
 import { useTargetSnapshot } from '@/lib/hooks/useTargetSnapshot'
-import { stateVerdict, gateOf, rebalancePlan, positionsOf, positionsOfAssets, type StatusLevel } from '@/lib/derive'
+import { stateVerdict, gateOf, observedTotalAsset, rebalancePlan, positionsOf, positionsOfAssets, type StatusLevel } from '@/lib/derive'
 import { shortErrorReason } from '@/lib/errorInfo'
 import { displayCurrencyUnit, fmtMoney, withCurrency } from '@/lib/format'
 import { describeCron } from '@/features/setup/cron'
@@ -143,23 +143,26 @@ export function AccountDetail({
   const activityStaleAt = connectionStaleAt(connectionUnavailable, [activityFreshness])
   const comparisonStaleAt = connectionStaleAt(connectionUnavailable, [assetFreshness, targetFreshness])
 
-  const runner = useExecutionRunner(accountId, () => {
-    activity.refresh()
-    void weights.reloadSnapshot()
-    onDashboardRefresh?.()
-  })
-  // 服务端真源的在途执行（SSE/轮询汇入 liveExec store）：任何来源发起的执行都可见。
-  const live = useRunning(accountId)
   const reloadTargetSnapshot = weights.reloadSnapshot
   const refreshAccount = account.refresh
   const refreshActivity = activity.refresh
   const refreshNextRun = nextRun.refresh
   const refreshAssetSnapshots = assetSnapshots.refresh
+  // 执行终态时记录与资产快照已落库：立刻重读观测面，避免目标单飞、权益/持仓停在上一帧。
+  const refreshObservedState = useCallback(() => {
+    refreshActivity()
+    void reloadTargetSnapshot()
+    void refreshAssetSnapshots()
+    onDashboardRefresh?.()
+  }, [refreshActivity, reloadTargetSnapshot, refreshAssetSnapshots, onDashboardRefresh])
+  const runner = useExecutionRunner(accountId, refreshObservedState)
+  // 服务端真源的在途执行（SSE/轮询汇入 liveExec store）：任何来源发起的执行都可见。
+  const live = useRunning(accountId)
   const previousLiveRef = useRef(live)
   useEffect(() => {
-    if (previousLiveRef.current && !live) void reloadTargetSnapshot()
+    if (executionJustSettled(previousLiveRef.current, live)) refreshObservedState()
     previousLiveRef.current = live
-  }, [live, reloadTargetSnapshot])
+  }, [live, refreshObservedState])
   // 顶栏的单次重试恢复连接后，立即同步详情页查询，不再等待各自的轮询间隔。
   const connectionUnavailableRef = useRef(connectionUnavailable)
   useEffect(() => {
@@ -188,6 +191,8 @@ export function AccountDetail({
   const latestAssets = assetSnapshots.data?.data[0]?.assets
   const snapshotPositions = positionsOfAssets(latestAssets)
   const positions = latestAssets ? snapshotPositions : positionsOf(recordList)
+  const equity = observedTotalAsset(latestAssets, item.total_asset)
+  const holdingsCount = latestAssets ? snapshotPositions.length : item.holdings_count
   const target = weights.data?.weights ?? {}
   const positionsLoading = latestAssets === undefined && activity.data === null
     && (assetSnapshots.loading || activity.loading)
@@ -200,7 +205,7 @@ export function AccountDetail({
   // 背离摘要：与明细抽屉同口径（均出自 rebalancePlan）。文案讲「几只要动 · 卖几买几」，
   // 条画各品种的要成交幅度；到位/空仓退成静态一句。
   const quantities = weights.data?.quantities ?? null
-  const plan = rebalancePlan(positions, target, item.total_asset, quantities)
+  const plan = rebalancePlan(positions, target, equity, quantities)
   const driftLevel: StatusLevel = plan.off > 0 ? 'warn' : 'ok'
   const driftHeadline =
     plan.rows.length === 0
@@ -210,7 +215,7 @@ export function AccountDetail({
         : `${plan.off} 只待调整`
   const targetCount = Object.values(target).filter((weight) => Math.abs(weight) > 1e-9).length
   const turnover = rebalanceTurnover(plan)
-  const currentHoldings = currentHoldingPreview(positions, item.total_asset)
+  const currentHoldings = currentHoldingPreview(positions, equity)
   // 有服务端 quantities 时现场计划即在位性；否则不拿权重尺子盖掉仪表盘 off_symbol_count。
   const state = stateVerdict({
     ...item,
@@ -280,6 +285,7 @@ export function AccountDetail({
       await updateAccount(accountId, { is_started: next })
       toast(next ? '已启动自动执行' : '已暂停自动执行')
       account.refresh()
+      nextRun.refresh()
       onDashboardRefresh?.()
     } catch (e) {
       setStartedOverride(null)
@@ -452,7 +458,7 @@ export function AccountDetail({
                 className="num mt-0.5 text-[34px] font-[640] tracking-tight"
                 style={amountVt ? { viewTransitionName: `equity-amount-${accountId}` } : undefined}
               >
-                <NumberTicker value={item.total_asset} format={{ minimumFractionDigits: 2, maximumFractionDigits: 2 }} />
+                <NumberTicker value={equity} format={{ minimumFractionDigits: 2, maximumFractionDigits: 2 }} />
                 <span className="ml-1.5 text-[16px] font-medium text-ink-3">{displayCurrencyUnit(item.currency)}</span>
               </div>
               <div className="mt-1.5 text-[13.5px] text-ink-2">
@@ -577,7 +583,7 @@ export function AccountDetail({
                   {driftHeadline}
                 </div>
                 <div className="mt-1.5 text-[13px] text-ink-2">
-                  当前 {item.holdings_count === 0 ? '空仓' : `${item.holdings_count} 只`} · 目标 {targetCount} 只
+                  当前 {holdingsCount === 0 ? '空仓' : `${holdingsCount} 只`} · 目标 {targetCount} 只
                 </div>
                 {plan.off > 0 && (
                   <>

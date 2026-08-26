@@ -1,5 +1,25 @@
 import { expect, test } from 'bun:test'
-import { useLiveExecStore } from './liveExec'
+import { executionJustSettled, useLiveExecStore, type RunEntry } from './liveExec'
+
+function run(over: Partial<RunEntry> = {}): RunEntry {
+  return {
+    executionId: 'e-1',
+    kind: 'rebalance',
+    phase: 'executing',
+    status: 'running',
+    pendingExecutionId: null,
+    pendingKind: null,
+    updatedAt: 1,
+    ...over,
+  }
+}
+
+test('executionJustSettled 只在从有到无时为真', () => {
+  expect(executionJustSettled(run(), null)).toBe(true)
+  expect(executionJustSettled(null, null)).toBe(false)
+  expect(executionJustSettled(null, run())).toBe(false)
+  expect(executionJustSettled(run(), run({ status: 'terminating' }))).toBe(false)
+})
 
 test('applySnapshot 保留 queued，丢弃终态', () => {
   useLiveExecStore.setState({ running: new Map() })

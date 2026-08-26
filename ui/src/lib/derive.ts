@@ -178,6 +178,22 @@ export function positionsOfAssets(assets: AccountAssets | null | undefined): Pos
 }
 
 /**
+ * 当前观测权益：与持仓同一帧的资产快照优先，缺字段时才退回仪表盘聚合。
+ *
+ * 执行结束后快照已落库。若权益仍读 dashboard 的旧 `total_asset`、持仓读快照，
+ * 两块会对不齐。快照里的 0 是有效值（清仓后），不能当缺失。
+ */
+export function observedTotalAsset(
+  snapshotAssets: AccountAssets | null | undefined,
+  dashboardTotal: number | null | undefined,
+): number {
+  const snapshot = snapshotAssets?.total_asset
+  if (typeof snapshot === 'number' && Number.isFinite(snapshot)) return snapshot
+  if (typeof dashboardTotal === 'number' && Number.isFinite(dashboardTotal)) return dashboardTotal
+  return 0
+}
+
+/**
  * 无 ``quantities`` 时的权重回退阈值（百分点）。
  * 有服务端目标数量时到位只比手数，不用这把尺子。
  */

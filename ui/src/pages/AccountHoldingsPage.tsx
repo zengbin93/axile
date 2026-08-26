@@ -1,4 +1,4 @@
-import { useCallback } from 'react'
+import { useCallback, useEffect, useRef } from 'react'
 import { useParams } from 'react-router'
 import { Card } from '@/components/ui/Card'
 import { Skeleton, SkeletonLines } from '@/components/ui/Skeleton'
@@ -10,21 +10,22 @@ import { TargetSnapshotControl } from '@/features/portfolio/TargetSnapshotContro
 import { getAccount, getAccountAssetSnapshots, getAccountTargetSnapshot, refreshAccountTargetSnapshot } from '@/lib/api/accounts'
 import { usePolling } from '@/lib/hooks/usePolling'
 import { useTargetSnapshot } from '@/lib/hooks/useTargetSnapshot'
-import { currencyOf, positionsOfAssets } from '@/lib/derive'
+import { currencyOf, observedTotalAsset, positionsOfAssets } from '@/lib/derive'
 import { useDomainStore } from '@/stores/domain'
 import { isExecutingStatus } from '@/features/dashboard/execProgress'
-import { useRunning } from '@/stores/liveExec'
+import { executionJustSettled, useRunning } from '@/stores/liveExec'
 
 /**
  * 持仓明细路由页 /accounts/:id/holdings。
  *
- * 由抽屉升级而来：换回可深链/刷新/后退的 URL。账户名/权益读自共享 store，
- * 持仓取自最近一次账户资产观测、目标取自组合最新权重，逐只对照复用 HoldingsView。
+ * 由抽屉升级而来：换回可深链/刷新/后退的 URL。账户名读自共享 store，
+ * 权益与持仓共用最近一次资产快照（缺快照才退回仪表盘权益），目标取自组合最新权重。
  */
 export function AccountHoldingsPage() {
   const { id } = useParams()
   const accountId = Number(id)
   const accounts = useDomainStore((s) => s.accounts)
+  const refreshAccounts = useDomainStore((s) => s.refreshAccounts)
   const item = accounts?.find((a) => a.account_id === accountId) ?? null
   const assetTerms = accountAssetTerms(item?.trade_channel)
   const running = useRunning(accountId)
@@ -47,8 +48,18 @@ export function AccountHoldingsPage() {
   const latestAssets = snapshots.data?.data[0]?.assets
   const positions = positionsOfAssets(latestAssets)
   const target = weights.data?.weights ?? {}
-  const recEquity = Number(latestAssets?.total_asset) || 0
-  const equity = item?.total_asset ?? recEquity
+  const equity = observedTotalAsset(latestAssets, item?.total_asset)
+  const previousLiveRef = useRef(running)
+  const refreshSnapshots = snapshots.refresh
+  const reloadTargetSnapshot = weights.reloadSnapshot
+  useEffect(() => {
+    if (executionJustSettled(previousLiveRef.current, running)) {
+      void refreshSnapshots()
+      void reloadTargetSnapshot()
+      void refreshAccounts()
+    }
+    previousLiveRef.current = running
+  }, [running, refreshSnapshots, reloadTargetSnapshot, refreshAccounts])
   const tradeChannel = item?.trade_channel ?? account.data?.trade_channel
   const portfolioId = item?.portfolio_id ?? account.data?.portfolio_id ?? null
   // 快照缺失但实时口径（dashboard.holdings_count）显示有持仓：资产观测未返回有效持仓明细，
