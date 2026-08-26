@@ -209,10 +209,12 @@ def test_next_execution_cancels_deadline_residual_orders_from_blocked_symbols(mo
     monkeypatch.setattr(
         engine_module,
         "resolve_algorithm",
-        lambda _name, _session: lambda _session, algorithm_input: AlgorithmResult(
-            symbol=algorithm_input.symbol,
-            algorithm="SINGLE-MAKER",
-            target_volume=algorithm_input.target_volume,
+        lambda _name, _session: (
+            lambda _session, algorithm_input: AlgorithmResult(
+                symbol=algorithm_input.symbol,
+                algorithm="SINGLE-MAKER",
+                target_volume=algorithm_input.target_volume,
+            )
         ),
     )
 
