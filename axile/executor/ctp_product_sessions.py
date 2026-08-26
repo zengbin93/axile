@@ -3,11 +3,6 @@
 数据基线：OpenCTP ``http://dict.openctp.cn/times?types=futures``，抓取于 2026-08-25。
 仅覆盖 ``ProductClass=1`` 期货；期权与未知品种查表失败即拒绝。交易所调整时段或新品种
 上市时，必须更新本文件、测试并随版本发布；执行路径不进行运行时刷新或外部联网。
-
-快照新鲜度为渠道级：``SESSION_DATA_GENERATED_AT`` 超过 ``SESSION_DATA_MAX_AGE`` 后
-整个 CTP 渠道的时段数据视为失效（``CTP.SESSION.DATA_UNAVAILABLE``），所有品种一并
-fail-closed，不存在"部分品种新鲜、部分过期"的状态。临近有效期须更新基线并随版本
-发布——``SESSION_DATA_MAX_AGE`` 是该渠道的硬性停摆开关。
 """
 
 from __future__ import annotations
@@ -17,14 +12,6 @@ from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 
 from axile.executor.china_futures_session import is_regular_night_session_transition
-
-SESSION_DATA_GENERATED_AT = date(2026, 8, 25)
-SESSION_DATA_MAX_AGE = timedelta(days=180)
-
-
-def decide_ctp_session_data_freshness(*, now: date) -> bool:
-    """纯新鲜度判定：快照生成日加最大有效期是否仍覆盖给定日期（时钟由调用方注入）。"""
-    return now - SESSION_DATA_GENERATED_AT <= SESSION_DATA_MAX_AGE
 
 
 @dataclass(frozen=True)
@@ -691,9 +678,6 @@ __all__ = [
     "CTP_PRODUCT_SESSIONS",
     "CtpProductSession",
     "CtpProductSessionDecision",
-    "SESSION_DATA_GENERATED_AT",
-    "SESSION_DATA_MAX_AGE",
     "decide_ctp_product_session",
-    "decide_ctp_session_data_freshness",
     "get_ctp_product_sessions",
 ]

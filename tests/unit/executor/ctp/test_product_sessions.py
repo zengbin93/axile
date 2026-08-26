@@ -2,18 +2,15 @@
 
 from __future__ import annotations
 
-from datetime import date, datetime, time, timedelta
+from datetime import date, datetime, time
 from zoneinfo import ZoneInfo
 
 import pytest
 
 from axile.executor.ctp_product_sessions import (
     CTP_PRODUCT_SESSIONS,
-    SESSION_DATA_GENERATED_AT,
-    SESSION_DATA_MAX_AGE,
     CtpProductSession,
     decide_ctp_product_session,
-    decide_ctp_session_data_freshness,
     get_ctp_product_sessions,
 )
 
@@ -192,14 +189,3 @@ def test_product_session_fails_closed_when_required_local_data_is_unavailable(
 
     assert decision.allowed is False
     assert decision.reason_code == expected_reason
-
-
-def test_session_data_freshness_is_snapshot_scoped_and_clock_injected() -> None:
-    assert SESSION_DATA_GENERATED_AT == date(2026, 8, 25)
-
-    assert decide_ctp_session_data_freshness(now=SESSION_DATA_GENERATED_AT) is True
-    assert decide_ctp_session_data_freshness(now=SESSION_DATA_GENERATED_AT + SESSION_DATA_MAX_AGE) is True
-    assert (
-        decide_ctp_session_data_freshness(now=SESSION_DATA_GENERATED_AT + SESSION_DATA_MAX_AGE + timedelta(days=1))
-        is False
-    )

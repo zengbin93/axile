@@ -384,19 +384,6 @@ def test_place_order_blocks_at_submit_without_calendar(
     assert executor._order_keys == {}
 
 
-def test_place_order_blocks_at_submit_when_session_snapshot_expired(
-    config: CTPAccountConfig, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    executor = _submit_point_executor(config)
-    _at_clock(monkeypatch, datetime(2027, 8, 25, 21, 29, tzinfo=_SHANGHAI))
-
-    with pytest.raises(AccountControlBlockedError, match="CTP.SESSION.DATA_UNAVAILABLE"):
-        executor._place_order_impl("ag2612", OrderDirection.BUY, OrderType.LIMIT, 1, 9000)
-
-    executor._trader_api.ReqOrderInsert.assert_not_called()
-    assert executor._order_keys == {}
-
-
 def test_place_order_recheck_blocks_after_planning_crosses_session_boundary(
     config: CTPAccountConfig, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -59,7 +59,6 @@ from axile.executor.ctp.requests import (
 from axile.executor.ctp.spi import MarketSpi, TraderSpi
 from axile.executor.ctp_product_sessions import (
     decide_ctp_product_session,
-    decide_ctp_session_data_freshness,
     get_ctp_product_sessions,
 )
 from axile.executor.execution_engine import ExecutionEngine, _DispatchPlanningResult
@@ -388,8 +387,6 @@ class CTPExecutor(AbstractExecutor, UnifiedCallbackClient):
         if not sessions:
             return "CTP.SESSION.NO_SESSION_TABLE"
         now = clock_now(tz=_SHANGHAI)
-        if not decide_ctp_session_data_freshness(now=now.date()):
-            return "CTP.SESSION.DATA_UNAVAILABLE"
         calendar = self._trading_calendar
         if calendar is None:
             return "CTP.SESSION.CALENDAR_UNAVAILABLE"
