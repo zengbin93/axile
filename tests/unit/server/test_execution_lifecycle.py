@@ -12,6 +12,7 @@ from axile.domain.execution import ExecutionKind, ExecutionTaskStatus, Execution
 from axile.executor.termination import ExecutionTerminated
 from axile.server.execution import lifecycle as execution_lifecycle
 from axile.server.execution import registry as execution_registry
+from axile.server.execution.intents import IntentSnapshot
 
 
 def test_handle_inline_execution_terminated_persists_record_and_updates_state(monkeypatch) -> None:
@@ -287,6 +288,108 @@ def test_run_execution_task_persists_intent_on_success(monkeypatch) -> None:
 
     assert marked["execution_id"] == execution_id
     assert marked["status"] == ExecutionTaskStatus.SUCCEEDED
+
+
+def test_run_execution_task_rehydrates_queued_intent_without_memory(monkeypatch) -> None:
+    """内存缺失但 intent 仍是 QUEUED 时应补水合再跑，而不是直接标终止。"""
+    execution_id = "exec-rehydrate-queued-1"
+    snapshot = IntentSnapshot(
+        execution_id=execution_id,
+        account_id=1,
+        kind=ExecutionKind.REBALANCE,
+        trigger_source="manual",
+        status=ExecutionTaskStatus.QUEUED,
+        channel=TradeChannel.CTP,
+        algorithm="SINGLE-MAKER",
+        payload={},
+        created_at="2026-03-27T12:00:00",
+        started_at=None,
+        finished_at=None,
+        error=None,
+        cancel_requested_at=None,
+        cancel_reason=None,
+        terminate_mode=None,
+    )
+    ran: dict[str, str] = {}
+    marked: dict[str, object] = {}
+
+    async def fake_get_intent(eid: str) -> IntentSnapshot:
+        assert eid == execution_id
+        return snapshot
+
+    async def fake_runner(tracked: str) -> SimpleNamespace:
+        ran["id"] = tracked
+        assert execution_registry.get_execution_task_state(tracked) is not None
+        return SimpleNamespace(id=1, is_success=1, raw_result={"status": "SUCCEEDED"})
+
+    async def fake_mark(eid: str, status: ExecutionTaskStatus, **kwargs: object) -> None:
+        marked["execution_id"] = eid
+        marked["status"] = status
+        marked.update(kwargs)
+
+    monkeypatch.setattr(execution_lifecycle, "get_intent", fake_get_intent)
+    monkeypatch.setattr(execution_lifecycle, "mark_intent_finished", fake_mark)
+    monkeypatch.setattr(execution_lifecycle, "sync_account_live", lambda *_a, **_k: None)
+
+    try:
+        asyncio.run(
+            execution_lifecycle._run_execution_task(
+                account_id=1,
+                execution_id=execution_id,
+                execution_kind=ExecutionKind.REBALANCE,
+                runner=fake_runner,
+            )
+        )
+        assert ran["id"] == execution_id
+        assert marked["status"] == ExecutionTaskStatus.SUCCEEDED
+    finally:
+        execution_registry.clear_queued_execution(1, execution_id)
+        execution_registry._clear_execution_task_state(execution_id)
+
+
+def test_run_execution_task_missing_memory_skips_terminal_intent(monkeypatch) -> None:
+    """内存缺失且 intent 已终态时不应再跑 runner。"""
+    execution_id = "exec-missing-terminal-1"
+    snapshot = IntentSnapshot(
+        execution_id=execution_id,
+        account_id=1,
+        kind=ExecutionKind.REBALANCE,
+        trigger_source="manual",
+        status=ExecutionTaskStatus.TERMINATED,
+        channel=TradeChannel.CTP,
+        algorithm="SINGLE-MAKER",
+        payload={},
+        created_at="2026-03-27T12:00:00",
+        started_at=None,
+        finished_at="2026-03-27T12:00:01",
+        error=None,
+        cancel_requested_at=None,
+        cancel_reason=None,
+        terminate_mode=None,
+    )
+    ran = False
+
+    async def fake_get_intent(eid: str) -> IntentSnapshot:
+        assert eid == execution_id
+        return snapshot
+
+    async def fake_runner(_tracked: str) -> SimpleNamespace:
+        nonlocal ran
+        ran = True
+        return SimpleNamespace(id=1, is_success=1, raw_result={})
+
+    monkeypatch.setattr(execution_lifecycle, "get_intent", fake_get_intent)
+    monkeypatch.setattr(execution_lifecycle, "sync_account_live", lambda *_a, **_k: None)
+
+    asyncio.run(
+        execution_lifecycle._run_execution_task(
+            account_id=1,
+            execution_id=execution_id,
+            execution_kind=ExecutionKind.REBALANCE,
+            runner=fake_runner,
+        )
+    )
+    assert ran is False
 
 
 def test_run_execution_task_retry_keeps_queued_slot(monkeypatch) -> None:

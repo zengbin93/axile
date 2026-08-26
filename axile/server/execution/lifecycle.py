@@ -40,6 +40,8 @@ from axile.server.execution.factory import create_executor_instance
 from axile.server.execution.intents import (
     IntentNotRunnable,
     SubmitResult,
+    ensure_memory_from_intent,
+    get_intent,
     mark_intent_finished,
     submit_intent,
     sync_account_live,
@@ -69,6 +71,14 @@ Notes
 下一次调度。取值与单个外网探测的超时同量级：够一个健康服务应答，又不至于让整条
 串行探测链把运行位拖住几十秒。
 """
+
+_TERMINAL_INTENT_STATUSES = frozenset(
+    {
+        ExecutionTaskStatus.TERMINATED,
+        ExecutionTaskStatus.FAILED,
+        ExecutionTaskStatus.SUCCEEDED,
+    }
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -613,6 +623,37 @@ async def handle_inline_execution_failure(
     await send_feishu_error(error, account, settings.exe_err_feishu_key)
 
 
+def _release_execution_slots(account_id: int, execution_id: str) -> None:
+    """释放账户槽位并丢掉该 execution 的内存态."""
+    clear_queued_execution(account_id, execution_id)
+    clear_running_execution(account_id, execution_id)
+    finalize_execution_task_state(execution_id)
+
+
+async def _bind_queued_execution_state(account_id: int, execution_id: str) -> ExecutionTaskState | None:
+    """准备可开跑的内存态.
+
+    内存缺失且 intent 仍是 QUEUED 时补水合，不把票标成终止。
+    已终态返回 ``None``；intent 是 RUNNING/TERMINATING 则抛 ``IntentNotRunnable``.
+    """
+    state = get_execution_task_state(execution_id)
+    if state is not None:
+        if state.status == ExecutionTaskStatus.TERMINATED:
+            _release_execution_slots(account_id, execution_id)
+            await mark_intent_finished(execution_id, ExecutionTaskStatus.TERMINATED)
+            return None
+        return state
+
+    intent = await get_intent(execution_id)
+    if intent is not None and intent.status == ExecutionTaskStatus.QUEUED:
+        return ensure_memory_from_intent(intent, status=ExecutionTaskStatus.QUEUED)
+
+    _release_execution_slots(account_id, execution_id)
+    if intent is None or intent.status in _TERMINAL_INTENT_STATUSES:
+        return None
+    raise IntentNotRunnable(f"intent {execution_id} 状态为 {intent.status.value}，不能开跑")
+
+
 async def _run_execution_task(
     *,
     account_id: int,
@@ -639,12 +680,9 @@ async def _run_execution_task(
     None
         该函数仅推进任务状态，不返回结果。
     """
-    state = get_execution_task_state(execution_id)
-    if state is None or state.status == ExecutionTaskStatus.TERMINATED:
-        clear_queued_execution(account_id, execution_id)
-        clear_running_execution(account_id, execution_id)
-        finalize_execution_task_state(execution_id)
-        await mark_intent_finished(execution_id, ExecutionTaskStatus.TERMINATED)
+    state = await _bind_queued_execution_state(account_id, execution_id)
+    if state is None:
+        sync_account_live(account_id)
         return
 
     keep_queued = False
@@ -691,9 +729,7 @@ async def _run_execution_task(
             # 渠道锁被刷新占用：intent 仍是 QUEUED，不能拆内存槽，否则终止会 409。
             sync_account_live(account_id)
         else:
-            clear_queued_execution(account_id, execution_id)
-            clear_running_execution(account_id, execution_id)
-            finalize_execution_task_state(execution_id)
+            _release_execution_slots(account_id, execution_id)
             sync_account_live(account_id)
 
 

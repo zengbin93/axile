@@ -14,7 +14,7 @@ import { Skeleton, SkeletonGroup, SkeletonText } from '@/components/ui/Skeleton'
 import { AccountActions } from '@/features/account/AccountActions'
 import { useExecutionRunner } from '@/features/account/useExecutionRunner'
 import { useTerminateAction } from '@/features/account/useTerminateAction'
-import { buildRecentActivity } from '@/features/account/recent'
+import { buildRecentActivity, recentRowText } from '@/features/account/recent'
 import { StaleDataStatus } from '@/features/account/StaleDataStatus'
 import { connectionStaleAt, localQueryError } from '@/features/account/staleData'
 import {
@@ -735,53 +735,45 @@ export function AccountDetail({
                     {row.type === 'fill' && (
                       <>
                         <span className="w-4 flex-none text-center text-ok">✓</span>
-                        <OverflowText className="min-w-0 flex-1" text={row.desc} />
+                        <OverflowText className="min-w-0 flex-1" text={recentRowText(row)} />
                         <span className="num text-[13px] text-ink-2">{row.amount}</span>
+                      </>
+                    )}
+                    {row.type === 'partial' && (
+                      <>
+                        <span className="w-4 flex-none text-center text-warn">⚠</span>
+                        <OverflowText className="min-w-0 flex-1 text-ink-1" text={recentRowText(row)} />
+                        {row.amount ? <span className="num text-[13px] text-ink-2">{row.amount}</span> : null}
                       </>
                     )}
                     {row.type === 'noop' && (
                       <>
                         <span className="w-4 flex-none text-center text-ink-3">–</span>
-                        <OverflowText
-                          className="min-w-0 flex-1 text-ink-3"
-                          text={`${row.count > 1 ? `${row.count} 次空跑` : '空跑'} · 目标未变`}
-                        />
+                        <OverflowText className="min-w-0 flex-1 text-ink-3" text={recentRowText(row)} />
                       </>
                     )}
                     {row.type === 'fail' && (
                       <>
                         <span className="w-4 flex-none text-center text-warn">⚠</span>
-                        <OverflowText
-                          className="min-w-0 flex-1 text-ink-1"
-                          text={`${row.count > 1 ? `连续 ${row.count}${row.saturated ? '+' : ''} 次执行失败` : '执行失败'}${row.reason ? ` · 最近：${row.reason}` : ''}`}
-                        />
+                        <OverflowText className="min-w-0 flex-1 text-ink-1" text={recentRowText(row)} />
                       </>
                     )}
                     {row.type === 'terminated' && (
                       <>
                         <span className="w-4 flex-none text-center text-ink-3">■</span>
-                        <OverflowText
-                          className="min-w-0 flex-1 text-ink-2"
-                          text={row.count > 1 ? `已终止 · ${row.count} 次` : '已终止'}
-                        />
+                        <OverflowText className="min-w-0 flex-1 text-ink-2" text={recentRowText(row)} />
                       </>
                     )}
                     {row.type === 'skip' && (
                       <>
                         <span className="w-4 flex-none text-center text-ink-3">–</span>
-                        <OverflowText
-                          className="min-w-0 flex-1 text-ink-2"
-                          text={row.count > 1 ? `连续 ${row.count} 次${row.reason}` : row.reason}
-                        />
+                        <OverflowText className="min-w-0 flex-1 text-ink-2" text={recentRowText(row)} />
                       </>
                     )}
                     {row.type === 'blocked' && (
                       <>
                         <span className="w-4 flex-none text-center text-ink-3">–</span>
-                        <OverflowText
-                          className="min-w-0 flex-1 text-ink-2"
-                          text={`${row.count > 1 ? `${row.count} 次非交易时段` : '非交易时段，未下单'}${row.reason ? ` · ${row.reason}` : ''}`}
-                        />
+                        <OverflowText className="min-w-0 flex-1 text-ink-2" text={recentRowText(row)} />
                       </>
                     )}
                   </div>

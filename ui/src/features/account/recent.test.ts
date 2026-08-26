@@ -1,17 +1,36 @@
 import { expect, test } from 'bun:test'
-import { buildRecentActivity } from './recent'
+import { buildRecentActivity, recentRowText } from './recent'
 import type { AccountActivity, ExecutionActivity, ScheduleSkipActivity } from '../../lib/api/accounts'
 import type { ExecuteRecord } from '../../types/api'
 
-/** 造一条执行记录。kind: 'fill' | 'noop' | 'fail' | 'blocked'。 */
-function rec(id: number, kind: 'fill' | 'noop' | 'fail' | 'blocked'): ExecuteRecord {
+/** 造一条执行记录。kind: 'fill' | 'noop' | 'fail' | 'blocked' | 'partial'。 */
+function rec(id: number, kind: 'fill' | 'noop' | 'fail' | 'blocked' | 'partial'): ExecuteRecord {
   const base = {
     id,
     execution_id: `e${id}`,
     created_at: `2026-07-02T10:${String(id % 60).padStart(2, '0')}:00`,
     raw_result: { account_assets: { total_asset: 1000 } },
   }
-  if (kind === 'fail') return { ...base, is_success: 0, raw_input: {} }
+  if (kind === 'fail') return { ...base, is_success: 0, raw_input: {}, raw_result: { ...base.raw_result, status: 'FAILED' } }
+  if (kind === 'partial') {
+    return {
+      ...base,
+      is_success: 0,
+      raw_input: {},
+      raw_result: {
+        status: 'PARTIAL',
+        error: '4 个品种执行未成功',
+        account_assets: { total_asset: 1000 },
+        symbol_results: {
+          rb2610: { status: 'SUCCEEDED' },
+          TA701: { status: 'FAILED' },
+          c2611: { status: 'FAILED' },
+          m2701: { status: 'FAILED' },
+          ag2610: { status: 'FAILED' },
+        },
+      },
+    }
+  }
   if (kind === 'blocked') {
     return {
       ...base,
@@ -139,4 +158,97 @@ test('进程中断失败记录用人话原因', () => {
   interrupted.raw_result = { error: '上次执行中断，未自动续跑', interrupt_reason: 'process_interrupted' }
   const { rows } = buildRecentActivity(executions([interrupted]))
   expect(rows[0]).toMatchObject({ type: 'fail', reason: '上次执行中断，未自动续跑' })
+})
+
+test('部分成功不与硬失败折叠', () => {
+  const { rows } = buildRecentActivity(executions([rec(3, 'partial'), rec(2, 'fail'), rec(1, 'partial')]))
+  expect(rows.map((row) => row.type)).toEqual(['partial', 'fail', 'partial'])
+})
+
+test('连续部分成功自折，文案两面说到位与未成', () => {
+  const { rows } = buildRecentActivity(executions([rec(3, 'partial'), rec(2, 'partial'), rec(1, 'partial')]), {
+    fetchLimit: 50,
+  })
+  expect(rows).toHaveLength(1)
+  expect(rows[0]).toMatchObject({ type: 'partial', count: 3, reached: 1, failed: 4, reason: '', executionId: 'e3' })
+  expect(recentRowText(rows[0])).toBe('连续 3 次部分执行 · 最近：1 只到位 · 4 只未成')
+})
+
+test('单次部分成功不复读品种计数句', () => {
+  const { rows } = buildRecentActivity(executions([rec(1, 'partial')]))
+  expect(rows[0]).toMatchObject({ type: 'partial', count: 1, reached: 1, failed: 4, reason: '' })
+  expect(recentRowText(rows[0])).toBe('部分执行 · 1 只到位 · 4 只未成')
+})
+
+test('FAILED 且全部品种失败仍是硬失败', () => {
+  const allFail = rec(2, 'fail')
+  allFail.raw_result = {
+    status: 'FAILED',
+    error: '4 个品种执行未成功',
+    symbol_results: {
+      TA701: { status: 'FAILED' },
+      c2611: { status: 'FAILED' },
+      m2701: { status: 'FAILED' },
+      rb2610: { status: 'FAILED' },
+    },
+  }
+  const { rows } = buildRecentActivity(executions([allFail]))
+  expect(rows[0]).toMatchObject({ type: 'fail', reason: '4 个品种执行未成功' })
+})
+
+test('FAILED 但 symbol_results 有成功腿时按部分成功', () => {
+  const mixed = rec(5, 'fail')
+  mixed.raw_result = {
+    status: 'FAILED',
+    error: '2 个品种执行未成功',
+    account_assets: { total_asset: 1000 },
+    symbol_results: {
+      rb2610: { status: 'SUCCEEDED' },
+      TA701: { status: 'FAILED' },
+      c2611: { status: 'NOOP' },
+    },
+  }
+  const { rows } = buildRecentActivity(executions([mixed]))
+  expect(rows[0]).toMatchObject({ type: 'partial', reached: 2, failed: 1, reason: '' })
+  expect(recentRowText(rows[0])).toBe('部分执行 · 2 只到位 · 1 只未成')
+})
+
+test('PARTIAL 无 symbol_results 时从计数句降级，不写到位半句', () => {
+  const legacy = rec(8, 'fail')
+  legacy.raw_result = { status: 'PARTIAL', error: '4 个品种执行未成功' }
+  const { rows } = buildRecentActivity(executions([legacy]))
+  expect(rows[0]).toMatchObject({ type: 'partial', reached: null, failed: 4, reason: '' })
+  expect(recentRowText(rows[0])).toBe('部分执行 · 4 只未成')
+})
+
+test('部分成功保留具体原因、丢掉计数句', () => {
+  const row = rec(6, 'partial')
+  row.raw_result = {
+    ...row.raw_result,
+    error: 'CTP 交易前置断线: 4097',
+  }
+  const { rows } = buildRecentActivity(executions([row]))
+  expect(rows[0]).toMatchObject({ type: 'partial', reason: 'CTP 交易前置断线: 4097' })
+  expect(recentRowText(rows[0])).toBe('部分执行 · 1 只到位 · 4 只未成 · CTP 交易前置断线: 4097')
+})
+
+test('零成功的 PARTIAL 按硬失败', () => {
+  const empty = rec(7, 'fail')
+  empty.raw_result = {
+    status: 'PARTIAL',
+    error: '3 个品种执行未成功',
+    symbol_results: {
+      TA701: { status: 'FAILED' },
+      c2611: { status: 'BLOCKED' },
+      m2701: { status: 'FAILED' },
+    },
+  }
+  const { rows } = buildRecentActivity(executions([empty]))
+  expect(rows[0]).toMatchObject({ type: 'fail' })
+})
+
+test('部分成功与成交交错时按时间保序', () => {
+  const { rows } = buildRecentActivity(executions([rec(4, 'partial'), rec(3, 'partial'), rec(2, 'fill'), rec(1, 'fail')]))
+  expect(rows.map((row) => row.type)).toEqual(['partial', 'fill', 'fail'])
+  expect(rows[0]).toMatchObject({ type: 'partial', count: 2 })
 })

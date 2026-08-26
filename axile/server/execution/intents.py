@@ -238,25 +238,59 @@ def _conflict(
     raise AccountExecutionAlreadyRunningError(message)
 
 
-def _ensure_memory_queued(account: Account, intent: IntentSnapshot) -> None:
+def ensure_memory_from_intent(
+    intent: IntentSnapshot,
+    *,
+    status: ExecutionTaskStatus | None = None,
+    channel: TradeChannel | None = None,
+) -> ExecutionTaskState:
+    """内存没有这张票时按 intent 补一份；已有则原样返回.
+
+    Parameters
+    ----------
+    intent : IntentSnapshot
+        落库快照。
+    status : ExecutionTaskStatus, optional
+        写入内存的状态；默认用 intent 当前状态。终止补内存时应传入
+        ``QUEUED`` / ``RUNNING``，以便随后的 ``request_execution_termination``
+        能迁移并点亮 ``cancel_event``。
+    channel : TradeChannel, optional
+        覆盖渠道（账户行兜底）。
+    """
     from threading import Event
 
     existing = get_execution_task_state(intent.execution_id)
-    if existing is None:
-        set_execution_task_state(
-            intent.execution_id,
-            ExecutionTaskState(
-                execution_id=intent.execution_id,
-                account_id=intent.account_id,
-                execution_kind=intent.kind,
-                status=ExecutionTaskStatus.QUEUED,
-                created_at=intent.created_at,
-                channel=intent.channel or account.trade_channel,
-                algorithm=intent.algorithm,
-                cancel_event=Event(),
-            ),
-        )
-    set_queued_execution(intent.account_id, intent.execution_id)
+    if existing is not None:
+        return existing
+    resolved = intent.status if status is None else status
+    state = ExecutionTaskState(
+        execution_id=intent.execution_id,
+        account_id=intent.account_id,
+        execution_kind=intent.kind,
+        status=resolved,
+        created_at=intent.created_at,
+        started_at=intent.started_at,
+        channel=intent.channel if channel is None else channel,
+        algorithm=intent.algorithm,
+        cancel_event=Event(),
+        cancel_requested_at=intent.cancel_requested_at,
+        cancel_reason=intent.cancel_reason,
+        terminate_mode=intent.terminate_mode,
+    )
+    set_execution_task_state(intent.execution_id, state)
+    if resolved == ExecutionTaskStatus.QUEUED:
+        set_queued_execution(intent.account_id, intent.execution_id)
+    elif resolved in _RUNNING_STATUSES:
+        try_register_running_execution(intent.account_id, intent.execution_id)
+    return state
+
+
+def _ensure_memory_queued(account: Account, intent: IntentSnapshot) -> None:
+    ensure_memory_from_intent(
+        intent,
+        status=ExecutionTaskStatus.QUEUED,
+        channel=intent.channel or account.trade_channel,
+    )
 
 
 def _sync_live(account_id: int) -> None:
@@ -517,7 +551,7 @@ async def promote_intent_to_running(execution_id: str, account_id: int) -> None:
     """
     intent = await get_intent(execution_id)
     if intent is None:
-        return
+        raise IntentNotRunnable(f"intent {execution_id} 不存在")
     if intent.status != ExecutionTaskStatus.QUEUED:
         raise IntentNotRunnable(f"intent {execution_id} 状态为 {intent.status.value}，不能开跑")
 

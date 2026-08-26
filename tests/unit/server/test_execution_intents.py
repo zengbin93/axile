@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from types import SimpleNamespace
 
 import pytest
 from sqlalchemy.exc import IntegrityError
@@ -12,9 +13,10 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from sqlmodel import SQLModel
 
 from axile.common.trade_channel import TradeChannel
-from axile.domain.execution import ExecutionKind, ExecutionTaskStatus
+from axile.domain.execution import ExecutionKind, ExecutionTaskStatus, ExecutionTerminateMode
 from axile.server.db.models import Account
 from axile.server.execution import intents as intents_module
+from axile.server.execution import registry as execution_registry
 from axile.server.execution.intents import (
     IntentSnapshot,
     SubmitResult,
@@ -27,6 +29,7 @@ from axile.server.execution.registry import (
     AccountExecutionAlreadyRunningError,
     clear_queued_execution,
     clear_running_execution,
+    get_execution_task_state,
     get_queued_execution_id,
     try_register_running_execution,
 )
@@ -303,3 +306,104 @@ def test_dashboard_ignores_terminal_progress_frames() -> None:
     assert progress["status"] == "done"
     live_hub.clear_live_account(92)
     assert live_hub.progress_for(92) is None
+
+
+def test_promote_missing_intent_raises(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def _run() -> None:
+        async with _intent_db(monkeypatch):
+            with pytest.raises(intents_module.IntentNotRunnable, match="不存在"):
+                await intents_module.promote_intent_to_running("missing-exec", 1)
+
+    asyncio.run(_run())
+
+
+def test_terminate_queued_intent_without_memory_returns_state(monkeypatch: pytest.MonkeyPatch) -> None:
+    """DB 有 QUEUED 票、内存被拆掉时，终止应落库成功并返回状态，而不是 409。"""
+
+    async def fake_append_execution_event(**_kwargs: object) -> bool:
+        return True
+
+    async def fake_append_terminated_execute_record(**_kwargs: object) -> SimpleNamespace:
+        return SimpleNamespace(id=1, is_success=0)
+
+    monkeypatch.setattr(execution_registry, "append_execution_event", fake_append_execution_event)
+    monkeypatch.setattr(
+        execution_registry,
+        "append_terminated_execute_record",
+        fake_append_terminated_execute_record,
+    )
+
+    async def _run() -> tuple[ExecutionTaskStatus | None, ExecutionTaskStatus | None]:
+        async with _intent_db(monkeypatch):
+            submitted = await submit_intent(1, ExecutionKind.REBALANCE, "manual")
+            assert submitted.execution_id is not None
+            execution_id = submitted.execution_id
+            clear_queued_execution(1, execution_id)
+            execution_registry._clear_execution_task_state(execution_id)
+            assert get_execution_task_state(execution_id) is None
+            try:
+                state = await execution_registry.terminate_running_account_execution(
+                    1,
+                    reason="manual stop",
+                    mode=ExecutionTerminateMode.GRACEFUL,
+                )
+                intent = await get_intent(execution_id)
+                return (
+                    None if state is None else state.status,
+                    None if intent is None else intent.status,
+                )
+            finally:
+                execution_registry.clear_running_execution(1, execution_id)
+                execution_registry._clear_execution_task_state(execution_id)
+
+    memory_status, db_status = asyncio.run(_run())
+    assert memory_status == ExecutionTaskStatus.TERMINATED
+    assert db_status == ExecutionTaskStatus.TERMINATED
+
+
+def test_terminate_terminating_intent_without_memory_sets_cancel_event(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """落库已是 TERMINATING、内存缺失时，补水合并点亮 cancel_event。"""
+
+    async def fake_append_execution_event(**_kwargs: object) -> bool:
+        return True
+
+    monkeypatch.setattr(execution_registry, "append_execution_event", fake_append_execution_event)
+
+    async def _run() -> bool:
+        async with _intent_db(monkeypatch):
+            submitted = await submit_intent(1, ExecutionKind.REBALANCE, "manual")
+            assert submitted.execution_id is not None
+            execution_id = submitted.execution_id
+            assert await cas_intent_status(
+                execution_id,
+                ExecutionTaskStatus.QUEUED,
+                ExecutionTaskStatus.RUNNING,
+            )
+            assert await intents_module.persist_intent_termination(
+                execution_id,
+                expected=ExecutionTaskStatus.RUNNING,
+                target=ExecutionTaskStatus.TERMINATING,
+                reason="stop",
+                mode=ExecutionTerminateMode.GRACEFUL,
+            )
+            clear_queued_execution(1, execution_id)
+            execution_registry._clear_execution_task_state(execution_id)
+            try:
+                state = await execution_registry.terminate_running_account_execution(
+                    1,
+                    reason="stop",
+                    mode=ExecutionTerminateMode.GRACEFUL,
+                )
+                return bool(
+                    state is not None
+                    and state.status == ExecutionTaskStatus.TERMINATING
+                    and state.cancel_event is not None
+                    and state.cancel_event.is_set()
+                )
+            finally:
+                execution_registry.clear_running_execution(1, execution_id)
+                execution_registry._clear_execution_task_state(execution_id)
+
+    assert asyncio.run(_run()) is True

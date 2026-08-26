@@ -154,6 +154,46 @@ test('SSE 显式 pending_execution_id null 会清掉 pending', () => {
   expect(entry?.pendingExecutionId).toBeNull()
 })
 
+test('SSE 上一张票的终态不会抹掉下一张票', () => {
+  useLiveExecStore.setState({ running: new Map() })
+  useLiveExecStore.getState().applyEvent({
+    account_id: 8,
+    execution_id: 'e-next',
+    kind: 'rebalance',
+    phase: 'queued',
+    status: 'queued',
+  })
+  useLiveExecStore.getState().applyEvent({
+    account_id: 8,
+    execution_id: 'e-prev',
+    kind: 'rebalance',
+    phase: 'settling',
+    status: 'done',
+  })
+  const entry = useLiveExecStore.getState().running.get(8)
+  expect(entry?.executionId).toBe('e-next')
+  expect(entry?.status).toBe('queued')
+})
+
+test('SSE 同一张票的终态仍会摘掉账户条目', () => {
+  useLiveExecStore.setState({ running: new Map() })
+  useLiveExecStore.getState().applyEvent({
+    account_id: 8,
+    execution_id: 'e-8',
+    kind: 'rebalance',
+    phase: 'executing',
+    status: 'running',
+  })
+  useLiveExecStore.getState().applyEvent({
+    account_id: 8,
+    execution_id: 'e-8',
+    kind: 'rebalance',
+    phase: 'settling',
+    status: 'done',
+  })
+  expect(useLiveExecStore.getState().running.has(8)).toBe(false)
+})
+
 test('reconcile 显式 pending_execution_id null 会清掉 pending', () => {
   useLiveExecStore.setState({ running: new Map() })
   useLiveExecStore.getState().applyEvent({

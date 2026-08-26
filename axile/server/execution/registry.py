@@ -753,7 +753,11 @@ async def _terminate_one_execution(
     mode: ExecutionTerminateMode,
 ) -> tuple[ExecutionTaskState | None, bool]:
     """先 CAS 落库再改内存；无 intent 行时退回纯内存路径（测试/遗留）。"""
-    from axile.server.execution.intents import get_intent, persist_intent_termination
+    from axile.server.execution.intents import (
+        ensure_memory_from_intent,
+        get_intent,
+        persist_intent_termination,
+    )
 
     intent = await get_intent(execution_id)
     expected = ExecutionTaskStatus.QUEUED if expected_queued else ExecutionTaskStatus.RUNNING
@@ -769,7 +773,12 @@ async def _terminate_one_execution(
         if not persisted:
             latest = await get_intent(execution_id)
             if latest is None or latest.status in _TERMINAL_EXECUTION_TASK_STATES:
-                return get_execution_task_state(execution_id), False
+                state = get_execution_task_state(execution_id)
+                if state is None and latest is not None:
+                    state = ensure_memory_from_intent(latest, status=latest.status)
+                elif state is not None:
+                    state, _ = request_execution_termination(execution_id, reason=reason, mode=mode)
+                return state, False
             if expected_queued and latest.status == ExecutionTaskStatus.RUNNING:
                 persisted = await persist_intent_termination(
                     execution_id,
@@ -779,8 +788,17 @@ async def _terminate_one_execution(
                     mode=mode,
                 )
                 expected_queued = False
+            elif latest.status == ExecutionTaskStatus.TERMINATING:
+                # 落库已是终止中：仍要补内存并点亮 cancel_event。
+                expected_queued = False
+                persisted = True
             if not persisted:
-                return get_execution_task_state(execution_id), False
+                state, _ = request_execution_termination(execution_id, reason=reason, mode=mode)
+                return state, False
+
+    if get_execution_task_state(execution_id) is None and intent is not None:
+        hydrate_status = ExecutionTaskStatus.QUEUED if expected_queued else ExecutionTaskStatus.RUNNING
+        ensure_memory_from_intent(intent, status=hydrate_status)
 
     state, transitioned = request_execution_termination(execution_id, reason=reason, mode=mode)
     if state is None:

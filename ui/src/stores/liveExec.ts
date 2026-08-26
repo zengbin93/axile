@@ -55,7 +55,7 @@ interface LiveExecState {
   running: Map<number, RunEntry>
   /** SSE 连上/重连的权威全量快照，直接替换运行集。 */
   applySnapshot: (frames: RunFrame[]) => void
-  /** SSE 单帧增量：终态移除，否则 upsert。 */
+  /** SSE 单帧增量：终态仅摘同一 execution_id，否则 upsert。 */
   applyEvent: (frame: RunFrame) => void
   /** 仪表盘轮询兜底对账（SSE 断线时仍正确）。 */
   reconcile: (accounts: AccountDashboardItem[]) => void
@@ -100,10 +100,13 @@ export const useLiveExecStore = create<LiveExecState>((set) => ({
   applyEvent: (frame) =>
     set((s) => {
       const next = new Map(s.running)
+      const prev = next.get(frame.account_id)
       if (TERMINAL.has(frame.status)) {
-        next.delete(frame.account_id)
+        // 终态只摘同一张票。A 的晚到 done 不能把已经点亮的 B 整户抹掉。
+        if (prev == null || prev.executionId === frame.execution_id) {
+          next.delete(frame.account_id)
+        }
       } else {
-        const prev = next.get(frame.account_id)
         next.set(frame.account_id, toEntry(frame, Date.now(), prev))
       }
       return { running: next }

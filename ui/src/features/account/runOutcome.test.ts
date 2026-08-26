@@ -6,12 +6,13 @@ test('FAILED + BLOCKED → 非交易时段 toast，不当成操作失败', () =>
   expect(outcome).toEqual({ kind: 'blocked', toast: '非交易时段，未下单' })
 })
 
-test('FAILED 使用服务端 error，缺省才兜底', () => {
+test('FAILED 使用服务端 error，缺省才兜底，不弹 toast', () => {
   expect(describeRunOutcome('exec', 'FAILED', null, 'CTP 断线').kind).toBe('failed')
   expect(describeRunOutcome('exec', 'FAILED', null, 'CTP 断线')).toMatchObject({ error: 'CTP 断线' })
   expect(describeRunOutcome('exec', 'FAILED', null, null)).toMatchObject({
     error: '执行失败，服务端未返回原因',
   })
+  expect('toast' in describeRunOutcome('exec', 'FAILED', 'PARTIAL', '4 个品种执行未成功')).toBe(false)
 })
 
 test('SUCCEEDED 普通调仓仍说已到位', () => {
