@@ -11,6 +11,7 @@ import pytest
 from pydantic import ValidationError
 
 from axile.common.trade_channel import TradeChannel
+from axile.domain.execution import ExecutionKind
 from axile.server.api.routes import account_schedule, account_support
 from axile.server.cron import SCHEDULER_TIMEZONE, combine_cron_triggers, parse_cron_expr
 from axile.server.execution import rebalance as rebalance_execution
@@ -77,14 +78,15 @@ def test_scheduled_rebalance_delegates_on_open_day(monkeypatch: pytest.MonkeyPat
         "evaluate_channel_calendar_moment",
         lambda *_args: _decision(CalendarDecisionStatus.AVAILABLE_OPEN),
     )
-    executions: list[tuple[object, ...]] = []
+    submitted: list[tuple[object, ...]] = []
 
-    async def execute_trade(*args: object) -> None:
-        executions.append(args)
+    async def fake_submit(account_id: object, kind: object, trigger_source: object, **kwargs: object) -> object:
+        submitted.append((account_id, kind, trigger_source, kwargs.get("on_conflict")))
+        return SimpleNamespace(outcome="created", execution_id="exec-1", account_id=account_id)
 
-    monkeypatch.setattr(rebalance_execution, "execute_trade", execute_trade)
+    monkeypatch.setattr("axile.server.execution.intents.submit_intent", fake_submit)
     asyncio.run(execution_scheduler.execute_scheduled_rebalance(7))
-    assert executions == [(7, None, "scheduler")]
+    assert submitted == [(7, ExecutionKind.REBALANCE, "scheduler", "skip")]
 
 
 def test_scheduled_rebalance_skips_closed_day_and_records_reason(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -130,14 +132,15 @@ def test_scheduled_rebalance_is_fail_open_when_calendar_is_unavailable(monkeypat
         "evaluate_channel_calendar_moment",
         lambda *_args: _decision(CalendarDecisionStatus.UNAVAILABLE),
     )
-    executions: list[tuple[object, ...]] = []
+    submitted: list[tuple[object, ...]] = []
 
-    async def execute_trade(*args: object) -> None:
-        executions.append(args)
+    async def fake_submit(account_id: object, kind: object, trigger_source: object, **kwargs: object) -> object:
+        submitted.append((account_id, kind, trigger_source, kwargs.get("on_conflict")))
+        return SimpleNamespace(outcome="created", execution_id="exec-1", account_id=account_id)
 
-    monkeypatch.setattr(rebalance_execution, "execute_trade", execute_trade)
+    monkeypatch.setattr("axile.server.execution.intents.submit_intent", fake_submit)
     asyncio.run(execution_scheduler.execute_scheduled_rebalance(7))
-    assert executions == [(7, None, "scheduler")]
+    assert submitted == [(7, ExecutionKind.REBALANCE, "scheduler", "skip")]
     assert session.added == []
 
 

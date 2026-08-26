@@ -81,7 +81,7 @@ async def empty_positions(
     ):
         try:
             logger.info("清除持仓")
-            await trade_channel_check(account)
+            await trade_channel_check(account, execution_id=tracked_execution_id)
             record = await __empty_positions(
                 account,
                 algorithm=resolved_algorithm,

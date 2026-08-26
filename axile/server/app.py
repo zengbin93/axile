@@ -21,6 +21,7 @@ from axile.server.api.main import api_router
 from axile.server.core.scheduler import scheduler
 from axile.server.core.single_worker import ensure_single_worker
 from axile.server.execution.ctp_channels import prepare_china_channel_accounts, register_china_channel_jobs
+from axile.server.execution.dispatcher import recover_intents_on_startup, shutdown_dispatchers
 from axile.server.execution.live import live_hub
 from axile.server.execution.worker_backend.manager import shutdown_worker_backend_manager
 from axile.server.initial_data import init_scheduler
@@ -220,10 +221,12 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     register_china_channel_jobs(scheduler)
     scheduler.start()
     await init_scheduler()
+    await recover_intents_on_startup()
     await prepare_china_channel_accounts("startup")
     logger.warning("axile已经成功运行!")
     yield
     scheduler.shutdown()
+    await shutdown_dispatchers()
     shutdown_worker_backend_manager()
     logger.warning("axile已经关闭!")
 

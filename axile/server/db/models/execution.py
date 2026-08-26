@@ -250,6 +250,7 @@ class ExecutionTriggerResponse(SQLModel):
     message: str
     execution_id: str
     account_id: int
+    accepted: str = "created"
 
 
 class ExecutionTerminateRequest(SQLModel):

@@ -156,7 +156,7 @@ class AccountBase(SQLModel):
     name: str = Field(sa_column=Column(Text, nullable=False), description="账户名称, 必填")
     market: str = Field(
         sa_column=Column(Text, nullable=False),
-        description="交易市场标识, 例如: A股、加密货币、期货等, 必填",
+        description="交易市场标识, 例如: A股、期货等, 必填",
     )
     trade_channel: TradeChannel = Field(
         sa_column=Column(Text, nullable=False),
@@ -255,7 +255,10 @@ class AccountBase(SQLModel):
     @field_validator("algorithm")
     def _check_algorithm_field(cls, value: Dict[str, Any]) -> Dict[str, Any]:
         """按注册表校验下单算法参数是否越界."""
-        return _validate_algorithm_config(value, "下单算法")
+        validated = _validate_algorithm_config(value, "下单算法")
+        if validated is None:
+            raise ValueError("下单算法不能为空")
+        return validated
 
     @field_validator("empty_positions_algorithm")
     def _check_empty_positions_algorithm_field(cls, value: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
@@ -426,6 +429,9 @@ class AccountDashboardItemPublic(SQLModel):
     running_execution_id: Optional[str] = None
     running_kind: Optional[str] = None
     running_phase: Optional[str] = None
+    running_status: Optional[str] = None
+    pending_execution_id: Optional[str] = None
+    pending_kind: Optional[str] = None
     today_pct: Optional[float] = None
 
 

@@ -41,6 +41,7 @@ from axile.server.execution.registry import (
     AccountExecutionAlreadyRunningError,
     clear_target_refresh,
     get_execution_status,
+    get_queued_execution_id,
     get_running_execution_id,
     terminate_running_account_execution,
     try_register_target_refresh,
@@ -112,7 +113,7 @@ async def execute(session: SessionDep, account_id: int) -> ExecutionTriggerRespo
     await _get_account_or_404(session, account_id)
 
     try:
-        execution_id = await enqueue_execute_trade(account_id)
+        submitted = await enqueue_execute_trade(account_id)
     except AccountExecutionAlreadyRunningError as exc:
         logger.warning(f"执行交易冲突: account_id={account_id}, error={exc}")
         raise HTTPException(
@@ -126,10 +127,17 @@ async def execute(session: SessionDep, account_id: int) -> ExecutionTriggerRespo
             detail="执行失败, 详情请看飞书信息或日志",
         ) from exc
 
+    execution_id = submitted.execution_id
+    if execution_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"账户 {account_id} 已有调仓任务在执行中",
+        )
     return ExecutionTriggerResponse(
-        message="已触发",
+        message="已与等待中的执行合并" if submitted.outcome == "coalesced" else "已触发",
         execution_id=execution_id,
         account_id=account_id,
+        accepted=submitted.outcome if submitted.outcome in {"created", "coalesced"} else "created",
     )
 
 
@@ -253,12 +261,8 @@ async def terminate_account_execution(
     """终止账户当前正在运行的执行任务."""
     await _get_account_or_404(session, account_id)
 
-    running_execution_id = get_running_execution_id(account_id)
-    if running_execution_id is None:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="账户当前没有活跃执行")
-
-    # 先读当前状态，再发 terminate；响应码要反映“请求被受理”还是“其实已经结束”。
-    current_status = await get_execution_status(running_execution_id)
+    running_execution_id = get_running_execution_id(account_id) or get_queued_execution_id(account_id)
+    current_status = None if running_execution_id is None else await get_execution_status(running_execution_id)
     current_task_status = None if current_status is None else cast("ExecutionTaskStatus", current_status["status"])
 
     state = await terminate_running_account_execution(
@@ -364,7 +368,7 @@ async def empty_all_positions(
     delete_job(sched, account_id)
 
     try:
-        execution_id = await enqueue_empty_positions(account_id, algorithm=algorithm)
+        submitted = await enqueue_empty_positions(account_id, algorithm=algorithm)
     except AccountExecutionAlreadyRunningError as exc:
         logger.warning(f"清仓冲突: account_id={account_id}, error={exc}")
         raise HTTPException(
@@ -378,8 +382,15 @@ async def empty_all_positions(
             detail="执行失败, 详情请看飞书信息或日志",
         ) from exc
 
+    execution_id = submitted.execution_id
+    if execution_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"账户 {account_id} 已有调仓任务在执行中",
+        )
     return ExecutionTriggerResponse(
-        message="已触发清仓",
+        message="已与等待中的清仓合并" if submitted.outcome == "coalesced" else "已触发清仓",
         execution_id=execution_id,
         account_id=account_id,
+        accepted=submitted.outcome if submitted.outcome in {"created", "coalesced"} else "created",
     )

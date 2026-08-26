@@ -69,9 +69,34 @@ async def execute_scheduled_rebalance(account_id: int) -> None:
             action="execute_without_calendar",
         ).warning("交易日历不可用，按排程执行")
 
-    from axile.server.execution import rebalance as rebalance_execution
+    from axile.domain.execution import ExecutionKind
+    from axile.server.execution.intents import submit_intent
 
-    await rebalance_execution.execute_trade(account_id, None, "scheduler")
+    result = await submit_intent(
+        account_id,
+        ExecutionKind.REBALANCE,
+        "scheduler",
+        on_conflict="skip",
+    )
+    if result.outcome == "skipped_busy":
+        try:
+            async with SessionLocal() as session:
+                session.add(
+                    ScheduleSkip(
+                        account_id=account_id,
+                        channel=str(channel),
+                        triggered_at=triggered_at.isoformat(),
+                        calendar_id=decision.calendar_id if decision is not None else "",
+                        calendar_day=(decision.day if decision else triggered_at.date()),
+                        calendar_label=decision.label if decision is not None and decision.label else "",
+                        reason_code="BUSY",
+                    )
+                )
+                await session.commit()
+        except Exception:  # noqa: BLE001 - 审计写入失败不能改变 busy 决策
+            account_logger.exception("BUSY 跳过记录写入失败")
+        account_logger.info("排程因已有执行在途跳过")
+        return
 
 
 async def create_job(

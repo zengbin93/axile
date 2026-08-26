@@ -42,7 +42,7 @@ def _build_account(
     return Account(
         id=1,
         name="ctp-testnet-sim",
-        market="加密货币",
+        market="期货",
         trade_channel=TradeChannel.CTP,
         account_config={"api_key": "k", "secret_key": "s", "is_testnet": True},
         is_started=True,
@@ -66,7 +66,7 @@ def _build_portfolio() -> Portfolio:
     return Portfolio(
         id=7,
         name="combo",
-        market="加密货币",
+        market="期货",
         description="desc",
         custom_calc_py_code="def calculate_portfolio(context):\n    return {}\n",
         status="active",

@@ -591,7 +591,10 @@ export function ExecutionDetailPage() {
       {model && <Header m={model} currency={currency} assetLabel={assetTerms.shortLabel} />}
 
       {/* 运行中：顶部给一条确定态阶段条作一瞥总览；逐事件细节仍在下方脊柱。 */}
-      {isLive && running && (
+      {isLive && running && running.status === 'queued' && (
+        <div className="mt-3 text-[14px] text-ink-2">已受理，等待开跑</div>
+      )}
+      {isLive && running && (running.status === 'running' || running.status === 'terminating') && (
         <div className="mt-3">
           <PhaseBar phase={running.phase} />
         </div>

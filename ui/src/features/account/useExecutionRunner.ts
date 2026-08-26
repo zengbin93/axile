@@ -4,6 +4,7 @@ import {
   triggerEmptyPositions,
   triggerExecute,
 } from '@/lib/api/executions'
+import { ApiError } from '@/lib/api/client'
 import { describeRunOutcome, type RunKind } from '@/features/account/runOutcome'
 import { useToastStore } from '@/stores/ui'
 import type { ExecutionTaskStatus } from '@/types/api'
@@ -60,7 +61,8 @@ export function useExecutionRunner(accountId: number, onSettled?: () => void) {
             ? await triggerExecute(accountId)
             : await triggerEmptyPositions(accountId)
         setState({ running: true, kind, executionId: trigger.execution_id })
-        toast(kind === 'exec' ? '已触发执行…' : '已触发清仓…')
+        if (trigger.accepted === 'coalesced') toast('已与等待中的执行合并')
+        else toast(kind === 'exec' ? '已触发执行…' : '已触发清仓…')
 
         stopPoll()
         pollRef.current = setInterval(async () => {
@@ -75,8 +77,14 @@ export function useExecutionRunner(accountId: number, onSettled?: () => void) {
               else toast(outcome.toast)
               settledRef.current?.()
             }
-          } catch {
-            // 轮询瞬时失败忽略，下次再试
+          } catch (err) {
+            if (err instanceof ApiError && err.status === 404) {
+              stopPoll()
+              runningRef.current = false
+              setState({ running: false, kind: null, executionId: null })
+              setError(new Error('执行已结束或中断'))
+              settledRef.current?.()
+            }
           }
         }, 1500)
       } catch (err) {

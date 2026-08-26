@@ -58,6 +58,7 @@ class AccountExecutionAlreadyRunningError(RuntimeError):
 
 
 _running_account_executions: dict[int, str] = {}
+_account_queued_executions: dict[int, str] = {}
 _running_account_asset_refreshes: set[int] = set()
 _running_account_target_refreshes: set[int] = set()
 _running_portfolio_target_refreshes: set[int] = set()
@@ -108,6 +109,31 @@ def try_register_running_execution(account_id: int, execution_id: str) -> bool:
 def _get_running_execution_id(account_id: int) -> str | None:
     with _running_account_executions_lock:
         return _running_account_executions.get(account_id)
+
+
+def set_queued_execution(account_id: int, execution_id: str) -> None:
+    """登记账户当前 QUEUED intent（不占渠道锁）."""
+    with _running_account_executions_lock:
+        _account_queued_executions[account_id] = execution_id
+
+
+def clear_queued_execution(account_id: int, execution_id: str) -> None:
+    """清除账户 QUEUED 槽位（仅当 execution_id 匹配）."""
+    with _running_account_executions_lock:
+        if _account_queued_executions.get(account_id) == execution_id:
+            del _account_queued_executions[account_id]
+
+
+def get_queued_execution_id(account_id: int) -> str | None:
+    """读取账户当前 QUEUED intent id."""
+    with _running_account_executions_lock:
+        return _account_queued_executions.get(account_id)
+
+
+def iter_running_account_executions() -> list[tuple[int, str]]:
+    """返回当前占用渠道锁的 (account_id, execution_id) 列表."""
+    with _running_account_executions_lock:
+        return list(_running_account_executions.items())
 
 
 def clear_running_execution(account_id: int, execution_id: str) -> None:
@@ -499,7 +525,7 @@ def request_execution_termination(
 
 async def get_execution_status(execution_id: str) -> dict[str, object] | None:
     """
-    返回某次 execution 当前的内存态或持久化状态.
+    返回某次 execution 当前的内存态、intent 或持久化结果.
 
     Parameters
     ----------
@@ -514,6 +540,12 @@ async def get_execution_status(execution_id: str) -> dict[str, object] | None:
     state = get_execution_task_state(execution_id)
     if state is not None:
         return _serialize_execution_task_state(state)
+
+    from axile.server.execution.intents import get_intent, serialize_intent
+
+    intent = await get_intent(execution_id)
+    if intent is not None:
+        return serialize_intent(intent)
 
     async with SessionLocal() as session:
         statement = (
@@ -677,22 +709,90 @@ async def terminate_running_account_execution(
     ExecutionTaskState | None
         命中时返回更新后的任务状态；账户当前无运行任务时返回 ``None``。
     """
-    execution_id = _get_running_execution_id(account_id)
-    if execution_id is None:
+    running_id = _get_running_execution_id(account_id)
+    queued_id = get_queued_execution_id(account_id)
+    if running_id is None and queued_id is None:
+        from axile.server.execution.intents import load_active_intents
+
+        intent_running, intent_queued = await load_active_intents(account_id)
+        running_id = None if intent_running is None else intent_running.execution_id
+        queued_id = None if intent_queued is None else intent_queued.execution_id
+    if running_id is None and queued_id is None:
         return None
+
+    primary: ExecutionTaskState | None = None
+    for execution_id, expected_queued in (
+        (running_id, False),
+        (queued_id, True),
+    ):
+        if execution_id is None:
+            continue
+        state, transitioned = await _terminate_one_execution(
+            account_id,
+            execution_id,
+            expected_queued=expected_queued,
+            reason=reason,
+            mode=mode,
+        )
+        if state is not None and primary is None:
+            primary = state
+        _ = transitioned
+
+    from axile.server.execution.intents import sync_account_live
+
+    sync_account_live(account_id)
+    return primary
+
+
+async def _terminate_one_execution(
+    account_id: int,
+    execution_id: str,
+    *,
+    expected_queued: bool,
+    reason: str | None,
+    mode: ExecutionTerminateMode,
+) -> tuple[ExecutionTaskState | None, bool]:
+    """先 CAS 落库再改内存；无 intent 行时退回纯内存路径（测试/遗留）。"""
+    from axile.server.execution.intents import get_intent, persist_intent_termination
+
+    intent = await get_intent(execution_id)
+    expected = ExecutionTaskStatus.QUEUED if expected_queued else ExecutionTaskStatus.RUNNING
+    target = ExecutionTaskStatus.TERMINATED if expected_queued else ExecutionTaskStatus.TERMINATING
+    if intent is not None:
+        persisted = await persist_intent_termination(
+            execution_id,
+            expected=expected,
+            target=target,
+            reason=reason,
+            mode=mode,
+        )
+        if not persisted:
+            latest = await get_intent(execution_id)
+            if latest is None or latest.status in _TERMINAL_EXECUTION_TASK_STATES:
+                return get_execution_task_state(execution_id), False
+            if expected_queued and latest.status == ExecutionTaskStatus.RUNNING:
+                persisted = await persist_intent_termination(
+                    execution_id,
+                    expected=ExecutionTaskStatus.RUNNING,
+                    target=ExecutionTaskStatus.TERMINATING,
+                    reason=reason,
+                    mode=mode,
+                )
+                expected_queued = False
+            if not persisted:
+                return get_execution_task_state(execution_id), False
 
     state, transitioned = request_execution_termination(execution_id, reason=reason, mode=mode)
     if state is None:
-        return None
-
-    # 仅在本次真发生迁移时落副作用：重复 terminate 不再重复写「受理」事件，
-    # 也不再对 QUEUED→TERMINATED 任务二次 finalize（否则重复写 terminate record 与终止事件）。
-    if transitioned:
-        await _append_termination_requested_event(state, reason=reason, mode=mode)
-        if _is_terminated_before_start(state):
-            await _finalize_terminated_queued_execution(state, reason=reason, mode=mode)
-
-    return state
+        return None, False
+    if expected_queued or _is_terminated_before_start(state):
+        clear_queued_execution(account_id, execution_id)
+    if not transitioned:
+        return state, False
+    await _append_termination_requested_event(state, reason=reason, mode=mode)
+    if _is_terminated_before_start(state):
+        await _finalize_terminated_queued_execution(state, reason=reason, mode=mode)
+    return state, True
 
 
 def transition_execution_task_to_running(execution_id: str) -> ExecutionTaskState | None:

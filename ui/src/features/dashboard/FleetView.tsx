@@ -5,7 +5,7 @@ import { NumberTicker } from '@/components/ui/NumberTicker'
 import { Sparkline } from '@/components/viz/Sparkline'
 import { ExposureBar } from '@/components/viz/ExposureBar'
 import { INTEGRITY_ICON, INTEGRITY_TEXT_CLASS, INTEGRITY_ORDER, channelLabel } from '@/features/dashboard/display'
-import { phaseLabel, runVerb } from '@/features/dashboard/execProgress'
+import { isExecutingStatus, phaseLabel, runVerb } from '@/features/dashboard/execProgress'
 import { integrityOf, gateOf, stateVerdict, holdingText, type Integrity } from '@/lib/derive'
 import { displayCurrencyUnit } from '@/lib/format'
 import { useRunning } from '@/stores/liveExec'
@@ -63,7 +63,9 @@ function FleetCard({
         <span className="text-xs text-ink-3">{portfolioName ?? (item.portfolio_id ? `组合 #${item.portfolio_id}` : '未绑定组合')}</span>
         {live ? (
           <span className="ml-auto inline-flex items-center gap-1.5 text-[13.5px] font-semibold text-accent">
-            ⟳ 正在{runVerb(live.kind)} · {phaseLabel(live.phase)}
+            {isExecutingStatus(live.status)
+              ? `⟳ 正在${runVerb(live.kind)} · ${phaseLabel(live.phase)}${live.pendingExecutionId ? ' · 结束后再调一次' : ''}`
+              : '等待执行'}
           </span>
         ) : (
           <span className={`ml-auto inline-flex items-center gap-1.5 text-[13.5px] font-semibold ${INTEGRITY_TEXT_CLASS[state.integrity]}`}>

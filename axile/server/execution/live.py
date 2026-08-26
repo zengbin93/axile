@@ -35,6 +35,9 @@ _PHASE_INDEX: dict[str, int] = {name: i for i, name in enumerate(PHASE_ORDER)}
 
 # 运行态状态标记。
 STATUS_RUNNING = "running"
+STATUS_QUEUED = "queued"
+STATUS_TERMINATING = "terminating"
+_LIVE_STATUS: frozenset[str] = frozenset({STATUS_QUEUED, STATUS_RUNNING, STATUS_TERMINATING})
 _TERMINAL_STATUS: frozenset[str] = frozenset({"done", "failed", "terminated"})
 
 # 事件类型 → 阶段标签；未列出者（如终止请求/确认）不推进阶段，仅作为事件转发。
@@ -100,6 +103,8 @@ class _Progress:
     phase: str
     status: str
     updated_at: str
+    pending_execution_id: str | None = None
+    pending_kind: str | None = None
 
 
 class ExecutionLiveHub:
@@ -172,6 +177,8 @@ class ExecutionLiveHub:
                 phase=eff_phase,
                 status=eff_status,
                 updated_at=now_str(),
+                pending_execution_id=None if cur is None else cur.pending_execution_id,
+                pending_kind=None if cur is None else cur.pending_kind,
             )
             self._progress[account_id] = prog
 
@@ -191,16 +198,80 @@ class ExecutionLiveHub:
         if terminal_status is not None:
             self._schedule_evict(account_id, execution_id)
 
-    def snapshot(self) -> list[dict[str, object]]:
-        """返回当前所有仍在运行的账户进度（SSE 首帧 / 冷渲染用）。"""
+    def publish_slots(
+        self,
+        *,
+        account_id: int,
+        execution_id: str,
+        kind: str | None,
+        status: str,
+        phase: str | None,
+        pending_execution_id: str | None,
+        pending_kind: str | None,
+    ) -> None:
+        """由 intent 层推送账户 headline + pending（入队当下即可被 SSE 看见）."""
         with self._lock:
-            return [self._as_dict(p) for p in self._progress.values() if p.status == STATUS_RUNNING]
+            cur = self._progress.get(account_id)
+            keep_phase = (
+                cur.phase
+                if cur is not None and cur.execution_id == execution_id and cur.phase not in {"queued", ""}
+                else (phase or "triggered")
+            )
+            if status == STATUS_QUEUED:
+                keep_phase = "queued"
+            prog = _Progress(
+                execution_id=execution_id,
+                account_id=account_id,
+                kind=kind,
+                phase=keep_phase,
+                status=status,
+                updated_at=now_str(),
+                pending_execution_id=pending_execution_id,
+                pending_kind=pending_kind,
+            )
+            self._progress[account_id] = prog
+        frame: dict[str, object] = {
+            "type": "event",
+            "account_id": account_id,
+            "execution_id": execution_id,
+            "kind": kind,
+            "phase": keep_phase,
+            "status": status,
+            "pending_execution_id": pending_execution_id,
+            "pending_kind": pending_kind,
+            "ts": now_str(),
+        }
+        self._fanout(frame)
+
+    def snapshot(self) -> list[dict[str, object]]:
+        """返回当前所有仍在运行或排队的账户进度（SSE 首帧 / 冷渲染用）。"""
+        with self._lock:
+            return [self._as_dict(p) for p in self._progress.values() if p.status in _LIVE_STATUS]
 
     def progress_for(self, account_id: int) -> dict[str, object] | None:
-        """返回某账户的当前进度镜像（无则 ``None``）。"""
+        """返回某账户的当前进度镜像（含刚结束的短窗口）；无则 ``None``。"""
         with self._lock:
             prog = self._progress.get(account_id)
             return self._as_dict(prog) if prog is not None else None
+
+    def clear_live_account(self, account_id: int) -> None:
+        """账户槽位已空时立刻摘掉进度镜像，并向订阅者发终态帧."""
+        with self._lock:
+            cur = self._progress.pop(account_id, None)
+        if cur is None:
+            return
+        frame: dict[str, object] = {
+            "type": "event",
+            "account_id": account_id,
+            "execution_id": cur.execution_id,
+            "kind": cur.kind,
+            "phase": cur.phase,
+            "status": "done",
+            "pending_execution_id": None,
+            "pending_kind": None,
+            "ts": now_str(),
+        }
+        self._fanout(frame)
 
     @contextlib.asynccontextmanager
     async def subscribe(self) -> AsyncIterator[asyncio.Queue[dict[str, object]]]:
@@ -226,6 +297,8 @@ class ExecutionLiveHub:
             "kind": prog.kind,
             "phase": prog.phase,
             "status": prog.status,
+            "pending_execution_id": prog.pending_execution_id,
+            "pending_kind": prog.pending_kind,
             "ts": prog.updated_at,
         }
 

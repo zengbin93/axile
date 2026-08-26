@@ -389,7 +389,7 @@ async def _run_account_rebalance(
 
     account = await _load_rebalance_account(account_id, logger)
     logger.info("执行任务")
-    await trade_channel_check(account)
+    await trade_channel_check(account, execution_id=execution_id)
     request = await _resolve_rebalance_request(account, execution_id, logger)
 
     normalized_target = _normalize_rebalance_target(account, request.curr_target)

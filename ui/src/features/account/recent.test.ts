@@ -126,3 +126,17 @@ test('连续 BLOCKED 折叠成一行', () => {
   expect(rows).toHaveLength(1)
   expect(rows[0]).toMatchObject({ type: 'blocked', count: 2 })
 })
+
+test('BUSY 排程跳过用人话原因', () => {
+  const busy = skip(9, '2026-08-26T10:00:00+08:00')
+  busy.reason_code = 'BUSY'
+  const { rows } = buildRecentActivity([busy])
+  expect(rows[0]).toMatchObject({ type: 'skip', reason: '已有执行在途，本次排程跳过' })
+})
+
+test('进程中断失败记录用人话原因', () => {
+  const interrupted = rec(4, 'fail')
+  interrupted.raw_result = { error: '上次执行中断，未自动续跑', interrupt_reason: 'process_interrupted' }
+  const { rows } = buildRecentActivity(executions([interrupted]))
+  expect(rows[0]).toMatchObject({ type: 'fail', reason: '上次执行中断，未自动续跑' })
+})

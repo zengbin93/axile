@@ -7,6 +7,8 @@ interface AccountActionsProps {
   name: string
   isStarted: boolean
   running: boolean
+  /** 真正在下单：禁用清仓。queued 时仍可清仓。 */
+  executing: boolean
   /** 终止请求在途：按钮切「终止中…」并禁用，防连点；由 useTerminateAction 驱动。 */
   terminating: boolean
   onExec: () => void
@@ -80,7 +82,7 @@ export function AccountActions(props: AccountActionsProps) {
   const terminateTip = (
     <div className="flex flex-col gap-0.5">
       <span>停下正在进行的调仓。</span>
-      <span className="text-ink-2">已成交的部分不会回滚。</span>
+      <span className="text-ink-2">已成交的部分不会回滚。排队里的下一次也会取消。</span>
     </div>
   )
 
@@ -150,8 +152,8 @@ export function AccountActions(props: AccountActionsProps) {
         <button
           className={`${BTN} border-bad/40 text-bad hover:bg-bad/10 disabled:opacity-40`}
           onClick={askClear}
-          disabled={props.running}
-          title={props.running ? '执行中，无法清仓' : undefined}
+          disabled={props.executing}
+          title={props.executing ? '执行中，无法清仓' : undefined}
         >
           ⚠ 一键清仓
         </button>

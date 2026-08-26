@@ -140,8 +140,13 @@ def test_run_execution_task_uses_state_termination_fallbacks(monkeypatch) -> Non
             cancel_failed_order_ids=["order-9"],
         )
 
+    async def fake_mark(*_a: object, **_k: object) -> None:
+        return None
+
     monkeypatch.setattr(execution_lifecycle, "append_terminated_execute_record", fake_append_terminated_execute_record)
     monkeypatch.setattr(execution_lifecycle, "append_execution_event", fake_append_execution_event)
+    monkeypatch.setattr(execution_lifecycle, "mark_intent_finished", fake_mark)
+    monkeypatch.setattr(execution_lifecycle, "sync_account_live", lambda *_a, **_k: None)
     monkeypatch.setattr(execution_lifecycle, "now_str", lambda: "2026-03-27T11:00:05")
 
     try:
@@ -215,58 +220,110 @@ class _FakeAccountSession:
         return self._account
 
 
-def test_enqueue_empty_positions_registers_clear_task(monkeypatch) -> None:
-    """入队清仓应登记 QUEUED 的 CLEAR_POSITIONS 任务并占用账户运行位。"""
-    account = SimpleNamespace(id=71, trade_channel=TradeChannel.CTP)
+def test_enqueue_empty_positions_delegates_to_submit_intent(monkeypatch) -> None:
+    """清仓入队应走 submit_intent，不再直接占渠道锁。"""
     captured: dict[str, object] = {}
 
-    async def fake_run_empty_positions_task(
+    async def fake_submit(
         account_id: int,
-        execution_id: str,
-        algorithm: dict[str, object] | None,
-    ) -> None:
-        captured["task_args"] = (account_id, execution_id, algorithm)
+        kind: ExecutionKind,
+        trigger_source: str,
+        payload: dict[str, object] | None = None,
+        on_conflict: str = "raise",
+    ) -> execution_lifecycle.SubmitResult:
+        captured["args"] = (account_id, kind, trigger_source, payload, on_conflict)
+        return execution_lifecycle.SubmitResult(outcome="created", execution_id="exec-clear-1", account_id=account_id)
 
-    monkeypatch.setattr(execution_lifecycle, "SessionLocal", lambda: _FakeAccountSession(account))
-    monkeypatch.setattr(execution_lifecycle, "resolve_execution_algorithm_name", lambda *_a, **_k: "SINGLE-MAKER")
-    monkeypatch.setattr(execution_lifecycle, "_run_empty_positions_task", fake_run_empty_positions_task)
+    monkeypatch.setattr(execution_lifecycle, "submit_intent", fake_submit)
+    result = asyncio.run(execution_lifecycle.enqueue_empty_positions(71, algorithm={"method": "SINGLE-MAKER"}))
+    assert result.execution_id == "exec-clear-1"
+    assert captured["args"] == (
+        71,
+        ExecutionKind.CLEAR_POSITIONS,
+        "empty_positions",
+        {"method": "SINGLE-MAKER"},
+        "raise",
+    )
 
-    async def _run() -> str:
-        execution_id = await execution_lifecycle.enqueue_empty_positions(71, algorithm={"method": "SINGLE-MAKER"})
-        # 让入队后创建的后台任务获得一次调度机会，以便捕获其入参。
-        await asyncio.sleep(0)
-        return execution_id
 
-    execution_id = asyncio.run(_run())
+def test_run_execution_task_persists_intent_on_success(monkeypatch) -> None:
+    """后台任务成功后应把 intent 标终态。"""
+    execution_id = "exec-intent-finish-1"
+    state = execution_registry.ExecutionTaskState(
+        execution_id=execution_id,
+        account_id=1,
+        execution_kind=ExecutionKind.REBALANCE,
+        status=ExecutionTaskStatus.QUEUED,
+        created_at="2026-03-27T12:00:00",
+        channel=TradeChannel.CTP,
+        algorithm="SINGLE-MAKER",
+    )
+    execution_registry.set_execution_task_state(execution_id, state)
+    marked: dict[str, object] = {}
+
+    async def fake_mark(execution_id: str, status: ExecutionTaskStatus, **kwargs: object) -> None:
+        marked["execution_id"] = execution_id
+        marked["status"] = status
+        marked.update(kwargs)
+
+    async def fake_runner(_tracked: str) -> SimpleNamespace:
+        return SimpleNamespace(id=9, is_success=1, raw_result={"status": "SUCCEEDED"})
+
+    monkeypatch.setattr(execution_lifecycle, "mark_intent_finished", fake_mark)
+    monkeypatch.setattr(execution_lifecycle, "sync_account_live", lambda *_a, **_k: None)
+    monkeypatch.setattr(execution_lifecycle, "now_str", lambda: "2026-03-27T12:00:05")
+
     try:
-        state = execution_registry.get_execution_task_state(execution_id)
-        running_id = execution_registry.get_running_execution_id(71)
+        asyncio.run(
+            execution_lifecycle._run_execution_task(
+                account_id=1,
+                execution_id=execution_id,
+                execution_kind=ExecutionKind.REBALANCE,
+                runner=fake_runner,
+            )
+        )
     finally:
         execution_registry._clear_execution_task_state(execution_id)
-        execution_registry.clear_running_execution(71, execution_id)
 
-    assert execution_id
-    assert running_id == execution_id
-    assert state is not None
-    assert state.execution_kind == ExecutionKind.CLEAR_POSITIONS
-    assert state.status == ExecutionTaskStatus.QUEUED
-    assert state.channel == TradeChannel.CTP
-    assert state.algorithm == "SINGLE-MAKER"
-    assert captured["task_args"] == (71, execution_id, {"method": "SINGLE-MAKER"})
+    assert marked["execution_id"] == execution_id
+    assert marked["status"] == ExecutionTaskStatus.SUCCEEDED
 
 
-def test_enqueue_empty_positions_conflicts_when_running(monkeypatch) -> None:
-    """账户已有运行中的执行时，入队清仓应抛出冲突错误。"""
-    account = SimpleNamespace(id=72, trade_channel=TradeChannel.CTP)
+def test_run_execution_task_retry_keeps_queued_slot(monkeypatch) -> None:
+    """渠道锁占用时应保留 QUEUED 槽，好让终止仍能找到这张票."""
+    execution_id = "exec-retry-queued-1"
+    state = execution_registry.ExecutionTaskState(
+        execution_id=execution_id,
+        account_id=1,
+        execution_kind=ExecutionKind.REBALANCE,
+        status=ExecutionTaskStatus.QUEUED,
+        created_at="2026-03-27T12:00:00",
+        channel=TradeChannel.CTP,
+        algorithm="SINGLE-MAKER",
+    )
+    execution_registry.set_execution_task_state(execution_id, state)
+    execution_registry.set_queued_execution(1, execution_id)
 
-    monkeypatch.setattr(execution_lifecycle, "SessionLocal", lambda: _FakeAccountSession(account))
+    async def fake_runner(_tracked: str) -> SimpleNamespace:
+        raise execution_lifecycle.IntentNotRunnable("账户渠道锁占用中", retry=True)
 
-    execution_registry.try_register_running_execution(72, "exec-running-72")
+    monkeypatch.setattr(execution_lifecycle, "sync_account_live", lambda *_a, **_k: None)
+
     try:
-        with pytest.raises(execution_registry.AccountExecutionAlreadyRunningError):
-            asyncio.run(execution_lifecycle.enqueue_empty_positions(72))
+        with pytest.raises(execution_lifecycle.IntentNotRunnable):
+            asyncio.run(
+                execution_lifecycle._run_execution_task(
+                    account_id=1,
+                    execution_id=execution_id,
+                    execution_kind=ExecutionKind.REBALANCE,
+                    runner=fake_runner,
+                )
+            )
+        assert execution_registry.get_queued_execution_id(1) == execution_id
+        assert execution_registry.get_execution_task_state(execution_id) is not None
     finally:
-        execution_registry.clear_running_execution(72, "exec-running-72")
+        execution_registry.clear_queued_execution(1, execution_id)
+        execution_registry._clear_execution_task_state(execution_id)
 
 
 def test_timeout_termination_is_distinguishable_from_operator(monkeypatch) -> None:

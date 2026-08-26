@@ -26,7 +26,7 @@ from axile.server.db.models import Account, AccountControlCounterDelta, AccountC
 def _build_account() -> Account:
     return Account(
         name="ctp-testnet-sim",
-        market="加密货币",
+        market="期货",
         trade_channel=TradeChannel.CTP,
         account_control_preset="default",
         account_control_override=None,

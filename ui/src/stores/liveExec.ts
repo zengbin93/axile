@@ -17,10 +17,12 @@ import type { AccountDashboardItem } from '@/types/api'
 export interface RunEntry {
   executionId: string
   kind: string | null
-  /** 阶段键（见 execProgress.PHASES）。 */
+  /** 阶段键（见 execProgress.PHASES）；queued 时为 `queued`。 */
   phase: string
-  /** running | done | failed | terminated。 */
+  /** queued | running | terminating | done | failed | terminated。 */
   status: string
+  pendingExecutionId: string | null
+  pendingKind: string | null
   /** 本地最近更新时刻（ms），供对账 STALE 守卫。 */
   updatedAt: number
 }
@@ -32,6 +34,8 @@ export interface RunFrame {
   kind: string | null
   phase: string
   status: string
+  pending_execution_id?: string | null
+  pending_kind?: string | null
 }
 
 /** 终态标记：命中即视为「已结束」，从运行集移除。 */
@@ -39,6 +43,12 @@ const TERMINAL = new Set(['done', 'failed', 'terminated'])
 
 /** 轮询对账时，超过该时长（ms）未收到 SSE 更新的条目才允许被「未在跑」的轮询清除。 */
 const STALE_MS = 6500
+
+const ACTIVE_STATUS_ORDER: Record<string, number> = {
+  queued: 0,
+  running: 1,
+  terminating: 2,
+}
 
 interface LiveExecState {
   /** account_id → 在途执行；不在跑的账户不出现在表中。 */
@@ -51,12 +61,25 @@ interface LiveExecState {
   reconcile: (accounts: AccountDashboardItem[]) => void
 }
 
-function toEntry(frame: RunFrame, updatedAt: number): RunEntry {
+function pendingOf(
+  incoming: { pending_execution_id?: string | null; pending_kind?: string | null },
+  prev?: RunEntry,
+): { id: string | null; kind: string | null } {
+  if ('pending_execution_id' in incoming) {
+    return { id: incoming.pending_execution_id ?? null, kind: incoming.pending_kind ?? null }
+  }
+  return { id: prev?.pendingExecutionId ?? null, kind: prev?.pendingKind ?? null }
+}
+
+function toEntry(frame: RunFrame, updatedAt: number, prev?: RunEntry): RunEntry {
+  const pending = pendingOf(frame, prev)
   return {
     executionId: frame.execution_id,
-    kind: frame.kind,
+    kind: frame.kind ?? (prev?.executionId === frame.execution_id ? prev.kind : null),
     phase: frame.phase,
     status: frame.status,
+    pendingExecutionId: pending.id,
+    pendingKind: pending.kind,
     updatedAt,
   }
 }
@@ -80,11 +103,8 @@ export const useLiveExecStore = create<LiveExecState>((set) => ({
       if (TERMINAL.has(frame.status)) {
         next.delete(frame.account_id)
       } else {
-        // SSE 帧 kind 常为 null（tap 不便引 registry）；同一执行沿用已知 kind，避免
-        // 清仓类被误显为「执行」。kind 由轮询兜底回填（见 reconcile）。
         const prev = next.get(frame.account_id)
-        const kind = frame.kind ?? (prev?.executionId === frame.execution_id ? prev.kind : null)
-        next.set(frame.account_id, { ...toEntry(frame, Date.now()), kind })
+        next.set(frame.account_id, toEntry(frame, Date.now(), prev))
       }
       return { running: next }
     }),
@@ -96,18 +116,27 @@ export const useLiveExecStore = create<LiveExecState>((set) => ({
       for (const a of accounts) {
         const existing = next.get(a.account_id)
         if (a.running_execution_id) {
+          const status = a.running_status ?? 'running'
           if (!existing || existing.executionId !== a.running_execution_id) {
-            // 缺失或换了执行：以轮询快照播种。
             next.set(a.account_id, {
               executionId: a.running_execution_id,
               kind: a.running_kind ?? null,
-              phase: a.running_phase ?? 'triggered',
-              status: 'running',
+              phase: a.running_phase ?? (status === 'queued' ? 'queued' : 'triggered'),
+              status,
+              pendingExecutionId: a.pending_execution_id ?? null,
+              pendingKind: a.pending_kind ?? null,
               updatedAt: now,
             })
-          } else if (existing.kind == null && a.running_kind != null) {
-            // 同一执行、SSE 已点亮但 kind 未知：用轮询已知的 kind 回填（阶段仍以 SSE 为准）。
-            next.set(a.account_id, { ...existing, kind: a.running_kind })
+          } else {
+            const advancesStatus = (ACTIVE_STATUS_ORDER[status] ?? -1) > (ACTIVE_STATUS_ORDER[existing.status] ?? -1)
+            next.set(a.account_id, {
+              ...existing,
+              kind: existing.kind ?? a.running_kind ?? null,
+              phase: advancesStatus ? (a.running_phase ?? existing.phase) : existing.phase,
+              status: advancesStatus ? status : existing.status,
+              pendingExecutionId: pendingOf(a, existing).id,
+              pendingKind: pendingOf(a, existing).kind,
+            })
           }
         } else if (existing && now - existing.updatedAt > STALE_MS) {
           // 轮询说没在跑，且该条目已陈旧（SSE 多半断了）→ 清除。新鲜条目不动，避免

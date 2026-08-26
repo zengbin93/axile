@@ -20,7 +20,7 @@ def _build_account(*, account_id: int, name: str) -> Account:
     return Account(
         id=account_id,
         name=name,
-        market="加密货币",
+        market="期货",
         trade_channel=TradeChannel.CTP,
         account_control_preset="default",
         account_control_override=None,

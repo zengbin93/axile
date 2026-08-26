@@ -25,7 +25,7 @@ __all__ = [
 ]
 
 
-async def trade_channel_check(account: Account) -> None:
+async def trade_channel_check(account: Account, execution_id: str | None = None) -> None:
     """
     实盘执行前的渠道依赖预检.
 
@@ -37,6 +37,8 @@ async def trade_channel_check(account: Account) -> None:
     ----------
     account : Account
         待执行的账户对象。
+    execution_id : str | None, optional
+        当前 execution 标识，写入错误记录时一并关联。
 
     Raises
     ------
@@ -48,5 +50,6 @@ async def trade_channel_check(account: Account) -> None:
         await execution_records.append_error_execute_record(
             account_id=account.id,
             msg=msg,
+            execution_id=execution_id,
         )
         raise ValueError(msg)

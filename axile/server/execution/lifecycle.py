@@ -3,7 +3,6 @@
 import asyncio
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from threading import Event
 
 import loguru
 
@@ -24,7 +23,6 @@ from axile.server.core.db import SessionLocal
 from axile.server.db.models import (
     Account,
     ExecuteRecord,
-    new_execution_id,
     now_str,
 )
 from axile.server.error_notifications import send_feishu_error
@@ -33,26 +31,29 @@ from axile.server.execution.execution_account_control import (
     build_account_control_guard,
     flush_account_control_records,
 )
-from axile.server.execution.execution_algorithms import resolve_execution_algorithm_name
 from axile.server.execution.execution_summaries import (
     build_execution_summary_from_symbol_results,
     build_symbol_reconciliation,
     count_orders_from_symbol_results,
 )
 from axile.server.execution.factory import create_executor_instance
+from axile.server.execution.intents import (
+    IntentNotRunnable,
+    SubmitResult,
+    mark_intent_finished,
+    submit_intent,
+    sync_account_live,
+)
 from axile.server.execution.records import append_terminated_execute_record
 from axile.server.execution.registry import (
-    AccountExecutionAlreadyRunningError,
     ExecutionTaskState,
+    clear_queued_execution,
     clear_running_execution,
     create_termination_controller,
     execution_record_output_error,
     execution_record_output_status,
     finalize_execution_task_state,
     get_execution_task_state,
-    set_execution_task_state,
-    transition_execution_task_to_running,
-    try_register_running_execution,
     update_execution_task_state,
 )
 from axile.server.execution_audit import append_execution_artifact, append_execution_event
@@ -638,20 +639,29 @@ async def _run_execution_task(
     None
         该函数仅推进任务状态，不返回结果。
     """
-    state = transition_execution_task_to_running(execution_id)
+    state = get_execution_task_state(execution_id)
     if state is None or state.status == ExecutionTaskStatus.TERMINATED:
+        clear_queued_execution(account_id, execution_id)
         clear_running_execution(account_id, execution_id)
         finalize_execution_task_state(execution_id)
+        await mark_intent_finished(execution_id, ExecutionTaskStatus.TERMINATED)
         return
 
+    keep_queued = False
     try:
         record = await runner(execution_id)
+        status = _resolve_completion_status(record)
+        finished_at = now_str()
         _mark_execution_finished(
             execution_id,
-            status=_resolve_completion_status(record),
-            finished_at=now_str(),
+            status=status,
+            finished_at=finished_at,
             record=record,
         )
+        await mark_intent_finished(execution_id, status, finished_at=finished_at)
+    except IntentNotRunnable as exc:
+        keep_queued = exc.retry
+        raise
     except ExecutionTerminated as exc:
         current_state = get_execution_task_state(execution_id)
         requested_at = None if current_state is None else current_state.cancel_requested_at
@@ -666,16 +676,25 @@ async def _run_execution_task(
             finished_at=finished_at,
             termination=termination,
         )
+        await mark_intent_finished(execution_id, ExecutionTaskStatus.TERMINATED, finished_at=finished_at)
     except Exception as e:
+        finished_at = now_str()
         _mark_execution_finished(
             execution_id,
             status=ExecutionTaskStatus.FAILED,
-            finished_at=now_str(),
+            finished_at=finished_at,
             error=e,
         )
+        await mark_intent_finished(execution_id, ExecutionTaskStatus.FAILED, error=str(e), finished_at=finished_at)
     finally:
-        clear_running_execution(account_id, execution_id)
-        finalize_execution_task_state(execution_id)
+        if keep_queued:
+            # 渠道锁被刷新占用：intent 仍是 QUEUED，不能拆内存槽，否则终止会 409。
+            sync_account_live(account_id)
+        else:
+            clear_queued_execution(account_id, execution_id)
+            clear_running_execution(account_id, execution_id)
+            finalize_execution_task_state(execution_id)
+            sync_account_live(account_id)
 
 
 async def _run_execute_trade_task(account_id: int, execution_id: str, trigger_source: str) -> None:
@@ -714,9 +733,9 @@ async def _run_execute_trade_task(account_id: int, execution_id: str, trigger_so
     )
 
 
-async def enqueue_execute_trade(account_id: int, trigger_source: str = "manual") -> str:
+async def enqueue_execute_trade(account_id: int, trigger_source: str = "manual") -> SubmitResult:
     """
-    为账户创建并跟踪一个后台 execution 任务.
+    为账户提交一张调仓 intent.
 
     Parameters
     ----------
@@ -727,38 +746,17 @@ async def enqueue_execute_trade(account_id: int, trigger_source: str = "manual")
 
     Returns
     -------
-    str
-        新创建的 execution ID。
+    SubmitResult
+        准入结果（新建或合并）。
 
     Raises
     ------
     ValueError
         当目标账户不存在时抛出。
     AccountExecutionAlreadyRunningError
-        当账户已有执行任务在运行时抛出。
+        当冲突表拒绝本次调仓时抛出。
     """
-    account = await _require_account(account_id)
-
-    execution_id = new_execution_id()
-    if not try_register_running_execution(account_id, execution_id):
-        msg = f"账户 {account_id} 已有调仓任务在执行中"
-        loguru.logger.warning(msg)
-        raise AccountExecutionAlreadyRunningError(msg)
-
-    task = asyncio.create_task(_run_execute_trade_task(account_id, execution_id, trigger_source))
-    state = ExecutionTaskState(
-        execution_id=execution_id,
-        account_id=account_id,
-        execution_kind=ExecutionKind.REBALANCE,
-        status=ExecutionTaskStatus.QUEUED,
-        created_at=now_str(),
-        channel=account.trade_channel,
-        algorithm=resolve_execution_algorithm_name(account, ExecutionKind.REBALANCE),
-        task=task,
-        cancel_event=Event(),
-    )
-    set_execution_task_state(execution_id, state)
-    return execution_id
+    return await submit_intent(account_id, ExecutionKind.REBALANCE, trigger_source)
 
 
 async def _run_empty_positions_task(
@@ -805,9 +803,9 @@ async def _run_empty_positions_task(
 async def enqueue_empty_positions(
     account_id: int,
     algorithm: dict[str, object] | None = None,
-) -> str:
+) -> SubmitResult:
     """
-    为账户创建并跟踪一个后台清仓任务.
+    为账户提交一张清仓 intent.
 
     Parameters
     ----------
@@ -818,39 +816,19 @@ async def enqueue_empty_positions(
 
     Returns
     -------
-    str
-        新创建的 execution ID。
+    SubmitResult
+        准入结果（新建、合并或替换排队中的调仓）。
 
     Raises
     ------
     ValueError
         当目标账户不存在时抛出。
     AccountExecutionAlreadyRunningError
-        当账户已有执行任务在运行时抛出。
+        当冲突表拒绝本次清仓时抛出。
     """
-    account = await _require_account(account_id)
-
-    execution_id = new_execution_id()
-    if not try_register_running_execution(account_id, execution_id):
-        msg = f"账户 {account_id} 已有调仓任务在执行中"
-        loguru.logger.warning(msg)
-        raise AccountExecutionAlreadyRunningError(msg)
-
-    task = asyncio.create_task(_run_empty_positions_task(account_id, execution_id, algorithm))
-    state = ExecutionTaskState(
-        execution_id=execution_id,
-        account_id=account_id,
-        execution_kind=ExecutionKind.CLEAR_POSITIONS,
-        status=ExecutionTaskStatus.QUEUED,
-        created_at=now_str(),
-        channel=account.trade_channel,
-        algorithm=resolve_execution_algorithm_name(
-            account,
-            ExecutionKind.CLEAR_POSITIONS,
-            algorithm_override=algorithm,
-        ),
-        task=task,
-        cancel_event=Event(),
+    return await submit_intent(
+        account_id,
+        ExecutionKind.CLEAR_POSITIONS,
+        "empty_positions",
+        payload=None if algorithm is None else dict(algorithm),
     )
-    set_execution_task_state(execution_id, state)
-    return execution_id

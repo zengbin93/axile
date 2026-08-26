@@ -24,6 +24,7 @@ from axile.server.db.models import (
     ScheduleSkip,
     ScheduleSkipActivity,
 )
+from axile.server.db.models.schedule import ScheduleSkipReason
 from axile.server.trading_calendar import (
     CalendarDecisionStatus,
     CalendarUnavailableReason,
@@ -235,7 +236,7 @@ async def account_activity(
             calendar_id=row.calendar_id,
             calendar_day=row.calendar_day,
             calendar_label=row.calendar_label,
-            reason_code=cast("Literal['CALENDAR.CLOSED', 'CALENDAR.NO_NIGHT_SESSION']", row.reason_code),
+            reason_code=cast("ScheduleSkipReason", row.reason_code),
         )
         for row in skip_rows
     )

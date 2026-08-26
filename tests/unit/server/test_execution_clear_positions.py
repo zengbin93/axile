@@ -364,7 +364,7 @@ def test_empty_positions_lock_acquired_reuses_tracked_execution(
     fake_record = SimpleNamespace(id=303, is_success=1)
     captured: dict[str, object] = {}
 
-    async def fake_trade_channel_check(_account: Account) -> None:
+    async def fake_trade_channel_check(_account: Account, execution_id: str | None = None) -> None:
         return None
 
     async def fake_inner_empty_positions(

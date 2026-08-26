@@ -72,6 +72,10 @@ async def run_rebalance_via_backend(*, request: RebalanceBackendRequest) -> Exec
     ExecuteRecord
         本次调仓对应的执行记录。
     """
+    if request.execution_id is not None:
+        from axile.server.execution.intents import promote_intent_to_running
+
+        await promote_intent_to_running(request.execution_id, cast("int", request.account.id))
     backend_kind = resolve_execution_backend_kind(request.account.trade_channel)
     if backend_kind == ExecutionBackendKind.PROCESS:
         return await _run_rebalance_via_worker_process(request)
@@ -385,6 +389,10 @@ async def run_clear_positions_via_backend(
     ExecuteRecord
         本次清仓对应的执行记录。
     """
+    if request.execution_id:
+        from axile.server.execution.intents import promote_intent_to_running
+
+        await promote_intent_to_running(request.execution_id, cast("int", request.account.id))
     backend_kind = resolve_execution_backend_kind(request.account.trade_channel)
     if backend_kind == ExecutionBackendKind.PROCESS:
         return await _run_clear_positions_via_worker_process(request)

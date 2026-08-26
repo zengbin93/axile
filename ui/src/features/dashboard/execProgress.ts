@@ -24,9 +24,20 @@ export function phaseIndex(phase: string | null | undefined): number {
   return i < 0 ? 0 : i
 }
 
-/** 阶段键 → 进行时文案（用于「正在执行 · X」）。 */
+/** 阶段键 → 进行时文案（用于「正在执行 · X」）。queued 不是五步之一。 */
 export function phaseLabel(phase: string | null | undefined): string {
+  if (phase === 'queued') return '等待开跑'
   return PHASES[phaseIndex(phase)]?.label ?? '触发'
+}
+
+/** 是否处于真正下单（阶段条、禁用清仓/刷新）。 */
+export function isExecutingStatus(status: string | null | undefined): boolean {
+  return status === 'running' || status === 'terminating'
+}
+
+/** 是否有未完成票（主槽切终止、显示忙态）。 */
+export function isBusyStatus(status: string | null | undefined): boolean {
+  return status === 'queued' || isExecutingStatus(status)
 }
 
 /** 执行种类 → 动词（区分「执行 / 清仓」的进行态标题）。 */

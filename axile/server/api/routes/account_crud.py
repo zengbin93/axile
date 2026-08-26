@@ -40,6 +40,7 @@ from axile.server.execution.live import live_hub
 from axile.server.execution.registry import (
     execution_record_output_status,
     get_execution_task_state,
+    get_queued_execution_id,
     get_running_execution_id,
 )
 from axile.server.execution.scheduler import create_job, delete_job
@@ -470,19 +471,40 @@ async def account_dashboard(session: SessionDep, sched: SchedDep) -> AccountDash
         job = sched.get_job(str(account_id))  # type: ignore[no-untyped-call]
         next_run = getattr(job, "next_run_time", None) if job is not None else None
 
-        # 在途执行快照：以并发锁为「是否在跑」的唯一真源，阶段取自实时中枢。让前端能
-        # 看见调度器/他端发起的执行（而非仅本地 runner 猜测）。
+        # 在途快照：优先 live hub 的 queued/running/terminating 帧（含阶段），
+        # 没有在途帧时退回内存槽位。刚结束的终态帧不填 running_execution_id。
+        progress = live_hub.progress_for(account_id)
+        if progress is not None and progress.get("status") not in {"queued", "running", "terminating"}:
+            progress = None
         running_execution_id = get_running_execution_id(account_id)
+        queued_execution_id = get_queued_execution_id(account_id)
         running_kind: str | None = None
         running_phase: str | None = None
-        if running_execution_id is not None:
+        running_status: str | None = None
+        pending_execution_id: str | None = None
+        pending_kind: str | None = None
+        if progress is not None:
+            running_execution_id = cast("str", progress.get("execution_id"))
+            running_kind = cast("str | None", progress.get("kind"))
+            running_phase = cast("str | None", progress.get("phase"))
+            running_status = cast("str | None", progress.get("status"))
+            pending_execution_id = cast("str | None", progress.get("pending_execution_id"))
+            pending_kind = cast("str | None", progress.get("pending_kind"))
+        elif running_execution_id is not None:
             task_state = get_execution_task_state(running_execution_id)
             running_kind = task_state.execution_kind.value if task_state is not None else None
-            progress = live_hub.progress_for(account_id)
-            if progress is not None and progress.get("execution_id") == running_execution_id:
-                running_phase = cast("str | None", progress.get("phase"))
-            if running_phase is None:
-                running_phase = "triggered"
+            running_status = "terminating" if task_state is not None and task_state.status.value == "TERMINATING" else "running"
+            running_phase = "triggered"
+            pending_execution_id = queued_execution_id
+            if queued_execution_id is not None:
+                queued_state = get_execution_task_state(queued_execution_id)
+                pending_kind = queued_state.execution_kind.value if queued_state is not None else None
+        elif queued_execution_id is not None:
+            task_state = get_execution_task_state(queued_execution_id)
+            running_execution_id = queued_execution_id
+            running_kind = task_state.execution_kind.value if task_state is not None else None
+            running_status = "queued"
+            running_phase = "queued"
 
         last_output_status = None if latest is None else execution_record_output_status(latest.raw_result)
         target_snapshot = targets_by_account.get(account_id)
@@ -520,6 +542,9 @@ async def account_dashboard(session: SessionDep, sched: SchedDep) -> AccountDash
                 running_execution_id=running_execution_id,
                 running_kind=running_kind,
                 running_phase=running_phase,
+                running_status=running_status,
+                pending_execution_id=pending_execution_id,
+                pending_kind=pending_kind,
                 today_pct=today_pct,
             )
         )

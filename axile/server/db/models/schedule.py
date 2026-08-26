@@ -11,7 +11,12 @@ from sqlmodel import Field, SQLModel
 from axile.server.db.models.base import now_str
 from axile.server.db.models.execution import ExecuteRecordPublic
 
-type ScheduleSkipReason = Literal["CALENDAR.CLOSED", "CALENDAR.NO_NIGHT_SESSION", "CALENDAR.SESSION_CLOSED"]
+type ScheduleSkipReason = Literal[
+    "CALENDAR.CLOSED",
+    "CALENDAR.NO_NIGHT_SESSION",
+    "CALENDAR.SESSION_CLOSED",
+    "BUSY",
+]
 
 
 class ScheduleSkip(SQLModel, table=True):

@@ -548,7 +548,7 @@ def test_account_rebalance_persists_same_normalized_target_used_by_trade(
     async def fake_load(_account_id: int, _logger: object) -> Account:
         return account
 
-    async def fake_check(_account: Account) -> None:
+    async def fake_check(_account: Account, execution_id: str | None = None) -> None:
         return None
 
     async def fake_resolve(_account: Account, _execution_id: str | None, _logger: object):

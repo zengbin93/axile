@@ -12,6 +12,7 @@ import { usePolling } from '@/lib/hooks/usePolling'
 import { useTargetSnapshot } from '@/lib/hooks/useTargetSnapshot'
 import { currencyOf, positionsOfAssets } from '@/lib/derive'
 import { useDomainStore } from '@/stores/domain'
+import { isExecutingStatus } from '@/features/dashboard/execProgress'
 import { useRunning } from '@/stores/liveExec'
 
 /**
@@ -75,8 +76,8 @@ export function AccountHoldingsPage() {
             loading={weights.loading}
             recalculating={weights.recalculating}
             error={weights.recalculateError}
-            disabled={!!running || portfolioId == null}
-            disabledReason={running ? '账户正在执行，结束后可重新计算' : portfolioId == null ? '账户未绑定组合' : undefined}
+            disabled={isExecutingStatus(running?.status) || portfolioId == null}
+            disabledReason={isExecutingStatus(running?.status) ? '账户正在执行，结束后可重新计算' : portfolioId == null ? '账户未绑定组合' : undefined}
             onRecalculate={() => void weights.recalculate()}
           />
         </div>

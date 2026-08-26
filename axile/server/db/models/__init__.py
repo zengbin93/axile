@@ -58,6 +58,7 @@ from axile.server.db.models.execution import (
     ListResponsePage,
     Message,
 )
+from axile.server.db.models.execution_intent import ExecutionIntent
 from axile.server.db.models.portfolio import (
     Portfolio,
     PortfolioBase,
@@ -124,6 +125,7 @@ __all__ = [
     "PortfolioAccountListPublic",
     "ExecuteRecordBase",
     "ExecuteRecord",
+    "ExecutionIntent",
     "ExecuteRecordPublic",
     "ExecuteRecordListPublic",
     "ExecutionEventBase",

@@ -34,6 +34,7 @@ def test_migration_history_is_linear() -> None:
         "0004_account_asset_snapshot.py",
         "0005_target_weight_snapshot.py",
         "0006_drop_trading_calendar.py",
+        "0007_execution_intent.py",
     ]
     initial = _load_migration(migration_paths[0])
     calendar = _load_migration(migration_paths[1])
@@ -41,6 +42,7 @@ def test_migration_history_is_linear() -> None:
     account_asset_snapshot = _load_migration(migration_paths[3])
     target_weight_snapshot = _load_migration(migration_paths[4])
     drop_trading_calendar = _load_migration(migration_paths[5])
+    execution_intent = _load_migration(migration_paths[6])
     assert initial.revision == "0001"
     assert initial.down_revision is None
     assert calendar.revision == "0002"
@@ -53,6 +55,8 @@ def test_migration_history_is_linear() -> None:
     assert target_weight_snapshot.down_revision == "0004"
     assert drop_trading_calendar.revision == "0006"
     assert drop_trading_calendar.down_revision == "0005"
+    assert execution_intent.revision == "0007"
+    assert execution_intent.down_revision == "0006"
 
 
 def test_account_asset_snapshot_migration_backfills_execution_assets() -> None:

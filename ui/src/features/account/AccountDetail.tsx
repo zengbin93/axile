@@ -25,7 +25,7 @@ import {
 } from '@/features/account/holdingPreview'
 import { ScheduleSummary, ScheduleTimeline, ScheduleTimelineSkeleton } from '@/features/account/ScheduleTimeline'
 import { accountAssetTerms, INTEGRITY_ICON, INTEGRITY_TEXT_CLASS, STATUS_TEXT_CLASS, channelLabel } from '@/features/dashboard/display'
-import { phaseLabel, runVerb } from '@/features/dashboard/execProgress'
+import { isExecutingStatus, phaseLabel, runVerb } from '@/features/dashboard/execProgress'
 import { useRunning } from '@/stores/liveExec'
 import { useDomainStore } from '@/stores/domain'
 import { algorithmRefOf, describeAlgorithmRef } from '@/features/setup/algorithms'
@@ -218,19 +218,22 @@ export function AccountDetail({
     off_symbol_count: comparisonReady && quantities != null ? plan.off : item.off_symbol_count,
   })
   const gate = gateOf({ ...item, is_started: isStarted })
-  // 执行态：服务端 live 优先，runner 仅首帧前乐观；驱动主句「正在执行/清仓」与生命体征。
-  const isRunning = !!(live || runner.running)
+  // 执行态：服务端 live 优先，runner 仅首帧前乐观。queued ≠ 正在下单。
+  const isBusy = !!(live || runner.running)
+  const isExecuting = live != null && isExecutingStatus(live.status)
+  const isQueued = isBusy && !isExecuting
   // 终止动作 + 防连点：点后乐观进「终止中…」并禁用按钮，执行离开运行态即复位。
-  const terminateAction = useTerminateAction(accountId, isRunning, activity.refresh)
+  const terminateAction = useTerminateAction(accountId, isBusy, activity.refresh)
   const { terminating, terminate } = terminateAction
   const runKind = live?.kind ?? (runner.kind === 'clear' ? 'clear' : 'rebalance')
-  // 主句只跟离散态变（进出执行、执行↔清仓、启停空闲句）；phase 不并入，避免连刷糊墨。
-  const statusHeadline = isRunning
+  const statusHeadline = isExecuting
     ? `正在${runVerb(runKind)}`
-    : `${INTEGRITY_ICON[state.integrity]} ${state.text}`
+    : isQueued
+      ? '等待执行'
+      : `${INTEGRITY_ICON[state.integrity]} ${state.text}`
   // 「需要看看」兑现：空闲且上次失败时，状态行点进最近失败执行详情（与近期失败行同构）。
   const lastFailExecId =
-    !isRunning && state.integrity === 'off' && item.last_output_status !== 'BLOCKED'
+    !isBusy && state.integrity === 'off' && item.last_output_status !== 'BLOCKED'
       ? (recordList.find((r) => r.raw_result?.status !== 'BLOCKED' && r.is_success !== 1 && r.execution_id)?.execution_id ?? null)
       : null
   const statusNavId = runningExecId ?? lastFailExecId
@@ -297,7 +300,7 @@ export function AccountDetail({
     }
   }
   const onRefreshAssets = async () => {
-    if (refreshingAssets || isRunning) return
+    if (refreshingAssets || isExecuting) return
     setRefreshingAssets(true)
     setActionError(null)
     try {
@@ -334,7 +337,8 @@ export function AccountDetail({
           <AccountActions
             name={item.name}
             isStarted={isStarted}
-            running={isRunning}
+            running={isBusy}
+            executing={isExecuting}
             terminating={terminating}
             onExec={() => runner.start('exec')}
             onClear={() => runner.start('clear')}
@@ -358,8 +362,8 @@ export function AccountDetail({
          */}
         <div
           className={`relative mt-[18px] inline-flex min-w-0 items-center gap-2 text-[23px] font-[640] tracking-tight transition-[padding-left] duration-[440ms] ease-[cubic-bezier(.4,0,.2,1)] motion-reduce:transition-none ${
-            isRunning ? 'pl-[18px]' : 'pl-0'
-          } ${isRunning ? 'text-accent' : INTEGRITY_TEXT_CLASS[state.integrity]}${
+            isBusy ? 'pl-[18px]' : 'pl-0'
+          } ${isBusy ? 'text-accent' : INTEGRITY_TEXT_CLASS[state.integrity]}${
             statusNavId ? ' cursor-pointer hover:opacity-80' : ''
           }`}
           role={statusNavId ? 'link' : undefined}
@@ -380,7 +384,7 @@ export function AccountDetail({
           {/* 圆点绝对定位、落进 padding-left 腾出的 18px 里：进执行时靠容器 padding 过渡把正文
               「温和推开」而非被撞开；圆点自身不占 flow、不推挤。my-auto 竖直居中（走 margin，
               不占 transform，避让 exec-breathe 的 scale）。 */}
-          {isRunning && (
+          {isBusy && (
             <span className="exec-dot absolute left-0 top-0 bottom-0 my-auto h-2.5 w-2.5" aria-hidden />
           )}
           {/*
@@ -394,13 +398,13 @@ export function AccountDetail({
             tone="prose"
             fluid
             className="min-w-0"
-            textClassName={isRunning ? 'text-accent exec-flow' : INTEGRITY_TEXT_CLASS[state.integrity]}
+            textClassName={isExecuting ? 'text-accent exec-flow' : isBusy ? 'text-accent' : INTEGRITY_TEXT_CLASS[state.integrity]}
           />
           {/* 相位副标：外壳 phase-grow 让入场 footprint 宽度 0→内容（grid-fr，箭头随 reflow 挪、
               进执行那刻不被瞬时占位顶跳）；内层 phase-enter 管 opacity 淡入。相位词逐步推进走
               label 档日记换字（触发→冻结输入→算目标→下单→对账），宽变由内层 InkRewrite fluid 自理。
               首帧不播、纯 opacity 无 blur，不与主句流光抢；「·」静态钉住只重写相位词。 */}
-          {isRunning && (
+          {isExecuting && (
             <span className="phase-grow">
               <span className="phase-enter inline-flex min-w-0 items-center gap-1 overflow-hidden whitespace-nowrap text-[15px] font-medium text-ink-2">
                 <span aria-hidden>·</span>
@@ -408,13 +412,16 @@ export function AccountDetail({
               </span>
             </span>
           )}
+          {isExecuting && live?.pendingExecutionId ? (
+            <span className="text-[15px] font-medium text-ink-2">· 结束后再调一次</span>
+          ) : null}
           {/* 可点暗示：执行中用生命体征箭头；失败「需要看看」用静止 →，色随父级琥珀。
               箭头纯 inline、只跟随 reflow（不再挂 transform-FLIP）：上游全走 CSS 布局过渡
               （槽宽 + 圆点 padding），箭头随之连续挪——单一范式，无采样、无自激。
               exec-arrow 自体漂移只在 running 时挂在此层。 */}
           {statusNavId && (
             <span
-              className={`inline-block text-[15px] font-medium ${isRunning ? 'exec-arrow' : ''}`}
+              className={`inline-block text-[15px] font-medium ${isExecuting ? 'exec-arrow' : ''}`}
               aria-hidden
             >
               →
@@ -429,14 +436,14 @@ export function AccountDetail({
         <div className="mt-6 border-t border-line pt-4">
           <div className="flex items-center gap-1.5 text-[13px] text-ink-2">
             <span>{assetTerms.fullLabel}</span>
-            <Tooltip content={isRunning ? '执行中，结束后可刷新账户权益' : '从交易渠道刷新账户权益'}>
+            <Tooltip content={isExecuting ? '执行中，结束后可刷新账户权益' : '从交易渠道刷新账户权益'}>
               <span className="inline-flex">
                 <button
                   type="button"
                   onClick={onRefreshAssets}
-                  disabled={isRunning || refreshingAssets}
+                  disabled={isExecuting || refreshingAssets}
                   aria-label={refreshingAssets ? '正在刷新账户权益' : '刷新账户权益'}
-                  title={isRunning ? '执行中，无法刷新账户权益' : undefined}
+                  title={isExecuting ? '执行中，无法刷新账户权益' : undefined}
                   className="grid h-6 w-6 cursor-pointer place-items-center rounded-md text-ink-3 hover:bg-fill hover:text-ink-1 disabled:cursor-default disabled:opacity-40 disabled:hover:bg-transparent"
                 >
                   <RefreshCw
@@ -545,8 +552,8 @@ export function AccountDetail({
               loading={weights.loading}
               recalculating={weights.recalculating}
               error={weights.recalculateError}
-              disabled={isRunning || portfolioId == null}
-              disabledReason={isRunning ? '账户正在执行，结束后可重新计算' : portfolioId == null ? '账户未绑定组合' : undefined}
+              disabled={isExecuting || portfolioId == null}
+              disabledReason={isExecuting ? '账户正在执行，结束后可重新计算' : portfolioId == null ? '账户未绑定组合' : undefined}
               variant="compact"
               onRecalculate={() => void weights.recalculate()}
             />

@@ -285,8 +285,13 @@ export interface AccountDashboardItem {
   running_execution_id?: string | null
   /** 在途执行种类（rebalance/clear_positions 等）；无在途执行为 null。 */
   running_kind?: string | null
-  /** 在途执行阶段（triggered/snapshot/planning/executing/settling）；无在途执行为 null。 */
+  /** 在途执行阶段（triggered/snapshot/planning/executing/settling/queued）；无在途执行为 null。 */
   running_phase?: string | null
+  /** queued | running | terminating；无在途为 null。 */
+  running_status?: 'queued' | 'running' | 'terminating' | null
+  /** running 背后排队的下一张票；没有 pending 为 null。 */
+  pending_execution_id?: string | null
+  pending_kind?: string | null
   /** 「今日」权益涨跌百分比（服务端按自然日锚定：昨收/今开为基准）；无基准为 null。 */
   today_pct?: number | null
 }
@@ -471,6 +476,7 @@ export interface ExecutionTrigger {
   message: string
   execution_id: string
   account_id: number
+  accepted?: 'created' | 'coalesced'
 }
 
 /** 执行状态轮询响应，对应 `ExecutionStatusPublic`。 */

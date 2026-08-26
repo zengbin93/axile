@@ -75,9 +75,15 @@ export function PortfolioDetailPage() {
       onConfirm: async () => {
         setActionError(null)
         try {
-          await triggerExecute(boundAccount.account_id)
-          toast(`已通知 ${boundAccount.name} 立即调仓`)
+          const trigger = await triggerExecute(boundAccount.account_id)
+          if (trigger.accepted === 'coalesced') toast(`已与 ${boundAccount.name} 等待中的执行合并`)
+          else toast(`已通知 ${boundAccount.name} 立即调仓`)
         } catch (e) {
+          const message = e instanceof Error ? e.message : String(e)
+          if (message.includes('已有调仓')) {
+            setActionError(new Error('账户正在清仓或无法再排队，请稍后再试'))
+            return
+          }
           setActionError(e instanceof Error ? e : new Error(String(e)))
         }
       },

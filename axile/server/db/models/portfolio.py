@@ -2,11 +2,12 @@
 
 from typing import TYPE_CHECKING, Optional
 
-from pydantic import ConfigDict, field_validator
+from pydantic import field_validator
 from sqlalchemy import Column, Connection, Text, event
 from sqlalchemy.ext.asyncio import AsyncAttrs
 from sqlalchemy.orm import Mapper, relationship
 from sqlmodel import Field, Relationship, SQLModel
+from sqlmodel._compat import SQLModelConfig
 
 from axile.server.db.models.base import now_str
 
@@ -27,7 +28,7 @@ class PortfolioBase(SQLModel):
     name: str = Field(sa_column=Column(Text, nullable=False), description="投资组合名称, 必填")
     market: str = Field(
         sa_column=Column(Text, nullable=False),
-        description="交易市场标识, 例如: A股、加密货币、期货等, 必填",
+        description="交易市场标识, 例如: A股、期货等, 必填",
     )
     description: Optional[str] = Field(
         default=None,
@@ -71,7 +72,7 @@ class Portfolio(PortfolioBase, AsyncAttrs, table=True):
 class PortfolioUpdate(SQLModel):
     """组合的局部更新载荷."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = SQLModelConfig(extra="forbid")
 
     name: Optional[str] = None
     market: Optional[str] = None
@@ -92,7 +93,7 @@ class PortfolioUpdate(SQLModel):
 class PortfolioCreate(PortfolioBase):
     """创建组合时使用的载荷."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = SQLModelConfig(extra="forbid")
 
 
 class ValidateCustomCalcRequest(SQLModel):
