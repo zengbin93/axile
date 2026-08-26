@@ -173,6 +173,40 @@ def test_symbol_tca_slippage_liquidity_fee_and_tree() -> None:
     assert order["trades"][0]["fee"] == 0.5
 
 
+def test_symbol_tca_counts_zero_trades_when_order_filled_without_trade_records() -> None:
+    """订单已成但无成交明细时，TCA 仍按明细笔数为 0，不把 filled_volume 假装成一笔成交."""
+    result = {
+        "account_assets": {"total_asset": 1000.0, "positions": [_short("TA701", 3.0)], "source": "real"},
+        "symbol_results": {
+            "TA701": {
+                "status": "SUCCEEDED",
+                "target_volume": -3.0,
+                "first_tick": {"bid_price": 5517.0, "ask_price": 5518.0, "last_price": 5517.5},
+                "orders": [
+                    {
+                        "order_id": "o1",
+                        "direction": "OrderDirection.SELL",
+                        "order_type": "OrderType.LIMIT",
+                        "price": 5516.0,
+                        "avg_price": 5516.0,
+                        "volume": 1.0,
+                        "filled_volume": 1.0,
+                        "status": "已成交",
+                    }
+                ],
+            }
+        },
+    }
+    before = {"total_asset": 1000.0, "positions": [_short("TA701", 2.0)], "source": "real"}
+    row = build_symbol_reconciliation(result, before)["symbols"][0]
+
+    assert row["tca"]["n_orders"] == 1
+    assert row["tca"]["n_trades"] == 0
+    assert abs(row["tca"]["fill_ratio"] - 1.0) < 1e-9
+    assert row["orders"][0]["filled_volume"] == 1.0
+    assert row["orders"][0]["trades"] == []
+
+
 def test_reconciliation_close_to_zero_target() -> None:
     """清仓：target≈0，卖出后 after≈0 视为到位。"""
     result = {

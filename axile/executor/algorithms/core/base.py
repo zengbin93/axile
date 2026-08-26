@@ -13,7 +13,11 @@ from pydantic import BaseModel
 from axile.common.trade_channel import TradeChannel
 from axile.executor.models.execution_result import AlgorithmResult
 from axile.executor.models.unified_account_assets import PositionDirection, UnifiedAccountAssets
-from axile.executor.models.unified_callback import OrderUpdateCallback, PriceDataCallback
+from axile.executor.models.unified_callback import (
+    OrderUpdateCallback,
+    PriceDataCallback,
+    TradeRecordCallback,
+)
 from axile.executor.models.unified_order import OrderDirection, OrderType, TradeRecord, UnifiedOrder
 from axile.executor.models.unified_price import UnifiedPriceData
 
@@ -208,12 +212,20 @@ class ExecutorProtocol(Protocol):
         """注册价格数据回调函数."""
         ...
 
+    def register_trade_callback(self, callback: TradeRecordCallback) -> None:
+        """注册成交记录回调函数."""
+        ...
+
     def unregister_order_callback(self, callback: OrderUpdateCallback) -> None:
         """注销订单更新回调函数."""
         ...
 
     def unregister_price_callback(self, callback: PriceDataCallback) -> None:
         """注销价格数据回调函数."""
+        ...
+
+    def unregister_trade_callback(self, callback: TradeRecordCallback) -> None:
+        """注销成交记录回调函数."""
         ...
 
     def is_monitoring(self) -> bool:

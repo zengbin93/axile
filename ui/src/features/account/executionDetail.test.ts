@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'bun:test'
 
-import { buildExecutionDetail } from './executionDetail'
+import { buildExecutionDetail, formatOrderTradeCounts } from './executionDetail'
 import type { ExecutionArtifact, ExecutionEvent, ExecutionStatus } from '@/types/api'
 
 /** 造一条最小可用的执行事件。 */
@@ -137,6 +137,23 @@ describe('buildExecutionDetail · 头条', () => {
     expect(events.filter((e) => e.status === 'ERROR')).toHaveLength(2)
     expect(header.failedCount).toBe(1)
     expect(header.success).toBe(false)
+  })
+})
+
+describe('formatOrderTradeCounts', () => {
+  it('有成交明细时数笔', () => {
+    expect(formatOrderTradeCounts(1, 1, true)).toBe('1 单 1 成交')
+    expect(formatOrderTradeCounts(1, 1, true, ' · ')).toBe('1 单 · 1 成交')
+  })
+
+  it('订单已成但明细缺失时不喊 0 成交', () => {
+    expect(formatOrderTradeCounts(1, 0, true)).toBe('1 单')
+    expect(formatOrderTradeCounts(1, 0, true, ' · ')).toBe('1 单')
+  })
+
+  it('确实没成交时才写 0 成交', () => {
+    expect(formatOrderTradeCounts(1, 0, false)).toBe('1 单 0 成交')
+    expect(formatOrderTradeCounts(1, 0, false, ' · ')).toBe('1 单 · 0 成交')
   })
 })
 

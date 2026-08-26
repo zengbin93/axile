@@ -15,7 +15,7 @@ from axile.executor.algorithms.defaults.ctp_target_pos_task.impl import (
 from axile.executor.constants.order_status import OrderStatus
 from axile.executor.models.execution_result import ExecutionStatus
 from axile.executor.models.unified_account_assets import Position, PositionDirection, UnifiedAccountAssets
-from axile.executor.models.unified_order import OrderDirection, OrderType, UnifiedOrder
+from axile.executor.models.unified_order import OrderDirection, OrderType, TradeRecord, UnifiedOrder
 from axile.executor.models.unified_price import UnifiedPriceData
 
 
@@ -30,6 +30,7 @@ class _FuturesExecutor:
         self.short_yesterday = 1
         self.order_callbacks: list[object] = []
         self.price_callbacks: list[object] = []
+        self.trade_callbacks: list[object] = []
         self.orders: list[UnifiedOrder] = []
 
     def _position(self, direction: PositionDirection, today: int, yesterday: int) -> Position:
@@ -111,6 +112,17 @@ class _FuturesExecutor:
         self.orders.append(order)
         for callback in tuple(self.order_callbacks):
             callback(order)  # type: ignore[operator]
+        trade = TradeRecord(
+            trade_id=f"{order.order_id}-t1",
+            symbol=self.symbol,
+            order_id=order.order_id,
+            trade_time="2026-08-23T09:00:00",
+            trade_volume=float(volume),
+            trade_price=float(price),
+            trade_value=float(volume) * float(price),
+        )
+        for callback in tuple(self.trade_callbacks):
+            callback(trade)  # type: ignore[operator]
         return order
 
     def register_order_callback(self, callback: object) -> None:
@@ -124,6 +136,12 @@ class _FuturesExecutor:
 
     def unregister_price_callback(self, callback: object) -> None:
         self.price_callbacks.remove(callback)
+
+    def register_trade_callback(self, callback: object) -> None:
+        self.trade_callbacks.append(callback)
+
+    def unregister_trade_callback(self, callback: object) -> None:
+        self.trade_callbacks.remove(callback)
 
     def get_pending_orders(self) -> list[UnifiedOrder]:
         return []
@@ -162,6 +180,10 @@ def test_target_pos_task_uses_same_close_then_open_flow(channel: TradeChannel) -
     assert executor.short_yesterday == executor.short_today == 0
     assert executor.long_today == 1
     assert executor.order_callbacks == []
+    assert executor.trade_callbacks == []
+    assert len(result.trades) == len(executor.orders) == 3
+    assert result.memory["trades_generated"] == 3
+    assert [trade.order_id for trade in result.trades] == [order.order_id for order in executor.orders]
 
 
 def test_target_pos_task_params_expose_execution_defaults() -> None:

@@ -208,8 +208,8 @@ def setup_order_tracker(
 
     Notes
     -----
-    这里把回调注册集中到单个入口，是为了让算法实现只关注“下单和等待”，而不必
-    在每个算法里重复处理回调绑定与追单初始化细节。
+    订单与成交回调始终注册：CTP 等渠道的成交手数在报单回报上，成交明细在成交
+    回报上，漏挂成交回调会让算法结果 ``trades`` 永远为空。价格回调仅追单时注册。
     """
     tracker = OrderTracker(
         executor=executor,
@@ -218,9 +218,7 @@ def setup_order_tracker(
     )
 
     executor.register_order_callback(tracker.on_order_update)
-    register_trade_callback = getattr(executor, "register_trade_callback", None)
-    if callable(register_trade_callback):
-        register_trade_callback(tracker.on_trade_record)
+    executor.register_trade_callback(tracker.on_trade_record)
 
     # 追单逻辑依赖最新盘口；若算法启动时已经拿到一份快照，这里先放入 tracker，
     # 避免在第一笔订单尚未收到价格回调前就失去追单判断依据。
@@ -261,12 +259,10 @@ def teardown_order_tracker(
     except Exception as e:
         executor.logger.warning(f"注销订单回调失败: {e}")
 
-    unregister_trade_callback = getattr(executor, "unregister_trade_callback", None)
-    if callable(unregister_trade_callback):
-        try:
-            unregister_trade_callback(tracker.on_trade_record)
-        except Exception as e:
-            executor.logger.warning(f"注销成交回调失败: {e}")
+    try:
+        executor.unregister_trade_callback(tracker.on_trade_record)
+    except Exception as e:
+        executor.logger.warning(f"注销成交回调失败: {e}")
 
     if chase_config:
         try:

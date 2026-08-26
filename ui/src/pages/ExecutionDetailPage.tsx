@@ -10,6 +10,7 @@ import { currencyOf } from '@/lib/derive'
 import { displayCurrencyUnit, fmtMoney, withCurrency } from '@/lib/format'
 import {
   buildExecutionDetail,
+  formatOrderTradeCounts,
   SOURCE_DEGRADED_LABEL,
   type ChainAction,
   type ExecutionDetailModel,
@@ -252,10 +253,11 @@ function TargetChangeView({ m }: { m: ExecutionDetailModel }) {
 function OrderTree({ orders, currency, units }: { orders: ExecOrder[]; currency: string; units: DisplayUnits }) {
   if (orders.length === 0) return null
   const nTrades = orders.reduce((n, o) => n + o.trades.length, 0)
+  const hasFills = orders.some((o) => (o.filled_volume ?? 0) > 0)
   return (
     <details className="mt-1.5">
       <summary className="cursor-pointer select-none text-[11.5px] text-ink-3 hover:text-ink-2">
-        订单与成交（{orders.length} 单 · {nTrades} 成交）
+        订单与成交（{formatOrderTradeCounts(orders.length, nTrades, hasFills, ' · ')}）
       </summary>
       <div className="mt-1 border-l border-line pl-3">
         {orders.map((o) => (
@@ -355,7 +357,7 @@ function SymbolChainRow({
           )}
           <span className="text-ink-3">
             {' · '}
-            {tca.n_orders} 单 {tca.n_trades} 成交
+            {formatOrderTradeCounts(tca.n_orders, tca.n_trades, s.filled !== 0)}
             {tca.fill_ratio != null && tca.fill_ratio < 0.999 && (
               <span className="text-warn"> · 成交率 {(tca.fill_ratio * 100).toFixed(0)}%</span>
             )}

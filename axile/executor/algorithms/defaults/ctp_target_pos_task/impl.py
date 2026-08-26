@@ -24,7 +24,8 @@ from axile.executor.algorithms.core.base import (
     OrderType,
     register_algorithm,
 )
-from axile.executor.algorithms.utils.order_tracker import ChaseConfig, OrderTracker
+from axile.executor.algorithms.utils import setup_order_tracker, teardown_order_tracker
+from axile.executor.algorithms.utils.order_tracker import ChaseConfig
 from axile.executor.models.execution_result import ExecutionStatus
 from axile.executor.models.unified_account_assets import UnifiedAccountAssets
 from axile.executor.models.unified_order import UnifiedOrder
@@ -616,14 +617,9 @@ def ctp_target_pos_task_algorithm(executor: ExecutorProtocol, algorithm_input: A
     if market_data:
         executor.logger.info(f"获取到 {symbol} 的市场数据")
 
-    # CTP 路径依赖回调驱动等待；先绑定 tracker 再开始下单，避免第一笔订单的
-    # 订单/价格回调在注册前到达，导致后续等待态缺少状态来源。
-    tracker = OrderTracker(executor=executor, chase_config=chase_config)
-    executor.register_order_callback(tracker.on_order_update)
-    if chase_config:
-        executor.register_price_callback(tracker.on_price_update)
-        if market_data is not None:
-            tracker.latest_prices[symbol] = market_data
+    # 回调驱动等待：先绑 tracker（订单/成交/追价）再下单，避免第一笔回报早于注册丢失。
+    # 成交必须走同一入口；只挂订单回调时，报单已成但 ``trades`` 仍为空。
+    tracker = setup_order_tracker(executor, market_data, chase_config)
 
     try:
         position_details = _extract_ctp_position_details(account_assets, [symbol])
@@ -745,6 +741,4 @@ def ctp_target_pos_task_algorithm(executor: ExecutorProtocol, algorithm_input: A
     finally:
         # 回调注册属于一次执行的临时资源；无论成功失败都必须释放，避免污染后续
         # symbol 执行或让旧 tracker 继续消费新订单事件。
-        executor.unregister_order_callback(tracker.on_order_update)
-        if chase_config:
-            executor.unregister_price_callback(tracker.on_price_update)
+        teardown_order_tracker(executor, tracker, chase_config)

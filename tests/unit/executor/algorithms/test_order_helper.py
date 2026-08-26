@@ -322,6 +322,14 @@ class TestTeardownOrderTracker:
 
         assert executor.logger.warning.called
 
+    def test_teardown_unregister_trade_callback_error(self, executor, tracker):
+        """注销成交回调失败时只记警告，不覆盖主流程."""
+        executor.unregister_trade_callback = Mock(side_effect=Exception("Unregister error"))
+
+        teardown_order_tracker(executor, tracker, None)
+
+        assert executor.logger.warning.called
+
 
 class TestSubmitAndTrackOrder:
     """测试 submit_and_track_order 函数."""

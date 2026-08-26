@@ -406,6 +406,24 @@ export const SOURCE_DEGRADED_LABEL: Record<string, string> = {
   unavailable: '不可用',
 }
 
+/**
+ * 「N 单 M 成交」文案。
+ *
+ * 成交笔数来自成交明细。明细为空但订单已有成交手数时不写「0 成交」，
+ * 避免和订单行「成交 1/1 手 · 已成交」打架。
+ */
+export function formatOrderTradeCounts(
+  nOrders: number,
+  nTrades: number,
+  hasFills: boolean,
+  sep = ' ',
+): string {
+  const head = `${nOrders} 单`
+  if (nTrades > 0) return `${head}${sep}${nTrades} 成交`
+  if (hasFills) return head
+  return `${head}${sep}0 成交`
+}
+
 /** 执行终态枚举 → 人话。 */
 const STATUS_LABEL: Record<string, string> = {
   SUCCEEDED: '成功',
