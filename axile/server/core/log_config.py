@@ -117,6 +117,7 @@ _COMPONENT_PREFIXES: tuple[tuple[str, LogComponent], ...] = (
     ("axile.executor", LogComponent.EXECUTION),
     ("sqlalchemy", LogComponent.DATABASE),
     ("aiosqlite", LogComponent.DATABASE),
+    ("apscheduler", LogComponent.SCHEDULER),
     ("uvicorn", LogComponent.SERVICE),
     ("starlette", LogComponent.SERVICE),
 )

@@ -5,13 +5,17 @@ from __future__ import annotations
 import json
 from typing import cast
 
-from apscheduler.triggers.combining import OrTrigger  # type: ignore[import-not-found]
 from fastapi import HTTPException, status
 
 from axile.common.trade_channel import TradeChannel
 from axile.executor.account_control.presets import ensure_account_control_preset_compatible
 from axile.server.api.deps import SchedDep, SessionDep
-from axile.server.cron import is_blank_cron_expr, parse_cron_expr
+from axile.server.cron import (
+    combine_cron_triggers,
+    cron_triggers_equivalent,
+    is_blank_cron_expr,
+    parse_cron_expr,
+)
 from axile.server.db.models import Account
 from axile.server.execution.scheduler import create_job, delete_job
 from axile.server.repositories import get_latest_portfolio_id_by_account_id
@@ -111,8 +115,9 @@ async def _reconcile_account_job(
         return
 
     triggers = parse_cron_expr(account.cron_expr)
-    desired_trigger = OrTrigger(triggers)
-    if existing_job is not None and str(existing_job.trigger) == str(desired_trigger):
+    desired_trigger = combine_cron_triggers(triggers)
+    # CompactOrTrigger.__str__ 只有条数，不能当排程指纹。
+    if existing_job is not None and cron_triggers_equivalent(existing_job.trigger, desired_trigger):
         return
 
     if existing_job is not None:

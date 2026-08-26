@@ -5,13 +5,12 @@ from typing import Union, cast
 
 import loguru
 from apscheduler.job import Job  # type: ignore[import-not-found]
-from apscheduler.triggers.combining import OrTrigger  # type: ignore[import-not-found]
 from apscheduler.triggers.cron import CronTrigger  # type: ignore[import-not-found]
 
 from axile.server.core.db import SessionLocal
 from axile.server.core.log_config import execution_log_context
 from axile.server.core.scheduler import Scheduler
-from axile.server.cron import SCHEDULER_TIMEZONE, is_blank_cron_expr
+from axile.server.cron import SCHEDULER_TIMEZONE, combine_cron_triggers, is_blank_cron_expr
 from axile.server.db.models import Account, ScheduleSkip
 from axile.server.repositories import get_latest_portfolio_id_by_account_id
 from axile.server.trading_calendar import (
@@ -122,18 +121,19 @@ async def create_job(
             return
 
     try:
-        trigger = OrTrigger(triggers)
+        trigger = combine_cron_triggers(triggers)
         next_run_time = trigger.get_next_fire_time(None, datetime.now(SCHEDULER_TIMEZONE))  # type: ignore[no-untyped-call]
         sched.add_job(  # type: ignore[no-untyped-call]
             func=execute_scheduled_rebalance,
             args=[account.id],
             trigger=trigger,
             id=str(account.id),
+            name=f"{account.name}#{account.id}",
             next_run_time=next_run_time,
             max_instances=1,
         )
 
-        acc_logger.info(f"定时任务创建成功 CRON={triggers}")
+        acc_logger.info(f"定时任务创建成功 CRON={account.cron_expr}")
     except Exception as e:
         acc_logger.error(
             f"账户定时任务初始化失败 | 错误原因={str(e)}",

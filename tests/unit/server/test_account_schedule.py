@@ -11,8 +11,8 @@ import pytest
 from pydantic import ValidationError
 
 from axile.common.trade_channel import TradeChannel
-from axile.server.api.routes import account_schedule
-from axile.server.cron import SCHEDULER_TIMEZONE, parse_cron_expr
+from axile.server.api.routes import account_schedule, account_support
+from axile.server.cron import SCHEDULER_TIMEZONE, combine_cron_triggers, parse_cron_expr
 from axile.server.execution import rebalance as rebalance_execution
 from axile.server.execution import scheduler as execution_scheduler
 from axile.server.trading_calendar import (
@@ -105,6 +105,23 @@ def test_scheduled_rebalance_skips_closed_day_and_records_reason(monkeypatch: py
     assert getattr(session.added[0], "reason_code") == "CALENDAR.CLOSED"
 
 
+def test_scheduled_rebalance_skips_session_gap(monkeypatch: pytest.MonkeyPatch) -> None:
+    session = _SessionContext(_account())
+    monkeypatch.setattr(execution_scheduler, "SessionLocal", lambda: session)
+    monkeypatch.setattr(
+        execution_scheduler,
+        "evaluate_channel_calendar_moment",
+        lambda *_args: _decision(CalendarDecisionStatus.AVAILABLE_CLOSED).model_copy(
+            update={"reason_code": "CALENDAR.SESSION_CLOSED"}
+        ),
+    )
+    execute_trade = MagicMock()
+    monkeypatch.setattr(rebalance_execution, "execute_trade", execute_trade)
+    asyncio.run(execution_scheduler.execute_scheduled_rebalance(7))
+    execute_trade.assert_not_called()
+    assert getattr(session.added[0], "reason_code") == "CALENDAR.SESSION_CLOSED"
+
+
 def test_scheduled_rebalance_is_fail_open_when_calendar_is_unavailable(monkeypatch: pytest.MonkeyPatch) -> None:
     session = _SessionContext(_account())
     monkeypatch.setattr(execution_scheduler, "SessionLocal", lambda: session)
@@ -160,7 +177,52 @@ def test_create_job_targets_scheduler_wrapper(monkeypatch: pytest.MonkeyPatch) -
     kwargs = scheduler.add_job.call_args.kwargs
     assert kwargs["func"] is execution_scheduler.execute_scheduled_rebalance
     assert kwargs["args"] == [7]
+    assert kwargs["name"] == "测试账户#7"
+    assert str(kwargs["trigger"]) == "or[1 crontab]"
     assert kwargs["next_run_time"].tzinfo == SCHEDULER_TIMEZONE
+
+
+def _patch_reconcile(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    events: list[str] = []
+
+    async def fake_portfolio(*_args: object) -> int:
+        return 11
+
+    async def fake_create(*_args: object) -> None:
+        events.append("create")
+
+    def fake_delete(*_args: object) -> None:
+        events.append("delete")
+
+    monkeypatch.setattr(account_support, "get_latest_portfolio_id_by_account_id", fake_portfolio)
+    monkeypatch.setattr(account_support, "create_job", fake_create)
+    monkeypatch.setattr(account_support, "delete_job", fake_delete)
+    return events
+
+
+def test_reconcile_keeps_existing_job_when_crontab_matches(monkeypatch: pytest.MonkeyPatch) -> None:
+    account = _account()
+    events = _patch_reconcile(monkeypatch)
+    existing = SimpleNamespace(trigger=combine_cron_triggers(parse_cron_expr(account.cron_expr)))
+    sched = SimpleNamespace(get_job=lambda _job_id: existing)
+
+    asyncio.run(account_support._reconcile_account_job(object(), sched, account))
+
+    assert events == []
+
+
+def test_reconcile_recreates_when_compact_str_collides_but_hours_differ(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    account = _account()
+    account.cron_expr = "0 11 * * * | 0 16 * * *"
+    events = _patch_reconcile(monkeypatch)
+    existing = SimpleNamespace(trigger=combine_cron_triggers(parse_cron_expr("0 10 * * * | 0 15 * * *")))
+    sched = SimpleNamespace(get_job=lambda _job_id: existing)
+
+    asyncio.run(account_support._reconcile_account_job(object(), sched, account))
+
+    assert events == ["delete", "create"]
 
 
 def test_schedule_preview_returns_raw_cron_points_with_cursor(monkeypatch: pytest.MonkeyPatch) -> None:
