@@ -125,6 +125,11 @@ def _patch_resolution(
         "append_target_weight_snapshot",
         fake_append_target_weight_snapshot,
     )
+
+    async def fake_snapshots(_session: object, _account_id: int, limit: int = 1) -> list[object]:
+        return []
+
+    monkeypatch.setattr(account_execution_routes, "get_recent_account_asset_snapshots", fake_snapshots)
     return saved
 
 
@@ -185,6 +190,7 @@ def test_account_target_snapshot_get_only_reads_snapshot(monkeypatch) -> None:
     assert response.status_code == 200
     assert response.json()["weights"] == {"rb2610": 1.5}
     assert response.json()["source"] == "execution"
+    assert response.json()["quantities"] == {}
 
 
 def test_account_target_snapshot_returns_uncalculated_without_bound_portfolio(monkeypatch) -> None:
@@ -217,3 +223,53 @@ def test_account_target_refresh_rejects_operation_conflict(monkeypatch) -> None:
     response = TestClient(_build_app(session)).post("/account/1/target_snapshot/refresh")
 
     assert response.status_code == 409
+
+
+def test_account_target_snapshot_canonicalizes_and_quantizes_from_book(monkeypatch) -> None:
+    """账户快照把 TA2701 收到 TA701，并按当前账面一手名义量化手数。"""
+    session = _RouteSession(_build_account(), _build_portfolio())
+    _patch_resolution(monkeypatch, portfolio_id=7, raw_target={"TA2701": -0.08})
+
+    async def fake_latest(_session: object, _account_id: int, _portfolio_id: int) -> TargetWeightSnapshot:
+        return TargetWeightSnapshot(
+            id=3,
+            portfolio_id=7,
+            account_id=1,
+            raw_weights={"TA2701": -0.0267},
+            normalized_weights={"TA2701": -0.08},
+            source="execution",
+            execution_id="exec-lot",
+            calculated_at="2026-08-26T21:35:10",
+        )
+
+    async def fake_snapshots(_session: object, _account_id: int, limit: int = 1) -> list[object]:
+        return [
+            type(
+                "Snap",
+                (),
+                {
+                    "assets": {
+                        "total_asset": 992_670.6124999999,
+                        "positions": [
+                            {
+                                "symbol": "TA701",
+                                "volume": 2.0,
+                                "market_value": 55000.0,
+                                "direction": "空头",
+                                "extra": {"net_position": -2.0},
+                            }
+                        ],
+                    }
+                },
+            )()
+        ]
+
+    monkeypatch.setattr(account_execution_routes, "get_latest_account_target_snapshot", fake_latest)
+    monkeypatch.setattr(account_execution_routes, "get_recent_account_asset_snapshots", fake_snapshots)
+
+    response = TestClient(_build_app(session)).get("/account/1/target_snapshot")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["weights"] == {"TA701": -0.08}
+    assert body["quantities"] == {"TA701": -2.0}

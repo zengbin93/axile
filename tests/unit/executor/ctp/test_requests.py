@@ -168,12 +168,13 @@ def test_normalizes_czce_four_digit_year_alias_in_all_input_fields(config: CTPAc
     executor._trading_day = "20260824"
     executor._instruments = {
         "CF701": SimpleNamespace(ExchangeID="CZCE", ProductClass=td.THOST_FTDC_PC_Futures),
+        "TA701C5000": SimpleNamespace(ExchangeID="CZCE", ProductClass=td.THOST_FTDC_PC_Options),
         "rb2610": SimpleNamespace(ExchangeID="SHFE", ProductClass=td.THOST_FTDC_PC_Futures),
     }
     standard_input = UnifiedStandardInput(
         channel_type="ctp",
         account_config=config,
-        curr_target={"CF2701": 0.2, "rb2610": 0.1},
+        curr_target={"CF2701": 0.2, "TA2701C5000": -0.1, "rb2610": 0.1},
         last_target={"CF2701": 0.1},
         symbol_algorithms={"CF2701": {"method": "SINGLE-MAKER", "params": {}}},
         trade_rules={"CF2701": {"min_notional": 100}},
@@ -183,13 +184,13 @@ def test_normalizes_czce_four_digit_year_alias_in_all_input_fields(config: CTPAc
 
     normalized = executor._normalize_connected_standard_input(standard_input)
 
-    assert normalized.curr_target == {"CF701": 0.2, "rb2610": 0.1}
+    assert normalized.curr_target == {"CF701": 0.2, "TA701C5000": -0.1, "rb2610": 0.1}
     assert normalized.last_target == {"CF701": 0.1}
     assert list(normalized.symbol_algorithms) == ["CF701"]
     assert normalized.trade_rules == {"CF701": {"min_notional": 100}}
     assert normalized.forbidden_symbols == ["CF701"]
     assert normalized.risk_symbols == ["CF701"]
-    assert standard_input.curr_target == {"CF2701": 0.2, "rb2610": 0.1}
+    assert standard_input.curr_target == {"CF2701": 0.2, "TA2701C5000": -0.1, "rb2610": 0.1}
 
 
 @pytest.mark.parametrize(

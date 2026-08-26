@@ -19,6 +19,13 @@ type ExecutionBackend = Literal["thread", "process"]
 type ScheduleKind = Literal["continuous", "cn_stock", "cn_futures"]
 type ExecutorFactory = Callable[[BaseAccountConfig], "AbstractExecutor"]
 type TargetTransform = Callable[[dict[str, float], pd.DataFrame], pd.DataFrame]
+type CanonicalizeSymbol = Callable[[str], str]
+type QuantizeTargetQuantity = Callable[[float, float, float], float]
+
+
+def _identity_symbol(symbol: str) -> str:
+    """默认不做合约别名合并."""
+    return symbol
 
 
 class _FrozenDescriptorModel(BaseModel):
@@ -371,6 +378,11 @@ class ChannelPlugin:
         公开包中对应的可选依赖 extra；外部插件通常为空。
     max_parallel_symbols : int
         单次执行允许并行处理的最大品种数。
+    canonicalize_symbol : CanonicalizeSymbol
+        把策略代码收到与持仓同一套标识；默认恒等。
+    quantize_target_quantity : QuantizeTargetQuantity | None
+        把目标权重量化成可下单数量 ``(weight, equity, notional_per_unit) -> qty``；
+        缺省表示该渠道尚未提供量化，在位性回退权重阈值。
     """
 
     descriptor: ChannelDescriptor
@@ -381,6 +393,8 @@ class ChannelPlugin:
     required_modules: tuple[str, ...] = ()
     install_extra: str | None = None
     max_parallel_symbols: int = 1
+    canonicalize_symbol: CanonicalizeSymbol = _identity_symbol
+    quantize_target_quantity: QuantizeTargetQuantity | None = None
 
     def __post_init__(self) -> None:
         """校验插件运行时契约中的基本不变量."""

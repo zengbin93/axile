@@ -199,7 +199,8 @@ export function AccountDetail({
   const comparisonReady = weights.data?.calculated_at != null && !positionsLoading && !positionsError
   // 背离摘要：与明细抽屉同口径（均出自 rebalancePlan）。文案讲「几只要动 · 卖几买几」，
   // 条画各品种的要成交幅度；到位/空仓退成静态一句。
-  const plan = rebalancePlan(positions, target, item.total_asset)
+  const quantities = weights.data?.quantities ?? null
+  const plan = rebalancePlan(positions, target, item.total_asset, quantities)
   const driftLevel: StatusLevel = plan.off > 0 ? 'warn' : 'ok'
   const driftHeadline =
     plan.rows.length === 0
@@ -210,11 +211,11 @@ export function AccountDetail({
   const targetCount = Object.values(target).filter((weight) => Math.abs(weight) > 1e-9).length
   const turnover = rebalanceTurnover(plan)
   const currentHoldings = currentHoldingPreview(positions, item.total_asset)
-  // 在位性用现场 rebalancePlan（详情已有目标+持仓）；仪表盘 off_symbol_count 只作尚未对账时的回退。
+  // 有服务端 quantities 时现场计划即在位性；否则不拿权重尺子盖掉仪表盘 off_symbol_count。
   const state = stateVerdict({
     ...item,
     is_started: isStarted,
-    off_symbol_count: comparisonReady ? plan.off : item.off_symbol_count,
+    off_symbol_count: comparisonReady && quantities != null ? plan.off : item.off_symbol_count,
   })
   const gate = gateOf({ ...item, is_started: isStarted })
   // 执行态：服务端 live 优先，runner 仅首帧前乐观；驱动主句「正在执行/清仓」与生命体征。

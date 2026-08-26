@@ -209,7 +209,7 @@ def test_dashboard_handles_account_without_records(monkeypatch: pytest.MonkeyPat
 
 
 def test_dashboard_counts_off_symbols_from_target_and_snapshot(monkeypatch: pytest.MonkeyPatch) -> None:
-    """有持仓快照和目标时，off_symbol_count 按 rebalancePlan 口径计算。"""
+    """有持仓快照和目标时，off_symbol_count 按可执行数量口径计算。"""
     account = build_account(id=1, name="acc", is_started=True)
     snapshots = [
         _snapshot(
@@ -257,3 +257,83 @@ def test_dashboard_counts_off_symbols_from_target_and_snapshot(monkeypatch: pyte
     item = TestClient(app).get("/account/dashboard").json()["data"][0]
     assert item["last_output_status"] == "BLOCKED"
     assert item["off_symbol_count"] == 5
+
+
+def test_dashboard_counts_off_symbols_zero_when_lots_already_match(monkeypatch: pytest.MonkeyPatch) -> None:
+    """手数已按渠道量化到位（含 TA2701→TA701）时 off_symbol_count 为 0。"""
+    account = build_account(id=1, name="acc", is_started=True)
+    equity = 992_670.6124999999
+    snapshots = [
+        _snapshot(
+            equity,
+            [
+                {
+                    "symbol": "c2611",
+                    "volume": 1.0,
+                    "market_value": 22800.0,
+                    "direction": "多头",
+                    "extra": {"net_position": 1.0},
+                },
+                {
+                    "symbol": "rb2610",
+                    "volume": 4.0,
+                    "market_value": 123100.0,
+                    "direction": "多头",
+                    "extra": {"net_position": 4.0},
+                },
+                {
+                    "symbol": "TA701",
+                    "volume": 2.0,
+                    "market_value": 55000.0,
+                    "direction": "空头",
+                    "extra": {"net_position": -2.0},
+                },
+                {
+                    "symbol": "m2701",
+                    "volume": 1.0,
+                    "market_value": 32960.0,
+                    "direction": "空头",
+                    "extra": {"net_position": -1.0},
+                },
+            ],
+            "2026-08-26T21:35:11",
+        )
+    ]
+    records = [
+        SimpleNamespace(
+            raw_result={"status": "SUCCEEDED"},
+            raw_input={},
+            is_success=1,
+            created_at="2026-08-26T21:35:11",
+        )
+    ]
+
+    async def _bindings(_session: object) -> dict[int, int]:
+        return {1: 7}
+
+    async def _recent(_session: object, _account_ids: object, limit: int = 20) -> dict[int, list[object]]:
+        return {1: list(records)}
+
+    async def _snapshots(_session: object, _account_ids: object, limit: int = 20) -> dict[int, list[object]]:
+        return {1: list(snapshots)}
+
+    async def _no_baseline_records(*_args: object, **_kwargs: object) -> dict[int, list[object]]:
+        return {}
+
+    async def _targets(_session: object, _pairs: object) -> dict[int, object]:
+        return {
+            1: SimpleNamespace(
+                normalized_weights={"TA2701": -0.08, "c2611": 0.03, "m2701": -0.06, "rb2610": 0.13},
+            )
+        }
+
+    monkeypatch.setattr(account_crud, "get_portfolios_every_account", _bindings)
+    monkeypatch.setattr(account_crud, "get_recent_execute_records_for_accounts", _recent)
+    monkeypatch.setattr(account_crud, "get_recent_account_asset_snapshots_for_accounts", _snapshots)
+    monkeypatch.setattr(account_crud, "get_account_asset_snapshots_before_for_accounts", _no_baseline_records)
+    monkeypatch.setattr(account_crud, "get_earliest_account_asset_snapshots_since_for_accounts", _no_baseline_records)
+    monkeypatch.setattr(account_crud, "get_latest_account_target_snapshots_for_accounts", _targets)
+
+    app = _build_app(_Session([account]), _Scheduler(_Job(None)))
+    item = TestClient(app).get("/account/dashboard").json()["data"][0]
+    assert item["off_symbol_count"] == 0

@@ -119,6 +119,7 @@ export function HoldingsView({
   equity,
   currency = '',
   assetLabel,
+  quantities = null,
 }: {
   positions: Position[]
   target: LatestWeights
@@ -128,8 +129,10 @@ export function HoldingsView({
   currency?: string
   /** 按账户渠道确定的行内资金名称。 */
   assetLabel: string
+  /** 服务端量化后的目标数量；缺省时按权重阈值回退。 */
+  quantities?: LatestWeights | null
 }) {
-  const plan = rebalancePlan(positions, target, equity)
+  const plan = rebalancePlan(positions, target, equity, quantities)
   // 标尺同尺：以「当前/目标」绝对值的全表最大为满量程（不再用 |Δ|）。
   const scale = plan.rows.reduce((m, r) => Math.max(m, Math.abs(r.cur), Math.abs(r.tgt)), 0)
   // 当前实际持仓只数（与 posLabel 的「空仓」阈值一致），供顶部一句话汇总当前状态。

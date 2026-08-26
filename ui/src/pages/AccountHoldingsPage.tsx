@@ -104,6 +104,7 @@ export function AccountHoldingsPage() {
             equity={equity}
             currency={currencyOf(item?.currency)}
             assetLabel={assetTerms.shortLabel}
+            quantities={weights.data?.quantities ?? null}
           />
         )}
         <ErrorNotice

@@ -348,6 +348,8 @@ export type LatestWeights = Record<string, number>
 /** 最近一次成功计算的目标权重快照；`calculated_at=null` 表示从未计算。 */
 export interface TargetWeightSnapshot {
   weights: LatestWeights
+  /** 渠道量化后的目标数量（与 weights 同 key）；渠道未提供时为 null。 */
+  quantities?: LatestWeights | null
   calculated_at: string | null
   source: 'manual' | 'execution' | null
   execution_id: string | null

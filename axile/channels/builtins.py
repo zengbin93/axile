@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pandas as pd
 
+from axile.channels.cn_futures import canonicalize_cn_futures_symbol, quantize_cn_futures_quantity
 from axile.channels.contracts import (
     AlgorithmReference,
     ChannelAccountField,
@@ -159,6 +160,8 @@ def _ctp_plugin() -> ChannelPlugin:
         required_modules=("openctp_ctp",),
         install_extra="ctp",
         max_parallel_symbols=10,
+        canonicalize_symbol=canonicalize_cn_futures_symbol,
+        quantize_target_quantity=quantize_cn_futures_quantity,
     )
 
 
@@ -357,6 +360,8 @@ def _tq_plugin() -> ChannelPlugin:
         required_modules=("tqsdk",),
         install_extra="tqsdk",
         max_parallel_symbols=10,
+        canonicalize_symbol=canonicalize_cn_futures_symbol,
+        quantize_target_quantity=quantize_cn_futures_quantity,
     )
 
 

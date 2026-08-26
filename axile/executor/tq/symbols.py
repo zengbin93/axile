@@ -2,17 +2,16 @@
 
 from __future__ import annotations
 
-import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
 from typing import TypeVar
 
+from axile.channels.cn_futures import canonicalize_cn_futures_symbol, czce_is_option_instrument
 from axile.executor.models.unified_input import UnifiedStandardInput
 
 _TRADE_CLASSES = frozenset({"FUTURE", "OPTION", "COMBINE"})
 _TRADE_EXCHANGES = frozenset({"CFFEX", "SHFE", "DCE", "CZCE", "INE", "GFEX"})
-_CZCE_FUTURE_ALIAS = re.compile(r"^(?P<product>[A-Za-z]+)(?P<year>\d{2})(?P<month>\d{2})$")
 
 _ValueT = TypeVar("_ValueT")
 
@@ -51,22 +50,14 @@ class TQSymbolResolver:
             exchange_id, local_symbol = symbol.split(".", 1)
             if exchange_id != "CZCE":
                 return []
-        match = _CZCE_FUTURE_ALIAS.fullmatch(local_symbol)
-        if match is None:
+        native_symbol = canonicalize_cn_futures_symbol(local_symbol, reference_year=self._reference_year)
+        if native_symbol == local_symbol:
             return []
-        requested_year = 2000 + int(match.group("year"))
-        native_year_digit = requested_year % 10
-        nearest_year = min(
-            (year for year in range(2000, 2100) if year % 10 == native_year_digit),
-            key=lambda year: abs(year - self._reference_year),
-        )
-        if requested_year != nearest_year:
-            return []
-        native_symbol = f"{match.group('product')}{match.group('year')[-1]}{match.group('month')}"
+        want_class = "OPTION" if czce_is_option_instrument(native_symbol) else "FUTURE"
         return [
             item
             for item in self._by_local.get(native_symbol, [])
-            if item.exchange_id == "CZCE" and item.ins_class == "FUTURE"
+            if item.exchange_id == "CZCE" and item.ins_class == want_class
         ]
 
     @staticmethod

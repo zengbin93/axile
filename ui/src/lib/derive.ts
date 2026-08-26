@@ -177,8 +177,12 @@ export function positionsOfAssets(assets: AccountAssets | null | undefined): Pos
   return Array.isArray(assets?.positions) ? assets.positions : []
 }
 
-/** 调仓阈值：|当前−目标| 小于此百分点视为「到位」。与 ``axile/server/integrity.py`` 同步。 */
+/**
+ * 无 ``quantities`` 时的权重回退阈值（百分点）。
+ * 有服务端目标数量时到位只比手数，不用这把尺子。
+ */
 export const REBALANCE_THRESHOLD = 0.5
+const QTY_EPS = 1e-6
 
 /** 单只调仓动作分类。 */
 export type RebalanceAction =
@@ -223,12 +227,23 @@ function isShort(direction: unknown): boolean {
 }
 
 /** 由单只的当前/目标（带符号）派生动作分类。 */
-function classifyAction(cur: number, tgt: number, delta: number): RebalanceAction {
-  if (Math.abs(delta) <= REBALANCE_THRESHOLD) return 'aligned'
+function classifyAction(cur: number, tgt: number, aligned: boolean): RebalanceAction {
+  if (aligned) return 'aligned'
   if (Math.abs(cur) < 1e-6) return 'open'
   if (Math.abs(tgt) < 1e-6) return 'close'
   if (Math.sign(cur) !== Math.sign(tgt)) return 'flip'
   return Math.abs(cur) < Math.abs(tgt) ? 'increase' : 'reduce'
+}
+
+function signedVolume(position: Position): number | null {
+  const extra = position.extra
+  if (extra && typeof extra === 'object' && extra !== null && 'net_position' in extra) {
+    const net = Number((extra as { net_position?: unknown }).net_position)
+    if (Number.isFinite(net)) return net
+  }
+  if (typeof position.volume !== 'number' || !Number.isFinite(position.volume)) return null
+  const mag = Math.abs(position.volume)
+  return isShort(position.direction) ? -mag : mag
 }
 
 /**
@@ -246,31 +261,72 @@ function classifyAction(cur: number, tgt: number, delta: number): RebalanceActio
  *     目标权重（分数，可为负=做空）。
  * equity : number
  *     账户总权益，作为归一分母；``<= 0`` 时当前权重按 0 处理。
+ * quantities : LatestWeights | null | undefined
+ *     服务端量化后的目标数量；缺省时回退权重阈值，不在前端写渠道公式。
 
  * Returns
  * -------
  * RebalancePlan
  *     逐只行（按 ``|delta|`` 降序）与账户级汇总。
  */
-export function rebalancePlan(positions: Position[], target: LatestWeights, equity: number): RebalancePlan {
+export function rebalancePlan(
+  positions: Position[],
+  target: LatestWeights,
+  equity: number,
+  quantities?: LatestWeights | null,
+): RebalancePlan {
   const curMv = new Map<string, number>()
+  const curQty = new Map<string, number>()
+  const notional = new Map<string, number>()
   for (const p of positions) {
     if (typeof p.symbol !== 'string') continue
     const mag = Math.abs(Number(p.market_value) || 0)
     const signed = isShort(p.direction) ? -mag : mag
     curMv.set(p.symbol, (curMv.get(p.symbol) ?? 0) + signed)
+    const lots = signedVolume(p)
+    if (lots != null) curQty.set(p.symbol, (curQty.get(p.symbol) ?? 0) + lots)
+    const volume = Math.abs(Number(p.volume) || 0)
+    if (volume > 0 && mag > 0) notional.set(p.symbol, mag / volume)
   }
   const base = equity > 0 ? equity : 0
-  const syms = new Set<string>([...curMv.keys(), ...Object.keys(target)])
+  const useQty = quantities != null
+  const syms = new Set<string>([
+    ...curMv.keys(),
+    ...Object.keys(target),
+    ...(useQty ? Object.keys(quantities) : []),
+  ])
   const rows: RebalanceRow[] = []
   for (const s of syms) {
     const cur = base > 0 ? ((curMv.get(s) ?? 0) / base) * 100 : 0
     const tgt = (target[s] ?? 0) * 100
-    if (Math.abs(cur) < 1e-6 && Math.abs(tgt) < 1e-6) continue
+    if (Math.abs(cur) < 1e-6 && Math.abs(tgt) < 1e-6 && !(useQty && s in quantities)) continue
+    let aligned: boolean
+    let amount: number
+    if (useQty) {
+      const currentLots = curQty.get(s) ?? 0
+      const knownLots = curQty.has(s)
+      if (s in quantities) {
+        const targetLots = quantities[s] ?? 0
+        aligned = knownLots || Math.abs(cur) < 1e-6
+          ? Math.abs(currentLots - targetLots) <= QTY_EPS
+          : false
+        const unit = notional.get(s)
+        amount = unit != null && base > 0
+          ? (Math.abs(currentLots - targetLots) * unit / base) * 100
+          : Math.abs(cur - tgt)
+      } else {
+        aligned = Math.abs(currentLots) <= QTY_EPS && Math.abs(tgt) < 1e-6
+        amount = Math.abs(cur - tgt)
+      }
+    } else {
+      const delta = +(cur - tgt).toFixed(2)
+      aligned = Math.abs(delta) <= REBALANCE_THRESHOLD
+      amount = Math.abs(delta)
+    }
     const delta = +(cur - tgt).toFixed(2)
-    const action = classifyAction(cur, tgt, delta)
+    const action = classifyAction(cur, tgt, aligned)
     const side = action === 'aligned' ? 'none' : delta < 0 ? 'buy' : 'sell'
-    rows.push({ symbol: s, cur, tgt, delta, amount: Math.abs(delta), side, action })
+    rows.push({ symbol: s, cur, tgt, delta, amount, side, action })
   }
   rows.sort((a, b) => b.amount - a.amount)
   return {

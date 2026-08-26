@@ -131,13 +131,16 @@ def target_snapshot_public(
     snapshot: TargetWeightSnapshot | None,
     *,
     weight_kind: Literal["raw", "normalized"],
+    weights: dict[str, float] | None = None,
+    quantities: dict[str, float] | None = None,
 ) -> TargetWeightSnapshotPublic:
     """把数据库快照转换为稳定的页面响应；无记录时返回未计算态."""
     if snapshot is None:
         return TargetWeightSnapshotPublic()
-    weights = snapshot.raw_weights if weight_kind == "raw" else snapshot.normalized_weights
+    stored = snapshot.raw_weights if weight_kind == "raw" else snapshot.normalized_weights
     return TargetWeightSnapshotPublic(
-        weights=weights or {},
+        weights=weights if weights is not None else (stored or {}),
+        quantities=quantities,
         calculated_at=snapshot.calculated_at,
         source=snapshot.source,
         execution_id=snapshot.execution_id,

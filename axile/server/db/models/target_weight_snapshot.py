@@ -41,6 +41,7 @@ class TargetWeightSnapshotPublic(SQLModel):
     """页面读取的最近一次目标权重计算结果."""
 
     weights: dict[str, float] = Field(default_factory=dict)
+    quantities: Optional[dict[str, float]] = None
     calculated_at: Optional[str] = None
     source: Optional[TargetWeightSnapshotSource] = None
     execution_id: Optional[str] = None

@@ -12,6 +12,7 @@ def _resolver() -> TQSymbolResolver:
         [
             TQInstrument("SHFE.rb2610", "rb2610", "SHFE", "FUTURE"),
             TQInstrument("CZCE.CF701", "CF701", "CZCE", "FUTURE"),
+            TQInstrument("CZCE.TA701C5000", "TA701C5000", "CZCE", "OPTION"),
             TQInstrument("CFFEX.IF2701", "IF2701", "CFFEX", "FUTURE"),
             TQInstrument("DCE.m2609-C-2700", "m2609-C-2700", "DCE", "OPTION"),
             TQInstrument("KQ.m@SHFE.rb", "m@SHFE.rb", "KQ", "CONT"),
@@ -35,6 +36,14 @@ def test_resolves_czce_four_digit_year_alias(symbol: str) -> None:
 
     assert resolver.to_tq(symbol, for_trade=True) == "CZCE.CF701"
     assert resolver.to_axile(resolver.to_tq(symbol)) == "CF701"
+
+
+@pytest.mark.parametrize("symbol", ["TA701C5000", "TA2701C5000", "CZCE.TA2701C5000"])
+def test_resolves_czce_option_four_digit_year_alias(symbol: str) -> None:
+    resolver = _resolver()
+
+    assert resolver.to_tq(symbol, for_trade=True) == "CZCE.TA701C5000"
+    assert resolver.to_axile(resolver.to_tq(symbol)) == "TA701C5000"
 
 
 def test_does_not_compact_non_czce_four_digit_contract() -> None:

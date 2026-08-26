@@ -12,6 +12,7 @@ from fastapi.responses import StreamingResponse
 from loguru import logger
 from sqlmodel import func, select
 
+from axile.channels import get_channel
 from axile.domain.execution import ExecutionTaskStatus
 from axile.server.api.deps import SchedDep, SessionDep
 from axile.server.api.routes.account_support import _get_account_or_404
@@ -30,6 +31,7 @@ from axile.server.db.models import (
     ExecutionTerminateResponse,
     ExecutionTriggerResponse,
     Portfolio,
+    TargetWeightSnapshot,
     TargetWeightSnapshotPublic,
 )
 from axile.server.execution.lifecycle import enqueue_empty_positions, enqueue_execute_trade
@@ -44,7 +46,11 @@ from axile.server.execution.registry import (
     try_register_target_refresh,
 )
 from axile.server.execution.scheduler import delete_job
-from axile.server.repositories import get_latest_portfolio_id_by_account_id
+from axile.server.integrity import plan_executable_target
+from axile.server.repositories import (
+    get_latest_portfolio_id_by_account_id,
+    get_recent_account_asset_snapshots,
+)
 from axile.server.target_weight_snapshots import (
     append_target_weight_snapshot,
     get_latest_account_target_snapshot,
@@ -52,6 +58,46 @@ from axile.server.target_weight_snapshots import (
 )
 
 router = APIRouter()
+
+
+async def _latest_book(session: SessionDep, account_id: int) -> tuple[list[object], float]:
+    """读取账户最近一条资产快照的持仓与权益；无快照时视为空仓."""
+    snapshots = await get_recent_account_asset_snapshots(session, account_id, limit=1)
+    if not snapshots:
+        return [], 0.0
+    assets = snapshots[0].assets if isinstance(snapshots[0].assets, dict) else {}
+    raw_positions = assets.get("positions")
+    positions = raw_positions if isinstance(raw_positions, list) else []
+    try:
+        equity = float(assets.get("total_asset") or 0.0)
+    except (TypeError, ValueError):
+        equity = 0.0
+    return positions, equity
+
+
+def _account_target_public(
+    account: object,
+    snapshot: TargetWeightSnapshot | None,
+    positions: list[object],
+    equity: float,
+) -> TargetWeightSnapshotPublic:
+    """账户目标快照：权重 key 与持仓对齐，并附带渠道量化后的目标数量."""
+    if snapshot is None:
+        return TargetWeightSnapshotPublic()
+    plugin = get_channel(getattr(account, "trade_channel"))
+    plan = plan_executable_target(
+        positions,
+        snapshot.normalized_weights or {},
+        equity,
+        canonicalize_symbol=plugin.canonicalize_symbol,
+        quantize_target_quantity=plugin.quantize_target_quantity,
+    )
+    return target_snapshot_public(
+        snapshot,
+        weight_kind="normalized",
+        weights=plan.weights,
+        quantities=plan.quantities,
+    )
 
 
 def _account_route_module() -> Any:
@@ -90,12 +136,13 @@ async def execute(session: SessionDep, account_id: int) -> ExecutionTriggerRespo
 @router.get("/{account_id}/target_snapshot", response_model=TargetWeightSnapshotPublic)
 async def account_target_snapshot(session: SessionDep, account_id: int) -> TargetWeightSnapshotPublic:
     """只读账户当前绑定组合下最近成功计算的目标快照."""
-    await _get_account_or_404(session, account_id)
+    account = await _get_account_or_404(session, account_id)
     portfolio_id = await get_latest_portfolio_id_by_account_id(session, account_id)
     if portfolio_id is None:
         return TargetWeightSnapshotPublic()
     snapshot = await get_latest_account_target_snapshot(session, account_id, portfolio_id)
-    return target_snapshot_public(snapshot, weight_kind="normalized")
+    positions, equity = await _latest_book(session, account_id)
+    return _account_target_public(account, snapshot, positions, equity)
 
 
 @router.post("/{account_id}/target_snapshot/refresh", response_model=TargetWeightSnapshotPublic)
@@ -126,7 +173,8 @@ async def refresh_account_target_snapshot(session: SessionDep, account_id: int) 
             normalized_weights=normalized_target,
             source="manual",
         )
-        return target_snapshot_public(snapshot, weight_kind="normalized")
+        positions, equity = await _latest_book(session, account_id)
+        return _account_target_public(account, snapshot, positions, equity)
     finally:
         clear_target_refresh(portfolio_id, account_id)
 

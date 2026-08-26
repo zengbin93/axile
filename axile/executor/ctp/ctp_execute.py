@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import math
-import re
 import shutil
 import tempfile
 import threading
@@ -18,6 +17,7 @@ from zoneinfo import ZoneInfo
 from openctp_ctp import thostmduserapi as md
 from openctp_ctp import thosttraderapi as td
 
+from axile.channels.cn_futures import canonicalize_cn_futures_symbol, czce_is_option_instrument
 from axile.common.trade_channel import TradeChannel
 from axile.domain.execution import ExecutionReasonFamily
 from axile.executor.abstract_executor.base import AbstractExecutor
@@ -71,7 +71,6 @@ from axile.executor.models.unified_callback import (
 from axile.executor.models.unified_input import AccountConfig, CTPAccountConfig, UnifiedStandardInput
 from axile.executor.models.unified_order import OrderType, UnifiedOrder
 
-_CZCE_FUTURE_ALIAS = re.compile(r"^(?P<product>[A-Za-z]+)(?P<year>\d{2})(?P<month>\d{2})$")
 _SHANGHAI = ZoneInfo("Asia/Shanghai")
 _ValueT = TypeVar("_ValueT")
 
@@ -401,7 +400,7 @@ class CTPExecutor(AbstractExecutor, UnifiedCallbackClient):
 
     @override
     def _normalize_connected_standard_input(self, standard_input: UnifiedStandardInput) -> UnifiedStandardInput:
-        """使用 CTP 合约目录规范化郑商所四位年份代码。"""
+        """使用 CTP 合约目录规范化郑商所四位年份期货/期权代码。"""
         return standard_input.model_copy(
             update={
                 "curr_target": self._normalize_symbol_mapping("curr_target", standard_input.curr_target),
@@ -434,26 +433,18 @@ class CTPExecutor(AbstractExecutor, UnifiedCallbackClient):
     def _normalize_ctp_symbol(self, symbol: str) -> str:
         if symbol in self._instruments:
             return symbol
-        match = _CZCE_FUTURE_ALIAS.fullmatch(symbol)
-        if match is None:
-            return symbol
-        requested_year = 2000 + int(match.group("year"))
         trading_day = str(getattr(self, "_trading_day", ""))
         reference_year = (
             int(trading_day[:4]) if len(trading_day) >= 4 and trading_day[:4].isdigit() else datetime.now().year
         )
-        native_year_digit = requested_year % 10
-        nearest_year = min(
-            (year for year in range(2000, 2100) if year % 10 == native_year_digit),
-            key=lambda year: abs(year - reference_year),
-        )
-        if requested_year != nearest_year:
+        native_symbol = canonicalize_cn_futures_symbol(symbol, reference_year=reference_year)
+        if native_symbol == symbol:
             return symbol
-        native_symbol = f"{match.group('product')}{match.group('year')[-1]}{match.group('month')}"
         instrument = self._instruments.get(native_symbol)
         if instrument is None or str(getattr(instrument, "ExchangeID", "")) != "CZCE":
             return symbol
-        if getattr(instrument, "ProductClass", None) != td.THOST_FTDC_PC_Futures:
+        want_class = td.THOST_FTDC_PC_Options if czce_is_option_instrument(native_symbol) else td.THOST_FTDC_PC_Futures
+        if getattr(instrument, "ProductClass", None) != want_class:
             return symbol
         return native_symbol
 

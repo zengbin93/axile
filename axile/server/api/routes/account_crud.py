@@ -43,7 +43,7 @@ from axile.server.execution.registry import (
     get_running_execution_id,
 )
 from axile.server.execution.scheduler import create_job, delete_job
-from axile.server.integrity import count_off_symbols
+from axile.server.integrity import plan_executable_target
 from axile.server.repositories import (
     add_record_portfolio_account,
     get_account_asset_snapshots_before_for_accounts,
@@ -464,7 +464,8 @@ async def account_dashboard(session: SessionDep, sched: SchedDep) -> AccountDash
             since_by_account.get(account_id, []),
         )
 
-        currency = get_channel(account.trade_channel).descriptor.currency
+        plugin = get_channel(account.trade_channel)
+        currency = plugin.descriptor.currency
 
         job = sched.get_job(str(account_id))  # type: ignore[no-untyped-call]
         next_run = getattr(job, "next_run_time", None) if job is not None else None
@@ -486,11 +487,15 @@ async def account_dashboard(session: SessionDep, sched: SchedDep) -> AccountDash
         last_output_status = None if latest is None else execution_record_output_status(latest.raw_result)
         target_snapshot = targets_by_account.get(account_id)
         target_weights = None if target_snapshot is None else target_snapshot.normalized_weights
-        off_symbol_count = (
-            None
-            if latest_snapshot is None or not isinstance(target_weights, dict)
-            else count_off_symbols(positions, target_weights, _safe_total_asset(assets))
-        )
+        off_symbol_count = None
+        if latest_snapshot is not None and isinstance(target_weights, dict):
+            off_symbol_count = plan_executable_target(
+                positions,
+                target_weights,
+                _safe_total_asset(assets),
+                canonicalize_symbol=plugin.canonicalize_symbol,
+                quantize_target_quantity=plugin.quantize_target_quantity,
+            ).off_symbol_count
 
         items.append(
             AccountDashboardItemPublic(
