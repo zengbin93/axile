@@ -229,12 +229,27 @@ def test_next_schedule_times_deduplicates_and_uses_beijing_timezone() -> None:
         "2026-08-24T09:30:00+08:00",
         "2026-08-25T09:30:00+08:00",
     ]
+    continued = account_schedule._next_schedule_times(
+        parse_cron_expr("30 9 * * * | 30 9 * * *"),
+        start=values[0],
+        limit=2,
+        exclusive=True,
+    )
+    assert [value.isoformat() for value in continued] == [
+        "2026-08-24T09:30:00+08:00",
+        "2026-08-25T09:30:00+08:00",
+    ]
 
 
 def test_schedule_preview_maps_only_closed_to_skip(monkeypatch: pytest.MonkeyPatch) -> None:
     closed_at = datetime(2026, 8, 24, 9, 30, tzinfo=SCHEDULER_TIMEZONE)
     unavailable_at = datetime(2026, 8, 25, 9, 30, tzinfo=SCHEDULER_TIMEZONE)
-    monkeypatch.setattr(account_schedule, "_next_schedule_times", lambda *_args, **_kwargs: [closed_at, unavailable_at])
+    later_at = datetime(2026, 8, 26, 9, 30, tzinfo=SCHEDULER_TIMEZONE)
+    monkeypatch.setattr(
+        account_schedule,
+        "_next_schedule_times",
+        lambda *_args, **_kwargs: [closed_at, unavailable_at, later_at],
+    )
 
     async def summary(*_args: object, **_kwargs: object) -> account_schedule.SchedulePreviewCalendar:
         return account_schedule.SchedulePreviewCalendar(
@@ -270,6 +285,8 @@ def test_schedule_preview_maps_only_closed_to_skip(monkeypatch: pytest.MonkeyPat
     )
     assert [item.action for item in response.items] == ["skip", "execute"]
     assert response.items[1].unavailable_reason is CalendarUnavailableReason.UNCOVERED
+    assert response.has_more is True
+    assert response.next_cursor == unavailable_at
 
 
 def test_schedule_preview_uses_its_beijing_date_for_calendar_summary(
@@ -428,6 +445,13 @@ def test_schedule_preview_models_enforce_limits_and_serialize_timezone() -> None
             cron_expr="30 9 * * *",
             limit=101,
         )
+    with pytest.raises(ValueError):
+        account_schedule.SchedulePreviewRequest(
+            trade_channel=TradeChannel.CTP,
+            cron_expr="30 9 * * *",
+            after=datetime(2026, 8, 23, 9, 30),
+        )
+    cursor = datetime(2026, 8, 23, 9, 30, tzinfo=SCHEDULER_TIMEZONE)
     response = account_schedule.SchedulePreviewResponse(
         evaluated_at=datetime(2026, 8, 23, 8, 0, tzinfo=SCHEDULER_TIMEZONE),
         calendar=account_schedule.SchedulePreviewCalendar(
@@ -436,7 +460,11 @@ def test_schedule_preview_models_enforce_limits_and_serialize_timezone() -> None
             unavailable_reason=CalendarUnavailableReason.NOT_CONFIGURED,
         ),
         items=[],
+        next_cursor=cursor,
+        has_more=True,
     )
     payload: dict[str, Any] = response.model_dump(mode="json")
     assert payload["timezone"] == "Asia/Shanghai"
     assert payload["evaluated_at"].endswith("+08:00")
+    assert payload["next_cursor"].endswith("+08:00")
+    assert payload["has_more"] is True

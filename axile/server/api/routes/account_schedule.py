@@ -7,7 +7,7 @@ from typing import Literal, cast
 
 from apscheduler.triggers.cron import CronTrigger  # type: ignore[import-not-found]
 from fastapi import APIRouter, HTTPException, Query, status
-from pydantic import BaseModel, Field
+from pydantic import AwareDatetime, BaseModel, Field
 from sqlmodel import col, desc, func, select
 
 from axile.channels import get_channel
@@ -39,6 +39,7 @@ class SchedulePreviewRequest(BaseModel):
 
     trade_channel: TradeChannel
     cron_expr: str
+    after: AwareDatetime | None = None
     limit: int = Field(default=5, ge=1, le=100)
 
 
@@ -75,6 +76,8 @@ class SchedulePreviewResponse(BaseModel):
     evaluated_at: datetime
     calendar: SchedulePreviewCalendar
     items: list[SchedulePreviewItem]
+    next_cursor: datetime | None = None
+    has_more: bool = False
 
 
 def _field_error(field: str, message: str) -> HTTPException:
@@ -89,9 +92,15 @@ def _next_schedule_times(
     *,
     start: datetime,
     limit: int,
+    exclusive: bool = False,
 ) -> list[datetime]:
     """合并多个 CronTrigger，按北京时间返回去重后的未来触发点。"""
     next_values = [trigger.get_next_fire_time(None, start) for trigger in triggers]
+    if exclusive:
+        for index, value in enumerate(next_values):
+            while value is not None and value <= start:
+                value = triggers[index].get_next_fire_time(value, value)
+            next_values[index] = value
     result: list[datetime] = []
     while len(result) < limit:
         candidates = [value for value in next_values if value is not None]
@@ -142,7 +151,7 @@ async def _calendar_summary(
 
 @router.post("/schedule-preview", response_model=SchedulePreviewResponse)
 async def schedule_preview(session: SessionDep, payload: SchedulePreviewRequest) -> SchedulePreviewResponse:
-    """只读预览未来原始 Cron 触发点及其交易日历动作。"""
+    """按时间游标只读预览未来 Cron 触发点及其交易日历动作。"""
     try:
         get_channel(str(payload.trade_channel))
     except KeyError as exc:
@@ -161,9 +170,17 @@ async def schedule_preview(session: SessionDep, payload: SchedulePreviewRequest)
     except ValueError as exc:
         raise _field_error("cron_expr", str(exc)) from exc
 
-    scheduled = _next_schedule_times(triggers, start=evaluated_at, limit=payload.limit)
+    start = payload.after.astimezone(SCHEDULER_TIMEZONE) if payload.after is not None else evaluated_at
+    scheduled = _next_schedule_times(
+        triggers,
+        start=start,
+        limit=payload.limit + 1,
+        exclusive=payload.after is not None,
+    )
+    has_more = len(scheduled) > payload.limit
+    page = scheduled[: payload.limit]
     items = []
-    for scheduled_at in scheduled:
+    for scheduled_at in page:
         local_time = scheduled_at.astimezone(SCHEDULER_TIMEZONE)
         decision = await evaluate_channel_calendar_moment(session, payload.trade_channel, local_time)
         items.append(
@@ -179,7 +196,13 @@ async def schedule_preview(session: SessionDep, payload: SchedulePreviewRequest)
                 reason_code=decision.reason_code,
             )
         )
-    return SchedulePreviewResponse(evaluated_at=evaluated_at, calendar=calendar, items=items)
+    return SchedulePreviewResponse(
+        evaluated_at=evaluated_at,
+        calendar=calendar,
+        items=items,
+        next_cursor=items[-1].scheduled_at if items else None,
+        has_more=has_more,
+    )
 
 
 @router.get("/{account_id}/activity", response_model=AccountActivityListPublic)

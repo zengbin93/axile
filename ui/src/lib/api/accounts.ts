@@ -28,6 +28,8 @@ export interface SchedulePreview {
     coverage_start: string | null
     coverage_end: string | null
   }
+  next_cursor: string | null
+  has_more: boolean
   items: Array<{
     scheduled_at: string
     calendar_day: string
@@ -108,17 +110,18 @@ export function getNextRun(id: number, signal?: AbortSignal): Promise<AccountNex
   return apiGet<AccountNextRun>(`/account/${id}/next_run_time`, signal)
 }
 
-/** 只读预览未来原始 Cron 触发点及其日历动作。 */
+/** 只读预览未来原始 Cron 触发点及其日历动作；after 严格续接其后的时间线。 */
 export function previewSchedule(
   tradeChannel: string,
   cronExpr: string,
+  params: { after?: string | null; limit?: number } = {},
   signal?: AbortSignal,
-  limit = 5,
 ): Promise<SchedulePreview> {
   return apiSend<SchedulePreview>('POST', '/account/schedule-preview', {
     trade_channel: tradeChannel,
     cron_expr: cronExpr,
-    limit,
+    after: params.after ?? null,
+    limit: params.limit ?? 5,
   }, signal)
 }
 

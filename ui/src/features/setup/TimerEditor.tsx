@@ -8,7 +8,7 @@
  * 动效与 :component:`AcctTimer` 原实现一致：panel-fade / grid 展开 / Segmented 滑块。
  */
 
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { Link } from '@/components/ui/nav'
 import { OverflowText } from '@/components/ui/OverflowText'
 import { Segmented } from '@/components/ui/Segmented'
@@ -27,14 +27,19 @@ import {
   type TimerEditorState,
 } from '@/features/setup/cron'
 import { TimerAdvanced, TimerCustom } from '@/features/setup/TimerAdvanced'
+import {
+  appendSchedulePreview,
+  PREVIEW_MIN_ITEMS,
+  PREVIEW_PREFETCH_ROWS,
+  PREVIEW_ROW_PITCH,
+  previewLimitForHeight,
+} from '@/features/setup/previewTimeline'
 import { previewSchedule, type SchedulePreview, type ScheduleUnavailableReason } from '@/lib/api/accounts'
 import type { TradeChannel } from '@/types/api'
 
 export type { TimerEditorState }
 
-const PREVIEW_ROW_PITCH = 26
-const PREVIEW_MIN_ITEMS = 5
-const PREVIEW_MAX_ITEMS = 100
+const PREVIEW_SENTINEL_MARGIN = PREVIEW_ROW_PITCH * 2
 const PREVIEW_WIDE_QUERY = '(min-width: 1120px)'
 const PREVIEW_CASCADE_DELAY_STEP = 16
 const PREVIEW_CASCADE_DELAY_MAX = 160
@@ -159,13 +164,20 @@ export function TimerEditor({ tradeChannel, scheduleKind, nightSchedule, value, 
   const tabFade = useRemountFade(v.timerTab)
   const [schedulePreview, setSchedulePreview] = useState<SchedulePreview | null>(null)
   const [previewLoading, setPreviewLoading] = useState(false)
+  const [previewLoadingMore, setPreviewLoadingMore] = useState(false)
   const [previewError, setPreviewError] = useState<string | null>(null)
+  const [previewMoreError, setPreviewMoreError] = useState<string | null>(null)
+  const [previewWide, setPreviewWide] = useState(false)
   const [previewLimit, setPreviewLimit] = useState(PREVIEW_MIN_ITEMS)
   const [previewCascade, setPreviewCascade] = useState({ generation: 0, active: false })
   const previewRequestId = useRef(0)
+  const previewAppendRequestId = useRef(0)
+  const previewAppendController = useRef<AbortController | null>(null)
   const previewListRef = useRef<HTMLDivElement | null>(null)
-  const previewResultCron = useRef<string | null>(null)
-  const previousChannel = useRef(tradeChannel)
+  const previewSentinelRef = useRef<HTMLDivElement | null>(null)
+  const previewLimitRef = useRef(PREVIEW_MIN_ITEMS)
+  const previewResultKey = useRef<string | null>(null)
+  const previewCascadePending = useRef(false)
 
   const patch = (p: Partial<TimerEditorState>) => {
     onChange((prev) => ({ ...prev, ...p }))
@@ -196,6 +208,7 @@ export function TimerEditor({ tradeChannel, scheduleKind, nightSchedule, value, 
   const rawErr = v.timerTab === 'custom' && !customEmpty ? cronError(v.rawCron) : null
   const cronList = v.autoOn ? resolveCronList(scheduleKind, v, nightSchedule) : []
   const cronExpr = rawErr ? '' : cronToExpr(cronList)
+  const previewKey = tradeChannel && cronExpr ? `${tradeChannel}\u0000${cronExpr}` : ''
   // 是否会发起预览请求（与下方 effect 的提前返回条件一致）：首帧据此直接上骨架，
   // 避免「占位文案 → 骨架 → 列表」三段跳闪。
   const expectPreview = Boolean(tradeChannel) && v.autoOn && !rawErr && Boolean(cronExpr)
@@ -204,6 +217,8 @@ export function TimerEditor({ tradeChannel, scheduleKind, nightSchedule, value, 
   // ResizeObserver 驱动；窄视口退回 5 条，避免自然高度布局形成测量反馈环。
   useEffect(() => {
     if (layout !== 'page') {
+      previewLimitRef.current = PREVIEW_MIN_ITEMS
+      setPreviewWide(false)
       setPreviewLimit(PREVIEW_MIN_ITEMS)
       return
     }
@@ -211,16 +226,17 @@ export function TimerEditor({ tradeChannel, scheduleKind, nightSchedule, value, 
     if (!list) return
     const media = window.matchMedia(PREVIEW_WIDE_QUERY)
     const updateLimit = () => {
-      if (!media.matches) {
+      const wide = media.matches
+      setPreviewWide(wide)
+      if (!wide) {
+        previewLimitRef.current = PREVIEW_MIN_ITEMS
         setPreviewLimit(PREVIEW_MIN_ITEMS)
         return
       }
       const height = list.clientHeight
       if (height <= 0) return
-      const next = Math.min(
-        PREVIEW_MAX_ITEMS,
-        Math.max(PREVIEW_MIN_ITEMS, Math.ceil(height / PREVIEW_ROW_PITCH) + 1),
-      )
+      const next = previewLimitForHeight(height)
+      previewLimitRef.current = next
       setPreviewLimit((current) => (current === next ? current : next))
     }
     updateLimit()
@@ -246,41 +262,50 @@ export function TimerEditor({ tradeChannel, scheduleKind, nightSchedule, value, 
     return () => window.clearTimeout(timer)
   }, [previewCascade.active, previewCascade.generation])
 
+  // 规则/渠道变化建立一条新的未来时间线；resize 只更新后续批次大小，不进入依赖，
+  // 因此不会把已看到的内容清空再从「现在」重抓。
   useEffect(() => {
-    if (previousChannel.current !== tradeChannel) {
-      previousChannel.current = tradeChannel
-      previewResultCron.current = null
-      setSchedulePreview(null)
-      setPreviewError(null)
-    }
     const requestId = ++previewRequestId.current
-    if (!tradeChannel || !v.autoOn || rawErr || !cronExpr) {
-      previewResultCron.current = null
+    previewAppendRequestId.current += 1
+    previewAppendController.current?.abort()
+    previewAppendController.current = null
+    setPreviewLoadingMore(false)
+    setPreviewMoreError(null)
+
+    if (!tradeChannel || !v.autoOn || rawErr || !cronExpr || !previewKey) {
+      previewResultKey.current = null
+      previewCascadePending.current = false
       setSchedulePreview(null)
       setPreviewLoading(false)
       setPreviewError(null)
       return
     }
+
+    const priorKey = previewResultKey.current
+    previewCascadePending.current = layout === 'page' && priorKey != null && priorKey !== previewKey
+    previewResultKey.current = null
+    setSchedulePreview(null)
+    setPreviewError(null)
+    if (layout === 'page') previewListRef.current?.scrollTo({ top: 0 })
+
     const controller = new AbortController()
     const timer = window.setTimeout(() => {
       setPreviewLoading(true)
-      setPreviewError(null)
-      const limit = layout === 'page' ? previewLimit : PREVIEW_MIN_ITEMS
-      void previewSchedule(tradeChannel, cronExpr, controller.signal, limit)
+      const limit = layout === 'page' ? previewLimitRef.current : PREVIEW_MIN_ITEMS
+      void previewSchedule(tradeChannel, cronExpr, { limit }, controller.signal)
         .then((next) => {
           if (requestId !== previewRequestId.current) return
-          const shouldCascade = layout === 'page'
-            && previewResultCron.current != null
-            && previewResultCron.current !== cronExpr
-          previewResultCron.current = cronExpr
+          previewResultKey.current = previewKey
           setSchedulePreview(next)
-          if (shouldCascade) {
+          if (previewCascadePending.current) {
             setPreviewCascade((current) => ({ generation: current.generation + 1, active: true }))
           }
+          previewCascadePending.current = false
           setPreviewLoading(false)
         })
         .catch((error) => {
           if (controller.signal.aborted || requestId !== previewRequestId.current) return
+          previewCascadePending.current = false
           setPreviewError(error instanceof Error ? error.message : String(error))
           setPreviewLoading(false)
         })
@@ -289,9 +314,99 @@ export function TimerEditor({ tradeChannel, scheduleKind, nightSchedule, value, 
       window.clearTimeout(timer)
       controller.abort()
     }
-  }, [tradeChannel, v.autoOn, rawErr, cronExpr, layout, previewLimit])
+  }, [tradeChannel, v.autoOn, rawErr, cronExpr, layout, previewKey])
 
-  useEffect(() => () => { previewRequestId.current += 1 }, [])
+  const loadMore = useCallback(() => {
+    const cursor = schedulePreview?.next_cursor
+    if (
+      layout !== 'page'
+      || !previewWide
+      || !tradeChannel
+      || !v.autoOn
+      || rawErr
+      || !cronExpr
+      || !previewKey
+      || !cursor
+      || !schedulePreview.has_more
+      || previewLoadingMore
+      || previewAppendController.current != null
+    ) return
+
+    const requestId = ++previewAppendRequestId.current
+    const controller = new AbortController()
+    previewAppendController.current = controller
+    setPreviewLoadingMore(true)
+    setPreviewMoreError(null)
+    void previewSchedule(
+      tradeChannel,
+      cronExpr,
+      { after: cursor, limit: previewLimit },
+      controller.signal,
+    )
+      .then((next) => {
+        if (requestId !== previewAppendRequestId.current || previewResultKey.current !== previewKey) return
+        setSchedulePreview((current) => (
+          current ? appendSchedulePreview(current, next, cursor) : current
+        ))
+        setPreviewLoadingMore(false)
+        if (previewAppendController.current === controller) previewAppendController.current = null
+      })
+      .catch((error) => {
+        if (controller.signal.aborted || requestId !== previewAppendRequestId.current) return
+        setPreviewMoreError(error instanceof Error ? error.message : String(error))
+        setPreviewLoadingMore(false)
+        if (previewAppendController.current === controller) previewAppendController.current = null
+      })
+  }, [
+    layout,
+    previewWide,
+    tradeChannel,
+    v.autoOn,
+    rawErr,
+    cronExpr,
+    previewKey,
+    previewLimit,
+    previewLoadingMore,
+    schedulePreview?.has_more,
+    schedulePreview?.next_cursor,
+  ])
+
+  // 底部哨兵提前两行触发；续取失败时停住自动重试，交给底部「重试」命令。
+  useEffect(() => {
+    if (
+      layout !== 'page'
+      || !previewWide
+      || !schedulePreview?.has_more
+      || !schedulePreview.next_cursor
+      || previewLoadingMore
+      || previewMoreError
+    ) return
+    const root = previewListRef.current
+    const sentinel = previewSentinelRef.current
+    if (!root || !sentinel) return
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) loadMore()
+      },
+      { root, rootMargin: `0px 0px ${PREVIEW_SENTINEL_MARGIN}px 0px` },
+    )
+    observer.observe(sentinel)
+    return () => observer.disconnect()
+  }, [
+    layout,
+    previewWide,
+    schedulePreview?.has_more,
+    schedulePreview?.next_cursor,
+    previewLoadingMore,
+    previewMoreError,
+    loadMore,
+  ])
+
+  useEffect(() => () => {
+    previewRequestId.current += 1
+    previewAppendRequestId.current += 1
+    previewAppendController.current?.abort()
+  }, [])
 
   const summary = tradeChannel
     ? calendarSummary(schedulePreview)
@@ -489,6 +604,26 @@ export function TimerEditor({ tradeChannel, scheduleKind, nightSchedule, value, 
           </div>
         )
       })}
+      {layout === 'page' && previewWide && schedulePreview.has_more && (
+        <div ref={previewSentinelRef} className="pt-1">
+          {previewLoadingMore ? (
+            <div className="space-y-2" aria-label="正在推演更多未来排程">
+              {Array.from({ length: PREVIEW_PREFETCH_ROWS }, (_, index) => (
+                <div key={index} className="h-4 w-full animate-pulse rounded bg-fill motion-reduce:animate-none" />
+              ))}
+            </div>
+          ) : previewMoreError ? (
+            <div className="flex items-center justify-between gap-2 border-l-2 border-warn px-2 text-[12px] text-warn">
+              <span title={previewMoreError}>未来排程续取失败</span>
+              <button type="button" className="flex-none font-semibold hover:underline" onClick={loadMore}>
+                重试
+              </button>
+            </div>
+          ) : (
+            <div className="h-px" aria-hidden="true" />
+          )}
+        </div>
+      )}
     </div>
   ) : (
     <p className="text-[13px] text-ink-3">选择有效节奏后显示。</p>
