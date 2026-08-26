@@ -1,12 +1,16 @@
 """CTP 原生请求字段构造与调用测试。"""
 
 import threading
+from datetime import date, datetime
 from types import SimpleNamespace
 from unittest.mock import Mock
+from zoneinfo import ZoneInfo
 
 import pytest
 from openctp_ctp import thosttraderapi as td
 
+from axile.common.trade_channel import TradeChannel
+from axile.executor.account_control.exceptions import AccountControlBlockedError
 from axile.executor.ctp.ctp_execute import CTPExecutor, _PendingQuery, _Stage
 from axile.executor.ctp.requests import (
     build_order_cancel,
@@ -277,3 +281,142 @@ def test_settlement_query_confirms_when_current_day_is_missing(config: CTPAccoun
     executor._ensure_settlement_confirmed()
 
     executor._trader_api.ReqSettlementInfoConfirm.assert_called_once()
+
+
+class _SessionCalendar:
+    def __init__(self, days: dict[date, bool]) -> None:
+        self.days = days
+
+    def is_open(self, _calendar_id: str, day: date) -> bool | None:
+        return self.days.get(day)
+
+
+_SHANGHAI = ZoneInfo("Asia/Shanghai")
+
+
+def _submit_point_executor(config: CTPAccountConfig) -> CTPExecutor:
+    executor = CTPExecutor.__new__(CTPExecutor)
+    executor.account_config = config
+    executor.channel_type = TradeChannel.CTP
+    executor._instruments = {
+        "ag2612": SimpleNamespace(
+            ExchangeID="SHFE", ProductID="ag", ProductClass=td.THOST_FTDC_PC_Futures, PriceTick=1.0
+        ),
+        "bu2612": SimpleNamespace(
+            ExchangeID="SHFE", ProductID="bu", ProductClass=td.THOST_FTDC_PC_Futures, PriceTick=1.0
+        ),
+    }
+    executor._trading_calendar = _SessionCalendar(
+        {
+            date(2026, 8, 21): True,
+            date(2026, 8, 22): False,
+            date(2026, 8, 23): False,
+            date(2026, 8, 24): True,
+            date(2026, 8, 25): True,
+        }
+    )
+    executor._trader_api = Mock()
+    executor._trader_api.ReqOrderInsert.return_value = 0
+    executor._order_keys = {}
+    executor._order_ref = 1
+    executor._request_id = 0
+    executor._lock = threading.RLock()
+    executor._trading_day = "20260824"
+    executor._front_id = 0
+    executor._session_id = 0
+    return executor
+
+
+def _at_clock(monkeypatch: pytest.MonkeyPatch, moment: datetime) -> None:
+    monkeypatch.setattr("axile.executor.ctp.ctp_execute.clock_now", lambda **_kwargs: moment)
+
+
+def test_place_order_blocks_at_submit_during_lunch_break(
+    config: CTPAccountConfig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    executor = _submit_point_executor(config)
+    _at_clock(monkeypatch, datetime(2026, 8, 25, 12, 0, tzinfo=_SHANGHAI))
+
+    with pytest.raises(AccountControlBlockedError, match="CTP.SESSION.CLOSED"):
+        executor._place_order_impl("ag2612", OrderDirection.BUY, OrderType.LIMIT, 1, 9000)
+
+    executor._trader_api.ReqOrderInsert.assert_not_called()
+    assert executor._order_keys == {}
+
+
+def test_place_order_blocks_at_submit_after_session_end(
+    config: CTPAccountConfig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    executor = _submit_point_executor(config)
+    _at_clock(monkeypatch, datetime(2026, 8, 25, 20, 0, tzinfo=_SHANGHAI))
+
+    with pytest.raises(AccountControlBlockedError, match="CTP.SESSION.CLOSED"):
+        executor._place_order_impl("ag2612", OrderDirection.BUY, OrderType.LIMIT, 1, 9000)
+
+    executor._trader_api.ReqOrderInsert.assert_not_called()
+    assert executor._order_keys == {}
+
+
+def test_place_order_blocks_at_submit_on_non_trading_day(
+    config: CTPAccountConfig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    executor = _submit_point_executor(config)
+    _at_clock(monkeypatch, datetime(2026, 8, 22, 21, 29, tzinfo=_SHANGHAI))
+
+    with pytest.raises(AccountControlBlockedError, match="CTP.SESSION.CLOSED"):
+        executor._place_order_impl("ag2612", OrderDirection.BUY, OrderType.LIMIT, 1, 9000)
+
+    executor._trader_api.ReqOrderInsert.assert_not_called()
+    assert executor._order_keys == {}
+
+
+def test_place_order_blocks_at_submit_without_calendar(
+    config: CTPAccountConfig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    executor = _submit_point_executor(config)
+    executor._trading_calendar = None
+    _at_clock(monkeypatch, datetime(2026, 8, 24, 21, 29, tzinfo=_SHANGHAI))
+
+    with pytest.raises(AccountControlBlockedError, match="CTP.SESSION.CALENDAR_UNAVAILABLE"):
+        executor._place_order_impl("ag2612", OrderDirection.BUY, OrderType.LIMIT, 1, 9000)
+
+    executor._trader_api.ReqOrderInsert.assert_not_called()
+    assert executor._order_keys == {}
+
+
+def test_place_order_blocks_at_submit_when_session_snapshot_expired(
+    config: CTPAccountConfig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    executor = _submit_point_executor(config)
+    _at_clock(monkeypatch, datetime(2027, 8, 25, 21, 29, tzinfo=_SHANGHAI))
+
+    with pytest.raises(AccountControlBlockedError, match="CTP.SESSION.DATA_UNAVAILABLE"):
+        executor._place_order_impl("ag2612", OrderDirection.BUY, OrderType.LIMIT, 1, 9000)
+
+    executor._trader_api.ReqOrderInsert.assert_not_called()
+    assert executor._order_keys == {}
+
+
+def test_place_order_recheck_blocks_after_planning_crosses_session_boundary(
+    config: CTPAccountConfig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    executor = _submit_point_executor(config)
+    _at_clock(monkeypatch, datetime(2026, 8, 24, 21, 29, tzinfo=_SHANGHAI))
+    assert executor._get_ctp_session_block_reason("bu2612") is None
+
+    _at_clock(monkeypatch, datetime(2026, 8, 24, 23, 0, tzinfo=_SHANGHAI))
+    with pytest.raises(AccountControlBlockedError, match="CTP.SESSION.CLOSED"):
+        executor._place_order_impl("bu2612", OrderDirection.BUY, OrderType.LIMIT, 1, 3600)
+
+    executor._trader_api.ReqOrderInsert.assert_not_called()
+    assert executor._order_keys == {}
+
+
+def test_place_order_submits_when_session_open(config: CTPAccountConfig, monkeypatch: pytest.MonkeyPatch) -> None:
+    executor = _submit_point_executor(config)
+    _at_clock(monkeypatch, datetime(2026, 8, 24, 21, 29, tzinfo=_SHANGHAI))
+
+    executor._place_order_impl("ag2612", OrderDirection.BUY, OrderType.LIMIT, 1, 9000)
+
+    executor._trader_api.ReqOrderInsert.assert_called_once()
+    assert len(executor._order_keys) == 1
