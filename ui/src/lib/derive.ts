@@ -4,7 +4,7 @@
  * 后端不下发「到位/背离」verdict，也无手续费汇总（见方案已知缺口）；这里用
  * 现有字段做诚实的粗粒度派生：能确定的说确定，不能确定的不编。
  */
-import { formatPlannedAt } from '@/features/account/scheduleTime'
+import { formatPlannedAt } from '@/lib/scheduleTime'
 import type { AccountAssets, AccountDashboardItem, ExecuteRecord, LatestWeights, Position } from '@/types/api'
 
 /**

@@ -3,7 +3,8 @@ import {
   formatPlannedAt,
   formatRecentExecution,
   formatTimeUntil,
-} from '@/features/account/scheduleTime'
+} from '@/lib/scheduleTime'
+import { ScheduleTimeRow } from '@/components/ui/ScheduleTimeRow'
 import { Skeleton, SkeletonGroup } from '@/components/ui/Skeleton'
 
 interface ScheduleTimelineProps {
@@ -68,12 +69,15 @@ export function ScheduleTimeline({ lastExecutedAt, nextRunTimes, now = Date.now(
         {upcoming.length > 0 ? (
           <div role="list" aria-label="未来自动执行计划" className="space-y-1">
             {upcoming.map((iso) => (
-              <div role="listitem" key={iso} className="flex items-baseline justify-between gap-3">
-                <time dateTime={iso} title={formatBeijingTimestamp(iso)} className="num font-medium text-ink-1">
-                  {formatPlannedAt(iso, now)}
-                </time>
-                <span className="flex-none text-[12px] text-ink-3">{formatTimeUntil(iso, now)}</span>
-              </div>
+              <ScheduleTimeRow
+                key={iso}
+                scheduledAt={iso}
+                trailing={formatTimeUntil(iso, now)}
+                now={now}
+                tone="muted"
+                size="md"
+                className="[&>span]:text-[12px]"
+              />
             ))}
           </div>
         ) : (

@@ -11,6 +11,7 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { Segmented } from '@/components/ui/Segmented'
 import { Select } from '@/components/ui/Select'
+import { ScheduleTimeRow } from '@/components/ui/ScheduleTimeRow'
 import { MOTION_LAYOUT, useRemountFade } from '@/lib/viewTransition'
 import { executionReasonText } from '@/features/account/executionReason'
 import {
@@ -32,6 +33,7 @@ import {
   PREVIEW_PREFETCH_ROWS,
   PREVIEW_ROW_PITCH,
   previewLimitForHeight,
+  schedulePreviewItemPresentation,
 } from '@/features/setup/previewTimeline'
 import { previewSchedule, type SchedulePreview } from '@/lib/api/accounts'
 import type { TradeChannel } from '@/types/api'
@@ -125,19 +127,6 @@ export interface TimerEditorProps {
  * onChange : fn
  *     状态更新；支持函数式 patch。
  */
-function formatScheduledAt(value: string): string {
-  const parts = new Intl.DateTimeFormat('zh-CN', {
-    timeZone: 'Asia/Shanghai',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false,
-  }).formatToParts(new Date(value))
-  const get = (type: Intl.DateTimeFormatPartTypes) => parts.find((part) => part.type === type)?.value ?? ''
-  return `${get('month')}-${get('day')} ${get('hour')}:${get('minute')}`
-}
-
 function calendarSummary(preview: SchedulePreview | null): { text: string; warning: boolean } {
   if (!preview) return { text: '交易日历 · 正在判断', warning: false }
   const calendar = preview.calendar
@@ -550,30 +539,21 @@ export function TimerEditor({ tradeChannel, scheduleKind, nightSchedule, value, 
   ) : expectPreview && !schedulePreview ? (
     <div className="space-y-2" aria-label="正在加载排程预览">{Array.from({ length: 4 }, (_, index) => <div key={index} className="h-4 w-full animate-pulse rounded bg-fill motion-reduce:animate-none" />)}</div>
   ) : schedulePreview?.items.length ? (
-    <div key={previewCascade.generation} className="space-y-1.5">
+    <div key={previewCascade.generation} role="list" aria-label="未来排程预览" className="space-y-1.5">
       {schedulePreview.items.map((item, index) => {
-        const tradingDay = item.calendar_day.slice(5)
-        const text = item.calendar_status === 'available_open'
-          ? `${tradingDay} 交易日，执行`
-          : item.calendar_status === 'available_closed'
-            ? executionReasonText(item.reason_code, '休市，已跳过')
-            : item.calendar_status === 'unavailable'
-              ? '日历不可用，按排程执行'
-              : '按排程执行'
-        const warning = item.calendar_status === 'unavailable'
+        const presentation = schedulePreviewItemPresentation(item, executionReasonText)
         return (
-          <div
+          <ScheduleTimeRow
             key={item.scheduled_at}
-            className={`grid grid-cols-[92px_minmax(0,1fr)] gap-3 text-[13px] ${
-              warning ? 'text-warn' : item.action === 'skip' ? 'text-ink-3' : 'text-ink-2'
-            } ${cascadeRows ? 'schedule-preview-row-in' : ''}`}
+            scheduledAt={item.scheduled_at}
+            trailing={presentation.text}
+            now={Date.parse(schedulePreview.evaluated_at)}
+            tone={presentation.tone}
+            className={cascadeRows ? 'schedule-preview-row-in' : ''}
             style={cascadeRows ? {
               animationDelay: `${Math.min(index * PREVIEW_CASCADE_DELAY_STEP, PREVIEW_CASCADE_DELAY_MAX)}ms`,
             } : undefined}
-          >
-            <span className="num">{formatScheduledAt(item.scheduled_at)}</span>
-            <span>{text}</span>
-          </div>
+          />
         )
       })}
       {layout === 'page' && previewWide && schedulePreview.has_more && (
