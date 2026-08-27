@@ -1,4 +1,4 @@
-import { useEffect, useRef, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { python } from '@codemirror/lang-python'
 import { lintGutter, setDiagnostics, type Diagnostic } from '@codemirror/lint'
 import { oneDark } from '@codemirror/theme-one-dark'
@@ -52,6 +52,28 @@ export function PythonFunctionEditor({
 }) {
   const cmRef = useRef<ReactCodeMirrorRef>(null)
   const hasCode = code.trim().length > 0
+  const [dialogOpen, setDialogOpen] = useState(false)
+  const closeRef = useRef<HTMLButtonElement>(null)
+  const runTriggerRef = useRef<HTMLElement | null>(null)
+
+  // 试跑结束即弹窗呈现结果：代码框保持全宽，结果不再挤在编辑器下方。
+  useEffect(() => {
+    if (result) setDialogOpen(true)
+  }, [result])
+
+  useEffect(() => {
+    if (!dialogOpen) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setDialogOpen(false)
+    }
+    window.addEventListener('keydown', onKey)
+    runTriggerRef.current = document.activeElement as HTMLElement | null
+    closeRef.current?.focus({ preventScroll: true })
+    return () => {
+      window.removeEventListener('keydown', onKey)
+      runTriggerRef.current?.focus?.({ preventScroll: true })
+    }
+  }, [dialogOpen])
 
   useEffect(() => {
     const view = cmRef.current?.view
@@ -84,7 +106,7 @@ export function PythonFunctionEditor({
   }[status]
 
   return (
-    <div className="max-w-[820px]">
+    <div className="w-full">
       <div className="mb-2 flex items-center justify-end gap-4">
         {hasCode && (
           <button className="inline-flex cursor-pointer items-center gap-1.5 text-[13px] text-accent disabled:cursor-default disabled:opacity-45" onClick={() => void paste()} disabled={disabled}>
@@ -129,13 +151,56 @@ export function PythonFunctionEditor({
           </div>
         )}
       </div>
-      {resultContent}
-      {result && !result.valid && result.traceback && (
-        <details className="mt-3 rounded-[8px] border border-line bg-code-bg px-4 py-3">
-          <summary className="cursor-pointer select-none text-[12.5px] text-warn">完整 traceback</summary>
-          <pre className="mt-2 max-h-[220px] overflow-auto whitespace-pre-wrap font-mono text-[12px] leading-relaxed text-warn">{result.traceback}</pre>
-        </details>
-      )}
+
+      {/* 试跑结果弹窗：通过 → resultContent（返回权重）；未通过 → 错误摘要 + traceback。 */}
+      <div
+        className={`fixed inset-0 z-[35] bg-scrim transition-opacity duration-150 ${dialogOpen ? 'opacity-100' : 'pointer-events-none opacity-0'}`}
+        onClick={() => setDialogOpen(false)}
+      />
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label="试跑结果"
+        className={`fixed left-1/2 top-1/2 z-[36] w-[560px] max-w-[92vw] -translate-x-1/2 rounded-[18px] bg-surface shadow-[0_24px_60px_rgba(0,0,0,0.24)] transition-all duration-150 ${
+          dialogOpen ? '-translate-y-1/2 opacity-100' : 'pointer-events-none -translate-y-[46%] opacity-0'
+        }`}
+      >
+        {result && dialogOpen && (
+          <>
+            <div className={`flex items-center gap-2 px-[22px] pt-5 pb-1.5 text-[17px] font-[640] ${result.valid ? 'text-accent' : 'text-warn'}`}>
+              {result.valid ? <Check size={17} /> : <TriangleAlert size={17} />}
+              {result.valid ? '试跑通过' : '试跑未通过'}
+            </div>
+            <div className="max-h-[60vh] overflow-y-auto px-[22px] pb-[18px] text-[13.5px] leading-relaxed">
+              {result.valid
+                ? (resultContent ?? <p className="text-ink-2">函数执行成功。</p>)
+                : (
+                  <>
+                    <p className="font-mono text-[12.5px] text-warn">
+                      {[result.errorType, result.errorMessage].filter(Boolean).join(': ') || '执行出错'}
+                    </p>
+                    {result.traceback && (
+                      <details className="mt-3 rounded-[8px] border border-line bg-code-bg px-4 py-3" open>
+                        <summary className="cursor-pointer select-none text-[12.5px] text-ink-2">完整 traceback</summary>
+                        <pre className="mt-2 max-h-[220px] overflow-auto whitespace-pre-wrap font-mono text-[12px] leading-relaxed text-warn">{result.traceback}</pre>
+                      </details>
+                    )}
+                  </>
+                )}
+            </div>
+            <div className="flex justify-end border-t border-line px-5 py-3.5">
+              <button
+                ref={closeRef}
+                className="inline-flex cursor-pointer items-center rounded-[9px] border-0 bg-ink-1 px-[18px] py-2 text-sm font-[550] text-surface focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/55 focus-visible:ring-offset-2 focus-visible:ring-offset-surface"
+                onClick={() => setDialogOpen(false)}
+              >
+                关闭
+                <span aria-hidden className="text-[12px] leading-none opacity-55">⏎</span>
+              </button>
+            </div>
+          </>
+        )}
+      </div>
     </div>
   )
 }

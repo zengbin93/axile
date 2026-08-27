@@ -283,7 +283,7 @@ export function AccountEditPage({ section = 'basic' }: { section?: EditSection }
 
   if (account.loading || !ready || !acc || !draft || (channelDescriptor == null && channelCatalogLoading)) {
     return (
-      <section className="mx-auto max-w-[900px] pb-24">
+      <section className="pb-24">
         {pageChrome}
         <EditLoading bare />
       </section>
@@ -344,7 +344,7 @@ export function AccountEditPage({ section = 'basic' }: { section?: EditSection }
   }
 
   return (
-    <section className="mx-auto max-w-[900px] pb-24">
+    <section className="pb-24">
       {pageChrome}
 
       {section === 'basic' && (

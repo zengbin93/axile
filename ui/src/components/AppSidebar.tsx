@@ -212,7 +212,11 @@ export function AppSidebar() {
             <div>
               <NavItem item={{ label: '所有账户', icon: CircleGauge, to: '/', active: (pathname) => pathname === '/' }} />
               <NavItem item={{ label: '所有组合', icon: Boxes, to: '/portfolios', active: (pathname) => pathname.startsWith('/portfolios') }} />
+              <NavItem item={{ label: '飞书告警', icon: BellRing, to: '/settings', active: exact('/settings') }} />
+              <NavItem item={{ label: '高级设置', icon: Settings2, to: '/settings/advanced', active: exact('/settings/advanced') }} />
 
+              {/* 横线分割：顶层（全局与系统设置）与账户段各自成块。 */}
+              <div className="mt-4 border-t border-line" />
               {noAccounts ? (
                 <NavSection label="当前账户">
                   <p className="px-2.5 py-1.5 text-[12px] leading-relaxed text-ink-3">
@@ -222,7 +226,7 @@ export function AppSidebar() {
               ) : (
                 /* 账户段：身份块头（账户名 + 渠道）+ 左缘贯通 hairline + 统一缩进——
                    整段条目属于这个账户。不用围合面板，层次靠线。 */
-                <div className="mt-5 ml-1.5 border-l border-line pl-2">
+                <div className="mt-4 ml-1.5 border-l border-line pl-2">
                   <div className="mb-1 flex min-w-0 items-center gap-1.5 px-2.5 pt-0.5" title={activeAccount?.name ?? '当前账户'}>
                     <span className="truncate text-[13px] font-[620] text-ink-1">
                       {activeAccount?.name ?? '当前账户'}
@@ -244,11 +248,6 @@ export function AppSidebar() {
                   </NavSection>
                 </div>
               )}
-
-              <NavSection label="系统">
-                <NavItem item={{ label: '飞书告警', icon: BellRing, to: '/settings', active: exact('/settings') }} />
-                <NavItem item={{ label: '高级', icon: Settings2, to: '/settings/advanced', active: exact('/settings/advanced') }} />
-              </NavSection>
             </div>
           </div>
         </nav>

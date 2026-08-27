@@ -91,7 +91,7 @@ function WeightResult({ target }: { target: Record<string, number> }) {
   const entries = Object.entries(target).sort((a, b) => Math.abs(b[1]) - Math.abs(a[1]))
   const total = entries.reduce((sum, [, weight]) => sum + weight, 0)
   return (
-    <div className="mt-3 rounded-[8px] border border-line px-4 py-3.5">
+    <div className="rounded-[8px] border border-line px-4 py-3.5">
       <div className="mb-2.5 flex items-center justify-between text-[13px]">
         <span className="flex items-center gap-1.5 font-[550] text-accent"><Check size={14} /> 返回权重</span>
         <span className="text-ink-3">合计 <span className="num text-ink-2">{total.toFixed(2)}</span></span>

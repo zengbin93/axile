@@ -55,7 +55,7 @@ export function AccountEditConnectionPage() {
   if (account.error && !acc) return <EditError error={account.error} onRetry={account.refresh} />
   if (!acc || !draft || (catalogLoading && !channelDescriptor))
     return (
-      <section className="mx-auto max-w-[900px] pb-24">
+      <section className="pb-24">
         {title}
         <EditLoading bare />
       </section>
@@ -114,7 +114,7 @@ export function AccountEditConnectionPage() {
   }
 
   return (
-    <section className="mx-auto max-w-[900px] pb-24">
+    <section className="pb-24">
       {title}
       <div className="mt-3 border-l-2 border-warn/60 bg-warn-tint/50 py-2 pl-3 pr-2 text-[13px] text-ink-2">修改会在下次创建执行器时生效；密码与密钥不会回显。</div>
       <Section label={`${channelDescriptor?.label ?? acc.trade_channel} 连接`}>

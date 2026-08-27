@@ -354,7 +354,7 @@ export function AccountEditControlPage() {
     )
   if (!acc || !model || !effective)
     return (
-      <section className="mx-auto max-w-[900px] pb-24">
+      <section className="pb-24">
         {title}
         <EditLoading bare />
       </section>
@@ -428,7 +428,7 @@ export function AccountEditControlPage() {
   }
 
   return (
-    <section className="mx-auto max-w-[900px] pb-24">
+    <section className="pb-24">
       {title}
       <EditSynopsis note="控制交易请求的频率与间隔；保存后从下一次执行开始生效。">
         {model.preset_display_name} · {overrideCount ? `${overrideCount} 处自定义` : '全部使用预设值'}
