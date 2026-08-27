@@ -492,12 +492,12 @@ export function AccountDetail({
             {/*
               权益走势迷你线即入口：点击跳「回看 · 绩效」。曲线不挂共享名（禁止小图→大图内容
               morph）；连续叙事只落在金额 FLIP。affordance 走安静瓷砖（hover 提亮，不叠字）；
-              发现性由 title 与页内「完整回看 / 绩效 →」兜底。
+              发现性由 title 与页内「完整实盘绩效 →」兜底。
             */}
             <Link
               to={`/accounts/${accountId}/history`}
-              aria-label="查看回看 · 绩效"
-              title="回看 · 绩效"
+              aria-label="查看实盘绩效"
+              title="实盘绩效"
               // hover/聚焦预取绩效全量记录：首帧有数据、不闪骨架，金额 FLIP 有真实落点。
               onPointerEnter={() => prefetchExecuteRecords(accountId)}
               onFocus={() => prefetchExecuteRecords(accountId)}
@@ -702,7 +702,7 @@ export function AccountDetail({
         <div className="flex min-w-0 items-center gap-3">
           <StaleDataStatus updatedAt={activityStaleAt} />
           <Link to={`/accounts/${accountId}/history`} className="text-[13.5px] font-semibold text-accent hover:underline">
-            完整回看 / 绩效 →
+            完整实盘绩效 →
           </Link>
         </div>
       </div>
@@ -795,7 +795,7 @@ export function AccountDetail({
                   to={`/accounts/${accountId}/history`}
                   className="block border-t border-line px-6 py-3 text-center text-[14px] text-ink-3 hover:text-ink-2"
                 >
-                  更多历史见「完整回看」→
+                  更多历史见「实盘绩效」→
                 </Link>
               )}
             </>

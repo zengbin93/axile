@@ -161,7 +161,7 @@ export function AccountHistoryPage() {
         <div className="flex flex-wrap items-baseline gap-3">
           <AccountPageTitle
             accountId={accountId}
-            page="回看与绩效"
+            page="实盘绩效"
             name={account.data?.name}
             channel={account.data?.trade_channel}
             market={account.data?.market}
@@ -192,7 +192,7 @@ export function AccountHistoryPage() {
         </>
       )}
       <ErrorNotice
-        title="账户回看数据加载失败"
+        title="账户绩效数据加载失败"
         error={historyError}
         variant={historyReady ? 'stale' : 'section'}
         updatedAt={activity.updatedAt ?? snapshots.updatedAt}

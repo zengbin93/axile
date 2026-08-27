@@ -186,7 +186,7 @@ export function AppSidebar() {
       to: accountPath('/executions'),
       active: (pathname) => pathname === accountPath('/executions') || pathname.startsWith(`${accountPath('/executions')}/`),
     },
-    { label: '回看与绩效', to: accountPath('/history'), active: exact(accountPath('/history')) },
+    { label: '实盘绩效', to: accountPath('/history'), active: exact(accountPath('/history')) },
   ]
   const accountParameters: NavItemSpec[] = [
     { label: '基本信息', to: accountPath('/edit'), active: exact(accountPath('/edit')) },
