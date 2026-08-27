@@ -12,7 +12,7 @@ const ACTION_TAG: Record<RebalanceRow['action'], { text: string; cls: string }> 
   close: { text: '清仓', cls: 'text-ink-3' },
   increase: { text: '加仓', cls: 'text-ink-3' },
   reduce: { text: '减仓', cls: 'text-ink-3' },
-  flip: { text: '翻向', cls: 'text-warn' },
+  flip: { text: '翻向', cls: 'rounded bg-warn-tint px-1 text-warn' },
 }
 
 /** 带符号百分比，负号即空头/欠配方向，保留一位小数。 */

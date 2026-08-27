@@ -172,7 +172,7 @@ function ControlRuleField({
           <div className="ml-0 mt-2 flex flex-col gap-2 rounded-[9px] bg-canvas/70 px-3 py-3 sm:ml-24 sm:flex-row sm:items-center">
             <label className="flex items-center gap-2 text-[12px] text-ink-2">
               <input
-                className="num w-24 rounded-[8px] border border-ink-3/25 bg-surface px-2.5 py-1.5 text-right text-[13px] outline-none focus:border-ink-2"
+                className="num w-24 rounded-[8px] border border-ink-3/25 bg-surface px-2.5 py-1.5 text-right text-[13px] outline-none focus:border-accent"
                 type="number"
                 min={ruleKey === 'min_interval_ms' ? 1 : 0}
                 step={1}

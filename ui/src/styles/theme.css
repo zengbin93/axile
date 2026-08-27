@@ -4,12 +4,17 @@
 @custom-variant dark (&:where(.dark, .dark *));
 
 /*
- * axile 设计 token，集中定义界面的语义 CSS 变量。
+ * axile 设计 token —— 「交易驾驶舱」体系。
+ *
+ * 双轴色彩：结构轴（bg/surface/ink/line 的蓝灰阶）只管界面秩序；
+ * 语义轴管判断——accent 信号青（运行/选中/连接的指示灯）、ok/warn/bad 状态、
+ * up/down 行情（红涨绿跌）。色彩永远服务于状态判读，不做装饰。
+ *
  * Tailwind v4 工具类编译为 var(--color-*)，故在 html.dark 下重写这些变量
  * 即可整体翻深色，组件无需 dark: 前缀（主题=纯数据）。
  *
  * 语义角色：
- *   bg/surface          页面底 / 卡片面
+ *   bg/surface          舱底 / 仪表面板
  *   ink-1/2/3           主/次/弱文字
  *   ok/warn/bad/accent  状态色 + 各自 -soft 底
  *   line/border-strong  细分隔线 / 较强边框(圆点/步骤圈/输入框)
@@ -20,24 +25,24 @@
  *   code-bg/code-fg     代码编辑器
  */
 @theme {
-  --color-bg: #f6f7f8;
+  --color-bg: #eef1f4;
   --color-surface: #ffffff;
 
-  --color-ink-1: #16191d;
-  --color-ink-2: #5b6470;
-  --color-ink-3: #9aa3af;
+  --color-ink-1: #1a2430;
+  --color-ink-2: #5a6a7d;
+  --color-ink-3: #8293a7;
 
-  --color-ok: #12a150;
-  --color-ok-soft: #e8f6ee;
-  --color-warn: #d97706;
-  --color-warn-soft: #fdf1e0;
-  --color-bad: #e5484d;
-  --color-bad-soft: #fdecec;
-  --color-accent: #2563eb;
-  --color-accent-soft: #eaf1fe;
+  --color-ok: #178a52;
+  --color-ok-soft: #e3f4ea;
+  --color-warn: #9a6510;
+  --color-warn-soft: #fbf0da;
+  --color-bad: #d9373e;
+  --color-bad-soft: #fbe9e9;
+  --color-accent: #0d7f96;
+  --color-accent-soft: #e0f2f6;
   /* 中间档：实心浅一档，用于「深色段/浅色段」两段条的浅段（非透明，避免发虚）。 */
-  --color-accent-mid: #7ba3f0;
-  --color-warn-mid: #f0b968;
+  --color-accent-mid: #7cc0cf;
+  --color-warn-mid: #e7c78a;
 
   /*
    * 行情涨跌语义色（红涨绿跌，A股/期货惯例）。刻意与 ok/bad「状态色」解耦：
@@ -47,20 +52,21 @@
   --color-up: var(--color-bad);
   --color-down: var(--color-ok);
 
-  --color-line: rgba(15, 18, 22, 0.07);
-  --color-border-strong: #cfd6dd;
-  --color-fill: #f1f3f5;
-  --color-bg-subtle: #fafbfc;
-  --color-warn-tint: #fffdf8;
-  --color-bad-tint: #fffafa;
-  --color-scrim: rgba(15, 18, 22, 0.28);
-  --color-code-bg: #0f1216;
-  --color-code-fg: #d6dde5;
+  --color-line: rgba(26, 36, 48, 0.1);
+  --color-border-strong: #c2ccd6;
+  --color-fill: #eef1f4;
+  --color-bg-subtle: #f7f9fa;
+  --color-warn-tint: #fdfaf2;
+  --color-bad-tint: #fdf7f6;
+  --color-scrim: rgba(15, 23, 32, 0.32);
+  --color-code-bg: #101820;
+  --color-code-fg: #d3dde6;
 
-  --radius-card: 16px;
-  --radius-chip: 9px;
+  /* 仪器感：小圆角、克制的层次（面板靠 1px 分隔线，不靠投影堆叠）。 */
+  --radius-card: 10px;
+  --radius-chip: 7px;
 
-  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.04), 0 6px 20px rgba(0, 0, 0, 0.045);
+  --shadow-card: 0 1px 2px rgba(16, 24, 32, 0.05);
 
   --font-sans:
     -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Segoe UI', Roboto,
@@ -68,37 +74,37 @@
   --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
-/* 深色：中性石墨。重写同名角色变量。 */
+/* 深色：夜航蓝黑（驾驶舱主场）。重写同名角色变量。 */
 .dark {
-  --color-bg: #121417;
-  --color-surface: #1a1d21;
+  --color-bg: #0d1117;
+  --color-surface: #141a22;
 
-  --color-ink-1: #e6e9ed;
-  --color-ink-2: #a2abb5;
-  --color-ink-3: #6b737d;
+  --color-ink-1: #e3eaf2;
+  --color-ink-2: #93a3b6;
+  --color-ink-3: #66788c;
 
-  --color-ok: #2ec073;
-  --color-ok-soft: rgba(46, 192, 115, 0.15);
-  --color-warn: #e0912b;
-  --color-warn-soft: rgba(224, 145, 43, 0.15);
-  --color-bad: #f26669;
-  --color-bad-soft: rgba(242, 102, 105, 0.15);
-  --color-accent: #4d84f5;
-  --color-accent-soft: rgba(77, 132, 245, 0.16);
-  --color-accent-mid: #37528a;
-  --color-warn-mid: #8a6636;
+  --color-ok: #35bd75;
+  --color-ok-soft: rgba(53, 189, 117, 0.15);
+  --color-warn: #e0a83e;
+  --color-warn-soft: rgba(224, 168, 62, 0.15);
+  --color-bad: #f06065;
+  --color-bad-soft: rgba(240, 96, 101, 0.15);
+  --color-accent: #3fbcd4;
+  --color-accent-soft: rgba(63, 188, 212, 0.14);
+  --color-accent-mid: #24596a;
+  --color-warn-mid: #6b5426;
 
-  --color-line: rgba(255, 255, 255, 0.09);
-  --color-border-strong: rgba(255, 255, 255, 0.18);
-  --color-fill: rgba(255, 255, 255, 0.06);
-  --color-bg-subtle: rgba(255, 255, 255, 0.03);
-  --color-warn-tint: rgba(224, 145, 43, 0.08);
-  --color-bad-tint: rgba(242, 102, 105, 0.08);
-  --color-scrim: rgba(0, 0, 0, 0.6);
-  --color-code-bg: #0b0d10;
-  --color-code-fg: #d6dde5;
+  --color-line: rgba(199, 216, 233, 0.1);
+  --color-border-strong: rgba(199, 216, 233, 0.22);
+  --color-fill: rgba(199, 216, 233, 0.07);
+  --color-bg-subtle: rgba(199, 216, 233, 0.04);
+  --color-warn-tint: rgba(224, 168, 62, 0.08);
+  --color-bad-tint: rgba(240, 96, 101, 0.08);
+  --color-scrim: rgba(2, 5, 9, 0.62);
+  --color-code-bg: #0a0f14;
+  --color-code-fg: #d3dde6;
 
-  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.3), 0 8px 24px rgba(0, 0, 0, 0.4);
+  --shadow-card: 0 1px 3px rgba(0, 0, 0, 0.35);
 }
 
 @layer base {
@@ -148,7 +154,7 @@
   /* 自定义滚动条（随主题深浅切换轨道/滑块）。 */
   * {
     scrollbar-width: thin;
-    scrollbar-color: rgba(15, 18, 22, 0.2) transparent;
+    scrollbar-color: rgba(26, 36, 48, 0.2) transparent;
   }
   .dark * {
     scrollbar-color: rgba(255, 255, 255, 0.22) transparent;
@@ -161,13 +167,13 @@
     background: transparent;
   }
   ::-webkit-scrollbar-thumb {
-    background: rgba(15, 18, 22, 0.18);
+    background: rgba(26, 36, 48, 0.18);
     border-radius: 999px;
     border: 3px solid var(--color-bg);
     background-clip: padding-box;
   }
   ::-webkit-scrollbar-thumb:hover {
-    background: rgba(15, 18, 22, 0.32);
+    background: rgba(26, 36, 48, 0.32);
   }
   .dark ::-webkit-scrollbar-thumb {
     background: rgba(255, 255, 255, 0.2);
@@ -187,7 +193,7 @@
   .quiet-scrollbar:hover,
   .quiet-scrollbar:focus-visible,
   .quiet-scrollbar:focus-within {
-    scrollbar-color: rgba(15, 18, 22, 0.28) transparent;
+    scrollbar-color: rgba(26, 36, 48, 0.28) transparent;
   }
   .dark .quiet-scrollbar:hover,
   .dark .quiet-scrollbar:focus-visible,
@@ -210,7 +216,7 @@
   .quiet-scrollbar:hover::-webkit-scrollbar-thumb,
   .quiet-scrollbar:focus-visible::-webkit-scrollbar-thumb,
   .quiet-scrollbar:focus-within::-webkit-scrollbar-thumb {
-    background: rgba(15, 18, 22, 0.28);
+    background: rgba(26, 36, 48, 0.28);
     background-clip: padding-box;
   }
   .dark .quiet-scrollbar:hover::-webkit-scrollbar-thumb,

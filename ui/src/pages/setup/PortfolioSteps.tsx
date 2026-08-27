@@ -94,7 +94,7 @@ export function PfName() {
           <div className="max-w-[520px]">
             <label className="mb-1.5 block text-[13px] text-ink-2">组合名称</label>
             <input
-              className="w-full rounded-[11px] border border-ink-3/30 bg-surface px-[18px] py-4 text-[22px] font-[550] outline-none focus:border-ink-2"
+              className="w-full rounded-[11px] border border-ink-3/30 bg-surface px-[18px] py-4 text-[22px] font-[550] outline-none focus:border-accent"
               value={pf.name}
               onChange={(e) => setPf({ name: e.target.value })}
               placeholder="例如：我的趋势组合"

@@ -158,9 +158,9 @@ function useAlgorithms(): AlgorithmInfo[] | null {
 
 /** 数字框：藏原生 spinner + 产品 focus，避免系统亮蓝/箭头掉队。 */
 const FIELD =
-  'w-28 rounded-[9px] border border-ink-3/30 bg-surface px-3 py-1.5 text-right text-[14px] num outline-none transition-[border-color] duration-200 ease-[cubic-bezier(0.4,0,0.2,1)] focus:border-ink-2 motion-reduce:transition-none [-moz-appearance:textfield] [&::-webkit-inner-spin-button]:m-0 [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:m-0 [&::-webkit-outer-spin-button]:appearance-none'
+  'w-28 rounded-[9px] border border-ink-3/30 bg-surface px-3 py-1.5 text-right text-[14px] num outline-none transition-[border-color] duration-200 ease-[cubic-bezier(0.4,0,0.2,1)] focus:border-accent motion-reduce:transition-none [-moz-appearance:textfield] [&::-webkit-inner-spin-button]:m-0 [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:m-0 [&::-webkit-outer-spin-button]:appearance-none'
 const VALUE_FIELD =
-  'w-full max-w-72 rounded-[9px] border border-ink-3/30 bg-surface px-3 py-1.5 text-[14px] outline-none transition-[border-color] duration-200 ease-[cubic-bezier(0.4,0,0.2,1)] focus:border-ink-2 motion-reduce:transition-none'
+  'w-full max-w-72 rounded-[9px] border border-ink-3/30 bg-surface px-3 py-1.5 text-[14px] outline-none transition-[border-color] duration-200 ease-[cubic-bezier(0.4,0,0.2,1)] focus:border-accent motion-reduce:transition-none'
 const ROW = 'flex flex-col gap-2 border-t border-line py-3 sm:flex-row sm:items-center sm:justify-between'
 const HINT = 'text-xs text-ink-3'
 

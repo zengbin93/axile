@@ -11,7 +11,7 @@ export function Placeholder({ title, milestone }: { title: string; milestone: st
         ← 返回仪表盘
       </Link>
       <h1 className="mt-3 text-[18px] font-[640]">{title}</h1>
-      <div className="mt-4 rounded-card bg-surface p-6 text-[14px] text-ink-2 shadow-card">
+      <div className="mt-4 rounded-card border border-line bg-surface p-6 text-[14px] text-ink-2">
         {id != null && (
           <>
             ID：<b className="text-ink-1">{id}</b>

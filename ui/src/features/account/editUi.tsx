@@ -22,11 +22,11 @@ const SHELL =
   'rounded-[12px] border border-line bg-surface px-4 py-3.5'
 
 export const TEXT =
-  'w-full rounded-[9px] border border-ink-3/25 bg-surface px-3 py-2 text-[14px] outline-none focus:border-ink-2'
+  'w-full rounded-[9px] border border-ink-3/25 bg-surface px-3 py-2 text-[14px] outline-none focus:border-accent'
 export const NUM =
-  'w-24 rounded-[9px] border border-ink-3/25 bg-surface px-3 py-1.5 num text-right text-[14px] outline-none focus:border-ink-2'
+  'w-24 rounded-[9px] border border-ink-3/25 bg-surface px-3 py-1.5 num text-right text-[14px] outline-none focus:border-accent'
 export const AREA =
-  'w-full rounded-[9px] border border-ink-3/25 bg-surface px-3 py-2 font-mono text-[13px] leading-6 outline-none focus:border-ink-2'
+  'w-full rounded-[9px] border border-ink-3/25 bg-surface px-3 py-2 font-mono text-[13px] leading-6 outline-none focus:border-accent'
 
 /** 加载骨架。 */
 export function EditLoading({

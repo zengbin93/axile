@@ -96,7 +96,7 @@ export function PortfolioEditPage() {
 
       <SectionLabel>组合名称</SectionLabel>
       <input
-        className="w-full max-w-[520px] rounded-[8px] border border-ink-3/30 bg-surface px-4 py-3 text-[16px] font-[550] outline-none focus:border-ink-2"
+        className="w-full max-w-[520px] rounded-[8px] border border-ink-3/30 bg-surface px-4 py-3 text-[16px] font-[550] outline-none focus:border-accent"
         value={name}
         onChange={(event) => { setName(event.target.value); setSaveError(null) }}
       />

@@ -12,7 +12,7 @@ export function SetupHub() {
       <div className="mt-4 grid grid-cols-1 gap-[18px] md:grid-cols-2">
         <Link
           to="/setup/pf/name"
-          className="rounded-2xl border border-line bg-surface p-[26px] shadow-card transition-transform hover:-translate-y-0.5"
+          className="rounded-card border border-line bg-surface p-[26px] transition-all duration-150 hover:-translate-y-0.5 hover:border-border-strong"
         >
           <div className="text-3xl">🎯</div>
           <h3 className="mt-3.5 text-[18px] font-semibold">新建组合</h3>
@@ -21,7 +21,7 @@ export function SetupHub() {
         </Link>
         <Link
           to="/setup/acct/channel"
-          className="rounded-2xl border border-line bg-surface p-[26px] shadow-card transition-transform hover:-translate-y-0.5"
+          className="rounded-card border border-line bg-surface p-[26px] transition-all duration-150 hover:-translate-y-0.5 hover:border-border-strong"
         >
           <div className="text-3xl">🔌</div>
           <h3 className="mt-3.5 text-[18px] font-semibold">新建账户</h3>

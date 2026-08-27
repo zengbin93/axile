@@ -20,11 +20,11 @@ function dirCls(pct: number): string {
   return pct > 0 ? 'text-up' : 'text-down'
 }
 
-/** open/close/flip 三类值得单列的动作给一枚小标签，其余不加噪。 */
+/** open/close/flip 三类值得单列的动作给一枚小标签，其余不加噪。翻向加 warn 底衬（与顶栏偏离胶囊同族），10px 裸色字太浅。 */
 const ACTION_TAG: Partial<Record<RebalanceRow['action'], { text: string; cls: string }>> = {
   open: { text: '建仓', cls: 'text-ink-3' },
   close: { text: '清仓', cls: 'text-ink-3' },
-  flip: { text: '翻向', cls: 'text-warn' },
+  flip: { text: '翻向', cls: 'inline-block rounded bg-warn-tint px-1 py-px font-medium text-warn' },
 }
 
 /** 有符号值在轴上的横向位置（%）：0 居中，±scale 落在 6%/94%（留边防裁切）。 */
@@ -160,7 +160,7 @@ export function HoldingsView({
         {plan.off > 0 && (
           <>
             {' · '}待买 {plan.buys} · 待卖 {plan.sells}
-            {plan.flips > 0 && <span className="text-warn"> · 翻向 {plan.flips}</span>}
+            {plan.flips > 0 && <span className="font-medium text-warn"> · 翻向 {plan.flips}</span>}
           </>
         )}
       </div>

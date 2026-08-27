@@ -42,9 +42,9 @@ function accountIdFromPath(pathname: string): number | null {
 
 function NavSection({ label, children }: { label: string; children: ReactNode }) {
   return (
-    <section>
-      <div className="mb-0.5 px-2.5 text-[11px] font-semibold tracking-wide text-ink-3">{label}</div>
-      <div className="ml-3">{children}</div>
+    <section className="mt-5 first:mt-0">
+      <div className="mb-1 px-2.5 text-[11px] font-semibold tracking-[0.14em] text-ink-3">{label}</div>
+      <div>{children}</div>
     </section>
   )
 }
@@ -114,8 +114,9 @@ function NavItem({ item }: { item: NavItemSpec }) {
   const Icon = item.icon
   const content = (
     <>
+      {/* 游标：贴左缘的青色指示条，跨入口滑移（共享元素 FLIP）——「当前位置」是仪表上的游标，不是高亮块。 */}
       {active && (
-        <span aria-hidden className="absolute inset-0 rounded-[7px] bg-accent-soft" style={activeMarkerStyle} />
+        <span aria-hidden className="absolute top-1 bottom-1 left-0 w-[2.5px] rounded-full bg-accent" style={activeMarkerStyle} />
       )}
       <span className="relative z-[1] flex items-center gap-2.5">
         {Icon && <Icon size={15} aria-hidden />}
@@ -126,7 +127,7 @@ function NavItem({ item }: { item: NavItemSpec }) {
 
   if (!item.to) {
     return (
-      <span className="relative flex h-7.5 items-center gap-2 rounded-[7px] px-2.5 text-[13px] text-ink-3" aria-disabled="true">
+      <span className="relative flex h-7.5 items-center gap-2 px-2.5 text-[13px] text-ink-3" aria-disabled="true">
         {content}
       </span>
     )
@@ -136,8 +137,8 @@ function NavItem({ item }: { item: NavItemSpec }) {
     <Link
       to={item.to}
       aria-current={active ? 'page' : undefined}
-      className={`relative flex h-7.5 items-center gap-2 rounded-[7px] px-2.5 text-[13px] transition-colors duration-150 motion-reduce:transition-none ${
-        active ? 'text-ink-1' : 'text-ink-2 hover:bg-bg-subtle hover:text-ink-1'
+      className={`relative flex h-7.5 items-center gap-2 px-2.5 text-[13px] transition-colors duration-150 motion-reduce:transition-none ${
+        active ? 'font-[550] text-ink-1' : 'text-ink-2 hover:text-ink-1'
       }`}
     >
       {content}
@@ -167,6 +168,8 @@ export function AppSidebar() {
   const accountId = routeAccountId ?? activeAccountId
   const accountPath = (suffix = '') => accountId == null ? null : `/accounts/${accountId}${suffix}`
   const exact = (to: string | null) => (pathname: string) => to != null && pathname === to
+  // 库里确定没有账户时收拢账户导航：三组入口此刻只有占位价值，一行说明它的归宿比 12 个禁用项安静。
+  const noAccounts = accounts != null && accounts.length === 0 && accountId == null
 
   const navRef = useRef<HTMLElement>(null)
   const scrollEdges = useScrollEdges(navRef)
@@ -197,7 +200,7 @@ export function AppSidebar() {
 
   return (
     <aside
-      className="absolute top-5 bottom-5 left-5 z-10 flex w-[224px] flex-col rounded-card bg-surface p-2.5 shadow-card"
+      className="flex w-[218px] flex-none flex-col border-r border-line bg-surface py-3.5 pr-2.5 pl-3"
       aria-label="主导航"
     >
       <div className="relative flex min-h-0 flex-1 flex-col">
@@ -206,24 +209,34 @@ export function AppSidebar() {
             <div>
               <NavItem item={{ label: '账户', icon: CircleGauge, to: '/', active: (pathname) => pathname === '/' }} />
               <NavItem item={{ label: '组合', icon: Boxes, to: '/portfolios', active: (pathname) => pathname.startsWith('/portfolios') }} />
+
+              {noAccounts ? (
+                <NavSection label="当前账户">
+                  <p className="px-2.5 py-1.5 text-[12px] leading-relaxed text-ink-3">
+                    创建账户后，这里会出现它的持仓、参数与执行入口。
+                  </p>
+                </NavSection>
+              ) : (
+                <>
+                  <NavSection label="当前账户">
+                    {accountOverview.map((item) => <NavItem key={item.label} item={item} />)}
+                  </NavSection>
+
+                  <NavSection label="账户参数">
+                    {accountParameters.map((item) => <NavItem key={item.label} item={item} />)}
+                  </NavSection>
+
+                  <NavSection label="自动执行">
+                    {accountExecution.map((item) => <NavItem key={item.label} item={item} />)}
+                  </NavSection>
+                </>
+              )}
+
+              <NavSection label="系统">
+                <NavItem item={{ label: '飞书告警', icon: BellRing, to: '/settings', active: exact('/settings') }} />
+                <NavItem item={{ label: '高级', icon: Settings2, to: '/settings/advanced', active: exact('/settings/advanced') }} />
+              </NavSection>
             </div>
-
-            <NavSection label="当前账户">
-              {accountOverview.map((item) => <NavItem key={item.label} item={item} />)}
-            </NavSection>
-
-            <NavSection label="账户参数">
-              {accountParameters.map((item) => <NavItem key={item.label} item={item} />)}
-            </NavSection>
-
-            <NavSection label="自动执行">
-              {accountExecution.map((item) => <NavItem key={item.label} item={item} />)}
-            </NavSection>
-
-            <NavSection label="系统">
-              <NavItem item={{ label: '飞书告警', icon: BellRing, to: '/settings', active: exact('/settings') }} />
-              <NavItem item={{ label: '高级', icon: Settings2, to: '/settings/advanced', active: exact('/settings/advanced') }} />
-            </NavSection>
           </div>
         </nav>
         {/* 溢出揭示：被裁掉的一端用渐隐 + 方向箭头暗示「还有下文」，滚到顶/底即消失。常挂 + 透明度切换，不条件挂载。 */}
@@ -231,12 +244,12 @@ export function AppSidebar() {
         <EdgeScrollHint edge="down" visible={scrollEdges.down} target={navRef} />
       </div>
 
-      <div className="border-t border-line pt-2">
+      <div className="mt-3 border-t border-line pt-3">
         <div className="grid grid-cols-2 gap-1.5">
-          <Link to="/setup/acct/channel" className="flex items-center justify-center gap-1.5 rounded-[9px] border border-line px-2 py-1.5 text-[12px] text-ink-2 hover:border-ink-3/40 hover:text-ink-1">
+          <Link to="/setup/acct/channel" className="flex items-center justify-center gap-1.5 rounded-chip border border-line px-2 py-1.5 text-[12px] text-ink-2 hover:border-border-strong hover:text-ink-1">
             <Plus size={14} aria-hidden />新建账户
           </Link>
-          <Link to="/setup/pf/name" className="flex items-center justify-center gap-1.5 rounded-[9px] border border-line px-2 py-1.5 text-[12px] text-ink-2 hover:border-ink-3/40 hover:text-ink-1">
+          <Link to="/setup/pf/name" className="flex items-center justify-center gap-1.5 rounded-chip border border-line px-2 py-1.5 text-[12px] text-ink-2 hover:border-border-strong hover:text-ink-1">
             <Plus size={14} aria-hidden />新建组合
           </Link>
         </div>

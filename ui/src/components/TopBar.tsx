@@ -4,7 +4,7 @@ import { useDomainStore } from '@/stores/domain'
 import { integrityOf } from '@/lib/derive'
 import { ThemeToggle } from '@/components/ThemeToggle'
 import { timeAgo } from '@/lib/format'
-import { RefreshCw } from 'lucide-react'
+import { RefreshCw, TriangleAlert } from 'lucide-react'
 import { Tooltip } from '@/components/ui/Tooltip'
 import { shortErrorReason } from '@/lib/errorInfo'
 
@@ -39,18 +39,19 @@ export function TopBar() {
     : `与服务器失联 · ${shortErrorReason(error)}`
 
   return (
-    <header className="sticky top-0 z-20 flex flex-none flex-wrap items-center gap-3 border-b border-line bg-surface/75 px-6 py-3 backdrop-blur-md">
-      <Link to="/" className="text-[15px] font-[650] tracking-wide">
+    <header className="flex flex-none flex-wrap items-center gap-3 border-b border-line bg-surface px-5 py-2.5">
+      <Link to="/" className="text-[15px] font-[700] tracking-[0.22em]">
         axile
       </Link>
       <span className="flex items-center gap-1.5 text-[13px] text-ink-2">
-        {/* 活性点离开红绿（红绿专供行情涨跌）：连通=中性点(安静即好)，失联=琥珀点。 */}
+        {/* 心跳灯（离开红绿，红绿专供行情涨跌）：通电=信号青常亮（亮而不动，安静即好），
+            连接中=青点搏动，失联=琥珀点。全站的「系统活着」都循同一灯语。 */}
         <span
           className={`h-2 w-2 flex-none rounded-full ${
             connecting
-              ? 'animate-pulse bg-ink-3 shadow-[0_0_0_3px_var(--color-fill)] motion-reduce:animate-none'
+              ? 'animate-pulse bg-accent shadow-[0_0_0_3px_var(--color-accent-soft)] motion-reduce:animate-none'
               : online
-              ? 'bg-ink-3 shadow-[0_0_0_3px_var(--color-fill)]'
+              ? 'bg-accent shadow-[0_0_0_3px_var(--color-accent-soft)]'
               : 'bg-warn shadow-[0_0_0_3px_var(--color-warn-soft)]'
           }`}
         />
@@ -75,7 +76,7 @@ export function TopBar() {
           title={`${offCount} 个账户偏离目标 · 需要看看`}
           className="inline-flex items-center gap-1.5 rounded-chip border border-warn/45 bg-warn-tint px-2.5 py-1 text-[13px] font-medium text-warn hover:border-warn/70"
         >
-          ⚠ {offCount} 个偏离
+          <TriangleAlert size={13} aria-hidden /> {offCount} 个偏离
         </Link>
       )}
       <span className="flex-1" />

@@ -1,6 +1,6 @@
 import type { CSSProperties, ReactNode } from 'react'
 
-/** 白底圆角卡片，全站统一容器。 */
+/** 仪表面板：surface 底 + hairline 边 + 小圆角，全站统一容器。层次靠线不靠影。 */
 export function Card({
   children,
   className = '',
@@ -12,7 +12,7 @@ export function Card({
 }) {
   return (
     <div
-      className={`rounded-card bg-surface shadow-card ${onClick ? 'cursor-pointer' : ''} ${className}`}
+      className={`rounded-card border border-line bg-surface ${onClick ? 'cursor-pointer hover:border-border-strong' : ''} ${className}`}
       onClick={onClick}
     >
       {children}

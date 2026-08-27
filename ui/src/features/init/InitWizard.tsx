@@ -31,7 +31,7 @@ import { useToastStore } from '@/stores/ui'
 export type WizardMode = 'init' | 'edit'
 
 const inputCls =
-  'w-full rounded-[11px] border border-ink-3/30 bg-surface px-3.5 py-3 text-[15px] outline-none focus:border-ink-2'
+  'w-full rounded-[11px] border border-ink-3/30 bg-surface px-3.5 py-3 text-[15px] outline-none focus:border-accent'
 const labelCls = 'mb-1.5 mt-4 block text-[13px] text-ink-2 first:mt-0'
 
 const DEFAULT_DB_URI = 'sqlite+aiosqlite:///./axile.db'
