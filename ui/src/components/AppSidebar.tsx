@@ -151,9 +151,11 @@ function NavItem({ item }: { item: NavItemSpec }) {
 /** 悬浮式常驻导航：层级只表达归属，每个二级入口均直接抵达最终页面。 */
 export function AppSidebar({
   mobileOpen = false,
+  navigationTriggerRef,
   onClose,
 }: {
   mobileOpen?: boolean
+  navigationTriggerRef?: RefObject<HTMLButtonElement | null>
   onClose?: () => void
 }) {
   const location = useLocation()
@@ -186,7 +188,24 @@ export function AppSidebar({
   const noAccounts = accounts != null && accounts.length === 0 && accountId == null
 
   const navRef = useRef<HTMLElement>(null)
+  const closeButtonRef = useRef<HTMLButtonElement>(null)
+  const wasMobileOpen = useRef(mobileOpen)
   const scrollEdges = useScrollEdges(navRef)
+
+  useEffect(() => {
+    if (mobileOpen) closeButtonRef.current?.focus()
+    else if (wasMobileOpen.current) navigationTriggerRef?.current?.focus()
+    wasMobileOpen.current = mobileOpen
+  }, [mobileOpen, navigationTriggerRef])
+
+  useEffect(() => {
+    if (!mobileOpen) return
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onClose?.()
+    }
+    window.addEventListener('keydown', closeOnEscape)
+    return () => window.removeEventListener('keydown', closeOnEscape)
+  }, [mobileOpen, onClose])
 
   // 账户段条目不带图标：归属已由「身份块头 + 左缘线 + 缩进」表达，段内保持素净。
   const accountOverview: NavItemSpec[] = [
@@ -231,7 +250,7 @@ export function AppSidebar({
       >
       <div className="mb-2 flex items-center justify-between px-2.5 md:hidden">
         <span className="text-[13px] font-medium text-ink-2">导航</span>
-        <button type="button" aria-label="关闭主导航" className="text-ink-2 hover:text-ink-1" onClick={onClose}>
+        <button ref={closeButtonRef} type="button" aria-label="关闭主导航" className="text-ink-2 hover:text-ink-1" onClick={onClose}>
           <X size={18} aria-hidden />
         </button>
       </div>

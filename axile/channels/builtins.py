@@ -160,7 +160,7 @@ def _ctp_plugin() -> ChannelPlugin:
         execution_backend="process",
         required_modules=("openctp_ctp",),
         install_extra="ctp",
-        max_parallel_symbols=10,
+        max_parallel_symbols=None,
         canonicalize_symbol=canonicalize_cn_futures_symbol,
         quantize_target_quantity=quantize_cn_futures_quantity,
     )
@@ -262,7 +262,7 @@ def _gm_plugin() -> ChannelPlugin:
         execution_backend="process",
         required_modules=("gm",),
         install_extra="gm",
-        max_parallel_symbols=10,
+        max_parallel_symbols=None,
     )
 
 
@@ -364,7 +364,7 @@ def _tq_plugin() -> ChannelPlugin:
         execution_backend="process",
         required_modules=("tqsdk",),
         install_extra="tqsdk",
-        max_parallel_symbols=10,
+        max_parallel_symbols=None,
         canonicalize_symbol=canonicalize_cn_futures_symbol,
         quantize_target_quantity=quantize_cn_futures_quantity,
     )

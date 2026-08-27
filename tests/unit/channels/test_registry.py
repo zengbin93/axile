@@ -55,7 +55,7 @@ def _plugin(
     channel: str = "vendor-demo",
     *,
     required_modules: tuple[str, ...] = (),
-    max_parallel_symbols: int = 4,
+    max_parallel_symbols: int | None = 4,
 ) -> ChannelPlugin:
     return ChannelPlugin(
         descriptor=ChannelDescriptor(
@@ -134,7 +134,7 @@ def test_builtin_channels_have_stable_order_and_descriptor_shape() -> None:
     assert plugins[1].descriptor.portfolio.market_label == "A股"
     assert plugins[1].descriptor.portfolio.example_symbols == ("600000.SH", "000001.SZ")
     assert plugins[2].descriptor.portfolio == plugins[0].descriptor.portfolio
-    assert [plugin.max_parallel_symbols for plugin in plugins] == [10, 10, 10]
+    assert [plugin.max_parallel_symbols for plugin in plugins] == [None, None, None]
     assert plugins[2].descriptor.account_form.fields[0].default is None
     assert [plugin.descriptor.calendar.calendar_id for plugin in plugins if plugin.descriptor.calendar] == [
         "china",
@@ -350,6 +350,74 @@ def test_executor_parallel_limit_comes_from_plugin() -> None:
     executor = _Executor()
     assert executor._supports_parallel_symbol_dispatch() is True
     assert executor._max_parallel_symbol_workers() == 7
+
+
+@pytest.mark.parametrize("invalid_limit", [0, -1])
+def test_channel_rejects_non_positive_parallel_limit(invalid_limit: int) -> None:
+    with pytest.raises(ValueError, match="max_parallel_symbols 必须大于等于 1"):
+        _plugin(max_parallel_symbols=invalid_limit)
+
+
+@pytest.mark.parametrize(("cpu_count", "expected"), [(1, 8), (2, 8), (4, 16), (8, 32), (64, 32)])
+def test_system_parallel_limit_scales_with_available_cpu(
+    monkeypatch: pytest.MonkeyPatch,
+    cpu_count: int,
+    expected: int,
+) -> None:
+    from axile.executor.abstract_executor import capability
+
+    monkeypatch.setattr(capability.os, "sched_getaffinity", lambda _pid: set(range(cpu_count)))
+
+    assert capability._system_max_parallel_symbol_workers() == expected
+
+
+def test_system_parallel_limit_falls_back_to_cpu_count(monkeypatch: pytest.MonkeyPatch) -> None:
+    from axile.executor.abstract_executor import capability
+
+    def unavailable(_pid: int) -> set[int]:
+        raise OSError("affinity unavailable")
+
+    monkeypatch.setattr(capability.os, "sched_getaffinity", unavailable)
+    monkeypatch.setattr(capability.os, "cpu_count", lambda: 4)
+
+    assert capability._system_max_parallel_symbol_workers() == 16
+
+
+def test_system_parallel_limit_handles_missing_cpu_count(monkeypatch: pytest.MonkeyPatch) -> None:
+    from axile.executor.abstract_executor import capability
+
+    monkeypatch.delattr(capability.os, "sched_getaffinity", raising=False)
+    monkeypatch.setattr(capability.os, "cpu_count", lambda: None)
+
+    assert capability._system_max_parallel_symbol_workers() == 8
+
+
+def test_channel_without_parallel_limit_uses_system_limit(monkeypatch: pytest.MonkeyPatch) -> None:
+    from axile.executor.abstract_executor import capability
+
+    list_channels()
+    register_channel(_plugin(max_parallel_symbols=None))
+    monkeypatch.setattr(capability, "_system_max_parallel_symbol_workers", lambda: 16)
+
+    class _Executor(AbstractExecutorCapabilityMixin):
+        channel_type = "vendor-demo"
+
+    executor = _Executor()
+    assert executor._supports_parallel_symbol_dispatch() is True
+    assert executor._max_parallel_symbol_workers() == 16
+
+
+def test_system_parallel_limit_caps_higher_channel_limit(monkeypatch: pytest.MonkeyPatch) -> None:
+    from axile.executor.abstract_executor import capability
+
+    list_channels()
+    register_channel(_plugin(max_parallel_symbols=24))
+    monkeypatch.setattr(capability, "_system_max_parallel_symbol_workers", lambda: 16)
+
+    class _Executor(AbstractExecutorCapabilityMixin):
+        channel_type = "vendor-demo"
+
+    assert _Executor()._max_parallel_symbol_workers() == 16
 
 
 def test_builtin_target_transforms_are_available_from_registry() -> None:

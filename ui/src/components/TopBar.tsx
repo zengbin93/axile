@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type RefObject } from 'react'
 import { Link } from '@/components/ui/nav'
 import { useDomainStore } from '@/stores/domain'
 import { integrityOf } from '@/lib/derive'
@@ -15,7 +15,13 @@ import { BrandWordmark } from '@/components/brand/BrandWordmark'
  * 活性点/新鲜度直接来自共享账户数据的刷新（比单独 ping health 更诚实）：
  * 有数据且最近一次刷新无误=中性+「数据 N 秒前」；刷新出错=琥珀并保留原因。
  */
-export function TopBar({ onOpenNavigation }: { onOpenNavigation?: () => void }) {
+export function TopBar({
+  navigationTriggerRef,
+  onOpenNavigation,
+}: {
+  navigationTriggerRef?: RefObject<HTMLButtonElement | null>
+  onOpenNavigation?: () => void
+}) {
   const updatedAt = useDomainStore((s) => s.accountsUpdatedAt)
   const error = useDomainStore((s) => s.accountsError)
   const accounts = useDomainStore((s) => s.accounts)
@@ -42,6 +48,7 @@ export function TopBar({ onOpenNavigation }: { onOpenNavigation?: () => void }) 
   return (
     <header className="flex flex-none flex-wrap items-center gap-3 border-b border-line bg-surface px-5 py-3">
       <button
+        ref={navigationTriggerRef}
         type="button"
         aria-label="打开主导航"
         className="text-ink-2 hover:text-ink-1 md:hidden"

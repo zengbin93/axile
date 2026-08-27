@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import os
 from typing import TYPE_CHECKING, cast
 
 from axile.channels import get_channel
@@ -25,6 +26,22 @@ if TYPE_CHECKING:
 
 def _executor(owner: object) -> AbstractExecutor:
     return cast("AbstractExecutor", owner)
+
+
+def _available_cpu_count() -> int:
+    """返回当前进程可用的 CPU 数，并兼容不支持 affinity 的平台."""
+    try:
+        affinity = os.sched_getaffinity(0)
+    except (AttributeError, OSError):
+        affinity = None
+    if affinity:
+        return len(affinity)
+    return max(1, os.cpu_count() or 1)
+
+
+def _system_max_parallel_symbol_workers() -> int:
+    """根据执行环境推导单次调度的 symbol worker 保护上限."""
+    return min(32, max(8, _available_cpu_count() * 4))
 
 
 class AbstractExecutorCapabilityMixin:
@@ -105,18 +122,20 @@ class AbstractExecutorCapabilityMixin:
 
     def _max_parallel_symbol_workers(self) -> int:
         """
-        返回当前渠道允许的最大品种并发数.
+        返回系统保护与渠道能力共同允许的最大品种并发数.
 
         Returns
         -------
         int
-            渠道插件声明的并发上限；渠道未注册时安全回退为 ``1``。
+            环境保护上限与可选渠道上限的较小值；渠道未注册时安全回退为 ``1``。
         """
         executor = _executor(self)
         try:
-            return get_channel(executor.channel_type).max_parallel_symbols
+            channel_limit = get_channel(executor.channel_type).max_parallel_symbols
         except KeyError:
             return 1
+        system_limit = _system_max_parallel_symbol_workers()
+        return system_limit if channel_limit is None else min(system_limit, channel_limit)
 
     def _normalize_symbol(self, symbol: str) -> str:
         """返回当前渠道在统一层使用的规范 symbol."""

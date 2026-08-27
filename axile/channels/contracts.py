@@ -379,8 +379,9 @@ class ChannelPlugin:
         判断运行时可用性所需的顶层 Python 模块。
     install_extra : str | None
         公开包中对应的可选依赖 extra；外部插件通常为空。
-    max_parallel_symbols : int
-        单次执行允许并行处理的最大品种数。
+    max_parallel_symbols : int | None
+        单次执行允许并行处理的最大品种数；``None`` 表示渠道不附加上限，
+        仅使用执行环境推导出的系统保护上限。
     canonicalize_symbol : CanonicalizeSymbol
         把策略代码收到与持仓同一套标识；默认恒等。
     quantize_target_quantity : QuantizeTargetQuantity | None
@@ -395,7 +396,7 @@ class ChannelPlugin:
     execution_backend: ExecutionBackend = "thread"
     required_modules: tuple[str, ...] = ()
     install_extra: str | None = None
-    max_parallel_symbols: int = 1
+    max_parallel_symbols: int | None = 1
     canonicalize_symbol: CanonicalizeSymbol = _identity_symbol
     quantize_target_quantity: QuantizeTargetQuantity | None = None
 
@@ -403,5 +404,5 @@ class ChannelPlugin:
         """校验插件运行时契约中的基本不变量."""
         if not issubclass(self.account_config_model, BaseAccountConfig):
             raise TypeError("account_config_model 必须继承 BaseAccountConfig")
-        if self.max_parallel_symbols < 1:
+        if self.max_parallel_symbols is not None and self.max_parallel_symbols < 1:
             raise ValueError("max_parallel_symbols 必须大于等于 1")

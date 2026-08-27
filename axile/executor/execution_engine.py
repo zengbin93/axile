@@ -316,9 +316,15 @@ class ExecutionEngine:
         results: list[AlgorithmResult] = []
         terminations: list[ExecutionTerminated] = []
 
-        # 并发上限是渠道运行时能力，由插件按真实 API 约束声明。
+        max_workers = min(len(tasks), self._owner._max_parallel_symbol_workers())
+        self._owner.logger.debug(
+            "symbol 并发调度 channel={} tasks={} max_workers={}",
+            self._owner.channel_type.value,
+            len(tasks),
+            max_workers,
+        )
         with ThreadPoolExecutor(
-            max_workers=min(len(tasks), self._owner._max_parallel_symbol_workers()),
+            max_workers=max_workers,
             thread_name_prefix=f"{self._owner.channel_type.value}-symbol-algo",
         ) as pool:
             for task in tasks:
