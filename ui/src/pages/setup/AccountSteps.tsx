@@ -732,7 +732,7 @@ export function AcctConfirm() {
         account_config: visibleChannelAccountConfig(accountFields(descriptor), acct.config),
         is_started: acct.autoOn,
         cron_expr: cronExpr,
-        remark: '由建号向导创建',
+        remark: null,
         brokerage: acct.channel,
         weight_precision: 0.01,
         long_leverage: Number(acct.longLeverage),
