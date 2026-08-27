@@ -33,6 +33,15 @@ def _keep_inline_scenarios_in_process(monkeypatch: pytest.MonkeyPatch) -> None:
         lambda channel: ExecutionBackendKind.PROCESS if channel == TradeChannel.GM else ExecutionBackendKind.THREAD,
     )
 
+    # 本文件直调 __empty_positions，没有对应 intent 记录；promote 走空实现。
+    async def _noop_promote(execution_id: str, account_id: int) -> None:
+        _ = execution_id, account_id
+
+    monkeypatch.setattr(
+        "axile.server.execution.intents.promote_intent_to_running",
+        _noop_promote,
+    )
+
 
 @pytest.fixture(autouse=True)
 def _stub_intent_promotion(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, int]]:
