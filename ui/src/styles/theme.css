@@ -117,11 +117,6 @@
     height: 100%;
   }
 
-  /* 始终为滚动条预留槽位：短页/长页切换时居中列不再横向抖动（L0 消抖）。 */
-  html {
-    scrollbar-gutter: stable;
-  }
-
   body {
     background: var(--color-bg);
     color: var(--color-ink-1);
