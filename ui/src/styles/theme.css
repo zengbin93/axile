@@ -68,10 +68,13 @@
 
   --shadow-card: 0 1px 2px rgba(16, 24, 32, 0.05);
 
+  /* 品牌字体：拉丁与数字走 Space Grotesk（几何骨架，交易数字有辨识度），
+     中文回退系统苹方；代码与对齐数字走 JetBrains Mono。 */
   --font-sans:
-    -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Segoe UI', Roboto,
-    sans-serif;
-  --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+    'Space Grotesk Variable', -apple-system, BlinkMacSystemFont, 'PingFang SC',
+    'Segoe UI', Roboto, sans-serif;
+  --font-mono:
+    'JetBrains Mono Variable', ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
 /* 深色：夜航蓝黑（驾驶舱主场）。重写同名角色变量。 */

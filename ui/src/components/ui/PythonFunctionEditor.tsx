@@ -10,7 +10,7 @@ const editorTheme = EditorView.theme({
   '&': { backgroundColor: 'transparent', fontSize: '13px' },
   '&.cm-focused': { outline: 'none' },
   '.cm-gutters': { backgroundColor: 'transparent', border: 'none' },
-  '.cm-content': { fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace' },
+  '.cm-content': { fontFamily: 'var(--font-mono)' },
 })
 
 export interface PythonValidationState {

@@ -10,6 +10,7 @@ import {
   Settings2,
 } from 'lucide-react'
 import { Link } from '@/components/ui/nav'
+import { AxileLogo } from '@/components/brand/AxileMark'
 import { channelLabel } from '@/features/dashboard/display'
 import { useDomainStore } from '@/stores/domain'
 import { useNavigationStore } from '@/stores/ui'
@@ -206,6 +207,9 @@ export function AppSidebar() {
       className="flex w-[218px] flex-none flex-col border-r border-line bg-surface py-3.5 pr-2.5 pl-3"
       aria-label="主导航"
     >
+      <div className="flex-none pb-2.5 pl-1 pt-px">
+        <AxileLogo />
+      </div>
       <div className="relative flex min-h-0 flex-1 flex-col">
         <nav ref={navRef} className="quiet-scrollbar min-h-0 flex-1 overflow-y-auto pb-2" aria-label="功能导航">
           <div className="flex min-h-full flex-col justify-between">
