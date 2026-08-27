@@ -362,6 +362,8 @@ class AccountDashboardItemPublic(SQLModel):
         账户 ID。
     name : str
         账户名称。
+    remark : Optional[str]
+        账户备注；未填写时为 ``None``。
     market : str
         市场。
     trade_channel : TradeChannel
@@ -410,6 +412,7 @@ class AccountDashboardItemPublic(SQLModel):
 
     account_id: int
     name: str
+    remark: Optional[str] = None
     market: str
     trade_channel: TradeChannel
     is_started: bool

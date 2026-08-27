@@ -94,7 +94,7 @@ def _snapshot(
 
 def test_dashboard_aggregates_account(monkeypatch: pytest.MonkeyPatch) -> None:
     """聚合最新权益/持仓/权益序列/绑定/下次执行/上次成败。"""
-    account = build_account(id=1, name="acc", is_started=True)
+    account = build_account(id=1, name="acc", remark="SimNow 测试账户", is_started=True)
     recent = [
         _record(
             102.0,
@@ -153,6 +153,7 @@ def test_dashboard_aggregates_account(monkeypatch: pytest.MonkeyPatch) -> None:
     assert len(data) == 1
     item = data[0]
     assert item["account_id"] == 1
+    assert item["remark"] == "SimNow 测试账户"
     assert item["portfolio_id"] == 7
     assert item["total_asset"] == 102.0
     assert item["currency"] == "CNY"  # CTP 渠道币种由渠道决定

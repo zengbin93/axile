@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { useParams } from 'react-router'
-import { Card, SectionLabel } from '@/components/ui/Card'
+import { useParams, useViewTransitionState } from 'react-router'
 import { useNavigate } from '@/components/ui/nav'
-import { Skeleton, SkeletonLines } from '@/components/ui/Skeleton'
+import { Skeleton } from '@/components/ui/Skeleton'
 import { ErrorNotice } from '@/components/ui/ErrorNotice'
+import { EditSaveBar, Section, TEXT } from '@/features/account/editUi'
 import { CustomFunctionEditor } from '@/features/portfolio/CustomFunctionEditor'
 import { usePolling } from '@/lib/hooks/usePolling'
 import { getPortfolio, updatePortfolio } from '@/lib/api/portfolios'
@@ -43,10 +43,23 @@ export function PortfolioEditPage() {
     () => (accounts ?? []).filter((account) => account.portfolio_id === portfolioId),
     [accounts, portfolioId],
   )
-  const dirty = name.trim() !== original.name || code !== original.code
+  // 同名账户折叠成「名 ×n」，避免「test、test」式复读。
+  const followerNames = useMemo(() => {
+    const counts = new Map<string, number>()
+    for (const account of followers) counts.set(account.name, (counts.get(account.name) ?? 0) + 1)
+    return [...counts].map(([label, count]) => (count > 1 ? `${label} ×${count}` : label)).join('、')
+  }, [followers])
+
+  // 组合名共享元素：详情 hero ↔ 本页标题槽（同账户域「详情头 ↔ 标题槽」协议，仅过渡涉及详情页时挂名）。
+  const tDetail = useViewTransitionState(`/portfolios/${portfolioId}`)
+
+  const changes: string[] = []
+  if (name.trim() !== original.name) changes.push('组合名称已改')
+  if (code !== original.code) changes.push('目标计算函数已改')
+  const blocked = !name.trim() || !code.trim() || accounts == null || Boolean(accountsError)
 
   const publish = async () => {
-    if (!name.trim() || !code.trim() || saving || accounts == null || accountsError) return
+    if (blocked || saving || changes.length === 0) return
     setSaving(true)
     setSaveError(null)
     try {
@@ -63,11 +76,19 @@ export function PortfolioEditPage() {
 
   if (portfolio.loading || (!pf && !portfolio.error) || (pf && !ready)) {
     return (
-      <section>
-        <Card className="px-6 py-4"><SkeletonLines rows={2} /></Card>
-        <SectionLabel>组合名称</SectionLabel>
-        <Skeleton className="h-12 w-full max-w-[520px]" />
-        <Card className="mt-6 px-6 py-4"><SkeletonLines rows={5} /></Card>
+      <section className="pb-24">
+        <Skeleton className="h-6 w-44" />
+        <Skeleton className="mt-4 h-4 w-64" />
+        <Section label="组合名称">
+          <div className="md:col-span-2">
+            <Skeleton className="h-[34px] w-full" />
+          </div>
+        </Section>
+        <Section label="目标计算函数">
+          <div className="md:col-span-2">
+            <Skeleton className="h-[300px] w-full" />
+          </div>
+        </Section>
       </section>
     )
   }
@@ -80,43 +101,65 @@ export function PortfolioEditPage() {
   }
 
   return (
-    <section>
-      <Card className="border border-warn/30 bg-warn-tint px-6 py-4">
-        <div className="text-[14px]">
-          <b>影响范围</b> · {accountsError ? (
-            <span className="text-warn">绑定关系暂不可用</span>
-          ) : accounts == null ? (
-            <Skeleton className="inline-block h-4 w-36 align-middle" />
-          ) : (
-            <>此组合被 <b>{followers.length}</b> 个账户使用{followers.length > 0 && `：${followers.map((account) => account.name).join('、')}`}</>
-          )}
-        </div>
-        <div className="mt-1 text-[13px] text-ink-2">保存后，这些账户会在下次调仓时执行新函数。</div>
-      </Card>
+    <section className="pb-24">
+      <h1 className="text-[18px] font-[640]">
+        组合 ·{' '}
+        <span style={tDetail ? { viewTransitionName: `portfolio-name-${portfolioId}` } : undefined}>{pf.name}</span>
+      </h1>
 
-      <SectionLabel>组合名称</SectionLabel>
-      <input
-        className="w-full max-w-[520px] rounded-[8px] border border-ink-3/30 bg-surface px-4 py-3 text-[16px] font-[550] outline-none focus:border-ink-2"
-        value={name}
-        onChange={(event) => { setName(event.target.value); setSaveError(null) }}
-      />
-
-      <SectionLabel>目标计算函数</SectionLabel>
-      <Card className="px-6 py-5">
-        <CustomFunctionEditor code={code} onChange={(value) => { setCode(value); setSaveError(null) }} />
-      </Card>
-
-      <ErrorNotice title="保存组合失败" error={saveError} variant="mutation" onRetry={publish} />
-      <div className="mt-2 flex items-center justify-end gap-3 border-t border-line pt-4">
-        <span className="mr-auto text-[13px] text-ink-3">{dirty ? '有未保存修改' : '没有修改'}</span>
-        <button
-          className="cursor-pointer rounded-[8px] border-0 bg-ink-1 px-5 py-2.5 text-[14px] font-[550] text-surface disabled:opacity-45"
-          disabled={!dirty || !name.trim() || !code.trim() || saving || accounts == null || Boolean(accountsError)}
-          onClick={publish}
-        >
-          {saving ? '保存中…' : '保存修改'}
-        </button>
+      {/* 影响范围：琥珀只在真有账户跟随时出现，量级收敛到左边条；无人跟随保持中性。 */}
+      <div className="mt-4">
+        {accountsError ? (
+          <p className="border-l-2 border-warn pl-2.5 text-[13px] leading-5 text-warn">
+            影响范围 · 绑定关系暂不可用，恢复前无法保存
+          </p>
+        ) : accounts == null ? (
+          <Skeleton className="h-4 w-64" />
+        ) : followers.length > 0 ? (
+          <p className="border-l-2 border-warn pl-2.5 text-[13px] leading-5 text-ink-1">
+            影响范围 · 此组合被 <b>{followers.length}</b> 个账户使用：{followerNames}。
+            <span className="text-ink-2">保存后，这些账户会在下次调仓时执行新函数。</span>
+          </p>
+        ) : (
+          <p className="border-l-2 border-line pl-2.5 text-[13px] leading-5 text-ink-3">
+            影响范围 · 当前没有账户使用此组合，保存只影响之后绑定的账户。
+          </p>
+        )}
       </div>
+
+      <Section label="组合名称">
+        <div className="md:col-span-2">
+          <input
+            className={TEXT}
+            value={name}
+            onChange={(event) => {
+              setName(event.target.value)
+              setSaveError(null)
+            }}
+          />
+        </div>
+      </Section>
+
+      <Section label="目标计算函数">
+        <div className="md:col-span-2">
+          <CustomFunctionEditor
+            code={code}
+            onChange={(value) => {
+              setCode(value)
+              setSaveError(null)
+            }}
+          />
+        </div>
+      </Section>
+
+      <EditSaveBar
+        changes={changes}
+        blocked={blocked}
+        cancelTo={`/portfolios/${portfolioId}`}
+        onSave={() => void publish()}
+        saving={saving}
+        error={saveError}
+      />
     </section>
   )
 }

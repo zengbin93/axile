@@ -5,7 +5,7 @@ export interface ConfirmSpec {
   body: string
   /** 确认按钮文案。 */
   okText: string
-  /** 危险操作用红色确认按钮。 */
+  /** 危险操作用琥珀色确认按钮。 */
   danger?: boolean
   onConfirm: () => void
 }
@@ -19,7 +19,7 @@ export function ConfirmModal({
   onClose: () => void
 }) {
   const open = spec != null
-  // 危险操作的默认焦点落在「取消」上：回车走安全路，红色确认必须手点，摩擦才留得住。
+  // 危险操作的默认焦点落在「取消」上：回车走安全路，琥珀色确认必须手点，摩擦才留得住。
   const danger = spec?.danger ?? false
   const dialogRef = useRef<HTMLDivElement>(null)
   const okRef = useRef<HTMLButtonElement>(null)
@@ -100,7 +100,7 @@ export function ConfirmModal({
                 ref={okRef}
                 className={`inline-flex cursor-pointer items-center gap-1.5 rounded-[9px] border-0 px-[18px] py-2 text-sm font-[550] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-surface ${
                   spec.danger
-                    ? 'bg-bad text-white focus-visible:ring-bad/60'
+                    ? 'bg-warn text-white focus-visible:ring-warn/60'
                     : 'bg-ink-1 text-surface focus-visible:ring-accent/55'
                 }`}
                 onClick={() => {

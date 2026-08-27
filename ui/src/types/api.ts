@@ -259,6 +259,7 @@ export interface AccountControlPolicyEditorModel {
 export interface AccountDashboardItem {
   account_id: number
   name: string
+  remark: string | null
   market: string
   trade_channel: TradeChannel
   is_started: boolean
