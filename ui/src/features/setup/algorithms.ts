@@ -325,7 +325,8 @@ export function algorithmRefOf(raw: unknown): AlgorithmRef | null {
 /**
  * 算法引用人话摘要（编辑总览 / 详情入口用）。
  *
- * SINGLE-MAKER / TARGET-POS-TASK 能反推意图时用意图标题；否则用算法展示名。
+ * SINGLE-MAKER 能反推意图时用意图标题；否则显示当前有效参数的执行行为。
+ * TARGET-POS-TASK 直接显示当前有效参数的执行行为，其余算法使用展示名。
  * 意图标题里的「（推荐）」是选择器里的引导文案，摘要场景一律剥掉。
  */
 export function describeAlgorithmRef(ref: AlgorithmRef | null | undefined): string {
@@ -333,7 +334,7 @@ export function describeAlgorithmRef(ref: AlgorithmRef | null | undefined): stri
   if (ref.method === 'SINGLE-MAKER') {
     const intent = intentFromParams(ref.params ?? {})
     if (intent) return INTENT_COPY[intent].title.replace('（推荐）', '')
-    return `${algoLabel(ref.method)}（自定义）`
+    return describeSingleMakerParams(ref.params ?? {})
   }
   if (ref.method === 'TARGET-POS-TASK') {
     return describeTargetPosParams(ref.params ?? {})

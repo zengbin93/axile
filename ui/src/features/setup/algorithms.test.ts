@@ -132,10 +132,19 @@ describe('describeSingleMakerParams · 当前执行摘要', () => {
     )
   })
 
-  it('非默认盘口兜底追加到摘要，自定义算法引用明确标记', () => {
+  it('非预设参数在算法引用中直接显示实际执行行为', () => {
     const params = { ...resolveAlgorithm('balance').params, on_missing_book: 'market' }
     expect(describeSingleMakerParams(params)).toContain('盘口缺失时直接市价成交')
-    expect(describeAlgorithmRef({ method: 'SINGLE-MAKER', params })).toBe('挂单追单（自定义）')
+    expect(describeAlgorithmRef({ method: 'SINGLE-MAKER', params })).toBe(
+      '被动挂单 · 等待 60 秒 · 最多追单 5 次 · 盘口缺失时直接市价成交',
+    )
+  })
+
+  it('主动成交并追单的非预设组合保留关键信息', () => {
+    const params = { ...resolveAlgorithm('fill').params, chase_enabled: true }
+    expect(describeAlgorithmRef({ method: 'SINGLE-MAKER', params })).toBe(
+      '主动成交 · 等待 30 秒 · 最多追单 5 次',
+    )
   })
 
   it('意图摘要剥掉选择器引导文案「（推荐）」', () => {

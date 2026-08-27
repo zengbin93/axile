@@ -350,7 +350,6 @@ const SingleMakerEditor: ParamsEditor = ({ params, defaults, onChange, onApplyIn
         <div className="min-w-0 text-[14px] leading-relaxed text-ink-2">
           <span className="mr-2 text-ink-3">当前执行</span>
           {describeSingleMakerParams(params)}
-          {!active && <span className="ml-2 font-semibold text-ink-2">自定义参数</span>}
           {paramError && <span className="ml-2 font-semibold text-warn">参数有误</span>}
         </div>
         <button
