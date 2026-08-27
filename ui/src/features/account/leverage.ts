@@ -50,12 +50,17 @@ export function leverageError(
   return null
 }
 
-/** 将合法杠杆按渠道步进前后调整，并夹在渠道边界内。 */
-export function stepLeverage(value: string, direction: -1 | 1, limits?: Partial<LeverageLimits>): string {
+/** 将合法杠杆按指定增量前后调整，并夹在渠道边界内。 */
+export function stepLeverage(
+  value: string,
+  direction: -1 | 1,
+  limits?: Partial<LeverageLimits>,
+  increment?: number,
+): string {
   const resolved = limitsOf(limits)
   const leverage = leverageValue(value, resolved)
   if (leverage === null) return value
-  const next = Math.min(resolved.max, Math.max(resolved.min, leverage + direction * resolved.step))
+  const next = Math.min(resolved.max, Math.max(resolved.min, leverage + direction * (increment ?? resolved.step)))
   return next.toFixed(decimals(resolved.step))
 }
 

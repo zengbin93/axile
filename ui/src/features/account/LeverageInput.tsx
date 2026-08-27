@@ -12,6 +12,7 @@ const NUMBER_FORMAT = {
   minimumFractionDigits: 1,
   maximumFractionDigits: 1,
 }
+const FAST_STEP = 1
 
 interface LeverageInputProps {
   id?: string
@@ -22,7 +23,7 @@ interface LeverageInputProps {
   limits?: LeverageLimits
 }
 
-/** 可直接输入、亦可按 0.1 步进的账户杠杆控件。 */
+/** 可直接输入、亦可按渠道步进或 1 倍快步进调整的账户杠杆控件。 */
 export function LeverageInput({
   id,
   value,
@@ -38,8 +39,11 @@ export function LeverageInput({
   if (validValue !== null) lastValidValue.current = validValue
 
   const showInput = isEditing || invalid || validValue === null
+  const baseStep = limits?.step ?? 0.1
   const decreaseValue = stepLeverage(value, -1, limits)
   const increaseValue = stepLeverage(value, 1, limits)
+  const fastDecreaseValue = stepLeverage(value, -1, limits, FAST_STEP)
+  const fastIncreaseValue = stepLeverage(value, 1, limits, FAST_STEP)
   const decreaseDisabled = validValue === null || validValue <= (limits?.min ?? 0)
   const increaseDisabled = validValue === null || (limits !== undefined && validValue >= limits.max)
 
@@ -58,7 +62,13 @@ export function LeverageInput({
     }
     if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return
     event.preventDefault()
-    const next = event.key === 'ArrowUp' ? increaseValue : decreaseValue
+    const next = event.shiftKey
+      ? event.key === 'ArrowUp'
+        ? fastIncreaseValue
+        : fastDecreaseValue
+      : event.key === 'ArrowUp'
+        ? increaseValue
+        : decreaseValue
     if (next !== value) onChange(next)
   }
 
@@ -68,8 +78,10 @@ export function LeverageInput({
     onChange(next)
   }
 
-  const stepButton =
-    'grid h-full w-9 flex-none place-items-center border-0 bg-transparent text-[19px] text-ink-3 transition-colors hover:bg-fill hover:text-ink-1 disabled:cursor-default disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-ink-3'
+  const stepButtonBase =
+    'grid h-full w-9 flex-none place-items-center border-0 bg-transparent text-ink-3 transition-colors hover:bg-fill hover:text-ink-1 disabled:cursor-default disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-ink-3'
+  const stepButton = `${stepButtonBase} text-[19px]`
+  const fastStepButton = `${stepButtonBase} text-[13px]`
 
   return (
     <div
@@ -79,8 +91,18 @@ export function LeverageInput({
     >
       <button
         type="button"
-        aria-label="减少 0.1 倍杠杆"
-        title="减少 0.1"
+        aria-label="减少 1 倍杠杆"
+        title="减少 1"
+        className={`${fastStepButton} border-r border-r-line`}
+        disabled={decreaseDisabled}
+        onClick={() => applyStep(fastDecreaseValue)}
+      >
+        −1
+      </button>
+      <button
+        type="button"
+        aria-label={`减少 ${baseStep} 倍杠杆`}
+        title={`减少 ${baseStep}`}
         className={`${stepButton} border-r border-r-line`}
         disabled={decreaseDisabled}
         onClick={() => applyStep(decreaseValue)}
@@ -138,13 +160,23 @@ export function LeverageInput({
       </div>
       <button
         type="button"
-        aria-label="增加 0.1 倍杠杆"
-        title="增加 0.1"
+        aria-label={`增加 ${baseStep} 倍杠杆`}
+        title={`增加 ${baseStep}`}
         className={`${stepButton} border-l border-l-line`}
         disabled={increaseDisabled}
         onClick={() => applyStep(increaseValue)}
       >
         +
+      </button>
+      <button
+        type="button"
+        aria-label="增加 1 倍杠杆"
+        title="增加 1"
+        className={`${fastStepButton} border-l border-l-line`}
+        disabled={increaseDisabled}
+        onClick={() => applyStep(fastIncreaseValue)}
+      >
+        +1
       </button>
     </div>
   )

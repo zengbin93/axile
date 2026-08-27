@@ -36,9 +36,16 @@ describe('stepLeverage', () => {
     expect(stepLeverage('0.2', 1)).toBe('0.3')
   })
 
+  it('可按指定增量快速调整', () => {
+    expect(stepLeverage('3.0', 1, undefined, 1)).toBe('4.0')
+    expect(stepLeverage('3.0', -1, undefined, 1)).toBe('2.0')
+    expect(stepLeverage('3.5', 1, { max: 5, step: 0.5 }, 1)).toBe('4.5')
+  })
+
   it('夹在运行时渠道边界内', () => {
     expect(stepLeverage('0.0', -1)).toBe('0.0')
     expect(stepLeverage('5.0', 1, { max: 5, step: 0.5 })).toBe('5.0')
+    expect(stepLeverage('0.5', -1, { min: 0, max: 5, step: 0.5 }, 1)).toBe('0.0')
   })
 
   it('非法输入保持原值', () => {
