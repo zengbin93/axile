@@ -85,7 +85,7 @@ export function StringTagInput({
         {value.map((item) => (
           <span
             key={item}
-            className={`inline-flex h-7 max-w-full items-center gap-1 rounded-[7px] border border-line bg-fill pl-2 font-mono text-[12px] text-ink-2 ${armed === item ? 'outline-2 outline-offset-1 outline-accent' : ''}`}
+            className={`inline-flex h-7 max-w-full items-center gap-1 rounded-[7px] border border-line bg-fill pl-2 font-mono text-[13px] text-ink-2 ${armed === item ? 'outline-2 outline-offset-1 outline-accent' : ''}`}
           >
             <span className="truncate" title={item}>
               {item}
@@ -107,7 +107,7 @@ export function StringTagInput({
         <input
           ref={inputRef}
           id={id}
-          className="h-7 min-w-[16rem] flex-1 bg-transparent font-mono text-[13px] text-ink-1 outline-none placeholder:text-ink-3"
+          className="h-7 min-w-[16rem] flex-1 bg-transparent font-mono text-[14px] text-ink-1 outline-none placeholder:text-ink-3"
           value={text}
           placeholder={value.length ? '继续输入…' : placeholder}
           autoComplete="off"
@@ -127,7 +127,7 @@ export function StringTagInput({
       <div className="mt-1.5 flex min-h-8 flex-wrap items-start gap-3">
         <span
           id={`${id}-help`}
-          className="min-w-0 flex-1 text-[11px] leading-5 text-ink-3"
+          className="min-w-0 flex-1 text-[12px] leading-5 text-ink-3"
         >
           {help}
         </span>

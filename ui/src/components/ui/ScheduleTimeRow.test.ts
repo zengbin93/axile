@@ -20,7 +20,7 @@ describe('ScheduleTimeRow', () => {
     expect(html).toContain('6 小时后')
     expect(html).toContain('2026-08-27 15:00:00（北京时间）')
     expect(html).toContain('text-ink-3')
-    expect(html).toContain('text-[14px]')
+    expect(html).toContain('text-[15px]')
   })
 
   it('uses warning color without changing the schedule time color', () => {

@@ -29,7 +29,7 @@ export function WeightBars({ weights, format = 'percent', className = '' }: Weig
   return (
     <div className={className} role="list" aria-label="品种权重">
       {rows.map(([sym, w]) => (
-        <div key={sym} role="listitem" className="flex items-center gap-3 py-1.5 text-[13.5px]">
+        <div key={sym} role="listitem" className="flex items-center gap-3 py-1.5 text-[14.5px]">
           <OverflowText className="w-20 flex-none font-[520] text-ink-1" text={sym} />
           <div aria-hidden className="h-1.5 min-w-0 flex-1">
             <div

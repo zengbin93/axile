@@ -255,7 +255,7 @@ export function AccountEditPage({ section = 'basic' }: { section?: EditSection }
   const pageChrome = (
     <>
       <div className="flex flex-wrap items-baseline gap-3">{titleName}</div>
-      <div className="mt-3 border-l-2 border-warn/60 bg-warn-tint/50 py-2 pl-3 pr-2 text-[13px] text-ink-2">
+      <div className="mt-3 border-l-2 border-warn/60 bg-warn-tint/50 py-2 pl-3 pr-2 text-[14px] text-ink-2">
         修改不会立即下单，从下次调仓开始生效。
       </div>
       {section === 'leverage' && leverageSynopsis != null && (
@@ -373,14 +373,14 @@ export function AccountEditPage({ section = 'basic' }: { section?: EditSection }
             />
             <button
               type="button"
-              className="flex-none cursor-pointer rounded-[9px] border border-line bg-surface px-4 py-2 text-[14px] text-ink-2 transition-[border-color] hover:border-ink-3/40 disabled:opacity-45"
+              className="flex-none cursor-pointer rounded-[9px] border border-line bg-surface px-4 py-2 text-[15px] text-ink-2 transition-[border-color] hover:border-ink-3/40 disabled:opacity-45"
               disabled={!feishuKey || feishuTest === 'busy'}
               onClick={() => void runFeishuTest()}
             >
               {feishuTest === 'busy' ? '测试中…' : '测试推送'}
             </button>
           </div>
-          <div className="mt-1.5 text-[12px]" aria-live="polite">
+          <div className="mt-1.5 text-[13px]" aria-live="polite">
             {feishuTest && feishuTest !== 'busy' ? (
               <span className={feishuTest.ok ? 'text-accent' : 'text-warn'}>
                 {feishuTest.ok ? '✓ ' : '✗ '}
@@ -401,9 +401,9 @@ export function AccountEditPage({ section = 'basic' }: { section?: EditSection }
           <Section label="杠杆设置">
           <div className="flex flex-wrap gap-x-8 gap-y-3 md:col-span-2">
           <div className="flex flex-col gap-1">
-            <label htmlFor="edit-long-leverage" className="text-[13px] text-ink-2">
+            <label htmlFor="edit-long-leverage" className="text-[14px] text-ink-2">
               {channelDescriptor?.ui.long_leverage_label ?? '做多杠杆'}
-              {longLevErr && <span className="ml-1.5 text-[11px] text-warn">{longLevErr}</span>}
+              {longLevErr && <span className="ml-1.5 text-[12px] text-warn">{longLevErr}</span>}
             </label>
             <LeverageInput
               limits={channelDescriptor?.leverage}
@@ -415,10 +415,10 @@ export function AccountEditPage({ section = 'basic' }: { section?: EditSection }
           </div>
           {showShortLeverage && (
             <div className="flex flex-col gap-1">
-              <label htmlFor="edit-short-leverage" className="text-[13px] text-ink-2">
+              <label htmlFor="edit-short-leverage" className="text-[14px] text-ink-2">
                 {channelDescriptor?.ui.short_leverage_label ?? '做空杠杆'}
-                <span className="ml-1.5 text-[11px] text-ink-3">0 = 不做空</span>
-                {shortLevErr && <span className="ml-1.5 text-[11px] text-warn">{shortLevErr}</span>}
+                <span className="ml-1.5 text-[12px] text-ink-3">0 = 不做空</span>
+                {shortLevErr && <span className="ml-1.5 text-[12px] text-warn">{shortLevErr}</span>}
               </label>
               <LeverageInput
                 limits={channelDescriptor?.leverage}
@@ -496,7 +496,7 @@ export function AccountEditPage({ section = 'basic' }: { section?: EditSection }
             ariaLabel="跟随组合"
             searchable
             disabled={portfolios == null || Boolean(portfoliosError)}
-            className="w-full justify-between px-3 py-2 text-[14px]"
+            className="w-full justify-between px-3 py-2 text-[15px]"
             value={d.portfolioId ?? null}
             onChange={(v) => set({ portfolioId: v })}
             options={[
@@ -522,7 +522,7 @@ export function AccountEditPage({ section = 'basic' }: { section?: EditSection }
               value={d.executionTimeout}
               onChange={(executionTimeout) => set({ executionTimeout })}
             />
-            <span className={`text-[11px] ${timeoutErr ? 'text-warn' : 'text-ink-3'}`}>
+            <span className={`text-[12px] ${timeoutErr ? 'text-warn' : 'text-ink-3'}`}>
               {timeoutErr ?? '超时后停止开新单'}
             </span>
           </div>

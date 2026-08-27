@@ -76,7 +76,7 @@ export function PortfolioEditPage() {
 
   if (portfolio.loading || (!pf && !portfolio.error) || (pf && !ready)) {
     return (
-      <section className="pb-24">
+      <section className="mx-auto w-full max-w-[1440px] pb-24">
         <Skeleton className="h-6 w-44" />
         <Skeleton className="mt-4 h-4 w-64" />
         <Section label="组合名称">
@@ -101,8 +101,8 @@ export function PortfolioEditPage() {
   }
 
   return (
-    <section className="pb-24">
-      <h1 className="text-[18px] font-[640]">
+    <section className="mx-auto w-full max-w-[1440px] pb-24">
+      <h1 className="text-[19px] font-[640]">
         组合 ·{' '}
         <span style={tDetail ? { viewTransitionName: `portfolio-name-${portfolioId}` } : undefined}>{pf.name}</span>
       </h1>
@@ -110,18 +110,18 @@ export function PortfolioEditPage() {
       {/* 影响范围：琥珀只在真有账户跟随时出现，量级收敛到左边条；无人跟随保持中性。 */}
       <div className="mt-4">
         {accountsError ? (
-          <p className="border-l-2 border-warn pl-2.5 text-[13px] leading-5 text-warn">
+          <p className="border-l-2 border-warn pl-2.5 text-[14px] leading-5 text-warn">
             影响范围 · 绑定关系暂不可用，恢复前无法保存
           </p>
         ) : accounts == null ? (
           <Skeleton className="h-4 w-64" />
         ) : followers.length > 0 ? (
-          <p className="border-l-2 border-warn pl-2.5 text-[13px] leading-5 text-ink-1">
+          <p className="border-l-2 border-warn pl-2.5 text-[14px] leading-5 text-ink-1">
             影响范围 · 此组合被 <b>{followers.length}</b> 个账户使用：{followerNames}。
             <span className="text-ink-2">保存后，这些账户会在下次调仓时执行新函数。</span>
           </p>
         ) : (
-          <p className="border-l-2 border-line pl-2.5 text-[13px] leading-5 text-ink-3">
+          <p className="border-l-2 border-line pl-2.5 text-[14px] leading-5 text-ink-3">
             影响范围 · 当前没有账户使用此组合，保存只影响之后绑定的账户。
           </p>
         )}

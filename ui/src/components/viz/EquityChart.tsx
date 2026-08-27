@@ -65,7 +65,7 @@ export function EquityChart({
   onHover?: (index: number | null) => void
 }) {
   if (points.length < 2) {
-    return <div className="py-8 text-center text-[13px] text-ink-3">数据点不足，无法绘制曲线。</div>
+    return <div className="py-8 text-center text-[14px] text-ink-3">数据点不足，无法绘制曲线。</div>
   }
   const W = 760
   const H = 210

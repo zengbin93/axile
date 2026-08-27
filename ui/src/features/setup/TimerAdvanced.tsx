@@ -108,7 +108,7 @@ function DayStrip({
   const customized = days.length > 0
   return (
     <div className="flex flex-col items-center gap-2">
-      <div className="flex items-center gap-2 text-[12px] text-ink-3">
+      <div className="flex items-center gap-2 text-[13px] text-ink-3">
         <span>重复 · {customized ? daysSub(days) : defaultDaysHint()}</span>
         {customized && (
           <button type="button" className="font-semibold text-accent hover:underline" onClick={onReset}>
@@ -125,7 +125,7 @@ function DayStrip({
               type="button"
               aria-pressed={Boolean(active)}
               onClick={() => onToggle(d)}
-              className={`flex h-8 w-8 items-center justify-center rounded-full text-[12.5px] font-[640] ${CHIP_T} ${
+              className={`flex h-8 w-8 items-center justify-center rounded-full text-[13.5px] font-[640] ${CHIP_T} ${
                 active
                   ? 'bg-accent text-white'
                   : customized
@@ -245,7 +245,7 @@ export function TimerAdvanced({ market, rules, selectedId, onChangeRules }: Time
             onChange={(time) => replaceSelected({ time, draft: !time })}
           />
         ) : (
-          <div className="text-center font-mono text-[28px] font-[640] tracking-tight text-ink-1">
+          <div className="text-center font-mono text-[29px] font-[640] tracking-tight text-ink-1">
             {FREQ_TITLE[selected.freq]}
           </div>
         )}
@@ -282,7 +282,7 @@ export function TimerAdvanced({ market, rules, selectedId, onChangeRules }: Time
             type="button"
             onClick={enterMulti}
             tabIndex={multi ? -1 : 0}
-            className="mt-5 text-[12.5px] font-semibold text-accent hover:underline"
+            className="mt-5 text-[13.5px] font-semibold text-accent hover:underline"
           >
             ＋ 加入多个时间
           </button>
@@ -302,7 +302,7 @@ export function TimerAdvanced({ market, rules, selectedId, onChangeRules }: Time
       aria-hidden={!multi}
     >
       <div className="w-[156px] sm:w-[176px]">
-        <div className="px-3 pt-3 pb-1.5 text-[11px] font-semibold tracking-wide text-ink-3">时间</div>
+        <div className="px-3 pt-3 pb-1.5 text-[12px] font-semibold tracking-wide text-ink-3">时间</div>
         <ul className="min-h-0">
           {rules.map((r, i) => {
             const active = r.id === selected.id
@@ -317,16 +317,16 @@ export function TimerAdvanced({ market, rules, selectedId, onChangeRules }: Time
                 >
                   <button type="button" className="min-w-0 flex-1 px-1 text-left" onClick={() => selectRule(r.id)}>
                     <div className="flex min-w-0 items-baseline gap-1.5">
-                      <span className="text-[10px] tabular-nums text-ink-3">{i + 1}</span>
+                      <span className="text-[11px] tabular-nums text-ink-3">{i + 1}</span>
                       <OverflowText
-                        className={`min-w-0 flex-1 text-[13.5px] font-[620] tabular-nums ${
+                        className={`min-w-0 flex-1 text-[14.5px] font-[620] tabular-nums ${
                           incomplete ? 'text-ink-3' : 'text-ink-1'
                         }`}
                         text={title}
                       />
                     </div>
                     <div className="mt-0.5 pl-4">
-                      <OverflowText className="text-[11.5px] text-ink-3" text={sub} />
+                      <OverflowText className="text-[12.5px] text-ink-3" text={sub} />
                     </div>
                   </button>
                   <button
@@ -345,7 +345,7 @@ export function TimerAdvanced({ market, rules, selectedId, onChangeRules }: Time
         <button
           type="button"
           onClick={addSlot}
-          className="w-full border-t border-line px-3 py-2.5 text-left text-[12.5px] font-semibold text-accent hover:underline"
+          className="w-full border-t border-line px-3 py-2.5 text-left text-[13.5px] font-semibold text-accent hover:underline"
         >
           ＋ 再加一条
         </button>

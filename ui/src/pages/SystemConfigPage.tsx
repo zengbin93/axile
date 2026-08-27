@@ -34,7 +34,7 @@ export function SystemConfigPage({ section = 'alert' }: { section?: 'alert' | 'a
   if (!values) {
     return (
       <div className="grid h-full place-items-center bg-bg text-ink-3">
-        <div className="text-[15px] tracking-wide">读取配置中…</div>
+        <div className="text-[16px] tracking-wide">读取配置中…</div>
       </div>
     )
   }

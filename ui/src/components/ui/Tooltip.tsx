@@ -171,7 +171,7 @@ export function Tooltip({
               ref={cardRef}
               id={id}
               role="tooltip"
-              className="select-pop-in relative max-w-[min(320px,90vw)] rounded-[11px] border border-line bg-surface px-3 py-2.5 text-[12.5px] leading-relaxed shadow-[0_12px_32px_rgba(0,0,0,0.16)]"
+              className="select-pop-in relative max-w-[min(320px,90vw)] rounded-[11px] border border-line bg-surface px-3 py-2.5 text-[13.5px] leading-relaxed shadow-[0_12px_32px_rgba(0,0,0,0.16)]"
             >
               {content}
               {arrow && (

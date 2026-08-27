@@ -44,7 +44,7 @@ export function DrawerHead({ children, onClose }: { children: ReactNode; onClose
   return (
     <div className="border-b border-line p-6">
       <button
-        className="float-right cursor-pointer text-[22px] leading-none text-ink-3 hover:text-ink-1"
+        className="float-right cursor-pointer text-[23px] leading-none text-ink-3 hover:text-ink-1"
         onClick={onClose}
         aria-label="关闭"
       >

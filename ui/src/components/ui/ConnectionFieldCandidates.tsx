@@ -109,10 +109,10 @@ export function ConnectionFieldCandidates({
       style={{ left: position.left, top: position.top, width: position.width }}
     >
       <div className="flex min-h-8 items-center justify-between gap-2 px-1.5">
-        <OverflowText className="min-w-0 text-[12px] text-ink-2" text={`从本次粘贴中识别到 ${candidates.length} 项`} />
+        <OverflowText className="min-w-0 text-[13px] text-ink-2" text={`从本次粘贴中识别到 ${candidates.length} 项`} />
         <span className="flex flex-none items-center gap-0.5">
           {onFillMatched && hasMatched && (
-            <button type="button" className="cursor-pointer px-1.5 text-[12px] text-accent hover:underline" onMouseDown={(event) => event.preventDefault()} onClick={onFillMatched}>
+            <button type="button" className="cursor-pointer px-1.5 text-[13px] text-accent hover:underline" onMouseDown={(event) => event.preventDefault()} onClick={onFillMatched}>
               填入已匹配项
             </button>
           )}
@@ -121,7 +121,7 @@ export function ConnectionFieldCandidates({
           </button>
         </span>
       </div>
-      {pasteError && <div className="px-1.5 pb-1 text-[12px] text-warn">{pasteError}</div>}
+      {pasteError && <div className="px-1.5 pb-1 text-[13px] text-warn">{pasteError}</div>}
       <div role="listbox" aria-label={`${label}本次粘贴候选列表`} className="mt-1 max-h-44 overflow-y-auto overscroll-contain">
         {candidates.map((candidate, index) => (
           <button
@@ -138,15 +138,15 @@ export function ConnectionFieldCandidates({
             onClick={() => onCommit(candidate)}
           >
             <span className="min-w-0 flex-1">
-              <OverflowText className={`text-[13px] text-ink-1 ${mono ? 'font-mono' : ''}`} text={candidate.displayValue} />
+              <OverflowText className={`text-[14px] text-ink-1 ${mono ? 'font-mono' : ''}`} text={candidate.displayValue} />
               {candidate.sourceLabel && (
                 <OverflowText
-                  className={`mt-0.5 text-[11px] ${candidate.role ? 'text-accent' : 'text-ink-3'}`}
+                  className={`mt-0.5 text-[12px] ${candidate.role ? 'text-accent' : 'text-ink-3'}`}
                   text={candidate.sourceLabel}
                 />
               )}
             </span>
-            <span className="flex-none text-[12px] text-ink-2">{value ? '替换' : '填入'}</span>
+            <span className="flex-none text-[13px] text-ink-2">{value ? '替换' : '填入'}</span>
           </button>
         ))}
       </div>

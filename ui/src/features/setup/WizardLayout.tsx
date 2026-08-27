@@ -2,6 +2,7 @@ import { Outlet, useLocation } from 'react-router'
 import { Link } from '@/components/ui/nav'
 import { Toast } from '@/components/Toast'
 import { ThemeToggle } from '@/components/ThemeToggle'
+import { BrandWordmark } from '@/components/brand/BrandWordmark'
 import { flowOf, PF_STEPS, ACCT_STEPS, type Step } from '@/features/setup/steps'
 
 function Rail({ steps, index, title }: { steps: Step[]; index: number; title: string }) {
@@ -15,7 +16,7 @@ function Rail({ steps, index, title }: { steps: Step[]; index: number; title: st
           <Link
             key={s.path}
             to={s.path}
-            className={`flex min-w-fit flex-none items-center gap-2 rounded-[8px] px-3 py-2 text-[13px] sm:mb-1 sm:w-full sm:gap-3 sm:p-2.5 sm:text-[14px] ${
+            className={`flex min-w-fit flex-none items-center gap-2 rounded-[8px] px-3 py-2 text-[14px] sm:mb-1 sm:w-full sm:gap-3 sm:p-2.5 sm:text-[15px] ${
               cur ? 'bg-accent-soft font-semibold text-ink-1' : 'text-ink-2'
             }`}
           >
@@ -46,15 +47,15 @@ export function WizardLayout() {
   return (
     <div className="flex h-screen flex-col">
       <header className="flex h-14 flex-none items-center gap-3.5 border-b border-line bg-surface px-4 sm:px-6">
-        <Link to="/setup" className="font-[650] tracking-wide">
-          axile
+        <Link to="/" aria-label="axile 首页" className="text-ink-1">
+          <BrandWordmark size={16.5} />
         </Link>
-        <span className="text-[14px] text-ink-2">
+        <span className="text-[15px] text-ink-2">
           {flow === 'pf' ? '· 组合设置' : flow === 'acct' ? '· 账户设置' : ''}
         </span>
         <span className="ml-auto" />
         <ThemeToggle />
-        <Link to="/" className="rounded-[9px] border border-line px-3.5 py-1.5 text-[13px] text-ink-2">
+        <Link to="/" className="rounded-[9px] border border-line px-3.5 py-1.5 text-[14px] text-ink-2">
           关闭
         </Link>
       </header>

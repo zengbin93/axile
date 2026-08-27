@@ -161,7 +161,7 @@ export function AccountHistoryPage() {
         <div className="flex flex-wrap items-baseline gap-3">
           <AccountPageTitle
             accountId={accountId}
-            page="回看与绩效"
+            page="实盘绩效"
             name={account.data?.name}
             channel={account.data?.trade_channel}
             market={account.data?.market}
@@ -192,7 +192,7 @@ export function AccountHistoryPage() {
         </>
       )}
       <ErrorNotice
-        title="账户回看数据加载失败"
+        title="账户绩效数据加载失败"
         error={historyError}
         variant={historyReady ? 'stale' : 'section'}
         updatedAt={activity.updatedAt ?? snapshots.updatedAt}
@@ -205,17 +205,17 @@ export function AccountHistoryPage() {
           <Card className="p-6">
             <div
               // w-fit：金额盒贴文字宽（与卡片金额同形），FLIP 只剩上移平移 + 微缩，避免横向硬拉。
-              className="num w-fit text-[32px] font-[640] tracking-tight"
+              className="num w-fit text-[33px] font-[640] tracking-tight"
               style={amountVt ? { viewTransitionName: `equity-amount-${accountId}` } : undefined}
             >
               {heroEq != null ? formatMoney(heroEq) : '—'}
-              <span className="ml-1.5 text-[15px] font-medium text-ink-3">{currencyUnit}</span>
+              <span className="ml-1.5 text-[16px] font-medium text-ink-3">{currencyUnit}</span>
               {reviewing && (
                 // 明确「这是回看历史点、非实时」，避免 hero 跳动被误读为账户实变。
                 <span className="ml-2 align-middle text-xs font-normal text-ink-3">· 回看 {readout.when}</span>
               )}
             </div>
-            <div className="mt-1 text-[13.5px] text-ink-2">
+            <div className="mt-1 text-[14.5px] text-ink-2">
               {reviewing ? (
                 // scrub 读数：命中点的盈亏（累计=至此区间盈亏，每日=当日盈亏），红涨绿跌。
                 <>
@@ -307,10 +307,10 @@ export function AccountHistoryPage() {
             ) : bindings.error ? (
               <ErrorNotice title="绑定记录加载失败" error={bindings.error} onRetry={bindings.refresh} />
             ) : segments.length === 0 ? (
-              <p className="text-[13px] text-ink-3">本区间无可用的分段数据。</p>
+              <p className="text-[14px] text-ink-3">本区间无可用的分段数据。</p>
             ) : (
               segments.map((s, i) => (
-                <div key={i} className="flex items-center gap-3 border-t border-line py-3 text-[14px] first:border-t-0">
+                <div key={i} className="flex items-center gap-3 border-t border-line py-3 text-[15px] first:border-t-0">
                   <div className="flex-1 min-w-0">
                     <div className="font-semibold">{s.portfolioId != null ? `组合 #${s.portfolioId}` : '未绑定'}</div>
                     <div className="text-xs text-ink-3">自 {s.start}</div>
@@ -332,7 +332,7 @@ export function AccountHistoryPage() {
             ) : bindings.error ? (
               <ErrorNotice title="绑定时间线加载失败" error={bindings.error} onRetry={bindings.refresh} />
             ) : events.length === 0 ? (
-              <p className="text-[13px] text-ink-3">本区间无异常事件。</p>
+              <p className="text-[14px] text-ink-3">本区间无异常事件。</p>
             ) : (
               <div className="relative pl-[22px]">
                 <div className="absolute left-1.5 top-1.5 bottom-1.5 w-0.5 bg-line" />
@@ -352,8 +352,8 @@ export function AccountHistoryPage() {
                     >
                       <span className={`absolute -left-[17px] top-[15px] h-[9px] w-[9px] rounded-full border-2 border-surface ${EVENT_DOT_CLASS[e.kind]}`} />
                       <span className="w-24 flex-none text-xs text-ink-3">{e.date}</span>
-                      <span className="min-w-0 flex-1 text-[14px]">
-                        <span className={`mr-1.5 rounded px-1.5 py-px text-[11px] font-semibold ${EVENT_TAG_CLASS[e.kind]}`}>{e.tag}</span>
+                      <span className="min-w-0 flex-1 text-[15px]">
+                        <span className={`mr-1.5 rounded px-1.5 py-px text-[12px] font-semibold ${EVENT_TAG_CLASS[e.kind]}`}>{e.tag}</span>
                         {e.text}
                       </span>
                       {clickable && (
@@ -393,9 +393,9 @@ function StatCard({
   return (
     <Card className="px-4 py-4">
       <div className="text-xs text-ink-3">{k}</div>
-      <div className={`num mt-0.5 text-[20px] font-[640] ${vClass}`}>
+      <div className={`num mt-0.5 text-[21px] font-[640] ${vClass}`}>
         {v}
-        {vUnit && <span className="ml-1 text-[13px] font-normal text-ink-3">{vUnit}</span>}
+        {vUnit && <span className="ml-1 text-[14px] font-normal text-ink-3">{vUnit}</span>}
       </div>
       {onSub ? (
         <button className={`${subCls} cursor-pointer border-0 bg-transparent p-0 hover:underline`} onClick={onSub}>

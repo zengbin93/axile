@@ -53,7 +53,7 @@ function ConfiguredApp() {
 function Splash() {
   return (
     <div className="grid h-screen place-items-center bg-bg text-ink-3">
-      <div className="text-[15px] tracking-wide">axile 启动中…</div>
+      <div className="text-[16px] tracking-wide">axile 启动中…</div>
     </div>
   )
 }

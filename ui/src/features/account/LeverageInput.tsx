@@ -69,7 +69,7 @@ export function LeverageInput({
   }
 
   const stepButton =
-    'grid h-full w-9 flex-none place-items-center border-0 bg-transparent text-[18px] text-ink-3 transition-colors hover:bg-fill hover:text-ink-1 disabled:cursor-default disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-ink-3'
+    'grid h-full w-9 flex-none place-items-center border-0 bg-transparent text-[19px] text-ink-3 transition-colors hover:bg-fill hover:text-ink-1 disabled:cursor-default disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-ink-3'
 
   return (
     <div
@@ -98,13 +98,13 @@ export function LeverageInput({
             value={lastValidValue.current}
             locales="zh-CN"
             format={NUMBER_FORMAT}
-            className="num text-[15px] text-ink-1"
+            className="num text-[16px] text-ink-1"
             spinTiming={SPIN_TIMING}
             transformTiming={TRANSFORM_TIMING}
             opacityTiming={OPACITY_TIMING}
             respectMotionPreference
           />
-          <span className="flex-none text-[12px] text-ink-3">×</span>
+          <span className="flex-none text-[13px] text-ink-3">×</span>
         </div>
         <div
           className={`relative flex h-full items-center justify-center gap-1 ${
@@ -126,14 +126,14 @@ export function LeverageInput({
             aria-valuemax={limits?.max}
             aria-valuenow={validValue ?? undefined}
             inputMode="decimal"
-            className="num w-11 border-0 bg-transparent p-0 text-right text-[15px] text-ink-1 outline-none"
+            className="num w-11 border-0 bg-transparent p-0 text-right text-[16px] text-ink-1 outline-none"
             value={value}
             onChange={(event) => onChange(event.target.value)}
             onFocus={() => setIsEditing(true)}
             onBlur={finishEditing}
             onKeyDown={onKeyDown}
           />
-          <span className="flex-none text-[12px] text-ink-3">×</span>
+          <span className="flex-none text-[13px] text-ink-3">×</span>
         </div>
       </div>
       <button

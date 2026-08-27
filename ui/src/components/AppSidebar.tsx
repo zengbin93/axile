@@ -1,26 +1,16 @@
 import { useEffect, useRef, useState, type ComponentType, type CSSProperties, type ReactNode, type RefObject } from 'react'
 import { useLocation } from 'react-router'
 import {
-  Ban,
   BellRing,
   Boxes,
-  ChartNoAxesCombined,
   ChevronDown,
   ChevronUp,
   CircleGauge,
-  Layers3,
-  ListChecks,
   Plus,
-  Scale,
   Settings2,
-  ShieldKeyhole,
-  SlidersHorizontal,
-  Timer,
-  UserRoundCog,
-  WalletCards,
-  Workflow,
 } from 'lucide-react'
 import { Link } from '@/components/ui/nav'
+import { channelLabel } from '@/features/dashboard/display'
 import { useDomainStore } from '@/stores/domain'
 import { useNavigationStore } from '@/stores/ui'
 
@@ -40,11 +30,22 @@ function accountIdFromPath(pathname: string): number | null {
   return Number.isFinite(accountId) ? accountId : null
 }
 
-function NavSection({ label, children }: { label: string; children: ReactNode }) {
+function NavSection({
+  label,
+  children,
+  compact = false,
+}: {
+  label: string
+  children: ReactNode
+  /** 账户块内部使用：组间距收紧，让块内多组读起来是一个整体。 */
+  compact?: boolean
+}) {
   return (
-    <section>
-      <div className="mb-0.5 px-2.5 text-[11px] font-semibold tracking-wide text-ink-3">{label}</div>
-      <div className="ml-3">{children}</div>
+    <section className={compact ? 'mt-3.5 first:mt-0' : 'mt-5 first:mt-0'}>
+      <div className="mb-1 truncate px-2.5 text-[12px] font-semibold tracking-[0.14em] text-ink-3" title={label}>
+        {label}
+      </div>
+      <div>{children}</div>
     </section>
   )
 }
@@ -114,11 +115,12 @@ function NavItem({ item }: { item: NavItemSpec }) {
   const Icon = item.icon
   const content = (
     <>
+      {/* 游标：贴左缘的青色指示条，跨入口滑移（共享元素 FLIP）——「当前位置」是仪表上的游标，不是高亮块。 */}
       {active && (
-        <span aria-hidden className="absolute inset-0 rounded-[7px] bg-accent-soft" style={activeMarkerStyle} />
+        <span aria-hidden className="absolute top-1 bottom-1 left-0 w-[2.5px] rounded-full bg-accent" style={activeMarkerStyle} />
       )}
       <span className="relative z-[1] flex items-center gap-2.5">
-        {Icon && <Icon size={15} aria-hidden />}
+        {Icon && <Icon size={16} aria-hidden />}
         <span>{item.label}</span>
       </span>
     </>
@@ -126,7 +128,7 @@ function NavItem({ item }: { item: NavItemSpec }) {
 
   if (!item.to) {
     return (
-      <span className="relative flex h-7.5 items-center gap-2 rounded-[7px] px-2.5 text-[13px] text-ink-3" aria-disabled="true">
+      <span className="relative flex h-8.5 items-center gap-2 px-2.5 text-[14px] text-ink-3" aria-disabled="true">
         {content}
       </span>
     )
@@ -136,8 +138,8 @@ function NavItem({ item }: { item: NavItemSpec }) {
     <Link
       to={item.to}
       aria-current={active ? 'page' : undefined}
-      className={`relative flex h-7.5 items-center gap-2 rounded-[7px] px-2.5 text-[13px] transition-colors duration-150 motion-reduce:transition-none ${
-        active ? 'text-ink-1' : 'text-ink-2 hover:bg-bg-subtle hover:text-ink-1'
+      className={`relative flex h-8.5 items-center gap-2 px-2.5 text-[14px] transition-colors duration-150 motion-reduce:transition-none ${
+        active ? 'font-[550] text-ink-1' : 'text-ink-2 hover:text-ink-1'
       }`}
     >
       {content}
@@ -167,63 +169,86 @@ export function AppSidebar() {
   const accountId = routeAccountId ?? activeAccountId
   const accountPath = (suffix = '') => accountId == null ? null : `/accounts/${accountId}${suffix}`
   const exact = (to: string | null) => (pathname: string) => to != null && pathname === to
+  // 账户段身份：块头直接署名当前账户（名称 + 渠道），本段所有条目都属于它。
+  const activeAccount = accounts?.find((a) => a.account_id === accountId)
+  // 库里确定没有账户时收拢账户导航：三组入口此刻只有占位价值，一行说明它的归宿比 12 个禁用项安静。
+  const noAccounts = accounts != null && accounts.length === 0 && accountId == null
 
   const navRef = useRef<HTMLElement>(null)
   const scrollEdges = useScrollEdges(navRef)
 
+  // 账户段条目不带图标：归属已由「身份块头 + 左缘线 + 缩进」表达，段内保持素净。
   const accountOverview: NavItemSpec[] = [
-    { label: '账户概览', icon: CircleGauge, to: accountPath(), active: exact(accountPath()) },
-    { label: '持仓明细', icon: WalletCards, to: accountPath('/holdings'), active: exact(accountPath('/holdings')) },
+    { label: '账户概览', to: accountPath(), active: exact(accountPath()) },
+    { label: '持仓明细', to: accountPath('/holdings'), active: exact(accountPath('/holdings')) },
     {
       label: '执行记录',
-      icon: ListChecks,
       to: accountPath('/executions'),
       active: (pathname) => pathname === accountPath('/executions') || pathname.startsWith(`${accountPath('/executions')}/`),
     },
-    { label: '回看与绩效', icon: ChartNoAxesCombined, to: accountPath('/history'), active: exact(accountPath('/history')) },
+    { label: '实盘绩效', to: accountPath('/history'), active: exact(accountPath('/history')) },
   ]
   const accountParameters: NavItemSpec[] = [
-    { label: '基本信息', icon: UserRoundCog, to: accountPath('/edit'), active: exact(accountPath('/edit')) },
-    { label: '连接设置', icon: ShieldKeyhole, to: accountPath('/edit/connection'), active: exact(accountPath('/edit/connection')) },
-    { label: '杠杆设置', icon: Scale, to: accountPath('/edit/leverage'), active: exact(accountPath('/edit/leverage')) },
-    { label: '品种控制', icon: Ban, to: accountPath('/edit/symbols'), active: exact(accountPath('/edit/symbols')) },
+    { label: '基本信息', to: accountPath('/edit'), active: exact(accountPath('/edit')) },
+    { label: '连接设置', to: accountPath('/edit/connection'), active: exact(accountPath('/edit/connection')) },
+    { label: '杠杆设置', to: accountPath('/edit/leverage'), active: exact(accountPath('/edit/leverage')) },
+    { label: '品种控制', to: accountPath('/edit/symbols'), active: exact(accountPath('/edit/symbols')) },
   ]
   const accountExecution: NavItemSpec[] = [
-    { label: '定时节奏', icon: Timer, to: accountPath('/edit/timer'), active: exact(accountPath('/edit/timer')) },
-    { label: '执行算法', icon: Workflow, to: accountPath('/edit/algorithm'), active: exact(accountPath('/edit/algorithm')) },
-    { label: '执行流控', icon: SlidersHorizontal, to: accountPath('/edit/control'), active: exact(accountPath('/edit/control')) },
-    { label: '组合执行', icon: Layers3, to: accountPath('/edit/portfolio'), active: exact(accountPath('/edit/portfolio')) },
+    { label: '定时任务', to: accountPath('/edit/timer'), active: exact(accountPath('/edit/timer')) },
+    { label: '执行算法', to: accountPath('/edit/algorithm'), active: exact(accountPath('/edit/algorithm')) },
+    { label: '执行流控', to: accountPath('/edit/control'), active: exact(accountPath('/edit/control')) },
+    { label: '绑定组合', to: accountPath('/edit/portfolio'), active: exact(accountPath('/edit/portfolio')) },
   ]
 
   return (
     <aside
-      className="absolute top-5 bottom-5 left-5 z-10 flex w-[224px] flex-col rounded-card bg-surface p-2.5 shadow-card"
+      className="flex w-[218px] flex-none flex-col border-r border-line bg-surface py-3.5 pr-2.5 pl-3"
       aria-label="主导航"
     >
       <div className="relative flex min-h-0 flex-1 flex-col">
         <nav ref={navRef} className="quiet-scrollbar min-h-0 flex-1 overflow-y-auto pb-2" aria-label="功能导航">
           <div className="flex min-h-full flex-col justify-between">
             <div>
-              <NavItem item={{ label: '账户', icon: CircleGauge, to: '/', active: (pathname) => pathname === '/' }} />
-              <NavItem item={{ label: '组合', icon: Boxes, to: '/portfolios', active: (pathname) => pathname.startsWith('/portfolios') }} />
-            </div>
-
-            <NavSection label="当前账户">
-              {accountOverview.map((item) => <NavItem key={item.label} item={item} />)}
-            </NavSection>
-
-            <NavSection label="账户参数">
-              {accountParameters.map((item) => <NavItem key={item.label} item={item} />)}
-            </NavSection>
-
-            <NavSection label="自动执行">
-              {accountExecution.map((item) => <NavItem key={item.label} item={item} />)}
-            </NavSection>
-
-            <NavSection label="系统">
+              <NavItem item={{ label: '所有账户', icon: CircleGauge, to: '/', active: (pathname) => pathname === '/' }} />
+              <NavItem item={{ label: '所有组合', icon: Boxes, to: '/portfolios', active: (pathname) => pathname.startsWith('/portfolios') }} />
               <NavItem item={{ label: '飞书告警', icon: BellRing, to: '/settings', active: exact('/settings') }} />
-              <NavItem item={{ label: '高级', icon: Settings2, to: '/settings/advanced', active: exact('/settings/advanced') }} />
-            </NavSection>
+              <NavItem item={{ label: '高级设置', icon: Settings2, to: '/settings/advanced', active: exact('/settings/advanced') }} />
+
+              {/* 横线分割：顶层（全局与系统设置）与账户段各自成块。 */}
+              <div className="mt-4 border-t border-line" />
+              {noAccounts ? (
+                <NavSection label="当前账户">
+                  <p className="px-2.5 py-1.5 text-[13px] leading-relaxed text-ink-3">
+                    创建账户后，这里会出现它的持仓、参数与执行入口。
+                  </p>
+                </NavSection>
+              ) : (
+                /* 账户段：身份块头（账户名 + 渠道）+ 左缘贯通 hairline + 统一缩进——
+                   整段条目属于这个账户。不用围合面板，层次靠线。 */
+                <div className="mt-4 ml-1.5 border-l border-line pl-2">
+                  <div className="mb-1 flex min-w-0 items-center gap-1.5 px-2.5 pt-0.5" title={activeAccount?.name ?? '当前账户'}>
+                    <span className="truncate text-[14px] font-[620] text-ink-1">
+                      {activeAccount?.name ?? '当前账户'}
+                    </span>
+                    {activeAccount && (
+                      <span className="flex-none rounded-chip bg-fill px-1.5 py-px text-[11.5px] text-ink-2">
+                        {channelLabel(activeAccount.trade_channel, activeAccount.market)}
+                      </span>
+                    )}
+                  </div>
+                  <div>
+                    {accountOverview.map((item) => <NavItem key={item.label} item={item} />)}
+                  </div>
+                  <NavSection compact label="参数">
+                    {accountParameters.map((item) => <NavItem key={item.label} item={item} />)}
+                  </NavSection>
+                  <NavSection compact label="执行">
+                    {accountExecution.map((item) => <NavItem key={item.label} item={item} />)}
+                  </NavSection>
+                </div>
+              )}
+            </div>
           </div>
         </nav>
         {/* 溢出揭示：被裁掉的一端用渐隐 + 方向箭头暗示「还有下文」，滚到顶/底即消失。常挂 + 透明度切换，不条件挂载。 */}
@@ -231,12 +256,12 @@ export function AppSidebar() {
         <EdgeScrollHint edge="down" visible={scrollEdges.down} target={navRef} />
       </div>
 
-      <div className="border-t border-line pt-2">
+      <div className="mt-3 border-t border-line pt-3">
         <div className="grid grid-cols-2 gap-1.5">
-          <Link to="/setup/acct/channel" className="flex items-center justify-center gap-1.5 rounded-[9px] border border-line px-2 py-1.5 text-[12px] text-ink-2 hover:border-ink-3/40 hover:text-ink-1">
+          <Link to="/setup/acct/channel" className="flex items-center justify-center gap-1.5 rounded-chip border border-line px-2 py-1.5 text-[13px] text-ink-2 hover:border-border-strong hover:text-ink-1">
             <Plus size={14} aria-hidden />新建账户
           </Link>
-          <Link to="/setup/pf/name" className="flex items-center justify-center gap-1.5 rounded-[9px] border border-line px-2 py-1.5 text-[12px] text-ink-2 hover:border-ink-3/40 hover:text-ink-1">
+          <Link to="/setup/pf/name" className="flex items-center justify-center gap-1.5 rounded-chip border border-line px-2 py-1.5 text-[13px] text-ink-2 hover:border-border-strong hover:text-ink-1">
             <Plus size={14} aria-hidden />新建组合
           </Link>
         </div>

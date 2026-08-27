@@ -101,9 +101,9 @@ export function AccountHoldingsPage() {
             <SkeletonLines rows={6} className="mt-3" />
           </div>
         ) : snapshots.error || weights.error ? null : !weights.data?.calculated_at ? (
-          <div className="text-[14px] text-ink-3">尚无目标权重，点击刷新按钮计算后再查看持仓对照。</div>
+          <div className="text-[15px] text-ink-3">尚无目标权重，点击刷新按钮计算后再查看持仓对照。</div>
         ) : holdingsStale ? (
-          <div className="text-[14px] leading-relaxed text-warn">
+          <div className="text-[15px] leading-relaxed text-warn">
             持仓数据待刷新 —— 实时口径显示当前持有 {holdingsCount} 个品种，但最近的资产观测未返回持仓明细。
             <span className="mt-1 block text-ink-3">
               为避免给出「买入建仓」等错误调仓建议，这里暂不展示逐只对照；刷新账户权益后即可恢复。

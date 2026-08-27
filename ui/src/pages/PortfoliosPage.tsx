@@ -71,6 +71,16 @@ export function PortfoliosPage() {
 
   return (
     <section>
+      <div className="mb-4 flex items-center justify-between">
+        <h1 className="text-[19px] font-[640]">组合</h1>
+        <Link
+          to="/setup/pf/name"
+          className="cursor-pointer rounded-[9px] border-0 bg-ink-1 px-4 py-2 text-[14.5px] font-[550] text-surface"
+        >
+          ＋ 新建组合
+        </Link>
+      </div>
+
       {portfolios == null && !portfoliosError && (
         <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,380px),1fr))] gap-3">
           {Array.from({ length: 4 }, (_, index) => (
@@ -96,9 +106,9 @@ export function PortfoliosPage() {
 
       {portfolios != null && list.length === 0 && (
         <Card className="p-8 text-center">
-          <p className="text-[15px] font-[620]">还没有组合</p>
-          <p className="mt-2 text-[14px] text-ink-2">组合是「交易什么」的来源，可被多个账户复用。</p>
-          <Link to="/setup/pf/name" className="mt-4 inline-block text-[14px] font-semibold text-accent">
+          <p className="text-[16px] font-[620]">还没有组合</p>
+          <p className="mt-2 text-[15px] text-ink-2">组合是「交易什么」的来源，可被多个账户复用。</p>
+          <Link to="/setup/pf/name" className="mt-4 inline-block text-[15px] font-semibold text-accent">
             新建组合 →
           </Link>
         </Card>
@@ -151,7 +161,7 @@ function PortfolioCard({
       <div className="flex min-w-0 items-start justify-between gap-4">
         <div className="min-w-0">
           <div
-            className="truncate text-[16px] font-[640]"
+            className="truncate text-[17px] font-[640]"
             style={nameVt && p.id != null ? { viewTransitionName: `portfolio-name-${p.id}` } : undefined}
           >
             {p.name}
@@ -188,7 +198,7 @@ function PortfolioCard({
 
       <TargetSummary state={targetState} />
 
-      <div className="mt-auto flex min-w-0 flex-wrap items-end justify-between gap-3 border-t border-line pt-3.5 text-[12.5px] text-ink-3">
+      <div className="mt-auto flex min-w-0 flex-wrap items-end justify-between gap-3 border-t border-line pt-3.5 text-[13.5px] text-ink-3">
         <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2">
           {accountsError ? (
             <span className="text-warn">绑定关系暂不可用</span>
@@ -226,7 +236,7 @@ function TargetSummary({ state }: { state: PortfolioTargetState }) {
         : '目标为空仓'
     return (
       <div className="mt-4 flex min-h-[62px] items-center border-t border-line pt-3.5">
-        <span className={`text-[13px] ${state.kind === 'unavailable' ? 'text-warn' : 'text-ink-3'}`}>{text}</span>
+        <span className={`text-[14px] ${state.kind === 'unavailable' ? 'text-warn' : 'text-ink-3'}`}>{text}</span>
       </div>
     )
   }
@@ -239,7 +249,7 @@ function TargetSummary({ state }: { state: PortfolioTargetState }) {
         <Metric label="总敞口" value={formatTargetWeight(summary.grossExposure, false)} />
         <Metric label="净敞口" value={formatTargetWeight(summary.netExposure)} />
       </div>
-      <div className="mt-3 grid min-h-[42px] grid-cols-2 gap-x-4 gap-y-1.5 text-[12.5px] text-ink-2">
+      <div className="mt-3 grid min-h-[42px] grid-cols-2 gap-x-4 gap-y-1.5 text-[13.5px] text-ink-2">
         {summary.topEntries.map((entry) => (
           <div key={entry.symbol} className="flex min-w-0 items-center justify-between gap-2">
             <span className="truncate" title={entry.symbol}>{entry.symbol}</span>
@@ -247,7 +257,7 @@ function TargetSummary({ state }: { state: PortfolioTargetState }) {
           </div>
         ))}
       </div>
-      {summary.hiddenCount > 0 && <div className="mt-1.5 text-[11.5px] text-ink-3">另有 {summary.hiddenCount} 个目标品种</div>}
+      {summary.hiddenCount > 0 && <div className="mt-1.5 text-[12.5px] text-ink-3">另有 {summary.hiddenCount} 个目标品种</div>}
     </div>
   )
 }
@@ -255,8 +265,8 @@ function TargetSummary({ state }: { state: PortfolioTargetState }) {
 function Metric({ label, value }: { label: string; value: string }) {
   return (
     <div className="min-w-0">
-      <div className="text-[11.5px] text-ink-3">{label}</div>
-      <div className="mt-0.5 truncate text-[14px] font-[620] text-ink-1">{value}</div>
+      <div className="text-[12.5px] text-ink-3">{label}</div>
+      <div className="mt-0.5 truncate text-[15px] font-[620] text-ink-1">{value}</div>
     </div>
   )
 }
@@ -264,7 +274,7 @@ function Metric({ label, value }: { label: string; value: string }) {
 function TargetTimestamp({ state }: { state: PortfolioTargetState }) {
   if (state.kind !== 'ready' && state.kind !== 'empty') return null
   return (
-    <span className={`flex-none text-[11.5px] ${state.stale ? 'text-warn' : ''}`}>
+    <span className={`flex-none text-[12.5px] ${state.stale ? 'text-warn' : ''}`}>
       目标更新于{formatTargetUpdatedAt(state.calculatedAt)}{state.stale ? ' · 更新失败' : ''}
     </span>
   )
@@ -281,7 +291,7 @@ function PortfolioFollowerLink({ account }: { account: AccountDashboardItem }) {
       aria-label={`查看账户 ${account.name}，${channelLabel(account.trade_channel, account.market)}`}
     >
       <span
-        className="max-w-32 truncate text-[14px] font-[620] text-ink-1"
+        className="max-w-32 truncate text-[15px] font-[620] text-ink-1"
         style={transitioning ? { viewTransitionName: `account-name-${account.account_id}` } : undefined}
       >
         {account.name}

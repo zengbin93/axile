@@ -30,7 +30,7 @@ export function DailyBars({
   onHover?: (index: number | null) => void
 }) {
   if (bars.length === 0) {
-    return <div className="py-8 text-center text-[13px] text-ink-3">数据点不足，无法绘制。</div>
+    return <div className="py-8 text-center text-[14px] text-ink-3">数据点不足，无法绘制。</div>
   }
   const W = 760
   const H = 210

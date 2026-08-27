@@ -59,7 +59,7 @@ export function TargetSnapshotControl({
     return (
       <div className="flex min-w-0 items-center gap-0.5">
         <Tooltip content={meta}>
-          <span className={`min-w-0 text-[12px] ${error ? 'text-warn' : 'text-ink-3'}`}>
+          <span className={`min-w-0 text-[13px] ${error ? 'text-warn' : 'text-ink-3'}`}>
             <InkRewrite text={compactMeta} tone="label" />
           </span>
         </Tooltip>
@@ -71,13 +71,13 @@ export function TargetSnapshotControl({
   return (
     <div>
       <div className="flex min-w-0 items-center justify-between gap-3">
-        <div title={meta} className={`min-w-0 text-[12.5px] ${error ? 'text-warn' : 'text-ink-3'}`}>
+        <div title={meta} className={`min-w-0 text-[13.5px] ${error ? 'text-warn' : 'text-ink-3'}`}>
           <InkRewrite text={meta} tone="label" />
         </div>
         {refreshButton}
       </div>
       {error && !snapshot?.calculated_at && (
-        <p className="mt-1.5 text-[12.5px] text-warn">目标权重计算失败：{error.message}</p>
+        <p className="mt-1.5 text-[13.5px] text-warn">目标权重计算失败：{error.message}</p>
       )}
     </div>
   )

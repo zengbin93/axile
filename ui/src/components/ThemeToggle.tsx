@@ -87,7 +87,7 @@ export function ThemeToggle() {
               key={o.mode}
               role="menuitemradio"
               aria-checked={mode === o.mode}
-              className="flex w-full cursor-pointer items-center gap-2.5 rounded-lg border-0 bg-transparent px-2.5 py-2 text-left text-[13.5px] text-ink-1 hover:bg-fill"
+              className="flex w-full cursor-pointer items-center gap-2.5 rounded-lg border-0 bg-transparent px-2.5 py-2 text-left text-[14.5px] text-ink-1 hover:bg-fill"
               onClick={() => {
                 setMode(o.mode)
                 setOpen(false)

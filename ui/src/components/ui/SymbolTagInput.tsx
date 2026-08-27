@@ -90,7 +90,7 @@ export function SymbolTagInput({
         {value.map((symbol) => (
           <span
             key={symbol}
-            className={`inline-flex h-7 items-center gap-1 rounded-[7px] border pl-2 font-mono text-[12px] ${tagClass} ${armed === symbol ? 'outline-2 outline-offset-1 outline-accent' : ''}`}
+            className={`inline-flex h-7 items-center gap-1 rounded-[7px] border pl-2 font-mono text-[13px] ${tagClass} ${armed === symbol ? 'outline-2 outline-offset-1 outline-accent' : ''}`}
           >
             {symbol}
             <button
@@ -110,7 +110,7 @@ export function SymbolTagInput({
         <input
           ref={inputRef}
           id={id}
-          className="h-7 min-w-[18rem] flex-1 bg-transparent font-mono text-[13px] text-ink-1 outline-none placeholder:text-ink-3"
+          className="h-7 min-w-[18rem] flex-1 bg-transparent font-mono text-[14px] text-ink-1 outline-none placeholder:text-ink-3"
           value={text}
           placeholder={value.length ? '继续输入…' : placeholder}
           autoComplete="off"
@@ -132,7 +132,7 @@ export function SymbolTagInput({
           }}
         />
       </div>
-      <div id={`${id}-help`} className="mt-1 min-h-4 text-[11px] text-ink-3" aria-live="polite">
+      <div id={`${id}-help`} className="mt-1 min-h-4 text-[12px] text-ink-3" aria-live="polite">
         {conflicts.length ? (
           <span className="text-warn">
             {conflicts.join('、')} 已在「{otherLabel}」

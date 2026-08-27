@@ -48,8 +48,8 @@ function MarketChoiceGroup({
             onClick={() => onChange(option.value)}
           >
             <span className="min-w-0 flex-1">
-              <span className={`block text-[14px] font-[620] ${selected ? 'text-ink-1' : 'text-ink-2'}`}>{option.label}</span>
-              <OverflowText className="mt-1 text-[12px] text-ink-3" text={examples} />
+              <span className={`block text-[15px] font-[620] ${selected ? 'text-ink-1' : 'text-ink-2'}`}>{option.label}</span>
+              <OverflowText className="mt-1 text-[13px] text-ink-3" text={examples} />
             </span>
             {selected && <span aria-hidden className="absolute inset-y-0 left-0 w-0.5 bg-accent sm:inset-x-0 sm:top-auto sm:bottom-0 sm:h-0.5 sm:w-auto" />}
           </button>
@@ -92,20 +92,20 @@ export function PfName() {
       <div className="flex-1">
         <WizardPage kicker="组合设置 · 1 / 3" title="先给组合起个名字" lead="组合是「交易什么」的来源——一套目标持仓，可被多个账户复用。">
           <div className="max-w-[520px]">
-            <label className="mb-1.5 block text-[13px] text-ink-2">组合名称</label>
+            <label className="mb-1.5 block text-[14px] text-ink-2">组合名称</label>
             <input
-              className="w-full rounded-[11px] border border-ink-3/30 bg-surface px-[18px] py-4 text-[22px] font-[550] outline-none focus:border-ink-2"
+              className="w-full rounded-[11px] border border-ink-3/30 bg-surface px-[18px] py-4 text-[23px] font-[550] outline-none focus:border-accent"
               value={pf.name}
               onChange={(e) => setPf({ name: e.target.value })}
               placeholder="例如：我的趋势组合"
             />
-            <label className="mb-1.5 mt-5 block text-[13px] text-ink-2">市场</label>
+            <label className="mb-1.5 mt-5 block text-[14px] text-ink-2">市场</label>
             <MarketChoiceGroup
               value={pf.market}
               options={markets}
               onChange={changeMarket}
             />
-            {loading && markets.length === 0 && <p className="mt-2 text-[13px] text-ink-2">加载市场…</p>}
+            {loading && markets.length === 0 && <p className="mt-2 text-[14px] text-ink-2">加载市场…</p>}
             <ErrorNotice title="市场目录加载失败" error={markets.length === 0 ? error : null} onRetry={refresh} />
           </div>
         </WizardPage>
@@ -176,7 +176,7 @@ export function PfDefine() {
             className={`grid transition-[grid-template-rows] duration-200 ease-[cubic-bezier(.4,0,.2,1)] motion-reduce:transition-none ${templateMismatch ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'}`}
           >
             <div className="min-h-0 overflow-hidden">
-              <div className="mb-4 flex items-center justify-between gap-4 border-l-[3px] border-warn bg-warn-soft px-4 py-3 text-[13px]">
+              <div className="mb-4 flex items-center justify-between gap-4 border-l-[3px] border-warn bg-warn-soft px-4 py-3 text-[14px]">
                 <span className="text-ink-2">当前代码来自其他市场。</span>
                 <button
                   type="button"
@@ -214,18 +214,18 @@ export function PfDone() {
   const { pf } = useWizardStore()
   return (
     <div className="py-16 text-center">
-      <div className="text-[56px]">🎯</div>
-      <h2 className="mt-3.5 text-[24px] font-semibold">组合已保存</h2>
+      <div className="text-[57px]">🎯</div>
+      <h2 className="mt-3.5 text-[25px] font-semibold">组合已保存</h2>
       <p className="mt-2 text-ink-2">
         {pf.savedId != null ? `“${pf.name}” 已创建。` : ''}去「账户设置」把它绑定到交易所即可开跑。
       </p>
       <div className="mt-6 flex justify-center gap-3">
         {pf.savedId != null && (
-          <Link to={`/portfolios/${pf.savedId}`} className="rounded-[11px] border border-line bg-surface px-5 py-2.5 text-[14px] text-ink-2">
+          <Link to={`/portfolios/${pf.savedId}`} className="rounded-[11px] border border-line bg-surface px-5 py-2.5 text-[15px] text-ink-2">
             查看组合
           </Link>
         )}
-        <Link to="/setup/acct/channel" className="rounded-[11px] border border-ink-1 bg-ink-1 px-5 py-2.5 text-[14px] font-semibold text-surface">
+        <Link to="/setup/acct/channel" className="rounded-[11px] border border-ink-1 bg-ink-1 px-5 py-2.5 text-[15px] font-semibold text-surface">
           去新建账户 →
         </Link>
       </div>

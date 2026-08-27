@@ -29,11 +29,11 @@ const GAP = 6
 /** 触发器不变样式（边框/底色/焦点/圆角）；布局（内距/字号/宽度）由 layout 决定。 */
 const TRIGGER_BASE =
   'inline-flex items-center gap-2 rounded-[9px] border border-ink-3/30 bg-surface ' +
-  'text-ink-1 cursor-pointer outline-none transition-colors focus:border-ink-2 ' +
+  'text-ink-1 cursor-pointer outline-none transition-colors focus:border-accent ' +
   'disabled:cursor-not-allowed disabled:opacity-45'
 
 /** 未传 className 时的紧凑内联布局（用于句子内嵌的下拉）。 */
-const TRIGGER_LAYOUT_DEFAULT = 'px-2.5 py-1.5 text-[13px]'
+const TRIGGER_LAYOUT_DEFAULT = 'px-2.5 py-1.5 text-[14px]'
 
 /**
  * 受控单选下拉框（原生 `<select>` 的替代）。
@@ -44,7 +44,7 @@ const TRIGGER_LAYOUT_DEFAULT = 'px-2.5 py-1.5 text-[13px]'
  *
  * 值以 `===` 比较，故 `T` 可为 `number | null` 等，用 `null` 承载「空/不绑定」哨兵。
  * `className` 若传入，将**整体替换**触发器的布局类（内距/字号/宽度/对齐），
- * 例如整行场景传 `"w-full justify-between px-3 py-2 text-[14px]"`；不传则用紧凑内联布局。
+ * 例如整行场景传 `"w-full justify-between px-3 py-2 text-[15px]"`；不传则用紧凑内联布局。
  *
  * @typeParam T - 选项值类型。
  */
@@ -226,7 +226,7 @@ export function Select<T>({
         <span className={`min-w-0 text-left ${selected ? '' : 'text-ink-3'}`}>
           <OverflowText text={selected ? selected.label : placeholder} />
           {selected?.description && (
-            <OverflowText text={selected.description} className="mt-0.5 text-[12px] font-normal text-ink-3" />
+            <OverflowText text={selected.description} className="mt-0.5 text-[13px] font-normal text-ink-3" />
           )}
         </span>
         <svg
@@ -273,13 +273,13 @@ export function Select<T>({
                   placeholder="搜索…"
                   aria-label="搜索选项"
                   aria-activedescendant={activeDesc}
-                  className="w-full rounded-[7px] border border-ink-3/25 bg-bg-subtle px-2.5 py-1.5 text-[13px] outline-none focus:border-ink-2"
+                  className="w-full rounded-[7px] border border-ink-3/25 bg-bg-subtle px-2.5 py-1.5 text-[14px] outline-none focus:border-accent"
                 />
               </div>
             )}
             <ul id={listId} role="listbox" className="min-h-0 flex-1 overflow-y-auto p-1">
               {filtered.length === 0 && (
-                <li className="px-2.5 py-2 text-[13px] text-ink-3">无匹配</li>
+                <li className="px-2.5 py-2 text-[14px] text-ink-3">无匹配</li>
               )}
               {filtered.map((o, i) => {
                 const isSelected = o.value === value
@@ -292,7 +292,7 @@ export function Select<T>({
                     aria-selected={isSelected}
                     onMouseEnter={() => setHighlight(i)}
                     onClick={() => choose(o)}
-                    className={`flex cursor-pointer items-start gap-2 rounded-[7px] px-2.5 py-2 text-[13px] ${
+                    className={`flex cursor-pointer items-start gap-2 rounded-[7px] px-2.5 py-2 text-[14px] ${
                       isActive ? 'bg-bg-subtle' : ''
                     } ${isSelected ? 'font-[550] text-ink-1' : 'text-ink-2'}`}
                   >
@@ -313,10 +313,10 @@ export function Select<T>({
                     <span className="min-w-0 flex-1">
                       <OverflowText text={o.label} />
                       {o.description && (
-                        <OverflowText text={o.description} className="mt-0.5 text-[12px] font-normal text-ink-3" />
+                        <OverflowText text={o.description} className="mt-0.5 text-[13px] font-normal text-ink-3" />
                       )}
                     </span>
-                    {o.hint && <span className="ml-auto flex-none text-[12px] font-normal text-ink-3">{o.hint}</span>}
+                    {o.hint && <span className="ml-auto flex-none text-[13px] font-normal text-ink-3">{o.hint}</span>}
                   </li>
                 )
               })}

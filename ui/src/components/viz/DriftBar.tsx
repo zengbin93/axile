@@ -12,7 +12,7 @@ const ACTION_TAG: Record<RebalanceRow['action'], { text: string; cls: string }> 
   close: { text: '清仓', cls: 'text-ink-3' },
   increase: { text: '加仓', cls: 'text-ink-3' },
   reduce: { text: '减仓', cls: 'text-ink-3' },
-  flip: { text: '翻向', cls: 'text-warn' },
+  flip: { text: '翻向', cls: 'rounded bg-warn-tint px-1 text-warn' },
 }
 
 /** 带符号百分比，负号即空头/欠配方向，保留一位小数。 */
@@ -27,13 +27,13 @@ function SegDetail({ row, turnover }: { row: RebalanceRow; turnover: number }) {
   return (
     <div className="whitespace-nowrap">
       <div className="flex items-baseline gap-2">
-        <span className="font-mono text-[12.5px] font-medium text-ink-1">{row.symbol}</span>
-        <span className={`text-[11.5px] ${tag.cls}`}>{tag.text}</span>
+        <span className="font-mono text-[13.5px] font-medium text-ink-1">{row.symbol}</span>
+        <span className={`text-[12.5px] ${tag.cls}`}>{tag.text}</span>
       </div>
       <div className="num mt-1 text-ink-2">
         {pct(row.cur)} <span className="text-ink-3">→</span> {pct(row.tgt)}
       </div>
-      <div className="num mt-1 text-[11.5px] text-ink-3">
+      <div className="num mt-1 text-[12.5px] text-ink-3">
         {row.side === 'buy' ? '买' : '卖'} {row.amount.toFixed(1)}% · 占换手 {share.toFixed(0)}%
       </div>
     </div>

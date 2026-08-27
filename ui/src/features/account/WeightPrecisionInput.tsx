@@ -60,7 +60,7 @@ export function WeightPrecisionInput({
   }
 
   const stepButton =
-    'grid h-full w-9 flex-none place-items-center border-0 bg-transparent text-[18px] text-ink-3 transition-colors hover:bg-fill hover:text-ink-1 disabled:cursor-default disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-ink-3'
+    'grid h-full w-9 flex-none place-items-center border-0 bg-transparent text-[19px] text-ink-3 transition-colors hover:bg-fill hover:text-ink-1 disabled:cursor-default disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-ink-3'
 
   return (
     <div>
@@ -90,7 +90,7 @@ export function WeightPrecisionInput({
               value={lastValidValue.current}
               locales="zh-CN"
               format={NUMBER_FORMAT}
-              className="num text-[15px] text-ink-1"
+              className="num text-[16px] text-ink-1"
               spinTiming={SPIN_TIMING}
               transformTiming={TRANSFORM_TIMING}
               opacityTiming={OPACITY_TIMING}
@@ -112,7 +112,7 @@ export function WeightPrecisionInput({
               aria-describedby={helpId}
               aria-invalid={invalid}
               inputMode="decimal"
-              className="num w-[70px] border-0 bg-transparent p-0 text-center text-[15px] text-ink-1 outline-none"
+              className="num w-[70px] border-0 bg-transparent p-0 text-center text-[16px] text-ink-1 outline-none"
               value={value}
               onChange={(event) => onChange(event.target.value)}
               onFocus={() => setIsEditing(true)}
@@ -134,7 +134,7 @@ export function WeightPrecisionInput({
           +
         </button>
       </div>
-      <div id={helpId} className={`mt-1 text-[11px] ${invalid ? 'text-warn' : 'text-ink-3'}`}>
+      <div id={helpId} className={`mt-1 text-[12px] ${invalid ? 'text-warn' : 'text-ink-3'}`}>
         {error ?? (percent ? `权重最小变化 ${percent}` : '按十倍数量级设置')}
       </div>
     </div>

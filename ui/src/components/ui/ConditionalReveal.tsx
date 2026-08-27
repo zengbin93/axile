@@ -41,8 +41,8 @@ export function ConditionalReveal({
 
   return (
     <fieldset>
-      <legend className="text-[13px] text-ink-2">选择一种{label}</legend>
-      {help && <p className="mt-1 text-[12px] text-ink-3">{help}</p>}
+      <legend className="text-[14px] text-ink-2">选择一种{label}</legend>
+      {help && <p className="mt-1 text-[13px] text-ink-3">{help}</p>}
       <div role="radiogroup" aria-label={label} className="mt-3 divide-y divide-line border-y border-line">
         {options.map((option, index) => {
           const selected = option.value === value
@@ -78,14 +78,14 @@ export function ConditionalReveal({
               >
                 <span>
                   <span
-                    className={`block text-[16px] font-[620] transition-colors duration-200 motion-reduce:transition-none ${
+                    className={`block text-[17px] font-[620] transition-colors duration-200 motion-reduce:transition-none ${
                       selected ? 'text-accent' : 'text-ink-1'
                     }`}
                   >
                     {option.label}
                   </span>
                   {option.description && (
-                    <span className="mt-0.5 block text-[13px] leading-relaxed text-ink-2">
+                    <span className="mt-0.5 block text-[14px] leading-relaxed text-ink-2">
                       {option.description}
                     </span>
                   )}
@@ -105,7 +105,7 @@ export function ConditionalReveal({
           )
         })}
       </div>
-      {error && <div className="mt-1 text-[12px] text-warn">{error}</div>}
+      {error && <div className="mt-1 text-[13px] text-warn">{error}</div>}
     </fieldset>
   )
 }

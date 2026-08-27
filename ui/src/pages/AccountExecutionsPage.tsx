@@ -51,9 +51,9 @@ export function AccountExecutionsPage() {
               market={item?.market}
             />
           </div>
-          <p className="mt-1 text-[13px] text-ink-2">最近的调仓、清仓、终止与排程跳过记录。</p>
+          <p className="mt-1 text-[14px] text-ink-2">最近的调仓、清仓、终止与排程跳过记录。</p>
         </div>
-        {activity.data && <span className="text-[12px] text-ink-3">共 {activity.data.count} 条</span>}
+        {activity.data && <span className="text-[13px] text-ink-3">共 {activity.data.count} 条</span>}
       </div>
 
       <ErrorNotice title="执行记录加载失败" error={activity.error} variant={activity.data ? 'stale' : 'section'} updatedAt={activity.updatedAt} onRetry={activity.refresh} />
@@ -69,12 +69,12 @@ export function AccountExecutionsPage() {
       )}
 
       {activity.data && rows.length === 0 && (
-        <Card className="px-6 py-12 text-center text-[14px] text-ink-3">暂无执行记录</Card>
+        <Card className="px-6 py-12 text-center text-[15px] text-ink-3">暂无执行记录</Card>
       )}
 
       {rows.length > 0 && (
         <Card className="overflow-hidden">
-          <div className="grid grid-cols-[150px_100px_minmax(0,1fr)_20px] gap-4 border-b border-line px-5 py-2.5 text-[11px] font-semibold text-ink-3">
+          <div className="grid grid-cols-[150px_100px_minmax(0,1fr)_20px] gap-4 border-b border-line px-5 py-2.5 text-[12px] font-semibold text-ink-3">
             <span>时间</span><span>结果</span><span>说明</span><span />
           </div>
           {rows.map((row) => {
@@ -86,9 +86,9 @@ export function AccountExecutionsPage() {
                 key={row.key}
                 disabled={!executionId}
                 onClick={() => executionId && navigate(`/accounts/${accountId}/executions/${executionId}`)}
-                className="grid min-h-[58px] w-full grid-cols-[150px_100px_minmax(0,1fr)_20px] items-center gap-4 border-t border-line px-5 text-left text-[13px] first:border-t-0 enabled:hover:bg-bg-subtle disabled:cursor-default"
+                className="grid min-h-[58px] w-full grid-cols-[150px_100px_minmax(0,1fr)_20px] items-center gap-4 border-t border-line px-5 text-left text-[14px] first:border-t-0 enabled:hover:bg-bg-subtle disabled:cursor-default"
               >
-                <span className="num text-[12px] text-ink-3">{row.time.replace('T', ' ').slice(0, 16)}</span>
+                <span className="num text-[13px] text-ink-3">{row.time.replace('T', ' ').slice(0, 16)}</span>
                 <span className={`font-semibold ${status.className}`}>{status.label}</span>
                 <span className="min-w-0 truncate text-ink-2">{status.description}</span>
                 {executionId ? <ChevronRight size={15} className="text-ink-3" aria-hidden /> : <span />}

@@ -1,4 +1,4 @@
-import { useEffect, useRef, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { python } from '@codemirror/lang-python'
 import { lintGutter, setDiagnostics, type Diagnostic } from '@codemirror/lint'
 import { oneDark } from '@codemirror/theme-one-dark'
@@ -8,10 +8,10 @@ import { Check, Clipboard, Play, TriangleAlert } from 'lucide-react'
 import { InkRewrite } from '@/components/ui/InkRewrite'
 
 const editorTheme = EditorView.theme({
-  '&': { backgroundColor: 'transparent', fontSize: '13px' },
+  '&': { backgroundColor: 'transparent', fontSize: '14px' },
   '&.cm-focused': { outline: 'none' },
   '.cm-gutters': { backgroundColor: 'transparent', border: 'none' },
-  '.cm-content': { fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace' },
+  '.cm-content': { fontFamily: 'var(--font-mono)' },
 })
 
 export interface PythonValidationState {
@@ -60,6 +60,28 @@ export function PythonFunctionEditor({
 }) {
   const cmRef = useRef<ReactCodeMirrorRef>(null)
   const hasCode = code.trim().length > 0
+  const [dialogOpen, setDialogOpen] = useState(false)
+  const closeRef = useRef<HTMLButtonElement>(null)
+  const runTriggerRef = useRef<HTMLElement | null>(null)
+
+  // 试跑结束即弹窗呈现结果：代码框保持全宽，结果不再挤在编辑器下方。
+  useEffect(() => {
+    if (result) setDialogOpen(true)
+  }, [result])
+
+  useEffect(() => {
+    if (!dialogOpen) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setDialogOpen(false)
+    }
+    window.addEventListener('keydown', onKey)
+    runTriggerRef.current = document.activeElement as HTMLElement | null
+    closeRef.current?.focus({ preventScroll: true })
+    return () => {
+      window.removeEventListener('keydown', onKey)
+      runTriggerRef.current?.focus?.({ preventScroll: true })
+    }
+  }, [dialogOpen])
 
   useEffect(() => {
     const view = cmRef.current?.view
@@ -98,15 +120,12 @@ export function PythonFunctionEditor({
     fail: { rail: 'border-warn', band: 'border-warn/30 bg-warn/10', text: 'text-warn', body: '未通过' },
   }[status]
 
-  // 结果面板常挂、grid-fr 收放：stale 时保持展开（降透明度），打字时代码不跳。
-  const panelOpen = result != null && (result.valid ? resultContent != null : true)
-
   return (
     <div className="w-full">
       <div className={`overflow-hidden rounded-[8px] border-l-[3px] ${hasCode ? style.rail : 'border-line'}`}>
         {/* 工具条：状态句同槽换字；图标槽恒占 14px，出现/消失不推字。 */}
         <div className={`flex flex-wrap items-center gap-x-3.5 gap-y-2 border-b px-3.5 py-2.5 ${style.band}`}>
-          <span className="flex min-w-[130px] flex-1 items-center gap-1.5 text-[13px] font-[520]">
+          <span className="flex min-w-[130px] flex-1 items-center gap-1.5 text-[14px] font-[520]">
             <span className="flex h-3.5 w-3.5 flex-none items-center justify-center">
               {status === 'pass' && <Check size={14} className="text-accent" />}
               {status === 'fail' && <TriangleAlert size={14} className="text-warn" />}
@@ -114,36 +133,18 @@ export function PythonFunctionEditor({
             <InkRewrite text={style.body} tone="label" textClassName={style.text} />
           </span>
           {hasCode && (
-            <button className="inline-flex cursor-pointer items-center gap-1.5 text-[13px] text-accent disabled:cursor-default disabled:opacity-45" onClick={() => void paste()} disabled={disabled}>
+            <button className="inline-flex cursor-pointer items-center gap-1.5 text-[14px] text-accent disabled:cursor-default disabled:opacity-45" onClick={() => void paste()} disabled={disabled}>
               <Clipboard size={14} /> 粘贴
             </button>
           )}
-          {docHref && <a className="text-[13px] text-accent" href={docHref} target="_blank" rel="noopener">开发文档 ↗</a>}
+          {docHref && <a className="text-[14px] text-accent" href={docHref} target="_blank" rel="noopener">开发文档 ↗</a>}
           {controls}
-          <button className="inline-flex cursor-pointer items-center gap-1.5 rounded-[8px] border-0 bg-ink-1 px-4 py-1.5 text-[13.5px] font-[550] text-surface disabled:cursor-default disabled:opacity-45" onClick={onRun} disabled={running || disabled || !hasCode}>
+          <button className="inline-flex cursor-pointer items-center gap-1.5 rounded-[8px] border-0 bg-ink-1 px-4 py-1.5 text-[14.5px] font-[550] text-surface disabled:cursor-default disabled:opacity-45" onClick={onRun} disabled={running || disabled || !hasCode}>
             <Play size={14} /> {runLabel}
           </button>
         </div>
 
-        {/* 结果区：权重 / 错误摘要 + traceback。 */}
-        <div className={`grid transition-[grid-template-rows] duration-200 motion-reduce:transition-none ${panelOpen ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'}`}>
-          <div className="min-h-0 overflow-hidden" inert={!panelOpen}>
-            <div className={`border-b border-line bg-surface px-3.5 py-3 transition-opacity duration-200 motion-reduce:transition-none ${stale ? 'opacity-55' : ''}`}>
-              {result != null && !result.valid && (
-                <p className="text-[13px] text-warn">
-                  {[result.errorType, result.errorMessage].filter(Boolean).join(': ') || '试跑未通过'}
-                </p>
-              )}
-              {resultContent}
-              {result != null && !result.valid && result.traceback && (
-                <details className="mt-2 rounded-[8px] border border-line bg-code-bg px-4 py-3">
-                  <summary className="cursor-pointer select-none text-[12.5px] text-warn">完整 traceback</summary>
-                  <pre className="mt-2 max-h-[220px] overflow-auto whitespace-pre-wrap font-mono text-[12px] leading-relaxed text-warn">{result.traceback}</pre>
-                </details>
-              )}
-            </div>
-          </div>
-        </div>
+        {/* 结果呈现走弹窗（试跑结束自动弹出，见下）：代码框保持全宽全高，不被结果挤压。 */}
 
         <div className="relative bg-code-bg">
           <CodeMirror
@@ -159,13 +160,63 @@ export function PythonFunctionEditor({
           />
           {!hasCode && (
             <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-2">
-              <button className="pointer-events-auto inline-flex cursor-pointer items-center gap-2 rounded-[8px] border border-line bg-surface px-5 py-3 text-[14px] font-[550] text-ink-1 shadow-sm hover:border-ink-3" onClick={() => void paste()}>
+              <button className="pointer-events-auto inline-flex cursor-pointer items-center gap-2 rounded-[8px] border border-line bg-surface px-5 py-3 text-[15px] font-[550] text-ink-1 shadow-sm hover:border-ink-3" onClick={() => void paste()}>
                 <Clipboard size={16} /> 从剪贴板粘贴代码
               </button>
-              <span className="text-[12.5px] text-ink-3">或点此直接输入</span>
+              <span className="text-[13.5px] text-ink-3">或点此直接输入</span>
             </div>
           )}
         </div>
+      </div>
+
+      {/* 试跑结果弹窗：通过 → resultContent（返回权重）；未通过 → 错误摘要 + traceback。 */}
+      <div
+        className={`fixed inset-0 z-[35] bg-scrim transition-opacity duration-150 ${dialogOpen ? 'opacity-100' : 'pointer-events-none opacity-0'}`}
+        onClick={() => setDialogOpen(false)}
+      />
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label="试跑结果"
+        className={`fixed left-1/2 top-1/2 z-[36] w-[560px] max-w-[92vw] -translate-x-1/2 rounded-[18px] bg-surface shadow-[0_24px_60px_rgba(0,0,0,0.24)] transition-all duration-150 ${
+          dialogOpen ? '-translate-y-1/2 opacity-100' : 'pointer-events-none -translate-y-[46%] opacity-0'
+        }`}
+      >
+        {result && dialogOpen && (
+          <>
+            <div className={`flex items-center gap-2 px-[22px] pt-5 pb-1.5 text-[18px] font-[640] ${result.valid ? 'text-accent' : 'text-warn'}`}>
+              {result.valid ? <Check size={17} /> : <TriangleAlert size={17} />}
+              {result.valid ? '试跑通过' : '试跑未通过'}
+            </div>
+            <div className="max-h-[60vh] overflow-y-auto px-[22px] pb-[18px] text-[14.5px] leading-relaxed">
+              {result.valid
+                ? (resultContent ?? <p className="text-ink-2">函数执行成功。</p>)
+                : (
+                  <>
+                    <p className="font-mono text-[13.5px] text-warn">
+                      {[result.errorType, result.errorMessage].filter(Boolean).join(': ') || '执行出错'}
+                    </p>
+                    {result.traceback && (
+                      <details className="mt-3 rounded-[8px] border border-line bg-code-bg px-4 py-3" open>
+                        <summary className="cursor-pointer select-none text-[13.5px] text-ink-2">完整 traceback</summary>
+                        <pre className="mt-2 max-h-[220px] overflow-auto whitespace-pre-wrap font-mono text-[13px] leading-relaxed text-warn">{result.traceback}</pre>
+                      </details>
+                    )}
+                  </>
+                )}
+            </div>
+            <div className="flex justify-end border-t border-line px-5 py-3.5">
+              <button
+                ref={closeRef}
+                className="inline-flex cursor-pointer items-center rounded-[9px] border-0 bg-ink-1 px-[18px] py-2 text-sm font-[550] text-surface focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/55 focus-visible:ring-offset-2 focus-visible:ring-offset-surface"
+                onClick={() => setDialogOpen(false)}
+              >
+                关闭
+                <span aria-hidden className="text-[13px] leading-none opacity-55">⏎</span>
+              </button>
+            </div>
+          </>
+        )}
       </div>
     </div>
   )

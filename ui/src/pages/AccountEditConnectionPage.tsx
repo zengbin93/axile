@@ -116,13 +116,13 @@ export function AccountEditConnectionPage() {
   return (
     <section className="pb-24">
       {title}
-      <div className="mt-3 border-l-2 border-warn/60 bg-warn-tint/50 py-2 pl-3 pr-2 text-[13px] text-ink-2">修改会在下次创建执行器时生效；密码与密钥不会回显。</div>
+      <div className="mt-3 border-l-2 border-warn/60 bg-warn-tint/50 py-2 pl-3 pr-2 text-[14px] text-ink-2">修改会在下次创建执行器时生效；密码与密钥不会回显。</div>
       <Section label={`${channelDescriptor?.label ?? acc.trade_channel} 连接`}>
         {fields.map((field) => {
           if (isConditionalRevealField(fields, field)) return null
           const visible = channelAccountFieldVisible(field, draft)
           return <div key={field.name} inert={!visible} className={`${field.width === 'full' ? 'md:col-span-2' : ''} grid transition-[grid-template-rows] duration-200 ${visible ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'}`}><div className="min-h-0 overflow-hidden">
-            {field.kind === 'select' && field.presentation === 'conditional_reveal' ? <ConditionalReveal label={field.label} help={field.help} value={String(draft[field.name] ?? '')} options={field.options ?? []} error={errors[field.name]} onChange={(value) => setField(field, value)} renderPanel={(option) => conditionalRevealFields(fields, field.name, option).map((dependent) => <div key={dependent.name} className="mt-3">{renderControl(dependent)}</div>)} /> : <>{(field.kind === 'boolean' || field.kind === 'select') && <div className="mb-2 text-[13px] text-ink-2">{field.label}</div>}{renderControl(field)}</>}
+            {field.kind === 'select' && field.presentation === 'conditional_reveal' ? <ConditionalReveal label={field.label} help={field.help} value={String(draft[field.name] ?? '')} options={field.options ?? []} error={errors[field.name]} onChange={(value) => setField(field, value)} renderPanel={(option) => conditionalRevealFields(fields, field.name, option).map((dependent) => <div key={dependent.name} className="mt-3">{renderControl(dependent)}</div>)} /> : <>{(field.kind === 'boolean' || field.kind === 'select') && <div className="mb-2 text-[14px] text-ink-2">{field.label}</div>}{renderControl(field)}</>}
           </div></div>
         })}
       </Section>

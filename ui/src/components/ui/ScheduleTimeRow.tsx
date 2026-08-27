@@ -22,8 +22,8 @@ const TONE_CLASS: Record<ScheduleTimeRowTone, string> = {
 }
 
 const SIZE_CLASS: Record<ScheduleTimeRowSize, string> = {
-  sm: 'text-[13px]',
-  md: 'text-[14px]',
+  sm: 'text-[14px]',
+  md: 'text-[15px]',
 }
 
 /** 通用排程行：自然时间在左，场景化状态或相对时间在右。 */

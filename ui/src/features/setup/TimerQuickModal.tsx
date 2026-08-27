@@ -196,7 +196,7 @@ function TimerQuickModalReady({
       <div
         role="dialog"
         aria-modal="true"
-        aria-label="调整定时节奏"
+        aria-label="调整定时任务"
         className={`fixed left-1/2 top-1/2 z-[36] flex max-h-[86vh] w-[480px] max-w-[92vw] -translate-x-1/2 flex-col rounded-[18px] bg-surface shadow-[0_24px_60px_rgba(0,0,0,0.24)] transition-all duration-150 ${
           open ? '-translate-y-1/2 opacity-100' : 'pointer-events-none -translate-y-[46%] opacity-0'
         }`}
@@ -205,14 +205,14 @@ function TimerQuickModalReady({
           <>
             <div className="flex items-start justify-between px-[22px] pt-5 pb-3">
               <div>
-                <div className="text-[17px] font-[640]">定时节奏</div>
-                <div className="mt-1 text-[13px] text-ink-2">
+                <div className="text-[18px] font-[640]">定时任务</div>
+                <div className="mt-1 text-[14px] text-ink-2">
                   {accountName} · 快捷预设 · 时间均为北京时间
                 </div>
               </div>
               <button
                 type="button"
-                className="cursor-pointer text-[20px] leading-none text-ink-3 hover:text-ink-1"
+                className="cursor-pointer text-[21px] leading-none text-ink-3 hover:text-ink-1"
                 onClick={() => !saving && onClose()}
                 aria-label="关闭"
               >
@@ -222,7 +222,7 @@ function TimerQuickModalReady({
 
             <div className="min-h-0 flex-1 overflow-y-auto px-[22px] pb-2">
               {fromComplex && (
-                <div className="mb-4 rounded-[10px] border-l-2 border-warn/60 bg-warn-tint/50 py-2 pl-3 pr-2 text-[12.5px] text-ink-2">
+                <div className="mb-4 rounded-[10px] border-l-2 border-warn/60 bg-warn-tint/50 py-2 pl-3 pr-2 text-[13.5px] text-ink-2">
                   当前为高级或自定义节奏。在此保存将改为下方快捷预设；完整编辑请到账户编辑页。
                 </div>
               )}
@@ -324,14 +324,14 @@ function TimerQuickModalReady({
                 <div className="border-t border-line pt-3">
                   <Link
                     to={`/accounts/${accountId}/edit/timer`}
-                    className="text-[12.5px] font-semibold text-accent hover:underline"
+                    className="text-[13.5px] font-semibold text-accent hover:underline"
                     onClick={onClose}
                   >
                     更多节奏 · 多时刻与自定义 →
                   </Link>
                 </div>
               </div>
-              <ErrorNotice title="保存定时节奏失败" error={saveError} variant="mutation" onRetry={save} />
+              <ErrorNotice title="保存定时任务失败" error={saveError} variant="mutation" onRetry={save} />
             </div>
 
             <div className="mt-1 flex justify-end gap-2.5 border-t border-line px-5 py-3.5">
