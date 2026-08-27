@@ -12,6 +12,7 @@ import {
   formatTargetWeight,
   formatTargetUpdatedAt,
   portfolioTargetState,
+  targetDirectionClass,
   type PortfolioTargetState,
 } from '@/features/portfolio/portfolioCardSummary'
 import { channelLabel } from '@/features/dashboard/display'
@@ -245,15 +246,15 @@ function TargetSummary({ state }: { state: PortfolioTargetState }) {
   return (
     <div className="mt-4 border-t border-line pt-3.5">
       <div className="grid grid-cols-3 gap-3">
-        <Metric label="目标品种" value={`${summary.activeCount} 个`} />
+        <Metric label="目标品种" value={`${summary.activeCount} 个`} quiet />
         <Metric label="总敞口" value={formatTargetWeight(summary.grossExposure, false)} />
-        <Metric label="净敞口" value={formatTargetWeight(summary.netExposure)} />
+        <Metric label="净敞口" value={formatTargetWeight(summary.netExposure)} valueClass={targetDirectionClass(summary.netExposure)} />
       </div>
       <div className="mt-3 grid min-h-[42px] grid-cols-2 gap-x-4 gap-y-1.5 text-[13.5px] text-ink-2">
         {summary.topEntries.map((entry) => (
           <div key={entry.symbol} className="flex min-w-0 items-center justify-between gap-2">
             <span className="truncate" title={entry.symbol}>{entry.symbol}</span>
-            <span className="flex-none text-ink-3">{formatTargetWeight(entry.weight)}</span>
+            <span className={`flex-none font-[550] ${targetDirectionClass(entry.weight)}`}>{formatTargetWeight(entry.weight)}</span>
           </div>
         ))}
       </div>
@@ -262,11 +263,21 @@ function TargetSummary({ state }: { state: PortfolioTargetState }) {
   )
 }
 
-function Metric({ label, value }: { label: string; value: string }) {
+function Metric({
+  label,
+  value,
+  valueClass = 'text-ink-1',
+  quiet = false,
+}: {
+  label: string
+  value: string
+  valueClass?: string
+  quiet?: boolean
+}) {
   return (
     <div className="min-w-0">
       <div className="text-[12.5px] text-ink-3">{label}</div>
-      <div className="mt-0.5 truncate text-[15px] font-[620] text-ink-1">{value}</div>
+      <div className={`mt-0.5 truncate ${quiet ? 'text-[14.5px] font-[580]' : 'text-[16px] font-[640]'} ${valueClass}`}>{value}</div>
     </div>
   )
 }

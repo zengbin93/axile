@@ -4,6 +4,7 @@ import {
   formatTargetUpdatedAt,
   portfolioTargetState,
   portfolioTargetSummary,
+  targetDirectionClass,
 } from './portfolioCardSummary'
 import type { TargetWeightSnapshot } from '@/types/api'
 
@@ -67,6 +68,15 @@ describe('formatTargetWeight', () => {
     expect(formatTargetWeight(-0.0268)).toBe('-2.7%')
     expect(formatTargetWeight(0.0001)).toBe('0.0%')
     expect(formatTargetWeight(0.0933, false)).toBe('9.3%')
+  })
+})
+
+describe('targetDirectionClass', () => {
+  it('目标多头红、空头绿，零值与无效值保持中性', () => {
+    expect(targetDirectionClass(0.2)).toBe('text-up')
+    expect(targetDirectionClass(-0.2)).toBe('text-down')
+    expect(targetDirectionClass(0)).toBe('text-ink-1')
+    expect(targetDirectionClass(Number.NaN)).toBe('text-ink-1')
   })
 })
 

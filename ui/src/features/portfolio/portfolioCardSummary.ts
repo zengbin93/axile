@@ -67,6 +67,12 @@ export function formatTargetWeight(weight: number, signed = true): string {
   return `${prefix}${percentage.toFixed(1)}%`
 }
 
+/** 目标仓位方向沿用交易界面的红涨绿跌口径，零值与无效值保持中性。 */
+export function targetDirectionClass(weight: number): string {
+  if (!Number.isFinite(weight) || weight === 0) return 'text-ink-1'
+  return weight > 0 ? 'text-up' : 'text-down'
+}
+
 /** 以北京时间显示卡片所需的紧凑自然日期。 */
 export function formatTargetUpdatedAt(iso: string, now = Date.now()): string {
   const withZone = /(?:Z|[+-]\d{2}:?\d{2})$/.test(iso) ? iso : `${iso}+08:00`
