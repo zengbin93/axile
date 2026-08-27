@@ -24,7 +24,7 @@ export function SettingsSaveBar({
       aria-hidden={!open}
       className={`absolute inset-x-0 bottom-0 z-20 transition-opacity duration-200 motion-reduce:transition-none ${open ? 'opacity-100' : 'pointer-events-none opacity-0'}`}
     >
-      <div className="mx-auto w-full max-w-[820px] px-5 sm:px-12">
+      <div className="mx-auto w-full max-w-[1080px] px-5 sm:px-12">
         <div className="border-t border-line bg-surface/90 px-4 py-3 backdrop-blur-md">
           <div className="flex items-center gap-4">
             <div className="min-w-0 flex-1">

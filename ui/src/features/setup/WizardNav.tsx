@@ -2,22 +2,20 @@ import { useState } from 'react'
 import { useNavigate } from '@/components/ui/nav'
 import type { ReactNode } from 'react'
 
-/** 向导页容器：统一留白 + kicker/标题/引导语。 */
+/** 向导页容器：统一留白 + kicker/标题/引导语。宽屏统一 1080 自适应，两侧留白适度。 */
 export function WizardPage({
   kicker,
   title,
   lead,
   children,
-  wide,
 }: {
   kicker: string
   title: string
   lead?: string
   children?: ReactNode
-  wide?: boolean
 }) {
   return (
-    <div className={`mx-auto ${wide ? 'max-w-[1040px]' : 'max-w-[820px]'} px-5 pt-8 pb-6 sm:px-12`}>
+    <div className="mx-auto max-w-[1080px] px-5 pt-8 pb-6 sm:px-12">
       <div className="mb-1.5 text-xs font-semibold tracking-wide text-accent">{kicker}</div>
       <div className="text-[22px] font-[680] tracking-tight">{title}</div>
       {lead && <div className="mt-1.5 max-w-[560px] text-[14px] text-ink-2">{lead}</div>}

@@ -3,7 +3,7 @@ import { Link } from '@/components/ui/nav'
 /** 设置首页：先建组合，再建账户绑定它。 */
 export function SetupHub() {
   return (
-    <div className="mx-auto max-w-[820px] px-12 pt-8 pb-6">
+    <div className="mx-auto max-w-[1080px] px-12 pt-8 pb-6">
       <div className="mb-1.5 text-xs font-semibold tracking-wide text-accent">设置</div>
       <div className="text-[22px] font-[680] tracking-tight">你想设置什么？</div>
       <div className="mt-1.5 max-w-[560px] text-[14px] text-ink-2">
