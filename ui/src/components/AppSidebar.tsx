@@ -40,9 +40,18 @@ function accountIdFromPath(pathname: string): number | null {
   return Number.isFinite(accountId) ? accountId : null
 }
 
-function NavSection({ label, children }: { label: string; children: ReactNode }) {
+function NavSection({
+  label,
+  children,
+  compact = false,
+}: {
+  label: string
+  children: ReactNode
+  /** 账户块内部使用：组间距收紧，让块内多组读起来是一个整体。 */
+  compact?: boolean
+}) {
   return (
-    <section className="mt-5 first:mt-0">
+    <section className={compact ? 'mt-3.5 first:mt-0' : 'mt-5 first:mt-0'}>
       <div className="mb-1 truncate px-2.5 text-[11px] font-semibold tracking-[0.14em] text-ink-3" title={label}>
         {label}
       </div>
@@ -221,19 +230,21 @@ export function AppSidebar() {
                   </p>
                 </NavSection>
               ) : (
-                <>
-                  <NavSection label={activeName ? `当前账户 · ${activeName}` : '当前账户'}>
+                /* 账户块：hairline 边 + 微沉底的内嵌面板，把「概览/参数/执行」三组
+                   圈成一个整体——这些条目都属于同一个账户，与顶层列表入口相区别。 */
+                <div className="mt-5 rounded-card border border-line bg-bg-subtle py-2 pl-1.5 pr-1">
+                  <NavSection compact label={activeName ? `当前账户 · ${activeName}` : '当前账户'}>
                     {accountOverview.map((item) => <NavItem key={item.label} item={item} />)}
                   </NavSection>
 
-                  <NavSection label="账户参数">
+                  <NavSection compact label="账户参数">
                     {accountParameters.map((item) => <NavItem key={item.label} item={item} />)}
                   </NavSection>
 
-                  <NavSection label="自动执行">
+                  <NavSection compact label="自动执行">
                     {accountExecution.map((item) => <NavItem key={item.label} item={item} />)}
                   </NavSection>
-                </>
+                </div>
               )}
 
               <NavSection label="系统">
