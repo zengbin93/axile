@@ -493,7 +493,9 @@ async def account_dashboard(session: SessionDep, sched: SchedDep) -> AccountDash
         elif running_execution_id is not None:
             task_state = get_execution_task_state(running_execution_id)
             running_kind = task_state.execution_kind.value if task_state is not None else None
-            running_status = "terminating" if task_state is not None and task_state.status.value == "TERMINATING" else "running"
+            running_status = (
+                "terminating" if task_state is not None and task_state.status.value == "TERMINATING" else "running"
+            )
             running_phase = "triggered"
             pending_execution_id = queued_execution_id
             if queued_execution_id is not None:
