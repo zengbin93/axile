@@ -1,7 +1,9 @@
 import { useViewTransitionState } from 'react-router'
-import { useNavigate } from '@/components/ui/nav'
+import { Plus } from 'lucide-react'
+import { Link, useNavigate } from '@/components/ui/nav'
 import { Card } from '@/components/ui/Card'
 import { NumberTicker } from '@/components/ui/NumberTicker'
+import { Skeleton } from '@/components/ui/Skeleton'
 import { Sparkline } from '@/components/viz/Sparkline'
 import { ExposureBar } from '@/components/viz/ExposureBar'
 import { INTEGRITY_ICON, INTEGRITY_TEXT_CLASS, INTEGRITY_ORDER, channelLabel } from '@/features/dashboard/display'
@@ -99,7 +101,7 @@ function FleetCard({
   )
 }
 
-/** 舰队总览（N≥2）：汇总条 + 按状态排序的账户卡。 */
+/** 舰队总览（所有账户的着陆列表）：汇总条 + 按状态排序的账户卡。 */
 export function FleetView({
   items,
   portfolioNames,
@@ -133,6 +135,35 @@ export function FleetView({
           item={item}
           portfolioName={item.portfolio_id != null ? (portfolioNames.get(item.portfolio_id) ?? null) : null}
         />
+      ))}
+      {/* 列表页主动作收尾：末位一张安静的新建入口，不与账户卡争层级。 */}
+      <Link
+        to="/setup/acct/channel"
+        className="flex items-center justify-center gap-1.5 rounded-card border border-dashed border-line py-3 text-[13px] text-ink-3 transition-colors duration-150 hover:border-border-strong hover:text-ink-1 motion-reduce:transition-none"
+      >
+        <Plus size={14} aria-hidden />新建账户
+      </Link>
+    </section>
+  )
+}
+
+/** 舰队冷拉骨架：汇总行 + 两张与成品同形的账户卡灰块。 */
+export function FleetSkeleton() {
+  return (
+    <section aria-busy="true" aria-label="账户列表加载中">
+      <Skeleton className="mx-0.5 my-2 mb-6 h-6 w-64" />
+      {[0, 1].map((i) => (
+        <div key={i} className="mb-4 rounded-card border border-line bg-surface px-6 py-4">
+          <div className="flex items-center gap-3">
+            <Skeleton className="h-5 w-28" />
+            <Skeleton className="h-5 w-14" />
+          </div>
+          <div className="mt-3 flex items-end justify-between gap-3">
+            <Skeleton className="h-8 w-44" />
+            <Skeleton className="h-[34px] w-[120px]" />
+          </div>
+          <Skeleton className="mt-3 h-4 w-full" />
+        </div>
       ))}
     </section>
   )

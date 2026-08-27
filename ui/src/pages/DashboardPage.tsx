@@ -2,11 +2,10 @@ import { useMemo } from 'react'
 import { Plus } from 'lucide-react'
 import { Link } from '@/components/ui/nav'
 import { useDomainStore } from '@/stores/domain'
-import { FleetView } from '@/features/dashboard/FleetView'
-import { AccountDetail, AccountDetailSkeleton } from '@/features/account/AccountDetail'
+import { FleetView, FleetSkeleton } from '@/features/dashboard/FleetView'
 import { ErrorNotice } from '@/components/ui/ErrorNotice'
 
-/** 仪表盘：N=1 原子视图 / N≥2 舰队视图。账户读自共享领域 store。 */
+/** 所有账户列表：不论几个账户都是稳定的舰队着陆页，点卡片进入单账户详情。 */
 export function DashboardPage() {
   const accounts = useDomainStore((s) => s.accounts)
   const portfolios = useDomainStore((s) => s.portfolios)
@@ -22,7 +21,7 @@ export function DashboardPage() {
   // 首次加载：无数据时才 loading / 报错；已有数据则一直渲染（失联降级由顶栏体现）。
   if (accounts == null) {
     if (error) return <ErrorNotice title="账户加载失败" error={error} onRetry={refresh} />
-    return <AccountDetailSkeleton />
+    return <FleetSkeleton />
   }
 
   if (accounts.length === 0) {
@@ -39,12 +38,6 @@ export function DashboardPage() {
           <Plus size={14} aria-hidden />新建账户
         </Link>
       </div>
-    )
-  }
-
-  if (accounts.length === 1) {
-    return (
-      <AccountDetail accountId={accounts[0].account_id} item={accounts[0]} onDashboardRefresh={refresh} />
     )
   }
 

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react'
 import { useViewTransitionState } from 'react-router'
-import { RefreshCw } from 'lucide-react'
+import { ArrowLeft, RefreshCw } from 'lucide-react'
 import { Link, useNavigate } from '@/components/ui/nav'
 import { Card, Chip } from '@/components/ui/Card'
 import { DriftBar } from '@/components/viz/DriftBar'
@@ -321,6 +321,13 @@ export function AccountDetail({
 
   return (
     <section>
+      {/* 面包屑回链：详情页永远有一条可见的「回到所有账户」路径。 */}
+      <Link
+        to="/"
+        className="mb-3 inline-flex items-center gap-1 text-[13px] text-ink-3 transition-colors duration-150 hover:text-ink-1 motion-reduce:transition-none"
+      >
+        <ArrowLeft size={14} aria-hidden />所有账户
+      </Link>
       {/* Hero */}
       <Card className="p-6">
         <div className="flex flex-wrap items-center gap-3">

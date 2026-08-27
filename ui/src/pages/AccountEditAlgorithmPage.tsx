@@ -135,7 +135,7 @@ export function AccountEditAlgorithmPage() {
 
   if (!isReady)
     return (
-      <section className="pb-24">
+      <section className="mx-auto max-w-[900px] pb-24">
         {title}
         {synopsis}
         <EditLoading bare />
@@ -201,7 +201,7 @@ export function AccountEditAlgorithmPage() {
   )
 
   return (
-    <section className="pb-24">
+    <section className="mx-auto max-w-[900px] pb-24">
       {title}
       {synopsis}
 

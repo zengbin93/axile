@@ -43,7 +43,9 @@ function accountIdFromPath(pathname: string): number | null {
 function NavSection({ label, children }: { label: string; children: ReactNode }) {
   return (
     <section className="mt-5 first:mt-0">
-      <div className="mb-1 px-2.5 text-[11px] font-semibold tracking-[0.14em] text-ink-3">{label}</div>
+      <div className="mb-1 truncate px-2.5 text-[11px] font-semibold tracking-[0.14em] text-ink-3" title={label}>
+        {label}
+      </div>
       <div>{children}</div>
     </section>
   )
@@ -168,6 +170,8 @@ export function AppSidebar() {
   const accountId = routeAccountId ?? activeAccountId
   const accountPath = (suffix = '') => accountId == null ? null : `/accounts/${accountId}${suffix}`
   const exact = (to: string | null) => (pathname: string) => to != null && pathname === to
+  // 组标题带上账户名：明示「这些条目属于哪个账户」，与顶层「所有账户」入口（列表落点）相区别。
+  const activeName = accounts?.find((a) => a.account_id === accountId)?.name
   // 库里确定没有账户时收拢账户导航：三组入口此刻只有占位价值，一行说明它的归宿比 12 个禁用项安静。
   const noAccounts = accounts != null && accounts.length === 0 && accountId == null
 
@@ -195,7 +199,7 @@ export function AppSidebar() {
     { label: '定时节奏', icon: Timer, to: accountPath('/edit/timer'), active: exact(accountPath('/edit/timer')) },
     { label: '执行算法', icon: Workflow, to: accountPath('/edit/algorithm'), active: exact(accountPath('/edit/algorithm')) },
     { label: '执行流控', icon: SlidersHorizontal, to: accountPath('/edit/control'), active: exact(accountPath('/edit/control')) },
-    { label: '组合执行', icon: Layers3, to: accountPath('/edit/portfolio'), active: exact(accountPath('/edit/portfolio')) },
+    { label: '绑定组合', icon: Layers3, to: accountPath('/edit/portfolio'), active: exact(accountPath('/edit/portfolio')) },
   ]
 
   return (
@@ -207,8 +211,8 @@ export function AppSidebar() {
         <nav ref={navRef} className="quiet-scrollbar min-h-0 flex-1 overflow-y-auto pb-2" aria-label="功能导航">
           <div className="flex min-h-full flex-col justify-between">
             <div>
-              <NavItem item={{ label: '账户', icon: CircleGauge, to: '/', active: (pathname) => pathname === '/' }} />
-              <NavItem item={{ label: '组合', icon: Boxes, to: '/portfolios', active: (pathname) => pathname.startsWith('/portfolios') }} />
+              <NavItem item={{ label: '所有账户', icon: CircleGauge, to: '/', active: (pathname) => pathname === '/' }} />
+              <NavItem item={{ label: '所有组合', icon: Boxes, to: '/portfolios', active: (pathname) => pathname.startsWith('/portfolios') }} />
 
               {noAccounts ? (
                 <NavSection label="当前账户">
@@ -218,7 +222,7 @@ export function AppSidebar() {
                 </NavSection>
               ) : (
                 <>
-                  <NavSection label="当前账户">
+                  <NavSection label={activeName ? `当前账户 · ${activeName}` : '当前账户'}>
                     {accountOverview.map((item) => <NavItem key={item.label} item={item} />)}
                   </NavSection>
 
