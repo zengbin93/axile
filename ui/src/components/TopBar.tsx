@@ -7,6 +7,7 @@ import { timeAgo } from '@/lib/format'
 import { RefreshCw, TriangleAlert } from 'lucide-react'
 import { Tooltip } from '@/components/ui/Tooltip'
 import { shortErrorReason } from '@/lib/errorInfo'
+import { BrandWordmark } from '@/components/brand/BrandWordmark'
 
 /**
  * 顶栏 —— 品牌、后端活性点、风险提示与主题切换。
@@ -40,8 +41,8 @@ export function TopBar() {
 
   return (
     <header className="flex flex-none flex-wrap items-center gap-3 border-b border-line bg-surface px-5 py-2.5">
-      <Link to="/" className="text-[15px] font-[700] tracking-[0.22em]">
-        axile
+      <Link to="/" aria-label="axile 首页">
+        <BrandWordmark />
       </Link>
       <span className="flex items-center gap-1.5 text-[13px] text-ink-2">
         {/* 心跳灯（离开红绿，红绿专供行情涨跌）：通电=信号青常亮（亮而不动，安静即好），

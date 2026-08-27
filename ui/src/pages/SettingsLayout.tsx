@@ -1,6 +1,6 @@
 import { Outlet, useLocation } from 'react-router'
 import { ThemeToggle } from '@/components/ThemeToggle'
-import { AxileLogo } from '@/components/brand/AxileMark'
+import { BrandWordmark } from '@/components/brand/BrandWordmark'
 import { Link, useNavigate } from '@/components/ui/nav'
 
 const SETTINGS_NAV = [
@@ -15,7 +15,7 @@ export function SettingsLayout() {
   return (
     <div className="flex h-screen flex-col bg-bg">
       <header className="flex h-14 flex-none items-center gap-3.5 border-b border-line bg-surface px-4 sm:px-6">
-        <AxileLogo mark={18} size={14.5} />
+        <BrandWordmark size={14.5} />
         <span className="text-[14px] text-ink-2">· 设置</span>
         <span className="ml-auto" />
         <ThemeToggle />
