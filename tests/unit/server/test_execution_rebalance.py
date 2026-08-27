@@ -15,6 +15,7 @@ from axile.executor.models.unified_output import ExecutionStatus, UnifiedStandar
 from axile.executor.models.unified_price import UnifiedPriceData
 from axile.server.db.models import Account
 from axile.server.execution import backend as execution_backend
+from axile.server.execution import intents as execution_intents
 from axile.server.execution import lifecycle as execution_lifecycle
 from axile.server.execution import rebalance as rebalance_execution
 from axile.server.execution import registry as execution_registry
@@ -58,6 +59,18 @@ def _keep_inline_scenarios_in_process(monkeypatch: pytest.MonkeyPatch) -> None:
         "resolve_execution_backend_kind",
         lambda channel: ExecutionBackendKind.PROCESS if channel == TradeChannel.GM else ExecutionBackendKind.THREAD,
     )
+
+
+@pytest.fixture(autouse=True)
+def _stub_intent_promotion(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, int]]:
+    """执行票状态机由 test_execution_intents.py 专门守护；分发层测试只记录 promote 调用。"""
+    calls: list[tuple[str, int]] = []
+
+    async def fake_promote(execution_id: str, account_id: int) -> None:
+        calls.append((execution_id, account_id))
+
+    monkeypatch.setattr(execution_intents, "promote_intent_to_running", fake_promote)
+    return calls
 
 
 def test_calculate_target_volume_does_not_restore_forbidden_symbols_from_last_target() -> None:
