@@ -195,7 +195,7 @@ export function AppSidebar() {
     { label: '品种控制', to: accountPath('/edit/symbols'), active: exact(accountPath('/edit/symbols')) },
   ]
   const accountExecution: NavItemSpec[] = [
-    { label: '定时节奏', to: accountPath('/edit/timer'), active: exact(accountPath('/edit/timer')) },
+    { label: '定时任务', to: accountPath('/edit/timer'), active: exact(accountPath('/edit/timer')) },
     { label: '执行算法', to: accountPath('/edit/algorithm'), active: exact(accountPath('/edit/algorithm')) },
     { label: '执行流控', to: accountPath('/edit/control'), active: exact(accountPath('/edit/control')) },
     { label: '绑定组合', to: accountPath('/edit/portfolio'), active: exact(accountPath('/edit/portfolio')) },

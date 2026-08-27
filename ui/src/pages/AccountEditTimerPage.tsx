@@ -46,7 +46,7 @@ export function AccountEditTimerPage() {
     <div className="flex flex-wrap items-baseline gap-3">
       <AccountPageTitle
         accountId={accountId}
-        page="定时节奏"
+        page="定时任务"
         name={acc?.name ?? cachedAccount?.name}
         channel={acc?.trade_channel ?? cachedAccount?.trade_channel}
         market={acc?.market ?? cachedAccount?.market}
@@ -81,7 +81,7 @@ export function AccountEditTimerPage() {
   const cronPrev = acc.cron_expr ?? ''
   const dirty = !cronExprEqual(cronNext, cronPrev)
   const err = timerEditorError(timer)
-  const changes = dirty ? [cronNext ? '定时节奏已改' : '关闭自动调仓节奏'] : []
+  const changes = dirty ? [cronNext ? '定时任务已改' : '关闭自动调仓节奏'] : []
 
   // 与总览入口同构摘要（随草稿变）。
   const timerSummary = !cronNext.trim()
