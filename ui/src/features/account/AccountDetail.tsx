@@ -318,6 +318,8 @@ export function AccountDetail({
 
   // 「今日」涨跌用服务端按自然日锚定的 today_pct（昨收/今开为基准），不再前端取序列末两点相减。
   const pct = item.today_pct ?? null
+  // 兼容尚未重启、dashboard 暂未携带 remark 的开发服务；详情到位后仍能展示已保存备注。
+  const remark = account.data?.remark ?? item.remark
 
   return (
     <section>
@@ -331,18 +333,26 @@ export function AccountDetail({
       {/* Hero */}
       <Card className="p-6">
         <div className="flex flex-wrap items-center gap-3">
-          {/* 与舰队卡 / 组合行 / 编辑页标题名配对做共享元素 FLIP（平移 + 微缩）。 */}
-          <span
-            className="text-[17px] font-[620]"
-            style={nameVt ? { viewTransitionName: `account-name-${accountId}` } : undefined}
-          >
-            {item.name}
-          </span>
-          {/* 渠道徽章与账户名同一逻辑单元：随名字同门控挂名、同轨飞行（nameVt）。 */}
-          <Chip style={nameVt ? { viewTransitionName: `account-channel-${accountId}` } : undefined}>
-            {channelLabel(item.trade_channel, item.market)}
-          </Chip>
-          {gate.gate === 'paused' && <Chip>{gate.label}</Chip>}
+          <div className="flex flex-none items-center gap-3">
+            {/* 与舰队卡 / 组合行 / 编辑页标题名配对做共享元素 FLIP（平移 + 微缩）。 */}
+            <span
+              className="text-[17px] font-[620]"
+              style={nameVt ? { viewTransitionName: `account-name-${accountId}` } : undefined}
+            >
+              {item.name}
+            </span>
+            {/* 渠道徽章与账户名同一逻辑单元：随名字同门控挂名、同轨飞行（nameVt）。 */}
+            <Chip style={nameVt ? { viewTransitionName: `account-channel-${accountId}` } : undefined}>
+              {channelLabel(item.trade_channel, item.market)}
+            </Chip>
+            {gate.gate === 'paused' && <Chip>{gate.label}</Chip>}
+          </div>
+          {remark && (
+            <OverflowText
+              className="order-last basis-full text-[14px] leading-5 text-ink-3 xl:order-none xl:min-w-0 xl:max-w-[520px] xl:flex-1 xl:basis-auto"
+              text={remark}
+            />
+          )}
           <AccountActions
             name={item.name}
             isStarted={isStarted}

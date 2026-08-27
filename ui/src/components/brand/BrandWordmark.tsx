@@ -10,7 +10,7 @@ export function BrandWordmark({ size = 20, className }: { size?: number; classNa
       className={`font-[620] leading-none tracking-[-0.015em] ${className ?? ''}`}
       style={{ fontSize: size }}
     >
-      ax<span style={{ color: 'var(--accent)' }}>i</span>le
+      ax<span style={{ color: 'var(--color-accent)' }}>i</span>le
     </span>
   )
 }

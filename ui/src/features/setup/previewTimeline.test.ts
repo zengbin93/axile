@@ -5,7 +5,9 @@ import {
   PREVIEW_MAX_ITEMS,
   PREVIEW_MIN_ITEMS,
   previewLimitForHeight,
+  schedulePreviewItemPresentation,
 } from '@/features/setup/previewTimeline'
+import { executionReasonText } from '@/features/account/executionReason'
 
 function preview(times: string[], nextCursor: string | null, hasMore: boolean): SchedulePreview {
   return {
@@ -61,5 +63,32 @@ describe('appendSchedulePreview', () => {
     const first = preview([cursor], cursor, true)
     const stalled = preview([cursor], cursor, true)
     expect(appendSchedulePreview(first, stalled, cursor).has_more).toBe(false)
+  })
+})
+
+describe('schedulePreviewItemPresentation', () => {
+  test('区分执行、跳过与日历降级的文案和颜色语义', () => {
+    const base = preview(['2026-08-27T15:00:00+08:00'], null, false).items[0]!
+
+    expect(schedulePreviewItemPresentation(base, executionReasonText)).toEqual({
+      text: '交易日，执行',
+      tone: 'default',
+    })
+    expect(schedulePreviewItemPresentation({
+      ...base,
+      calendar_status: 'available_closed',
+      action: 'skip',
+      reason_code: 'CALENDAR.NO_NIGHT_SESSION',
+    }, executionReasonText)).toEqual({
+      text: '无对应夜盘，已跳过',
+      tone: 'muted',
+    })
+    expect(schedulePreviewItemPresentation({
+      ...base,
+      calendar_status: 'unavailable',
+    }, executionReasonText)).toEqual({
+      text: '日历不可用，按排程执行',
+      tone: 'warning',
+    })
   })
 })

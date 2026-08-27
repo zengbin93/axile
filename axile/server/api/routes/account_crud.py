@@ -412,9 +412,9 @@ async def account_dashboard(session: SessionDep, sched: SchedDep) -> AccountDash
 
     Notes
     -----
-    权益与持仓取自各账户最近一条执行记录的 ``raw_result.account_assets`` 快照，
-    ``next_run_time`` 取自 APScheduler；把原本前端对每个账户分别发起的多次请求
-    合并为一次，避免舰队页 N 账户 × 数次请求。
+    账户名称与备注取自账户主表；权益与持仓取自各账户最近一条执行记录的
+    ``raw_result.account_assets`` 快照，``next_run_time`` 取自 APScheduler；把原本
+    前端对每个账户分别发起的多次请求合并为一次，避免舰队页 N 账户 × 数次请求。
 
     执行记录、资产快照、目标快照与今日基准都用窗口函数**批量**取回，而不是在
     账户循环里逐账户查询——后者是 N+1，账户越多查询数线性增长。
@@ -523,6 +523,7 @@ async def account_dashboard(session: SessionDep, sched: SchedDep) -> AccountDash
             AccountDashboardItemPublic(
                 account_id=account_id,
                 name=account.name,
+                remark=account.remark,
                 market=account.market,
                 trade_channel=account.trade_channel,
                 is_started=account.is_started,

@@ -39,6 +39,7 @@ test('reconcile 不把 queued 写成 running，并回填 pending', () => {
     {
       account_id: 8,
       name: 'a',
+      remark: null,
       market: '期货',
       trade_channel: 'ctp',
       is_started: true,
@@ -79,6 +80,7 @@ test('reconcile 在 SSE 断线时把 queued 推进为 running', () => {
     {
       account_id: 8,
       name: 'a',
+      remark: null,
       market: '期货',
       trade_channel: 'ctp',
       is_started: true,
@@ -120,6 +122,7 @@ test('reconcile 不用陈旧轮询把 running 降级为 queued', () => {
     {
       account_id: 8,
       name: 'a',
+      remark: null,
       market: '期货',
       trade_channel: 'ctp',
       is_started: true,
@@ -229,6 +232,7 @@ test('reconcile 显式 pending_execution_id null 会清掉 pending', () => {
     {
       account_id: 8,
       name: 'a',
+      remark: null,
       market: '期货',
       trade_channel: 'ctp',
       is_started: true,

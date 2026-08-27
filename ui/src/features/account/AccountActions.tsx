@@ -112,7 +112,7 @@ export function AccountActions(props: AccountActionsProps) {
   const menuItemDanger = `${menuItemBase} text-bad hover:bg-bad/10`
 
   return (
-    <div className="ml-auto flex flex-wrap items-center gap-2">
+    <div className="ml-auto flex flex-none items-center gap-2">
       {/* 主操作槽：同一按钮跨 running 存活，壳/提示/动作随态切，标签走日记式换字。
           两态若拆成两个分支会各自挂载，InkRewrite 当首帧不播——必须合一。 */}
       <Tooltip content={props.running ? terminateTip : execTip} delay={ACTION_TIP_MS} arrow>

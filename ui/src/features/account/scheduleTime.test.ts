@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test'
 
-import { formatBeijingTimestamp, formatPlannedAt, formatRecentExecution, formatTimeUntil } from './scheduleTime'
+import { formatBeijingTimestamp, formatPlannedAt, formatRecentExecution, formatTimeUntil } from '@/lib/scheduleTime'
 
 const NOW = Date.parse('2026-08-24T09:30:00+08:00')
 

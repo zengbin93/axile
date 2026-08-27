@@ -21,6 +21,7 @@ interface CustomFunctionEditorProps {
 export function CustomFunctionEditor({ code, onChange, onVerifiedChange }: CustomFunctionEditorProps) {
   const [validating, setValidating] = useState(false)
   const [result, setResult] = useState<ValidateCustomCalcResult | null>(null)
+  const [ranCode, setRanCode] = useState<string | null>(null)
   const [accountId, setAccountId] = useState<number | null>(null)
   const accounts = useDomainStore((state) => state.accounts) ?? []
   const onVerifiedChangeRef = useRef(onVerifiedChange)
@@ -28,12 +29,11 @@ export function CustomFunctionEditor({ code, onChange, onVerifiedChange }: Custo
   useEffect(() => {
     onVerifiedChangeRef.current = onVerifiedChange
   }, [onVerifiedChange])
+  // 改代码不清空结果：旧结果留着并降级 stale（面板在代码上方，清空收放会让打字中的代码跳）。
+  const stale = result != null && ranCode !== code
   useEffect(() => {
-    setResult(null)
-  }, [code])
-  useEffect(() => {
-    onVerifiedChangeRef.current?.(result == null ? null : { ok: result.valid })
-  }, [result])
+    onVerifiedChangeRef.current?.(result == null || stale ? null : { ok: result.valid })
+  }, [result, stale])
 
   const runValidation = async () => {
     if (!code.trim() || validating) return
@@ -52,9 +52,9 @@ export function CustomFunctionEditor({ code, onChange, onVerifiedChange }: Custo
         error_type: null,
         error_message: message,
       })
-    } finally {
-      setValidating(false)
     }
+    setRanCode(code)
+    setValidating(false)
   }
 
   return (
@@ -62,6 +62,7 @@ export function CustomFunctionEditor({ code, onChange, onVerifiedChange }: Custo
       code={code}
       onChange={onChange}
       running={validating}
+      stale={stale}
       result={result && {
         valid: result.valid,
         errorLine: result.error_line,
@@ -71,6 +72,9 @@ export function CustomFunctionEditor({ code, onChange, onVerifiedChange }: Custo
       }}
       onRun={() => void runValidation()}
       docHref="/docs/custom-calc"
+      height="auto"
+      minHeight="240px"
+      maxHeight="40vh"
       controls={
         <Select<number | null>
           ariaLabel="试跑上下文"
