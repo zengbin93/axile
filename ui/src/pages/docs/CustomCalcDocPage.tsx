@@ -84,7 +84,7 @@ function CodeBlock({ code }: { code: string }) {
 export function CustomCalcDocPage() {
   return (
     <div className="min-h-screen bg-bg">
-      <div className="mx-auto max-w-[880px] px-8 py-12">
+      <div className="mx-auto max-w-[1408px] px-8 py-12">
         <div className="text-xs font-semibold tracking-wide text-accent">组合 · 自定义逻辑</div>
         <h1 className="mt-1.5 text-[26px] font-[680] tracking-tight">开发自定义组合逻辑</h1>
         <p className="mt-3 text-[14.5px] leading-relaxed text-ink-2">

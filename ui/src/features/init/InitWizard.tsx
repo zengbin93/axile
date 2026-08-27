@@ -557,7 +557,7 @@ export function InitWizard({
             )}
 
             {isEdit && editSection === 'advanced' && (
-              <div className="mx-auto max-w-[1080px] px-5 pt-8 pb-6 sm:px-12">
+              <div className="mx-auto max-w-[1728px] px-5 pt-8 pb-6 sm:px-12">
                 <div className="text-[22px] font-[680] tracking-tight">
                   高级
                 </div>

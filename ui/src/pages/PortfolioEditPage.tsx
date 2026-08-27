@@ -63,7 +63,7 @@ export function PortfolioEditPage() {
 
   if (portfolio.loading || (!pf && !portfolio.error) || (pf && !ready)) {
     return (
-      <section className="mx-auto w-full max-w-[900px]">
+      <section className="mx-auto w-full max-w-[1440px]">
         <Card className="px-6 py-4"><SkeletonLines rows={2} /></Card>
         <SectionLabel>组合名称</SectionLabel>
         <Skeleton className="h-12 w-full max-w-[520px]" />
@@ -73,14 +73,14 @@ export function PortfolioEditPage() {
   }
   if (portfolio.error || !pf) {
     return (
-      <section className="mx-auto w-full max-w-[900px]">
+      <section className="mx-auto w-full max-w-[1440px]">
         <ErrorNotice title="组合加载失败" error={portfolio.error ?? new Error('组合不存在')} onRetry={portfolio.refresh} />
       </section>
     )
   }
 
   return (
-    <section className="mx-auto w-full max-w-[900px]">
+    <section className="mx-auto w-full max-w-[1440px]">
       <Card className="border border-warn/30 bg-warn-tint px-6 py-4">
         <div className="text-[14px]">
           <b>影响范围</b> · {accountsError ? (

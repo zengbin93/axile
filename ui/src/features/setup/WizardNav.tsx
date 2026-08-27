@@ -15,7 +15,7 @@ export function WizardPage({
   children?: ReactNode
 }) {
   return (
-    <div className="mx-auto max-w-[1080px] px-5 pt-8 pb-6 sm:px-12">
+    <div className="mx-auto max-w-[1728px] px-5 pt-8 pb-6 sm:px-12">
       <div className="mb-1.5 text-xs font-semibold tracking-wide text-accent">{kicker}</div>
       <div className="text-[22px] font-[680] tracking-tight">{title}</div>
       {lead && <div className="mt-1.5 max-w-[560px] text-[14px] text-ink-2">{lead}</div>}

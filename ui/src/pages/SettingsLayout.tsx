@@ -15,7 +15,9 @@ export function SettingsLayout() {
   return (
     <div className="flex h-screen flex-col bg-bg">
       <header className="flex h-14 flex-none items-center gap-3.5 border-b border-line bg-surface px-4 sm:px-6">
-        <BrandWordmark size={14.5} />
+        <Link to="/" aria-label="axile 首页" className="text-ink-1">
+          <BrandWordmark size={14.5} />
+        </Link>
         <span className="text-[14px] text-ink-2">· 设置</span>
         <span className="ml-auto" />
         <ThemeToggle />
