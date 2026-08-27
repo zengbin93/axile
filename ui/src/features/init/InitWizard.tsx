@@ -1,5 +1,7 @@
 import { FolderOpen } from 'lucide-react'
 import { useState } from 'react'
+import { Link } from '@/components/ui/nav'
+import { BrandWordmark } from '@/components/brand/BrandWordmark'
 import { ThemeToggle } from '@/components/ThemeToggle'
 import { Toast } from '@/components/Toast'
 import { ConfirmModal, type ConfirmSpec } from '@/components/ui/ConfirmModal'
@@ -369,7 +371,9 @@ export function InitWizard({
     <div className={`flex flex-col ${isEdit ? 'h-full' : 'h-screen'}`}>
       {!isEdit && (
         <header className="flex h-14 flex-none items-center gap-3.5 border-b border-line bg-surface px-6">
-          <span className="font-[650] tracking-wide">axile</span>
+          <Link to="/" aria-label="axile 首页" className="text-ink-1">
+            <BrandWordmark size={14.5} />
+          </Link>
           <span className="text-[14px] text-ink-2">· {copy.brand}</span>
           <span className="ml-auto" />
           <ThemeToggle />

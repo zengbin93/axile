@@ -2,6 +2,7 @@ import { Outlet, useLocation } from 'react-router'
 import { Link } from '@/components/ui/nav'
 import { Toast } from '@/components/Toast'
 import { ThemeToggle } from '@/components/ThemeToggle'
+import { BrandWordmark } from '@/components/brand/BrandWordmark'
 import { flowOf, PF_STEPS, ACCT_STEPS, type Step } from '@/features/setup/steps'
 
 function Rail({ steps, index, title }: { steps: Step[]; index: number; title: string }) {
@@ -46,8 +47,8 @@ export function WizardLayout() {
   return (
     <div className="flex h-screen flex-col">
       <header className="flex h-14 flex-none items-center gap-3.5 border-b border-line bg-surface px-4 sm:px-6">
-        <Link to="/setup" className="font-[650] tracking-wide">
-          axile
+        <Link to="/" aria-label="axile 首页" className="text-ink-1">
+          <BrandWordmark size={14.5} />
         </Link>
         <span className="text-[14px] text-ink-2">
           {flow === 'pf' ? '· 组合设置' : flow === 'acct' ? '· 账户设置' : ''}
