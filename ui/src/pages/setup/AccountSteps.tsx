@@ -112,7 +112,7 @@ export function AcctChannel() {
       <div className="flex-1 overflow-y-auto">
         <WizardPage kicker="账户设置 · 1 / 6" title="连接哪个交易所 / 券商？" lead="不同渠道连接方式完全不同——选定后进入对应的连接页。">
           <div className="grid grid-cols-1 gap-3">
-            {loading && channels === null && <p className="text-[14px] text-ink-2">加载渠道…</p>}
+            {loading && channels === null && <p className="text-[15px] text-ink-2">加载渠道…</p>}
             <ErrorNotice title="渠道目录加载失败" error={channels === null ? error : null} onRetry={refresh} />
             {channels?.map((ch) => {
               const available = ch.available
@@ -134,8 +134,8 @@ export function AcctChannel() {
                     <ChannelIcon name={ch.icon} />
                   </span>
                   <span>
-                    <span className={`block text-[16px] font-[620] ${available ? '' : 'text-ink-3'}`}>{ch.label}</span>
-                    <span className={`mt-0.5 block text-[13px] ${available ? 'text-ink-2' : 'text-warn'}`}>
+                    <span className={`block text-[17px] font-[620] ${available ? '' : 'text-ink-3'}`}>{ch.label}</span>
+                    <span className={`mt-0.5 block text-[14px] ${available ? 'text-ink-2' : 'text-warn'}`}>
                       {available ? ch.description : '暂不可用'}
                     </span>
                   </span>
@@ -312,7 +312,7 @@ export function AcctConnect() {
     if (field.kind === 'boolean') {
       return (
         <>
-          <div className="mb-2 text-[13px] text-ink-2">{field.label}</div>
+          <div className="mb-2 text-[14px] text-ink-2">{field.label}</div>
           <Segmented
             value={value === true || value === 'true' ? 'true' : 'false'}
             options={[
@@ -321,22 +321,22 @@ export function AcctConnect() {
             ]}
             onChange={(next) => setField(field.name, next === 'true')}
           />
-          {field.help && <div className="mt-1 text-[12px] text-ink-3">{field.help}</div>}
-          {errors[field.name] && <div className="mt-1 text-[12px] text-warn">{errors[field.name]}</div>}
+          {field.help && <div className="mt-1 text-[13px] text-ink-3">{field.help}</div>}
+          {errors[field.name] && <div className="mt-1 text-[13px] text-warn">{errors[field.name]}</div>}
         </>
       )
     }
     if (field.kind === 'select') {
       return (
         <>
-          <div className="mb-2 text-[13px] text-ink-2">{field.label}</div>
+          <div className="mb-2 text-[14px] text-ink-2">{field.label}</div>
           <Segmented<string>
             value={String(value)}
             onChange={(next) => setField(field.name, next)}
             options={field.options ?? []}
           />
-          {field.help && <div className="mt-1 text-[12px] text-ink-3">{field.help}</div>}
-          {errors[field.name] && <div className="mt-1 text-[12px] text-warn">{errors[field.name]}</div>}
+          {field.help && <div className="mt-1 text-[13px] text-ink-3">{field.help}</div>}
+          {errors[field.name] && <div className="mt-1 text-[13px] text-warn">{errors[field.name]}</div>}
         </>
       )
     }
@@ -375,7 +375,7 @@ export function AcctConnect() {
             {descriptor?.account_form.notices.map((notice, index) => (
               <div
                 key={`${notice.tone}-${index}`}
-                className={`mt-4 rounded-xl border px-4 py-3.5 text-[14px] ${
+                className={`mt-4 rounded-xl border px-4 py-3.5 text-[15px] ${
                   notice.tone === 'warning' ? 'border-warn/30 bg-warn-soft text-warn' : 'border-line bg-fill text-ink-2'
                 }`}
               >
@@ -469,25 +469,25 @@ export function AcctPortfolio() {
       <div className="flex-1 overflow-y-auto">
         <WizardPage kicker="账户设置 · 3 / 6" title="用哪个组合？" lead="账户按组合算出的目标持仓来调仓。">
           <div className="grid grid-cols-1 gap-3">
-            {portfolios == null && <p className="text-[14px] text-ink-2">加载组合…</p>}
+            {portfolios == null && <p className="text-[15px] text-ink-2">加载组合…</p>}
             {list.map((p) => (
               <button
                 key={p.id}
                 className={`flex w-full items-start gap-4 rounded-[14px] border p-[18px] text-left transition ${acct.portfolioId === p.id ? 'border-accent bg-accent-soft shadow-[inset_0_0_0_1px_var(--color-accent)]' : 'border-line bg-surface hover:border-ink-3/30'}`}
                 onClick={() => setAcct({ portfolioId: p.id })}
               >
-                <span className="grid h-11 w-11 flex-none place-items-center rounded-xl bg-fill text-[22px]">🎯</span>
+                <span className="grid h-11 w-11 flex-none place-items-center rounded-xl bg-fill text-[23px]">🎯</span>
                 <span>
-                  <span className="block text-[16px] font-[620]">{p.name}</span>
-                  <span className="mt-0.5 block text-[13px] text-ink-2">{p.market}{p.description ? ` · ${p.description}` : ''}</span>
+                  <span className="block text-[17px] font-[620]">{p.name}</span>
+                  <span className="mt-0.5 block text-[14px] text-ink-2">{p.market}{p.description ? ` · ${p.description}` : ''}</span>
                 </span>
               </button>
             ))}
             <Link to="/setup/pf/name" className="flex items-center gap-4 rounded-[14px] border border-dashed border-line p-[18px] text-ink-2 hover:border-ink-3/30">
-              <span className="grid h-11 w-11 flex-none place-items-center rounded-xl bg-fill text-[22px]">＋</span>
+              <span className="grid h-11 w-11 flex-none place-items-center rounded-xl bg-fill text-[23px]">＋</span>
               <span>
-                <span className="block text-[16px] font-[620]">新建组合</span>
-                <span className="mt-0.5 block text-[13px] text-ink-2">跳到组合设置</span>
+                <span className="block text-[17px] font-[620]">新建组合</span>
+                <span className="mt-0.5 block text-[14px] text-ink-2">跳到组合设置</span>
               </span>
             </Link>
           </div>
@@ -513,7 +513,7 @@ export function AcctTrade() {
     <div className="flex h-full flex-col">
       <div className="flex-1 overflow-y-auto">
         <WizardPage kicker="账户设置 · 4 / 6" title="怎么交易？" lead="选想要的结果，参数系统替你配。">
-          <label className="mb-2 block text-[13px] text-ink-2">交易方式</label>
+          <label className="mb-2 block text-[14px] text-ink-2">交易方式</label>
           <AlgorithmEditor
             slot="trade"
             channel={acct.channel}
@@ -524,12 +524,12 @@ export function AcctTrade() {
           <div className="mt-6 max-w-[560px]">
             <div className="grid grid-cols-1 gap-3 border-t border-line py-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-start sm:gap-6">
               <div className="min-w-0">
-                <label htmlFor="account-execution-timeout" className="text-[15px] text-ink-1">
+                <label htmlFor="account-execution-timeout" className="text-[16px] text-ink-1">
                   执行超时
                 </label>
                 <div
                   id="account-execution-timeout-help"
-                  className={`mt-0.5 text-[12px] ${timeoutErr ? 'text-warn' : 'text-ink-3'}`}
+                  className={`mt-0.5 text-[13px] ${timeoutErr ? 'text-warn' : 'text-ink-3'}`}
                 >
                   {timeoutErr ?? '限制一次执行最多运行多久；超时后停止开新单。'}
                 </div>
@@ -545,16 +545,16 @@ export function AcctTrade() {
           </div>
 
           <div className="mt-6 max-w-[560px]">
-            <label className="mb-1.5 block text-[13px] text-ink-2">
+            <label className="mb-1.5 block text-[14px] text-ink-2">
               {descriptor?.ui.leverage_title ?? '杠杆'}{' '}
               <span className="text-ink-3">（{descriptor?.ui.leverage_note ?? '多空可分设'}）</span>
             </label>
-            <div className="grid grid-cols-1 gap-3 border-t border-line py-3 text-[15px] sm:grid-cols-[minmax(0,1fr)_auto] sm:items-start sm:gap-6">
+            <div className="grid grid-cols-1 gap-3 border-t border-line py-3 text-[16px] sm:grid-cols-[minmax(0,1fr)_auto] sm:items-start sm:gap-6">
               <div>
                 <label htmlFor="account-long-leverage">{descriptor?.ui.long_leverage_label ?? '做多杠杆'}</label>
                 <div
                   id="account-long-leverage-help"
-                  className={`mt-0.5 text-[12px] ${longLeverageErr ? 'text-warn' : 'text-ink-3'}`}
+                  className={`mt-0.5 text-[13px] ${longLeverageErr ? 'text-warn' : 'text-ink-3'}`}
                 >
                   {longLeverageErr ?? `${leverageLimits?.min ?? 0}–${leverageLimits?.max ?? '不限'}，步进 ${leverageLimits?.step ?? 0.1}`}
                 </div>
@@ -569,12 +569,12 @@ export function AcctTrade() {
               />
             </div>
             {showShortLeverage && (
-              <div className="grid grid-cols-1 gap-3 border-t border-line py-3 text-[15px] sm:grid-cols-[minmax(0,1fr)_auto] sm:items-start sm:gap-6">
+              <div className="grid grid-cols-1 gap-3 border-t border-line py-3 text-[16px] sm:grid-cols-[minmax(0,1fr)_auto] sm:items-start sm:gap-6">
                 <div>
                   <label htmlFor="account-short-leverage">{descriptor?.ui.short_leverage_label ?? '做空杠杆'}</label>
                   <div
                     id="account-short-leverage-help"
-                    className={`mt-0.5 text-[12px] ${shortLeverageErr ? 'text-warn' : 'text-ink-3'}`}
+                    className={`mt-0.5 text-[13px] ${shortLeverageErr ? 'text-warn' : 'text-ink-3'}`}
                   >
                     {shortLeverageErr ?? '0 = 不做空'}
                   </div>
@@ -644,7 +644,7 @@ export function AcctTimer() {
                 })
               }}
             />
-          ) : <p className="text-[14px] text-ink-2">渠道能力加载中…</p>}
+          ) : <p className="text-[15px] text-ink-2">渠道能力加载中…</p>}
         </WizardPage>
       </div>
       <WizardNav prevTo="/setup/acct/trade" nextTo="/setup/acct/confirm" nextDisabled={!scheduleKind} />
@@ -760,7 +760,7 @@ export function AcctConfirm() {
     <div className="flex h-full flex-col">
       <div className="flex-1 overflow-y-auto">
         <WizardPage kicker="账户设置 · 6 / 6" title="确认无误就开跑">
-          <div className="rounded-2xl bg-ok-soft px-7 py-6 text-[19px] leading-loose">
+          <div className="rounded-2xl bg-ok-soft px-7 py-6 text-[20px] leading-loose">
             这个账户 <b className="font-[680]">{acct.name || '（未命名）'}</b> 在 <b className="font-[680]">{descriptor?.label ?? acct.channel}</b> 上，
             绑定组合 <b className="font-[680]">#{acct.portfolioId ?? '—'}</b>，用 <b className="font-[680]">{intentText}</b> 的方式，
             {acct.autoOn ? '自动' : '手动'}调仓，杠杆 <b className="font-[680]">{levText}</b>。
@@ -775,14 +775,14 @@ export function AcctConfirm() {
           )}
 
           <div className="mt-5">
-            <button disabled={previewState.status === 'loading'} className="cursor-pointer rounded-[11px] border-0 bg-ink-1 px-[22px] py-2.5 text-[14px] font-[550] text-surface disabled:cursor-not-allowed disabled:opacity-45" onClick={preview}>
+            <button disabled={previewState.status === 'loading'} className="cursor-pointer rounded-[11px] border-0 bg-ink-1 px-[22px] py-2.5 text-[15px] font-[550] text-surface disabled:cursor-not-allowed disabled:opacity-45" onClick={preview}>
               {previewState.status === 'loading' ? '试跑中…' : '▶ 试跑（不下单）'}
             </button>
             <div className="mt-[18px] max-w-[460px] rounded-[14px] border border-dashed border-line bg-surface p-5">
-              {previewState.status === 'idle' && <div className="py-5 text-center text-[14px] text-ink-3">试跑看这套组合此刻会调成什么样</div>}
+              {previewState.status === 'idle' && <div className="py-5 text-center text-[15px] text-ink-3">试跑看这套组合此刻会调成什么样</div>}
               {previewState.status === 'loading' && <div aria-busy="true"><Skeleton className="h-4 w-full" /><Skeleton className="mt-3 h-4 w-4/5" /><Skeleton className="mt-3 h-4 w-3/5" /></div>}
               <ErrorNotice title="试跑失败" error={previewState.status === 'error' ? previewState.message : null} onRetry={preview} />
-              {previewState.status === 'success' && previewState.rows.length === 0 && <div className="py-5 text-center text-[14px] text-ink-3">无目标持仓。</div>}
+              {previewState.status === 'success' && previewState.rows.length === 0 && <div className="py-5 text-center text-[15px] text-ink-3">无目标持仓。</div>}
               {previewState.status === 'success' && <WeightBars weights={previewState.rows} />}
             </div>
           </div>

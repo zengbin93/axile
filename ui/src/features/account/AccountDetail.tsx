@@ -324,7 +324,7 @@ export function AccountDetail({
       {/* 面包屑回链：详情页永远有一条可见的「回到所有账户」路径。 */}
       <Link
         to="/"
-        className="mb-3 inline-flex items-center gap-1 text-[13px] text-ink-3 transition-colors duration-150 hover:text-ink-1 motion-reduce:transition-none"
+        className="mb-3 inline-flex items-center gap-1 text-[14px] text-ink-3 transition-colors duration-150 hover:text-ink-1 motion-reduce:transition-none"
       >
         <ArrowLeft size={14} aria-hidden />所有账户
       </Link>
@@ -333,7 +333,7 @@ export function AccountDetail({
         <div className="flex flex-wrap items-center gap-3">
           {/* 与舰队卡 / 组合行 / 编辑页标题名配对做共享元素 FLIP（平移 + 微缩）。 */}
           <span
-            className="text-[16px] font-[620]"
+            className="text-[17px] font-[620]"
             style={nameVt ? { viewTransitionName: `account-name-${accountId}` } : undefined}
           >
             {item.name}
@@ -365,7 +365,7 @@ export function AccountDetail({
          * 可点：在途 → 当前执行；「需要看看」→ 最近失败执行。外层始终 div，避免 Link remount 打断换字。
          */}
         <div
-          className={`relative mt-[18px] inline-flex min-w-0 items-center gap-2 text-[23px] font-[640] tracking-tight transition-[padding-left] duration-[440ms] ease-[cubic-bezier(.4,0,.2,1)] motion-reduce:transition-none ${
+          className={`relative mt-[18px] inline-flex min-w-0 items-center gap-2 text-[24px] font-[640] tracking-tight transition-[padding-left] duration-[440ms] ease-[cubic-bezier(.4,0,.2,1)] motion-reduce:transition-none ${
             isBusy ? 'pl-[18px]' : 'pl-0'
           } ${isBusy ? 'text-accent' : INTEGRITY_TEXT_CLASS[state.integrity]}${
             statusNavId ? ' cursor-pointer hover:opacity-80' : ''
@@ -410,14 +410,14 @@ export function AccountDetail({
               首帧不播、纯 opacity 无 blur，不与主句流光抢；「·」静态钉住只重写相位词。 */}
           {isExecuting && (
             <span className="phase-grow">
-              <span className="phase-enter inline-flex min-w-0 items-center gap-1 overflow-hidden whitespace-nowrap text-[15px] font-medium text-ink-2">
+              <span className="phase-enter inline-flex min-w-0 items-center gap-1 overflow-hidden whitespace-nowrap text-[16px] font-medium text-ink-2">
                 <span aria-hidden>·</span>
                 <InkRewrite text={phaseLabel(live?.phase)} tone="label" fluid />
               </span>
             </span>
           )}
           {isExecuting && live?.pendingExecutionId ? (
-            <span className="text-[15px] font-medium text-ink-2">· 结束后再调一次</span>
+            <span className="text-[16px] font-medium text-ink-2">· 结束后再调一次</span>
           ) : null}
           {/* 可点暗示：执行中用生命体征箭头；失败「需要看看」用静止 →，色随父级琥珀。
               箭头纯 inline、只跟随 reflow（不再挂 transform-FLIP）：上游全走 CSS 布局过渡
@@ -425,7 +425,7 @@ export function AccountDetail({
               exec-arrow 自体漂移只在 running 时挂在此层。 */}
           {statusNavId && (
             <span
-              className={`inline-block text-[15px] font-medium ${isExecuting ? 'exec-arrow' : ''}`}
+              className={`inline-block text-[16px] font-medium ${isExecuting ? 'exec-arrow' : ''}`}
               aria-hidden
             >
               →
@@ -438,7 +438,7 @@ export function AccountDetail({
         />
 
         <div className="mt-6 border-t border-line pt-4">
-          <div className="flex items-center gap-1.5 text-[13px] text-ink-2">
+          <div className="flex items-center gap-1.5 text-[14px] text-ink-2">
             <span>{assetTerms.fullLabel}</span>
             <Tooltip content={isExecuting ? '执行中，结束后可刷新账户权益' : '从交易渠道刷新账户权益'}>
               <span className="inline-flex">
@@ -462,13 +462,13 @@ export function AccountDetail({
             <div>
               {/* 金额 → 绩效 hero：共享元素 FLIP（平移 + 微缩）；曲线不参与。 */}
               <div
-                className="num mt-0.5 text-[34px] font-[640] tracking-tight"
+                className="num mt-0.5 text-[35px] font-[640] tracking-tight"
                 style={amountVt ? { viewTransitionName: `equity-amount-${accountId}` } : undefined}
               >
                 <NumberTicker value={equity} format={{ minimumFractionDigits: 2, maximumFractionDigits: 2 }} />
-                <span className="ml-1.5 text-[16px] font-medium text-ink-3">{displayCurrencyUnit(item.currency)}</span>
+                <span className="ml-1.5 text-[17px] font-medium text-ink-3">{displayCurrencyUnit(item.currency)}</span>
               </div>
-              <div className="mt-1.5 text-[13.5px] text-ink-2">
+              <div className="mt-1.5 text-[14.5px] text-ink-2">
                 {pct != null && (
                   <span className={`num ${pct > 0 ? 'text-up' : pct < 0 ? 'text-down' : 'text-ink-2'}`}>
                     今日 {pct >= 0 ? '+' : '−'}
@@ -518,7 +518,7 @@ export function AccountDetail({
          * 算法项吃剩余宽、OverflowText 截断 + hover 播全句；整项可点跳编辑分区。
          * 值文本挂共享名：与目标编辑页的「当前配置」摘要值配对 FLIP（各自门控）。
          */}
-        <div className="mt-4 flex flex-wrap items-center gap-x-6 gap-y-1.5 border-t border-line pt-3.5 text-[13px]">
+        <div className="mt-4 flex flex-wrap items-center gap-x-6 gap-y-1.5 border-t border-line pt-3.5 text-[14px]">
           <HeroConfigItem
             label="杠杆"
             to={`/accounts/${accountId}/edit/leverage`}
@@ -547,7 +547,7 @@ export function AccountDetail({
       <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-3">
         <Card className="px-6 py-4 md:col-span-2">
           <div className="mb-3 flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1.5">
-            <h3 className="mr-auto text-[13px] font-semibold text-ink-2">持仓 vs 目标</h3>
+            <h3 className="mr-auto text-[14px] font-semibold text-ink-2">持仓 vs 目标</h3>
             <StaleDataStatus updatedAt={comparisonStaleAt} />
             <TargetSnapshotControl
               snapshot={weights.data}
@@ -561,7 +561,7 @@ export function AccountDetail({
             />
             <Link
               to={`/accounts/${accountId}/holdings`}
-              className="flex-none text-[12.5px] font-semibold text-accent hover:underline"
+              className="flex-none text-[13.5px] font-semibold text-accent hover:underline"
             >
               持仓明细 →
             </Link>
@@ -578,24 +578,24 @@ export function AccountDetail({
               </div>
             </SkeletonGroup>
           ) : comparisonError ? null : !weights.data?.calculated_at ? (
-            <div className="border-t border-line py-3 text-[13px] leading-relaxed text-ink-3">
+            <div className="border-t border-line py-3 text-[14px] leading-relaxed text-ink-3">
               尚无目标权重，刷新后生成持仓对照
             </div>
           ) : comparisonReady ? (
             <div className="grid min-h-40 gap-5 lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
               <div className="border-t border-line pt-3">
-                <div className={`text-[22px] font-[640] ${STATUS_TEXT_CLASS[driftLevel]}`}>
+                <div className={`text-[23px] font-[640] ${STATUS_TEXT_CLASS[driftLevel]}`}>
                   {driftHeadline}
                 </div>
-                <div className="mt-1.5 text-[13px] text-ink-2">
+                <div className="mt-1.5 text-[14px] text-ink-2">
                   当前 {holdingsCount === 0 ? '空仓' : `${holdingsCount} 只`} · 目标 {targetCount} 只
                 </div>
                 {plan.off > 0 && (
                   <>
-                    <div className="mt-1 text-[13px] text-ink-2">
+                    <div className="mt-1 text-[14px] text-ink-2">
                       卖 {plan.sells} · 买 {plan.buys}{plan.flips > 0 ? ` · 翻向 ${plan.flips}` : ''}
                     </div>
-                    <div className="mt-4 flex items-baseline justify-between gap-3 text-[12.5px]">
+                    <div className="mt-4 flex items-baseline justify-between gap-3 text-[13.5px]">
                       <span className="text-ink-2">预计换手</span>
                       <span className="num font-medium text-ink-1">{turnover.toFixed(1)}%</span>
                     </div>
@@ -619,14 +619,14 @@ export function AccountDetail({
 
         <Card className="px-6 py-4">
           <div className="mb-3 flex items-center justify-between gap-2">
-            <h3 className="text-[13px] font-semibold text-ink-2">自动执行</h3>
+            <h3 className="text-[14px] font-semibold text-ink-2">自动执行</h3>
             <div className="flex min-w-0 items-center gap-3">
               <StaleDataStatus updatedAt={automaticStaleAt} />
               <button
                 type="button"
                 disabled={!scheduleKind}
                 title={!scheduleKind ? '渠道能力加载中' : undefined}
-                className="cursor-pointer text-[12.5px] font-semibold text-accent hover:underline disabled:cursor-default disabled:text-ink-3 disabled:no-underline"
+                className="cursor-pointer text-[13.5px] font-semibold text-accent hover:underline disabled:cursor-default disabled:text-ink-3 disabled:no-underline"
                 onClick={() => setTimerOpen(true)}
               >
                 调整
@@ -637,7 +637,7 @@ export function AccountDetail({
             type="button"
             disabled={!scheduleKind}
             title={!scheduleKind ? '渠道能力加载中' : undefined}
-            className="flex w-full cursor-pointer items-center justify-between gap-3 border-t border-line py-1.5 text-left text-[14px] first:border-t-0 disabled:cursor-default"
+            className="flex w-full cursor-pointer items-center justify-between gap-3 border-t border-line py-1.5 text-left text-[15px] first:border-t-0 disabled:cursor-default"
             onClick={() => setTimerOpen(true)}
           >
             <span className="flex-none text-ink-2">节奏</span>
@@ -645,7 +645,7 @@ export function AccountDetail({
               {account.loading ? (
                 <SkeletonText className="ml-auto w-28" />
               ) : account.error && account.data === null ? (
-                <span className="ml-auto text-[13px] text-ink-3">—</span>
+                <span className="ml-auto text-[14px] text-ink-3">—</span>
               ) : (
                 <OverflowText
                   className="min-w-0 flex-1 text-right font-medium text-ink-1"
@@ -701,13 +701,13 @@ export function AccountDetail({
         <span className="text-xs font-semibold tracking-wide text-ink-3">近期活动</span>
         <div className="flex min-w-0 items-center gap-3">
           <StaleDataStatus updatedAt={activityStaleAt} />
-          <Link to={`/accounts/${accountId}/history`} className="text-[12.5px] font-semibold text-accent hover:underline">
+          <Link to={`/accounts/${accountId}/history`} className="text-[13.5px] font-semibold text-accent hover:underline">
             完整回看 / 绩效 →
           </Link>
         </div>
       </div>
       <Card className="overflow-hidden">
-        {activity.loading && <div className="px-6 py-4 text-[14px] text-ink-2">加载中…</div>}
+        {activity.loading && <div className="px-6 py-4 text-[15px] text-ink-2">加载中…</div>}
         <div className="px-6">
           <ErrorNotice
             title="近期活动加载失败"
@@ -718,7 +718,7 @@ export function AccountDetail({
           />
         </div>
         {!activity.loading && !activity.error && (activity.data?.data.length ?? 0) === 0 && (
-          <div className="px-6 py-4 text-[14px] text-ink-3">暂无执行或跳过记录。</div>
+          <div className="px-6 py-4 text-[15px] text-ink-3">暂无执行或跳过记录。</div>
         )}
         {(() => {
           const { rows, truncated } = buildRecentActivity(activity.data?.data ?? [], {
@@ -737,12 +737,12 @@ export function AccountDetail({
                 return (
                   <div
                     key={row.key}
-                    className={`flex items-center gap-4 border-t border-line px-6 py-3 text-[14px] transition-colors first:border-t-0 ${
+                    className={`flex items-center gap-4 border-t border-line px-6 py-3 text-[15px] transition-colors first:border-t-0 ${
                       clickable ? 'cursor-pointer hover:bg-bg-subtle' : ''
                     }`}
                     onClick={onClick}
                   >
-                    <span className="num w-28 flex-none text-[13px] text-ink-3">{fmt(row.time)}</span>
+                    <span className="num w-28 flex-none text-[14px] text-ink-3">{fmt(row.time)}</span>
                     {row.type === 'fill' && (
                       <>
                         <span className="w-4 flex-none text-center text-ok">✓</span>
@@ -793,7 +793,7 @@ export function AccountDetail({
               {truncated && (
                 <Link
                   to={`/accounts/${accountId}/history`}
-                  className="block border-t border-line px-6 py-3 text-center text-[13px] text-ink-3 hover:text-ink-2"
+                  className="block border-t border-line px-6 py-3 text-center text-[14px] text-ink-3 hover:text-ink-2"
                 >
                   更多历史见「完整回看」→
                 </Link>
@@ -814,7 +814,7 @@ function RecentAmount({ amount, currency }: { amount: string; currency: string }
   if (!amount) return null
   const unit = amount === '—' ? '' : displayCurrencyUnit(currency)
   return (
-    <span className="num whitespace-nowrap text-[13px] text-ink-2">
+    <span className="num whitespace-nowrap text-[14px] text-ink-2">
       {amount}
       {unit ? <span className="ml-1 font-medium text-ink-3">{unit}</span> : null}
     </span>
@@ -846,7 +846,7 @@ function HoldingsPreviewTable({
     >
       <table aria-label="当前持仓" className="w-full border-separate border-spacing-0">
         <thead>
-          <tr className="text-[11px] font-medium text-ink-3">
+          <tr className="text-[12px] font-medium text-ink-3">
             <th scope="col" className={`${PREVIEW_TH} ${PREVIEW_COL} border-b border-line pr-1.5 text-left`}>
               品种
             </th>
@@ -881,7 +881,7 @@ function HoldingsPreviewTable({
             ))
           ) : holdings.length === 0 ? (
             <tr>
-              <td colSpan={4} className="h-32 text-[13px] text-ink-3">
+              <td colSpan={4} className="h-32 text-[14px] text-ink-3">
                 当前空仓
               </td>
             </tr>
@@ -893,8 +893,8 @@ function HoldingsPreviewTable({
               const availableVolume = formatHoldingQuantity(holding.availableVolume)
               const value = holding.value == null ? '—' : withCurrency(fmtMoney(holding.value), currency)
               return (
-                <tr key={holding.key} className="border-t border-line text-[12.5px] first:border-t-0">
-                  <td className={`h-8 ${PREVIEW_COL} pr-1.5 text-[13px] font-[560] text-ink-1`}>{holding.symbol}</td>
+                <tr key={holding.key} className="border-t border-line text-[13.5px] first:border-t-0">
+                  <td className={`h-8 ${PREVIEW_COL} pr-1.5 text-[14px] font-[560] text-ink-1`}>{holding.symbol}</td>
                   <td className={`num h-8 ${PREVIEW_COL} px-1.5 text-right text-ink-2`}>{weight}</td>
                   <td className={`num h-8 ${PREVIEW_COL} px-1.5 text-right text-ink-2`}>
                     {volume}/{availableVolume}

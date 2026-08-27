@@ -158,9 +158,9 @@ function useAlgorithms(): AlgorithmInfo[] | null {
 
 /** 数字框：藏原生 spinner + 产品 focus，避免系统亮蓝/箭头掉队。 */
 const FIELD =
-  'w-28 rounded-[9px] border border-ink-3/30 bg-surface px-3 py-1.5 text-right text-[14px] num outline-none transition-[border-color] duration-200 ease-[cubic-bezier(0.4,0,0.2,1)] focus:border-accent motion-reduce:transition-none [-moz-appearance:textfield] [&::-webkit-inner-spin-button]:m-0 [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:m-0 [&::-webkit-outer-spin-button]:appearance-none'
+  'w-28 rounded-[9px] border border-ink-3/30 bg-surface px-3 py-1.5 text-right text-[15px] num outline-none transition-[border-color] duration-200 ease-[cubic-bezier(0.4,0,0.2,1)] focus:border-accent motion-reduce:transition-none [-moz-appearance:textfield] [&::-webkit-inner-spin-button]:m-0 [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:m-0 [&::-webkit-outer-spin-button]:appearance-none'
 const VALUE_FIELD =
-  'w-full max-w-72 rounded-[9px] border border-ink-3/30 bg-surface px-3 py-1.5 text-[14px] outline-none transition-[border-color] duration-200 ease-[cubic-bezier(0.4,0,0.2,1)] focus:border-accent motion-reduce:transition-none'
+  'w-full max-w-72 rounded-[9px] border border-ink-3/30 bg-surface px-3 py-1.5 text-[15px] outline-none transition-[border-color] duration-200 ease-[cubic-bezier(0.4,0,0.2,1)] focus:border-accent motion-reduce:transition-none'
 const ROW = 'flex flex-col gap-2 border-t border-line py-3 sm:flex-row sm:items-center sm:justify-between'
 const HINT = 'text-xs text-ink-3'
 
@@ -190,7 +190,7 @@ function NumRow({
     (max !== undefined && value > max) || !Number.isFinite(value)
   return (
     <div className={ROW}>
-      <span className="text-[14px]">
+      <span className="text-[15px]">
         {label} {hint && <span className={HINT}>{hint}</span>}
       </span>
       <span className="flex items-center gap-2">
@@ -203,8 +203,8 @@ function NumRow({
           step={step ?? 1}
           onChange={(e) => onChange(Number(e.target.value))}
         />
-        {suffix && <span className="w-6 text-[13px] text-ink-3">{suffix}</span>}
-        {bad && <span className="text-[12px] text-warn">超范围</span>}
+        {suffix && <span className="w-6 text-[14px] text-ink-3">{suffix}</span>}
+        {bad && <span className="text-[13px] text-warn">超范围</span>}
       </span>
     </div>
   )
@@ -217,7 +217,7 @@ function AdvancedSettings({ children }: { children: ReactNode }) {
     <div className="border-t border-line">
       <button
         type="button"
-        className="flex w-full items-center justify-between py-3 text-[13px] font-semibold text-ink-3 hover:text-ink-1"
+        className="flex w-full items-center justify-between py-3 text-[14px] font-semibold text-ink-3 hover:text-ink-1"
         aria-expanded={open}
         onClick={() => setOpen((value) => !value)}
       >
@@ -250,7 +250,7 @@ function PriceStrategyRow({
   activeLabel?: string
 }) {
   return (
-    <div className={`${ROW} text-[14px]`}>
+    <div className={`${ROW} text-[15px]`}>
       <span>价格策略 <span className={HINT}>单次下单的挂价方式</span></span>
       <Segmented
         value={value === 'PASSIVE' ? 'PASSIVE' : 'ACTIVE'}
@@ -279,7 +279,7 @@ function ChaseSettings({
   return (
     <>
       <div className={ROW}>
-        <span className="text-[14px]">追单 <span className={HINT}>行情偏离后撤单重挂</span></span>
+        <span className="text-[15px]">追单 <span className={HINT}>行情偏离后撤单重挂</span></span>
         <Toggle on={enabled} ariaLabel="启用追单" onClick={() => set({ chase_enabled: !enabled })} />
       </div>
       <div
@@ -337,8 +337,8 @@ const SingleMakerEditor: ParamsEditor = ({ params, defaults, onChange, onApplyIn
                 if (!on) onApplyIntent?.(k)
               }}
             >
-              <span className="text-[15px] font-[640]">{c.title}</span>
-              <span className="text-[12.5px] text-ink-2">{c.desc}</span>
+              <span className="text-[16px] font-[640]">{c.title}</span>
+              <span className="text-[13.5px] text-ink-2">{c.desc}</span>
               {/* 质量：warn=注意极（填不满），其余中性说明，不用涨跌绿表「好」 */}
               <span className={`mt-1 text-xs font-semibold ${c.warn ? 'text-warn' : 'text-ink-3'}`}>{c.note}</span>
             </button>
@@ -347,7 +347,7 @@ const SingleMakerEditor: ParamsEditor = ({ params, defaults, onChange, onApplyIn
       </div>
 
       <div className="mt-4 flex flex-wrap items-start justify-between gap-x-5 gap-y-2 border-t border-line pt-3">
-        <div className="min-w-0 text-[13px] leading-relaxed text-ink-2">
+        <div className="min-w-0 text-[14px] leading-relaxed text-ink-2">
           <span className="mr-2 text-ink-3">当前执行</span>
           {describeSingleMakerParams(params)}
           {!active && <span className="ml-2 font-semibold text-ink-2">自定义参数</span>}
@@ -355,7 +355,7 @@ const SingleMakerEditor: ParamsEditor = ({ params, defaults, onChange, onApplyIn
         </div>
         <button
           type="button"
-          className="flex flex-none items-center gap-1 text-[13px] font-semibold text-ink-3 hover:text-ink-1"
+          className="flex flex-none items-center gap-1 text-[14px] font-semibold text-ink-3 hover:text-ink-1"
           aria-expanded={advanced}
           onClick={() => setAdvanced((value) => !value)}
         >
@@ -377,7 +377,7 @@ const SingleMakerEditor: ParamsEditor = ({ params, defaults, onChange, onApplyIn
         <div className="min-h-0 overflow-hidden">
           <div className="mt-3 max-w-[620px]">
             <div className={ROW}>
-              <span className="text-[14px]">下单价格</span>
+              <span className="text-[15px]">下单价格</span>
               <Segmented
                 value={String(effective.price_strategy)}
                 options={[
@@ -397,7 +397,7 @@ const SingleMakerEditor: ParamsEditor = ({ params, defaults, onChange, onApplyIn
               suffix="秒"
             />
             <div className={ROW}>
-              <span className="text-[14px]">追单</span>
+              <span className="text-[15px]">追单</span>
               <Toggle
                 on={chaseEnabled}
                 ariaLabel="启用追单"
@@ -442,9 +442,9 @@ const SingleMakerEditor: ParamsEditor = ({ params, defaults, onChange, onApplyIn
               </div>
             </div>
             <div className={`${ROW} gap-5`}>
-              <span className="text-[14px]">盘口缺失时</span>
+              <span className="text-[15px]">盘口缺失时</span>
               <Select
-                className="min-w-[220px] justify-between px-3 py-1.5 text-[14px]"
+                className="min-w-[220px] justify-between px-3 py-1.5 text-[15px]"
                 value={String(effective.on_missing_book)}
                 onChange={(value) => set({ on_missing_book: value })}
                 options={[
@@ -455,9 +455,9 @@ const SingleMakerEditor: ParamsEditor = ({ params, defaults, onChange, onApplyIn
               />
             </div>
             {effective.on_missing_book === 'market' && (
-              <div className="-mt-1 pb-3 text-[12px] text-warn">盘口不可用时会直接发市价单，可能放大滑点。</div>
+              <div className="-mt-1 pb-3 text-[13px] text-warn">盘口不可用时会直接发市价单，可能放大滑点。</div>
             )}
-            {paramError && <div className="pb-3 text-[12px] text-warn">{paramError}</div>}
+            {paramError && <div className="pb-3 text-[13px] text-warn">{paramError}</div>}
           </div>
         </div>
       </div>
@@ -477,14 +477,14 @@ const TwapEditor: ParamsEditor = ({ params, defaults, onChange }) => {
       <NumRow label="总执行时长" hint="秒（1–86400）" value={total} min={1} max={86400} step={30} onChange={(v) => set({ total_duration: v })} suffix="s" />
       <NumRow label="切片数量" hint="均匀切成几片（1–1000）" value={slices} min={1} max={1000} onChange={(v) => set({ slices: v })} suffix="片" />
       <PriceStrategyRow value={effective.price_strategy} onChange={(value) => set({ price_strategy: value })} />
-      <div className={`${ROW} text-[14px]`}>
+      <div className={`${ROW} text-[15px]`}>
         <span>单片间隔</span>
         <span className="num text-ink-2">{slices > 0 ? (total / slices).toFixed(1) : '—'} s</span>
       </div>
       <AdvancedSettings>
         <NumRow label="单片最大等待" hint="等待成交（1–3600）" value={wait} min={1} max={3600} onChange={(value) => set({ max_wait_seconds: value })} suffix="秒" />
       </AdvancedSettings>
-      {paramError && <div className="pb-3 text-[12px] text-warn">{paramError}</div>}
+      {paramError && <div className="pb-3 text-[13px] text-warn">{paramError}</div>}
     </div>
   )
 }
@@ -504,7 +504,7 @@ const PovEditor: ParamsEditor = ({ params, defaults, onChange }) => {
       <NumRow label="下单节奏" hint="秒（≥0.1）" value={interval} min={0.1} step={0.5} onChange={(v) => set({ interval_seconds: v })} suffix="s" />
       <NumRow label="硬时间上限" hint="秒（1–86400）" value={maxDur} min={1} max={86400} step={60} onChange={(v) => set({ max_duration: v })} suffix="s" />
       <PriceStrategyRow value={effective.price_strategy} onChange={(value) => set({ price_strategy: value })} />
-      <div className={`${ROW} text-[14px]`}>
+      <div className={`${ROW} text-[15px]`}>
         <span>
           超时兜底 <span className={HINT}>到点未成交时按市价补足</span>
         </span>
@@ -520,7 +520,7 @@ const PovEditor: ParamsEditor = ({ params, defaults, onChange }) => {
       <AdvancedSettings>
         <NumRow label="单次最大等待" hint="每轮订单等待（1–3600）" value={wait} min={1} max={3600} onChange={(value) => set({ max_wait_seconds: value })} suffix="秒" />
       </AdvancedSettings>
-      {paramError && <div className="pb-3 text-[12px] text-warn">{paramError}</div>}
+      {paramError && <div className="pb-3 text-[13px] text-warn">{paramError}</div>}
     </div>
   )
 }
@@ -533,7 +533,7 @@ const TargetPosEditor: ParamsEditor = ({ params, defaults, onChange }) => {
   const paramError = validateAlgorithmParams(params, 'TARGET-POS-TASK')
   return (
     <div className="max-w-[620px]">
-      <div className={`${ROW} text-[14px]`}>
+      <div className={`${ROW} text-[15px]`}>
         <span>
           价格策略 <span className={HINT}>被动挂单 / 主动吃单</span>
         </span>
@@ -546,7 +546,7 @@ const TargetPosEditor: ParamsEditor = ({ params, defaults, onChange }) => {
           onChange={(v) => set({ price_strategy: v })}
         />
       </div>
-      <div className={`${ROW} text-[14px]`}>
+      <div className={`${ROW} text-[15px]`}>
         <span>
           平仓优先 <span className={HINT}>先平昨仓还是今仓</span>
         </span>
@@ -571,7 +571,7 @@ const TargetPosEditor: ParamsEditor = ({ params, defaults, onChange }) => {
         />
         <ChaseSettings effective={effective} set={set} />
       </AdvancedSettings>
-      {paramError && <div className="pb-3 text-[12px] text-warn">{paramError}</div>}
+      {paramError && <div className="pb-3 text-[13px] text-warn">{paramError}</div>}
     </div>
   )
 }
@@ -590,9 +590,9 @@ function GenericEditor({
   const [err, setErr] = useState<string | null>(null)
   return (
     <div className="max-w-[620px]">
-      {info?.description && <div className="mb-1.5 text-[13px] text-ink-2">{info.description}</div>}
+      {info?.description && <div className="mb-1.5 text-[14px] text-ink-2">{info.description}</div>}
       <textarea
-        className="w-full rounded-[11px] border border-ink-3/30 bg-surface p-3 font-mono text-[13px] leading-relaxed"
+        className="w-full rounded-[11px] border border-ink-3/30 bg-surface p-3 font-mono text-[14px] leading-relaxed"
         rows={8}
         spellCheck={false}
         value={text}
@@ -619,7 +619,7 @@ function GenericEditor({
           }
         }}
       />
-      {err && <div className="mt-1 text-[12px] text-warn">JSON 有误：{err}</div>}
+      {err && <div className="mt-1 text-[13px] text-warn">JSON 有误：{err}</div>}
     </div>
   )
 }
@@ -649,9 +649,9 @@ function SchemaFieldRow({
     const options = spec.enum.map((item) => ({ value: String(item), label: String(item) }))
     return (
       <div className={ROW}>
-        <span className="text-[14px]">{label} {hint && <span className={HINT}>{hint}</span>}</span>
+        <span className="text-[15px]">{label} {hint && <span className={HINT}>{hint}</span>}</span>
         <Select
-          className="min-w-[220px] justify-between px-3 py-1.5 text-[14px]"
+          className="min-w-[220px] justify-between px-3 py-1.5 text-[15px]"
           value={String(value ?? '')}
           options={options}
           onChange={(next) => onChange(spec.enum?.find((item) => String(item) === next) ?? next)}
@@ -662,7 +662,7 @@ function SchemaFieldRow({
   if (spec.type === 'boolean') {
     return (
       <div className={ROW}>
-        <span className="text-[14px]">{label} {hint && <span className={HINT}>{hint}</span>}</span>
+        <span className="text-[15px]">{label} {hint && <span className={HINT}>{hint}</span>}</span>
         <Toggle on={value === true} ariaLabel={label} onClick={() => onChange(value !== true)} />
       </div>
     )
@@ -684,7 +684,7 @@ function SchemaFieldRow({
   }
   return (
     <div className={ROW}>
-      <span className="text-[14px]">{label} {hint && <span className={HINT}>{hint}</span>}</span>
+      <span className="text-[15px]">{label} {hint && <span className={HINT}>{hint}</span>}</span>
       <input
         className={VALUE_FIELD}
         value={typeof value === 'string' ? value : ''}
@@ -719,7 +719,7 @@ function SchemaEditor({
 
   return (
     <div className="max-w-[620px]">
-      {info.description && <div className="mb-1.5 text-[13px] text-ink-2">{info.description}</div>}
+      {info.description && <div className="mb-1.5 text-[14px] text-ink-2">{info.description}</div>}
       {coreFields.map((field) => (
         <SchemaFieldRow key={field.name} field={field} value={effective[field.name]} onChange={(value) => set(field.name, value)} />
       ))}
@@ -731,7 +731,7 @@ function SchemaEditor({
           {hasCompleteChaseGroup && <ChaseSettings effective={effective} set={(patch) => onChange({ ...params, ...patch })} />}
         </AdvancedSettings>
       )}
-      {error && <div className="pb-3 text-[12px] text-warn">{error}</div>}
+      {error && <div className="pb-3 text-[13px] text-warn">{error}</div>}
     </div>
   )
 }
@@ -793,7 +793,7 @@ export function AlgorithmEditor({ slot, channel, value, onChange, allowClear }: 
   // 值未设置（清仓槽）：只露一行「未设置」+ 设置入口。
   if (value === null) {
     return (
-      <div className="text-[14px] text-ink-2">
+      <div className="text-[15px] text-ink-2">
         <span className="text-ink-3">未设置 · 使用后端默认清仓逻辑</span>
         <button type="button" className="ml-3 cursor-pointer text-accent hover:underline" onClick={() => onChange(fallback)}>
           设置清仓算法
@@ -845,12 +845,12 @@ export function AlgorithmEditor({ slot, channel, value, onChange, allowClear }: 
       >
         <div className="overflow-hidden">
           <div className="flex flex-wrap items-center gap-3">
-            <label className="text-[13px] text-ink-2">执行算法</label>
+            <label className="text-[14px] text-ink-2">执行算法</label>
             {algos == null ? (
               <Skeleton className="h-9 w-[220px]" />
             ) : (
               <Select
-                className="min-w-[220px] justify-between px-3 py-1.5 text-[14px]"
+                className="min-w-[220px] justify-between px-3 py-1.5 text-[15px]"
                 value={method}
                 onChange={pick}
                 options={candidates.map((a) => ({
@@ -863,7 +863,7 @@ export function AlgorithmEditor({ slot, channel, value, onChange, allowClear }: 
             {!isDefault && (
               <button
                 type="button"
-                className="text-[13px] text-ink-3 hover:text-ink-1"
+                className="text-[14px] text-ink-3 hover:text-ink-1"
                 onClick={() => {
                   onChange(fallback)
                   setOpen(false)
@@ -873,14 +873,14 @@ export function AlgorithmEditor({ slot, channel, value, onChange, allowClear }: 
               </button>
             )}
             {allowClear && (
-              <button type="button" className="text-[13px] text-ink-3 hover:text-warn" onClick={() => onChange(null)}>
+              <button type="button" className="text-[14px] text-ink-3 hover:text-warn" onClick={() => onChange(null)}>
                 清空
               </button>
             )}
             {isDefault && open && (
               <button
                 type="button"
-                className="text-[13px] text-ink-3 hover:text-ink-1"
+                className="text-[14px] text-ink-3 hover:text-ink-1"
                 onClick={() => setOpen(false)}
               >
                 收起
@@ -907,7 +907,7 @@ export function AlgorithmEditor({ slot, channel, value, onChange, allowClear }: 
       {!showPicker && (
         <button
           type="button"
-          className="mt-4 flex items-center gap-2 text-[12px] font-semibold tracking-wide text-ink-3 hover:text-ink-1"
+          className="mt-4 flex items-center gap-2 text-[13px] font-semibold tracking-wide text-ink-3 hover:text-ink-1"
           onClick={() => setOpen(true)}
         >
           ▸ 换执行算法

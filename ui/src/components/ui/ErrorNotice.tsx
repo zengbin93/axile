@@ -49,7 +49,7 @@ export function ErrorNotice({
     <div className={`grid transition-[grid-template-rows] duration-200 motion-reduce:transition-none ${open ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'}`}>
       <div className="min-h-0 overflow-hidden" inert={!open}>
         <div
-          className={`${compact ? 'py-1.5 text-[12.5px]' : 'my-2 py-2 text-[13px]'} ${blocked ? 'rounded-[6px] bg-warn-soft px-2.5' : 'border-l-2 border-warn pl-2.5'}`}
+          className={`${compact ? 'py-1.5 text-[13.5px]' : 'my-2 py-2 text-[14px]'} ${blocked ? 'rounded-[6px] bg-warn-soft px-2.5' : 'border-l-2 border-warn pl-2.5'}`}
           role={variant === 'mutation' ? 'alert' : 'status'}
           aria-live={variant === 'mutation' ? 'assertive' : 'polite'}
         >
@@ -76,7 +76,7 @@ export function ErrorNotice({
             <>
               <button
                 type="button"
-                className="mt-1 cursor-pointer text-[11.5px] text-ink-3 hover:text-ink-2"
+                className="mt-1 cursor-pointer text-[12.5px] text-ink-3 hover:text-ink-2"
                 aria-expanded={expanded}
                 aria-controls={evidenceId}
                 onClick={() => setExpanded((value) => !value)}
@@ -85,7 +85,7 @@ export function ErrorNotice({
               </button>
               <div className={`grid transition-[grid-template-rows] duration-200 motion-reduce:transition-none ${expanded ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'}`}>
                 <div id={evidenceId} className="min-h-0 overflow-hidden" inert={!expanded}>
-                  <dl className="mt-1.5 space-y-1 border-t border-line pt-1.5 text-[11.5px] text-ink-3">
+                  <dl className="mt-1.5 space-y-1 border-t border-line pt-1.5 text-[12.5px] text-ink-3">
                     {allEvidence.map((item) => (
                       <div key={`${item.label}:${item.value}`} className="flex gap-2">
                         <dt className="flex-none">{item.label}</dt>

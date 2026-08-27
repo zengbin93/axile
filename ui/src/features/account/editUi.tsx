@@ -22,11 +22,11 @@ const SHELL =
   'rounded-[12px] border border-line bg-surface px-4 py-3.5'
 
 export const TEXT =
-  'w-full rounded-[9px] border border-ink-3/25 bg-surface px-3 py-2 text-[14px] outline-none focus:border-accent'
+  'w-full rounded-[9px] border border-ink-3/25 bg-surface px-3 py-2 text-[15px] outline-none focus:border-accent'
 export const NUM =
-  'w-24 rounded-[9px] border border-ink-3/25 bg-surface px-3 py-1.5 num text-right text-[14px] outline-none focus:border-accent'
+  'w-24 rounded-[9px] border border-ink-3/25 bg-surface px-3 py-1.5 num text-right text-[15px] outline-none focus:border-accent'
 export const AREA =
-  'w-full rounded-[9px] border border-ink-3/25 bg-surface px-3 py-2 font-mono text-[13px] leading-6 outline-none focus:border-accent'
+  'w-full rounded-[9px] border border-ink-3/25 bg-surface px-3 py-2 font-mono text-[14px] leading-6 outline-none focus:border-accent'
 
 /** 加载骨架。 */
 export function EditLoading({
@@ -76,7 +76,7 @@ export function Section({ label, children }: { label: string; children: ReactNod
   return (
     <div className="mt-7">
       <div className="mb-2 flex items-center gap-3">
-        <span className="text-[11px] font-semibold tracking-wide text-ink-3">{label}</span>
+        <span className="text-[12px] font-semibold tracking-wide text-ink-3">{label}</span>
         <span className="h-px flex-1 bg-line" />
       </div>
       <div className="grid grid-cols-1 gap-x-8 gap-y-3 md:grid-cols-2">{children}</div>
@@ -96,9 +96,9 @@ export function EditSynopsis({
 }) {
   return (
     <div className="mt-4">
-      <div className="text-[11px] font-semibold tracking-wide text-ink-3">当前配置</div>
-      <div className="mt-1 text-[14px] font-medium leading-6 text-ink-1">{children}</div>
-      {note && <p className="mt-1 text-[13px] leading-5 text-ink-2">{note}</p>}
+      <div className="text-[12px] font-semibold tracking-wide text-ink-3">当前配置</div>
+      <div className="mt-1 text-[15px] font-medium leading-6 text-ink-1">{children}</div>
+      {note && <p className="mt-1 text-[14px] leading-5 text-ink-2">{note}</p>}
     </div>
   )
 }
@@ -119,9 +119,9 @@ export function Row({
 }) {
   return (
     <div className={`flex gap-4 ${span ? 'md:col-span-2' : ''} ${top ? 'items-start' : 'items-center'}`}>
-      <div className={`w-24 flex-none text-[13px] text-ink-2 ${top ? 'pt-2' : ''}`}>
+      <div className={`w-24 flex-none text-[14px] text-ink-2 ${top ? 'pt-2' : ''}`}>
         {label}
-        {hint && <span className="block text-[11px] text-ink-3">{hint}</span>}
+        {hint && <span className="block text-[12px] text-ink-3">{hint}</span>}
       </div>
       <div className="min-w-0 flex-1">{children}</div>
     </div>
@@ -145,10 +145,10 @@ export function NumCell({
 }) {
   return (
     <label className="flex flex-col gap-1">
-      <span className="text-[13px] text-ink-2">
+      <span className="text-[14px] text-ink-2">
         {label}
-        {hint && <span className="ml-1.5 text-[11px] text-ink-3">{hint}</span>}
-        {bad && <span className="ml-1.5 text-[11px] text-warn">超范围</span>}
+        {hint && <span className="ml-1.5 text-[12px] text-ink-3">{hint}</span>}
+        {bad && <span className="ml-1.5 text-[12px] text-warn">超范围</span>}
       </span>
       <input className={NUM} value={value} onChange={(e) => onChange(e.target.value)} />
     </label>
@@ -201,11 +201,11 @@ function ShellColumns({
 }) {
   return (
     <div className="flex items-center gap-4">
-      <div className="w-24 flex-none text-[13px] text-ink-2">
+      <div className="w-24 flex-none text-[14px] text-ink-2">
         {label}
-        {hint && <span className="block text-[11px] text-ink-3">{hint}</span>}
+        {hint && <span className="block text-[12px] text-ink-3">{hint}</span>}
       </div>
-      <OverflowText className="min-w-0 flex-1 text-[14px] font-medium text-ink-1" text={summary} />
+      <OverflowText className="min-w-0 flex-1 text-[15px] font-medium text-ink-1" text={summary} />
       <div className="flex-none">{trailing}</div>
     </div>
   )
@@ -239,7 +239,7 @@ export function EntryRow({
         label={label}
         hint={hint}
         summary={summary}
-        trailing={<span className="text-[12.5px] font-semibold text-accent">调整 ›</span>}
+        trailing={<span className="text-[13.5px] font-semibold text-accent">调整 ›</span>}
       />
     </Link>
   )
@@ -278,14 +278,14 @@ export function EditWorktopBar({
           trailing={
             trailing ?? (
               // 与入口「调整 ›」近似占位宽，减轻 FLIP 时右缘伸缩
-              <span className="invisible text-[12.5px] font-semibold" aria-hidden>
+              <span className="invisible text-[13.5px] font-semibold" aria-hidden>
                 调整 ›
               </span>
             )
           }
         />
       </div>
-      {lead && <p className="mt-2 text-[13px] text-ink-2">{lead}</p>}
+      {lead && <p className="mt-2 text-[14px] text-ink-2">{lead}</p>}
     </div>
   )
 }
@@ -318,17 +318,17 @@ export function EditSaveBar({
     >
       <div className="flex items-center gap-4 px-6 py-3">
         <div className="min-w-0 flex-1">
-          <div className="text-[11px] font-semibold tracking-wide text-ink-3">
+          <div className="text-[12px] font-semibold tracking-wide text-ink-3">
             待保存 · {changes.length} 项{blocked && <span className="text-warn"> · 有错误</span>}
           </div>
-          <OverflowText className="num text-[13px] text-ink-1" text={changes.join('  ·  ')} />
+          <OverflowText className="num text-[14px] text-ink-1" text={changes.join('  ·  ')} />
         </div>
-        <Link to={cancelTo} className="flex-none text-[13px] text-ink-2 hover:text-ink-1" tabIndex={open ? 0 : -1}>
+        <Link to={cancelTo} className="flex-none text-[14px] text-ink-2 hover:text-ink-1" tabIndex={open ? 0 : -1}>
           取消
         </Link>
         <button
           type="button"
-          className="flex-none cursor-pointer rounded-[9px] border-0 bg-ink-1 px-5 py-2 text-[13.5px] font-semibold text-surface disabled:opacity-45"
+          className="flex-none cursor-pointer rounded-[9px] border-0 bg-ink-1 px-5 py-2 text-[14.5px] font-semibold text-surface disabled:opacity-45"
           onClick={onSave}
           disabled={blocked || saving || !open}
           tabIndex={open ? 0 : -1}

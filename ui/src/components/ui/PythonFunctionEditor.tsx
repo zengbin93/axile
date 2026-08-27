@@ -7,7 +7,7 @@ import CodeMirror, { type ReactCodeMirrorRef } from '@uiw/react-codemirror'
 import { Check, Clipboard, Play, TriangleAlert } from 'lucide-react'
 
 const editorTheme = EditorView.theme({
-  '&': { backgroundColor: 'transparent', fontSize: '13px' },
+  '&': { backgroundColor: 'transparent', fontSize: '14px' },
   '&.cm-focused': { outline: 'none' },
   '.cm-gutters': { backgroundColor: 'transparent', border: 'none' },
   '.cm-content': { fontFamily: 'var(--font-mono)' },
@@ -109,11 +109,11 @@ export function PythonFunctionEditor({
     <div className="w-full">
       <div className="mb-2 flex items-center justify-end gap-4">
         {hasCode && (
-          <button className="inline-flex cursor-pointer items-center gap-1.5 text-[13px] text-accent disabled:cursor-default disabled:opacity-45" onClick={() => void paste()} disabled={disabled}>
+          <button className="inline-flex cursor-pointer items-center gap-1.5 text-[14px] text-accent disabled:cursor-default disabled:opacity-45" onClick={() => void paste()} disabled={disabled}>
             <Clipboard size={14} /> 粘贴
           </button>
         )}
-        {docHref && <a className="text-[13px] text-accent" href={docHref} target="_blank" rel="noopener">开发文档 ↗</a>}
+        {docHref && <a className="text-[14px] text-accent" href={docHref} target="_blank" rel="noopener">开发文档 ↗</a>}
       </div>
       <div className={`overflow-hidden rounded-[8px] border-l-[3px] ${hasCode ? style.rail : 'border-line'}`}>
         <div className="relative bg-code-bg">
@@ -130,22 +130,22 @@ export function PythonFunctionEditor({
           />
           {!hasCode && (
             <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-2">
-              <button className="pointer-events-auto inline-flex cursor-pointer items-center gap-2 rounded-[8px] border border-line bg-surface px-5 py-3 text-[14px] font-[550] text-ink-1 shadow-sm hover:border-ink-3" onClick={() => void paste()}>
+              <button className="pointer-events-auto inline-flex cursor-pointer items-center gap-2 rounded-[8px] border border-line bg-surface px-5 py-3 text-[15px] font-[550] text-ink-1 shadow-sm hover:border-ink-3" onClick={() => void paste()}>
                 <Clipboard size={16} /> 从剪贴板粘贴代码
               </button>
-              <span className="text-[12.5px] text-ink-3">或点此直接输入</span>
+              <span className="text-[13.5px] text-ink-3">或点此直接输入</span>
             </div>
           )}
         </div>
         {hasCode && (
           <div className={`flex flex-wrap items-center gap-2.5 border-t px-3.5 py-2.5 ${style.band}`}>
-            <span className={`flex min-w-[130px] flex-1 items-center gap-1.5 text-[13px] font-[520] ${style.text}`}>
+            <span className={`flex min-w-[130px] flex-1 items-center gap-1.5 text-[14px] font-[520] ${style.text}`}>
               {status === 'pass' && <Check size={14} />}
               {status === 'fail' && <TriangleAlert size={14} />}
               {style.body}
             </span>
             {controls}
-            <button className="inline-flex cursor-pointer items-center gap-1.5 rounded-[8px] border-0 bg-ink-1 px-4 py-1.5 text-[13.5px] font-[550] text-surface disabled:cursor-default disabled:opacity-45" onClick={onRun} disabled={running || disabled}>
+            <button className="inline-flex cursor-pointer items-center gap-1.5 rounded-[8px] border-0 bg-ink-1 px-4 py-1.5 text-[14.5px] font-[550] text-surface disabled:cursor-default disabled:opacity-45" onClick={onRun} disabled={running || disabled}>
               <Play size={14} /> {runLabel}
             </button>
           </div>
@@ -167,22 +167,22 @@ export function PythonFunctionEditor({
       >
         {result && dialogOpen && (
           <>
-            <div className={`flex items-center gap-2 px-[22px] pt-5 pb-1.5 text-[17px] font-[640] ${result.valid ? 'text-accent' : 'text-warn'}`}>
+            <div className={`flex items-center gap-2 px-[22px] pt-5 pb-1.5 text-[18px] font-[640] ${result.valid ? 'text-accent' : 'text-warn'}`}>
               {result.valid ? <Check size={17} /> : <TriangleAlert size={17} />}
               {result.valid ? '试跑通过' : '试跑未通过'}
             </div>
-            <div className="max-h-[60vh] overflow-y-auto px-[22px] pb-[18px] text-[13.5px] leading-relaxed">
+            <div className="max-h-[60vh] overflow-y-auto px-[22px] pb-[18px] text-[14.5px] leading-relaxed">
               {result.valid
                 ? (resultContent ?? <p className="text-ink-2">函数执行成功。</p>)
                 : (
                   <>
-                    <p className="font-mono text-[12.5px] text-warn">
+                    <p className="font-mono text-[13.5px] text-warn">
                       {[result.errorType, result.errorMessage].filter(Boolean).join(': ') || '执行出错'}
                     </p>
                     {result.traceback && (
                       <details className="mt-3 rounded-[8px] border border-line bg-code-bg px-4 py-3" open>
-                        <summary className="cursor-pointer select-none text-[12.5px] text-ink-2">完整 traceback</summary>
-                        <pre className="mt-2 max-h-[220px] overflow-auto whitespace-pre-wrap font-mono text-[12px] leading-relaxed text-warn">{result.traceback}</pre>
+                        <summary className="cursor-pointer select-none text-[13.5px] text-ink-2">完整 traceback</summary>
+                        <pre className="mt-2 max-h-[220px] overflow-auto whitespace-pre-wrap font-mono text-[13px] leading-relaxed text-warn">{result.traceback}</pre>
                       </details>
                     )}
                   </>
@@ -195,7 +195,7 @@ export function PythonFunctionEditor({
                 onClick={() => setDialogOpen(false)}
               >
                 关闭
-                <span aria-hidden className="text-[12px] leading-none opacity-55">⏎</span>
+                <span aria-hidden className="text-[13px] leading-none opacity-55">⏎</span>
               </button>
             </div>
           </>

@@ -82,7 +82,7 @@ export function PortfolioEditPage() {
   return (
     <section className="mx-auto w-full max-w-[1440px]">
       <Card className="border border-warn/30 bg-warn-tint px-6 py-4">
-        <div className="text-[14px]">
+        <div className="text-[15px]">
           <b>影响范围</b> · {accountsError ? (
             <span className="text-warn">绑定关系暂不可用</span>
           ) : accounts == null ? (
@@ -91,12 +91,12 @@ export function PortfolioEditPage() {
             <>此组合被 <b>{followers.length}</b> 个账户使用{followers.length > 0 && `：${followers.map((account) => account.name).join('、')}`}</>
           )}
         </div>
-        <div className="mt-1 text-[13px] text-ink-2">保存后，这些账户会在下次调仓时执行新函数。</div>
+        <div className="mt-1 text-[14px] text-ink-2">保存后，这些账户会在下次调仓时执行新函数。</div>
       </Card>
 
       <SectionLabel>组合名称</SectionLabel>
       <input
-        className="w-full max-w-[520px] rounded-[8px] border border-ink-3/30 bg-surface px-4 py-3 text-[16px] font-[550] outline-none focus:border-accent"
+        className="w-full max-w-[520px] rounded-[8px] border border-ink-3/30 bg-surface px-4 py-3 text-[17px] font-[550] outline-none focus:border-accent"
         value={name}
         onChange={(event) => { setName(event.target.value); setSaveError(null) }}
       />
@@ -108,9 +108,9 @@ export function PortfolioEditPage() {
 
       <ErrorNotice title="保存组合失败" error={saveError} variant="mutation" onRetry={publish} />
       <div className="mt-2 flex items-center justify-end gap-3 border-t border-line pt-4">
-        <span className="mr-auto text-[13px] text-ink-3">{dirty ? '有未保存修改' : '没有修改'}</span>
+        <span className="mr-auto text-[14px] text-ink-3">{dirty ? '有未保存修改' : '没有修改'}</span>
         <button
-          className="cursor-pointer rounded-[8px] border-0 bg-ink-1 px-5 py-2.5 text-[14px] font-[550] text-surface disabled:opacity-45"
+          className="cursor-pointer rounded-[8px] border-0 bg-ink-1 px-5 py-2.5 text-[15px] font-[550] text-surface disabled:opacity-45"
           disabled={!dirty || !name.trim() || !code.trim() || saving || accounts == null || Boolean(accountsError)}
           onClick={publish}
         >

@@ -37,7 +37,7 @@ export function ChoiceGroup<T extends string>({
             type="button"
             role="radio"
             aria-checked={selected}
-            className={`cursor-pointer rounded-[9px] border px-4 py-2 text-[14px] transition-colors ${
+            className={`cursor-pointer rounded-[9px] border px-4 py-2 text-[15px] transition-colors ${
               selected
                 ? 'border-accent bg-accent-soft font-semibold text-ink-1'
                 : 'border-ink-3/30 text-ink-2 hover:border-ink-3/60 hover:text-ink-1'

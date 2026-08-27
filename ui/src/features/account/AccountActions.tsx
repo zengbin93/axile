@@ -19,7 +19,7 @@ interface AccountActionsProps {
   onDelete: () => void
 }
 
-const BTN = 'cursor-pointer whitespace-nowrap rounded-lg border px-3 py-1.5 text-[13px]'
+const BTN = 'cursor-pointer whitespace-nowrap rounded-lg border px-3 py-1.5 text-[14px]'
 
 /** 主操作说明气泡：hover 满 2s 才出，压制掠过噪音；不弹窗。 */
 const ACTION_TIP_MS = 2000
@@ -162,7 +162,7 @@ export function AccountActions(props: AccountActionsProps) {
       {/* ⋯ 仅留罕见/不可逆的配置类动作 */}
       <div className="relative" ref={ref}>
         <button
-          className="cursor-pointer rounded-md px-1.5 text-[22px] leading-none text-ink-3 hover:bg-fill hover:text-ink-1"
+          className="cursor-pointer rounded-md px-1.5 text-[23px] leading-none text-ink-3 hover:bg-fill hover:text-ink-1"
           onClick={(e) => {
             e.stopPropagation()
             if (menuOpen) closeMenu()

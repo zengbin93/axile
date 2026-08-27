@@ -83,8 +83,8 @@ export function ConfirmModal({
       >
         {spec && (
           <>
-            <div className="px-[22px] pt-5 pb-1.5 text-[17px] font-[640]">{spec.title}</div>
-            <div className="px-[22px] pb-[18px] text-[13.5px] leading-relaxed text-ink-2">
+            <div className="px-[22px] pt-5 pb-1.5 text-[18px] font-[640]">{spec.title}</div>
+            <div className="px-[22px] pb-[18px] text-[14.5px] leading-relaxed text-ink-2">
               {spec.body}
             </div>
             <div className="flex justify-end gap-2.5 border-t border-line px-5 py-3.5">
@@ -94,7 +94,7 @@ export function ConfirmModal({
                 onClick={onClose}
               >
                 取消
-                {danger && <span aria-hidden className="text-[12px] leading-none opacity-55">⏎</span>}
+                {danger && <span aria-hidden className="text-[13px] leading-none opacity-55">⏎</span>}
               </button>
               <button
                 ref={okRef}
@@ -109,7 +109,7 @@ export function ConfirmModal({
                 }}
               >
                 {spec.okText}
-                {!danger && <span aria-hidden className="text-[12px] leading-none opacity-55">⏎</span>}
+                {!danger && <span aria-hidden className="text-[13px] leading-none opacity-55">⏎</span>}
               </button>
             </div>
           </>

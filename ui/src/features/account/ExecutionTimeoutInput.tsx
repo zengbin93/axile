@@ -55,7 +55,7 @@ export function ExecutionTimeoutInput({
   }
 
   const stepButton =
-    'grid h-full w-9 flex-none place-items-center border-0 bg-transparent text-[18px] text-ink-3 transition-colors hover:bg-fill hover:text-ink-1 disabled:cursor-default disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-ink-3'
+    'grid h-full w-9 flex-none place-items-center border-0 bg-transparent text-[19px] text-ink-3 transition-colors hover:bg-fill hover:text-ink-1 disabled:cursor-default disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-ink-3'
 
   return (
     <div className="flex items-center gap-1.5">
@@ -85,13 +85,13 @@ export function ExecutionTimeoutInput({
               value={lastValidValue.current}
               locales="zh-CN"
               format={NUMBER_FORMAT}
-              className="num text-[15px] text-ink-1"
+              className="num text-[16px] text-ink-1"
               spinTiming={SPIN_TIMING}
               transformTiming={TRANSFORM_TIMING}
               opacityTiming={OPACITY_TIMING}
               respectMotionPreference
             />
-            <span className="flex-none text-[12px] text-ink-3">秒</span>
+            <span className="flex-none text-[13px] text-ink-3">秒</span>
           </div>
           <div
             className={`relative flex h-full items-center justify-center gap-1 ${
@@ -109,7 +109,7 @@ export function ExecutionTimeoutInput({
               aria-describedby={describedBy}
               aria-invalid={invalid}
               inputMode="numeric"
-              className="num w-12 border-0 bg-transparent p-0 text-right text-[15px] text-ink-1 outline-none"
+              className="num w-12 border-0 bg-transparent p-0 text-right text-[16px] text-ink-1 outline-none"
               value={value}
               onChange={(event) => onChange(event.target.value)}
               onFocus={() => setIsEditing(true)}
@@ -125,7 +125,7 @@ export function ExecutionTimeoutInput({
                 onKeyDown(event)
               }}
             />
-            <span className="flex-none text-[12px] text-ink-3">秒</span>
+            <span className="flex-none text-[13px] text-ink-3">秒</span>
           </div>
         </div>
         <button

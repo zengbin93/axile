@@ -148,17 +148,17 @@ function ControlRuleField({
   return (
     <div className="border-t border-line/70 py-3 first:border-t-0">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-        <span className="w-24 flex-none text-[13px] text-ink-2">{meta.label}</span>
-        <span className="num min-w-0 flex-1 text-[13px] text-ink-1">
+        <span className="w-24 flex-none text-[14px] text-ink-2">{meta.label}</span>
+        <span className="num min-w-0 flex-1 text-[14px] text-ink-1">
           {effective ? `${effective.limit} ${meta.unit}` : '不限制'}
-          {active && <span className="ml-2 text-[11px] text-ink-3">预设 {preset ? `${preset.limit} ${meta.unit}` : '不限制'}</span>}
+          {active && <span className="ml-2 text-[12px] text-ink-3">预设 {preset ? `${preset.limit} ${meta.unit}` : '不限制'}</span>}
         </span>
-        <span className={`text-[11px] ${active ? 'text-accent' : 'text-ink-3'}`}>
+        <span className={`text-[12px] ${active ? 'text-accent' : 'text-ink-3'}`}>
           {active ? '自定义' : '使用预设值'}
         </span>
         <button
           type="button"
-          className="cursor-pointer border-0 bg-transparent text-[12px] font-semibold text-accent"
+          className="cursor-pointer border-0 bg-transparent text-[13px] font-semibold text-accent"
           onClick={() => (active ? onChange(null) : begin())}
         >
           {active ? '恢复预设值' : preset ? '修改' : '设置限制'}
@@ -170,9 +170,9 @@ function ControlRuleField({
       >
         <div className="min-h-0 overflow-hidden">
           <div className="ml-0 mt-2 flex flex-col gap-2 rounded-[9px] bg-canvas/70 px-3 py-3 sm:ml-24 sm:flex-row sm:items-center">
-            <label className="flex items-center gap-2 text-[12px] text-ink-2">
+            <label className="flex items-center gap-2 text-[13px] text-ink-2">
               <input
-                className="num w-24 rounded-[8px] border border-ink-3/25 bg-surface px-2.5 py-1.5 text-right text-[13px] outline-none focus:border-accent"
+                className="num w-24 rounded-[8px] border border-ink-3/25 bg-surface px-2.5 py-1.5 text-right text-[14px] outline-none focus:border-accent"
                 type="number"
                 min={ruleKey === 'min_interval_ms' ? 1 : 0}
                 step={1}
@@ -181,7 +181,7 @@ function ControlRuleField({
               />
               {meta.unit}
             </label>
-            <span className="text-[12px] text-ink-3">达到额度后</span>
+            <span className="text-[13px] text-ink-3">达到额度后</span>
             <Select<AccountControlTrigger>
               ariaLabel={`${meta.label}达到额度后的动作`}
               value={custom?.on_trigger ?? 'wait'}
@@ -193,7 +193,7 @@ function ControlRuleField({
             />
           </div>
           {(error || zeroWarning) && (
-            <p className="ml-0 mt-1 text-[11px] text-warn sm:ml-24">
+            <p className="ml-0 mt-1 text-[12px] text-warn sm:ml-24">
               {error ?? '0 次会阻断所有此类请求。'}
             </p>
           )}
@@ -221,7 +221,7 @@ function ControlScopeEditor({
   }
   return (
     <div className="mt-4">
-      <h3 className="text-[13px] font-semibold text-ink-1">{label}</h3>
+      <h3 className="text-[14px] font-semibold text-ink-1">{label}</h3>
       <div className="mt-1">
         {RULES.map(({ key }) => (
           <ControlRuleField key={key} ruleKey={key} preset={preset?.[key]} custom={custom?.[key]} onChange={(rule) => setRule(key, rule)} />
@@ -258,13 +258,13 @@ function ControlOperationRow({
     <div className="rounded-[12px] border border-line bg-surface">
       <button type="button" className="w-full cursor-pointer border-0 bg-transparent px-4 py-3.5 text-left" onClick={onToggle} aria-expanded={open}>
         <div className="flex items-center gap-3">
-          <span className="min-w-0 flex-1 text-[14px] font-semibold text-ink-1">{meta.display_name}</span>
-          <span className={`text-[11px] ${customCount ? 'text-accent' : 'text-ink-3'}`}>
+          <span className="min-w-0 flex-1 text-[15px] font-semibold text-ink-1">{meta.display_name}</span>
+          <span className={`text-[12px] ${customCount ? 'text-accent' : 'text-ink-3'}`}>
             {customCount ? `${customCount} 处自定义` : '全部使用预设值'}
           </span>
-          <span className="text-[12px] text-ink-3" aria-hidden>{open ? '⌄' : '›'}</span>
+          <span className="text-[13px] text-ink-3" aria-hidden>{open ? '⌄' : '›'}</span>
         </div>
-        <div className="mt-1.5 space-y-1 text-[12px] text-ink-2">
+        <div className="mt-1.5 space-y-1 text-[13px] text-ink-2">
           <div><span className="mr-2 text-ink-3">账户合计</span>{scopeSummary(effective.account)}</div>
           <div><span className="mr-2 text-ink-3">每个品种</span>{scopeSummary(effective.symbol)}</div>
         </div>
@@ -437,19 +437,19 @@ export function AccountEditControlPage() {
       <Section label="预设方案">
         <div className="rounded-[12px] border border-line bg-surface px-4 py-3.5 md:col-span-2">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-            <div className="w-24 flex-none text-[13px] text-ink-2">当前方案</div>
+            <div className="w-24 flex-none text-[14px] text-ink-2">当前方案</div>
             <Select<string>
               ariaLabel="流控预设方案"
               disabled={previewing}
               value={presetKey}
               onChange={(value) => void switchPreset(value)}
-              className="w-full justify-between px-3 py-2 text-[14px] sm:w-64"
+              className="w-full justify-between px-3 py-2 text-[15px] sm:w-64"
               options={model.compatible_presets.map((item) => ({ value: item.key, label: item.display_name, hint: item.description }))}
             />
-            <span className="text-[12px] text-ink-3">{model.compatible_presets.find((item) => item.key === presetKey)?.description}</span>
+            <span className="text-[13px] text-ink-3">{model.compatible_presets.find((item) => item.key === presetKey)?.description}</span>
           </div>
-          <div className="mt-3 flex gap-3 text-[13px]"><span className="w-24 flex-none text-ink-2">统计时区</span><span className="text-ink-1">{model.timezone_display_name}</span></div>
-          {previewNote && <p className="mt-2 text-[12px] text-ink-2">{previewNote}</p>}
+          <div className="mt-3 flex gap-3 text-[14px]"><span className="w-24 flex-none text-ink-2">统计时区</span><span className="text-ink-1">{model.timezone_display_name}</span></div>
+          {previewNote && <p className="mt-2 text-[13px] text-ink-2">{previewNote}</p>}
         </div>
       </Section>
       <ErrorNotice title="预设方案预览失败" error={previewError} variant="mutation" />
@@ -459,8 +459,8 @@ export function AccountEditControlPage() {
       {other.length > 0 && (
         <div className="mt-4">
           <button type="button" className="flex w-full cursor-pointer items-center gap-3 border-0 bg-transparent py-2 text-left" onClick={() => setOtherOpen((value) => !value)} aria-expanded={otherOpen}>
-            <span className="text-[12px] font-semibold text-ink-2">其他操作</span>
-            <span className="text-[11px] text-ink-3">{other.length} 项</span><span className="h-px flex-1 bg-line" /><span className="text-[12px] text-ink-3">{otherOpen ? '⌄' : '›'}</span>
+            <span className="text-[13px] font-semibold text-ink-2">其他操作</span>
+            <span className="text-[12px] text-ink-3">{other.length} 项</span><span className="h-px flex-1 bg-line" /><span className="text-[13px] text-ink-3">{otherOpen ? '⌄' : '›'}</span>
           </button>
           <div inert={!otherOpen} className={`grid transition-[grid-template-rows] duration-200 motion-reduce:transition-none ${otherOpen ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'}`}><div className="min-h-0 overflow-hidden"><div className="flex flex-col gap-2 pt-1">{other.map(renderOperation)}</div></div></div>
         </div>
@@ -478,8 +478,8 @@ export function AccountEditControlPage() {
               return (
                 <div key={group.key} className="rounded-[12px] border border-line bg-surface">
                   <button type="button" className="w-full cursor-pointer border-0 bg-transparent px-4 py-3.5 text-left" onClick={() => setOpenKey(open ? null : key)} aria-expanded={open}>
-                    <div className="flex items-center gap-3"><span className="min-w-0 flex-1 text-[14px] font-semibold text-ink-1">{group.display_name}</span><span className={`text-[11px] ${custom ? 'text-accent' : 'text-ink-3'}`}>{custom ? '已自定义' : '使用预设值'}</span><span className="text-ink-3">{open ? '⌄' : '›'}</span></div>
-                    <p className="mt-1 text-[12px] text-ink-3">{group.description}</p><p className="mt-1 text-[12px] text-ink-2">{scopeSummary(current)}</p>
+                    <div className="flex items-center gap-3"><span className="min-w-0 flex-1 text-[15px] font-semibold text-ink-1">{group.display_name}</span><span className={`text-[12px] ${custom ? 'text-accent' : 'text-ink-3'}`}>{custom ? '已自定义' : '使用预设值'}</span><span className="text-ink-3">{open ? '⌄' : '›'}</span></div>
+                    <p className="mt-1 text-[13px] text-ink-3">{group.description}</p><p className="mt-1 text-[13px] text-ink-2">{scopeSummary(current)}</p>
                   </button>
                   <div inert={!open} className={`grid transition-[grid-template-rows] duration-200 motion-reduce:transition-none ${open ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'}`}><div className="min-h-0 overflow-hidden"><div className="border-t border-line px-4 pb-4"><ControlScopeEditor label="共同限制" preset={preset} custom={custom} onChange={(next) => setOverride((currentOverride) => { const groups = { ...currentOverride.groups }; if (next) groups[group.key] = next; else delete groups[group.key]; return { ...currentOverride, groups } })} /></div></div></div>
                 </div>

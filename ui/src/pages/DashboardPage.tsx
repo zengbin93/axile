@@ -27,13 +27,13 @@ export function DashboardPage() {
   if (accounts.length === 0) {
     return (
       <div className="rounded-card border border-line bg-surface px-8 py-14 text-center">
-        <p className="text-[16px] font-[650]">还没有账户</p>
-        <p className="mt-2 text-[13.5px] leading-relaxed text-ink-2">
+        <p className="text-[17px] font-[650]">还没有账户</p>
+        <p className="mt-2 text-[14.5px] leading-relaxed text-ink-2">
           连接交易所账户后，axile 会接管它的持仓目标与定时执行。
         </p>
         <Link
           to="/setup/acct/channel"
-          className="mt-6 inline-flex items-center gap-1.5 rounded-chip bg-accent px-4 py-2 text-[13px] font-medium text-white transition-colors duration-150 hover:brightness-110 motion-reduce:transition-none"
+          className="mt-6 inline-flex items-center gap-1.5 rounded-chip bg-accent px-4 py-2 text-[14px] font-medium text-white transition-colors duration-150 hover:brightness-110 motion-reduce:transition-none"
         >
           <Plus size={14} aria-hidden />新建账户
         </Link>

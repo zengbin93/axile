@@ -11,7 +11,7 @@ type SegmentedSize = 'sm' | 'md'
 
 /** 各尺寸的凹槽 / 滑块 / 按钮类片段。 */
 const SIZE_CLASS: Record<SegmentedSize, { track: string; thumb: string; button: string }> = {
-  md: { track: 'gap-1 rounded-[11px] p-1', thumb: 'top-1 bottom-1 rounded-lg', button: 'rounded-lg px-4 py-2 text-[14px]' },
+  md: { track: 'gap-1 rounded-[11px] p-1', thumb: 'top-1 bottom-1 rounded-lg', button: 'rounded-lg px-4 py-2 text-[15px]' },
   sm: { track: 'gap-0.5 rounded-[9px] p-0.5', thumb: 'top-0.5 bottom-0.5 rounded-md', button: 'rounded-md px-2.5 py-1 text-xs' },
 }
 

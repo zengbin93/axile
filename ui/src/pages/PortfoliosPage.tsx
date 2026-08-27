@@ -62,10 +62,10 @@ export function PortfoliosPage() {
   return (
     <section>
       <div className="mb-4 flex items-center justify-between">
-        <h1 className="text-[18px] font-[640]">组合</h1>
+        <h1 className="text-[19px] font-[640]">组合</h1>
         <Link
           to="/setup/pf/name"
-          className="cursor-pointer rounded-[9px] border-0 bg-ink-1 px-4 py-2 text-[13.5px] font-[550] text-surface"
+          className="cursor-pointer rounded-[9px] border-0 bg-ink-1 px-4 py-2 text-[14.5px] font-[550] text-surface"
         >
           ＋ 新建组合
         </Link>
@@ -87,9 +87,9 @@ export function PortfoliosPage() {
 
       {portfolios != null && list.length === 0 && (
         <Card className="p-8 text-center">
-          <p className="text-[15px] font-[620]">还没有组合</p>
-          <p className="mt-2 text-[14px] text-ink-2">组合是「交易什么」的来源，可被多个账户复用。</p>
-          <Link to="/setup/pf/name" className="mt-4 inline-block text-[14px] font-semibold text-accent">
+          <p className="text-[16px] font-[620]">还没有组合</p>
+          <p className="mt-2 text-[15px] text-ink-2">组合是「交易什么」的来源，可被多个账户复用。</p>
+          <Link to="/setup/pf/name" className="mt-4 inline-block text-[15px] font-semibold text-accent">
             新建组合 →
           </Link>
         </Card>
@@ -130,7 +130,7 @@ function PortfolioCard({
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-2.5">
           <span
-            className="text-[15px] font-[620]"
+            className="text-[16px] font-[620]"
             style={nameVt && p.id != null ? { viewTransitionName: `portfolio-name-${p.id}` } : undefined}
           >
             {p.name}
@@ -138,7 +138,7 @@ function PortfolioCard({
           <Chip>{p.market}</Chip>
           <Chip>自定义函数</Chip>
         </div>
-        <div className="mt-1 text-[12.5px] text-ink-3">
+        <div className="mt-1 text-[13.5px] text-ink-3">
           {accountsError ? (
             <span className="text-warn">绑定关系暂不可用</span>
           ) : !accountsReady ? (
@@ -154,13 +154,13 @@ function PortfolioCard({
       </div>
       <div className="flex flex-none items-center gap-2" onClick={(e) => e.stopPropagation()}>
         <button
-          className="cursor-pointer rounded-lg border border-line px-3 py-1.5 text-[12.5px] text-ink-2 hover:border-ink-3/40 hover:text-ink-1"
+          className="cursor-pointer rounded-lg border border-line px-3 py-1.5 text-[13.5px] text-ink-2 hover:border-ink-3/40 hover:text-ink-1"
           onClick={() => navigate(to + '/edit')}
         >
           编辑
         </button>
         <button
-          className="cursor-pointer rounded-lg border border-line px-3 py-1.5 text-[12.5px] text-ink-2 hover:border-warn/40 hover:text-warn disabled:cursor-not-allowed disabled:opacity-45"
+          className="cursor-pointer rounded-lg border border-line px-3 py-1.5 text-[13.5px] text-ink-2 hover:border-warn/40 hover:text-warn disabled:cursor-not-allowed disabled:opacity-45"
           disabled={!accountsReady || Boolean(accountsError)}
           onClick={() => onDelete(p)}
         >

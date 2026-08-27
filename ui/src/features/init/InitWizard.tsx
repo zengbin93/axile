@@ -33,8 +33,8 @@ import { useToastStore } from '@/stores/ui'
 export type WizardMode = 'init' | 'edit'
 
 const inputCls =
-  'w-full rounded-[11px] border border-ink-3/30 bg-surface px-3.5 py-3 text-[15px] outline-none focus:border-accent'
-const labelCls = 'mb-1.5 mt-4 block text-[13px] text-ink-2 first:mt-0'
+  'w-full rounded-[11px] border border-ink-3/30 bg-surface px-3.5 py-3 text-[16px] outline-none focus:border-accent'
+const labelCls = 'mb-1.5 mt-4 block text-[14px] text-ink-2 first:mt-0'
 
 const DEFAULT_DB_URI = 'sqlite+aiosqlite:///./axile.db'
 
@@ -151,7 +151,7 @@ function TestRow({
   return (
     <div className="mt-4 flex items-center gap-3">
       <button
-        className="cursor-pointer rounded-[11px] border border-line bg-surface px-4 py-2.5 text-[14px] text-ink-2 disabled:opacity-45"
+        className="cursor-pointer rounded-[11px] border border-line bg-surface px-4 py-2.5 text-[15px] text-ink-2 disabled:opacity-45"
         onClick={onTest}
         disabled={disabled || state === 'busy'}
       >
@@ -159,7 +159,7 @@ function TestRow({
       </button>
       {state && state !== 'busy' && (
         <span
-          className={`text-[13px] ${state.ok ? 'text-accent' : 'text-warn'}`}
+          className={`text-[14px] ${state.ok ? 'text-accent' : 'text-warn'}`}
         >
           {state.ok ? '✓ ' : '✗ '}
           {state.message}
@@ -198,7 +198,7 @@ function Rail({
           <button
             key={label}
             onClick={() => clickable && onJump(i)}
-            className={`flex w-auto min-w-fit flex-none items-center gap-2 rounded-[10px] p-2.5 text-left text-[13px] sm:w-full sm:gap-3 sm:text-[14px] ${
+            className={`flex w-auto min-w-fit flex-none items-center gap-2 rounded-[10px] p-2.5 text-left text-[14px] sm:w-full sm:gap-3 sm:text-[15px] ${
               cur ? 'bg-accent-soft font-semibold text-ink-1' : 'text-ink-2'
             } ${clickable ? 'cursor-pointer' : 'cursor-default'}`}
           >
@@ -372,9 +372,9 @@ export function InitWizard({
       {!isEdit && (
         <header className="flex h-14 flex-none items-center gap-3.5 border-b border-line bg-surface px-6">
           <Link to="/" aria-label="axile 首页" className="text-ink-1">
-            <BrandWordmark size={14.5} />
+            <BrandWordmark size={16.5} />
           </Link>
-          <span className="text-[14px] text-ink-2">· {copy.brand}</span>
+          <span className="text-[15px] text-ink-2">· {copy.brand}</span>
           <span className="ml-auto" />
           <ThemeToggle />
         </header>
@@ -408,7 +408,7 @@ export function InitWizard({
                     <>
                       <div className="mt-4 flex flex-wrap items-center gap-3">
                         <button
-                          className="cursor-pointer rounded-[11px] border border-line bg-surface px-4 py-2.5 text-[14px] text-ink-2 disabled:opacity-45"
+                          className="cursor-pointer rounded-[11px] border border-line bg-surface px-4 py-2.5 text-[15px] text-ink-2 disabled:opacity-45"
                           onClick={runFeishuTest}
                           disabled={
                             !draft.exe_err_feishu_key.trim() ||
@@ -419,7 +419,7 @@ export function InitWizard({
                           {feishuTest === 'busy' ? '测试中…' : '测试推送'}
                         </button>
                         <button
-                          className="cursor-pointer rounded-[11px] border border-ink-1 bg-ink-1 px-[22px] py-2.5 text-[14px] font-[550] text-surface disabled:opacity-45"
+                          className="cursor-pointer rounded-[11px] border border-ink-1 bg-ink-1 px-[22px] py-2.5 text-[15px] font-[550] text-surface disabled:opacity-45"
                           onClick={onSave}
                           disabled={
                             !alertDirty || saving || feishuTest === 'busy'
@@ -429,7 +429,7 @@ export function InitWizard({
                         </button>
                         {feishuTest && feishuTest !== 'busy' && (
                           <span
-                            className={`text-[13px] ${feishuTest.ok ? 'text-accent' : 'text-warn'}`}
+                            className={`text-[14px] ${feishuTest.ok ? 'text-accent' : 'text-warn'}`}
                           >
                             {feishuTest.ok ? '✓ ' : '✗ '}
                             {feishuTest.message}
@@ -462,7 +462,7 @@ export function InitWizard({
                 lead={copy.confirmLead}
               >
                 <div className="max-w-[560px]">
-                  <dl className="rounded-[14px] border border-line bg-surface px-4 py-2 text-[14px]">
+                  <dl className="rounded-[14px] border border-line bg-surface px-4 py-2 text-[15px]">
                     {[
                       [
                         '执行告警',
@@ -484,7 +484,7 @@ export function InitWizard({
                   </dl>
 
                   <details className="mt-4 rounded-[14px] border border-line bg-surface px-4 py-3">
-                    <summary className="cursor-pointer text-[14px] text-ink-2">
+                    <summary className="cursor-pointer text-[15px] text-ink-2">
                       高级选项（一般保持默认）
                     </summary>
                     <label className={labelCls}>数据库地址</label>
@@ -500,7 +500,7 @@ export function InitWizard({
                     <label className={labelCls}>运行环境</label>
                     <Select<string>
                       ariaLabel="运行环境"
-                      className="w-full justify-between px-3 py-2 text-[14px]"
+                      className="w-full justify-between px-3 py-2 text-[15px]"
                       value={draft.environment}
                       onChange={(v) => set({ environment: v })}
                       options={[
@@ -509,7 +509,7 @@ export function InitWizard({
                         { value: 'production', label: '生产（production）' },
                       ]}
                     />
-                    <p className="mt-1.5 text-[12px] leading-relaxed text-ink-3">
+                    <p className="mt-1.5 text-[13px] leading-relaxed text-ink-3">
                       仅影响日志详细程度：「本地开发」打印较详细日志（INFO
                       及以上），「预发布 / 生产」更安静（仅警告及以上）。
                       <span className="text-ink-2">
@@ -539,7 +539,7 @@ export function InitWizard({
                       }
                       placeholder="./my_algorithms"
                     />
-                    <p className="mt-1.5 text-[12px] leading-relaxed text-ink-3">
+                    <p className="mt-1.5 text-[13px] leading-relaxed text-ink-3">
                       指向存放自定义算法的目录，启动时扫描其中的{' '}
                       <span className="num">.py</span> 并加载注册的算法；
                       保存后服务重启生效，随后在账户「怎么交易」里可选。
@@ -562,10 +562,10 @@ export function InitWizard({
 
             {isEdit && editSection === 'advanced' && (
               <div className="mx-auto max-w-[1728px] px-5 pt-8 pb-6 sm:px-12">
-                <div className="text-[22px] font-[680] tracking-tight">
+                <div className="text-[23px] font-[680] tracking-tight">
                   高级
                 </div>
-                <div className="mt-3 border-l-2 border-warn/60 bg-warn-tint/50 py-2 pl-3 pr-2 text-[13px] text-ink-2">
+                <div className="mt-3 border-l-2 border-warn/60 bg-warn-tint/50 py-2 pl-3 pr-2 text-[14px] text-ink-2">
                   保存后将重启服务，并中断正在进行中的执行。
                 </div>
 
@@ -583,7 +583,7 @@ export function InitWizard({
                       />
                       <button
                         type="button"
-                        className="flex-none cursor-pointer rounded-[9px] border border-line bg-surface px-4 py-2 text-[14px] text-ink-2 transition-[border-color] hover:border-ink-3/40 disabled:opacity-45"
+                        className="flex-none cursor-pointer rounded-[9px] border border-line bg-surface px-4 py-2 text-[15px] text-ink-2 transition-[border-color] hover:border-ink-3/40 disabled:opacity-45"
                         onClick={runDbTest}
                         disabled={
                           !draft.sqlalchemy_database_uri.trim() ||
@@ -594,7 +594,7 @@ export function InitWizard({
                       </button>
                     </div>
                     <div
-                      className="mt-1.5 min-h-4 text-[12px]"
+                      className="mt-1.5 min-h-4 text-[13px]"
                       aria-live="polite"
                     >
                       {dbTest && dbTest !== 'busy' ? (
@@ -617,7 +617,7 @@ export function InitWizard({
                   <Row label="运行环境" hint="日志级别" top>
                     <Select<string>
                       ariaLabel="运行环境"
-                      className="w-full justify-between px-3 py-2 text-[14px]"
+                      className="w-full justify-between px-3 py-2 text-[15px]"
                       value={draft.environment}
                       onChange={(value) => set({ environment: value })}
                       options={[
@@ -626,7 +626,7 @@ export function InitWizard({
                         { value: 'production', label: '生产（production）' },
                       ]}
                     />
-                    <p className="mt-1.5 text-[11px] leading-5 text-ink-3">
+                    <p className="mt-1.5 text-[12px] leading-5 text-ink-3">
                       {draft.environment === 'local'
                         ? '打印 INFO 及以上详细日志。'
                         : '仅记录警告及以上日志。'}
@@ -642,7 +642,7 @@ export function InitWizard({
                       }
                       placeholder="1 day"
                     />
-                    <p className="mt-1.5 text-[11px] leading-5 text-ink-3">
+                    <p className="mt-1.5 text-[12px] leading-5 text-ink-3">
                       例如 1 day、100 MB 或 00:00。
                     </p>
                   </Row>
@@ -657,14 +657,14 @@ export function InitWizard({
                       />
                       <button
                         type="button"
-                        className="inline-flex flex-none cursor-pointer items-center gap-1.5 rounded-[9px] border border-line bg-surface px-4 py-2 text-[14px] text-ink-2 transition-[border-color] hover:border-ink-3/40"
+                        className="inline-flex flex-none cursor-pointer items-center gap-1.5 rounded-[9px] border border-line bg-surface px-4 py-2 text-[15px] text-ink-2 transition-[border-color] hover:border-ink-3/40"
                         onClick={() => setDirectoryPickerTarget('log')}
                       >
                         <FolderOpen size={15} />
                         选择目录
                       </button>
                     </div>
-                    <p className="mt-1.5 text-[11px] leading-5 text-ink-3">
+                    <p className="mt-1.5 text-[12px] leading-5 text-ink-3">
                       服务运行日志的写入目录，可直接输入或浏览服务所在机器。
                     </p>
                   </Row>
@@ -684,7 +684,7 @@ export function InitWizard({
                       action={
                         <button
                           type="button"
-                          className="inline-flex flex-none cursor-pointer items-center gap-1.5 rounded-[9px] border border-line bg-surface px-3 py-1.5 text-[12px] text-ink-2"
+                          className="inline-flex flex-none cursor-pointer items-center gap-1.5 rounded-[9px] border border-line bg-surface px-3 py-1.5 text-[13px] text-ink-2"
                           onMouseDown={(event) => event.preventDefault()}
                           onClick={() => setDirectoryPickerTarget('algorithm')}
                         >
@@ -736,7 +736,7 @@ export function InitWizard({
                 {/* init=向导：上一步 + 下一步 / 保存，逐级推进。 */}
                 {step > 0 && (
                   <button
-                    className="cursor-pointer rounded-[11px] border border-line bg-surface px-[22px] py-2.5 text-[14px] text-ink-2"
+                    className="cursor-pointer rounded-[11px] border border-line bg-surface px-[22px] py-2.5 text-[15px] text-ink-2"
                     onClick={() => setStep(step - 1)}
                   >
                     上一步
@@ -744,7 +744,7 @@ export function InitWizard({
                 )}
                 <span className="flex-1" />
                 <button
-                  className="shrink-0 cursor-pointer whitespace-nowrap rounded-[11px] border border-ink-1 bg-ink-1 px-[22px] py-2.5 text-[14px] font-[550] text-surface disabled:opacity-45"
+                  className="shrink-0 cursor-pointer whitespace-nowrap rounded-[11px] border border-ink-1 bg-ink-1 px-[22px] py-2.5 text-[15px] font-[550] text-surface disabled:opacity-45"
                   onClick={onNext}
                   disabled={nextDisabled || saving}
                 >

@@ -16,13 +16,13 @@ export function SettingsLayout() {
     <div className="flex h-screen flex-col bg-bg">
       <header className="flex h-14 flex-none items-center gap-3.5 border-b border-line bg-surface px-4 sm:px-6">
         <Link to="/" aria-label="axile 首页" className="text-ink-1">
-          <BrandWordmark size={14.5} />
+          <BrandWordmark size={16.5} />
         </Link>
-        <span className="text-[14px] text-ink-2">· 设置</span>
+        <span className="text-[15px] text-ink-2">· 设置</span>
         <span className="ml-auto" />
         <ThemeToggle />
         <button
-          className="cursor-pointer rounded-chip border border-line px-3 py-1.5 text-[13px] text-ink-2 hover:border-ink-3/40 hover:text-ink-1"
+          className="cursor-pointer rounded-chip border border-line px-3 py-1.5 text-[14px] text-ink-2 hover:border-ink-3/40 hover:text-ink-1"
           onClick={() => navigate('/')}
         >
           关闭
@@ -41,7 +41,7 @@ export function SettingsLayout() {
                 key={item.to}
                 to={item.to}
                 aria-current={active ? 'page' : undefined}
-                className={`flex min-w-fit flex-none items-center rounded-[8px] px-3 py-2.5 text-[14px] sm:mb-1 sm:w-full ${
+                className={`flex min-w-fit flex-none items-center rounded-[8px] px-3 py-2.5 text-[15px] sm:mb-1 sm:w-full ${
                   active ? 'bg-accent-soft font-semibold text-ink-1' : 'text-ink-2 hover:text-ink-1'
                 }`}
               >

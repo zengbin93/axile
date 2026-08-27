@@ -28,25 +28,25 @@ export function SettingsSaveBar({
         <div className="border-t border-line bg-surface/90 px-4 py-3 backdrop-blur-md">
           <div className="flex items-center gap-4">
             <div className="min-w-0 flex-1">
-              <div className="text-[11px] font-semibold tracking-wide text-ink-3">
+              <div className="text-[12px] font-semibold tracking-wide text-ink-3">
                 待保存 · {changes.length} 项
                 {blocked && <span className="text-warn"> · 有错误</span>}
               </div>
               <OverflowText
-                className="text-[13px] text-ink-1"
+                className="text-[14px] text-ink-1"
                 text={changes.join(' · ')}
               />
             </div>
             <button
               type="button"
-              className="flex-none cursor-pointer text-[13px] text-ink-2 hover:text-ink-1"
+              className="flex-none cursor-pointer text-[14px] text-ink-2 hover:text-ink-1"
               onClick={onCancel}
             >
               取消修改
             </button>
             <button
               type="button"
-              className="flex-none cursor-pointer rounded-[9px] border-0 bg-ink-1 px-5 py-2 text-[13.5px] font-semibold text-surface disabled:opacity-45"
+              className="flex-none cursor-pointer rounded-[9px] border-0 bg-ink-1 px-5 py-2 text-[14.5px] font-semibold text-surface disabled:opacity-45"
               onClick={onSave}
               disabled={blocked || saving || !open}
             >

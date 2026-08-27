@@ -156,10 +156,10 @@ function Header({ m, currency, assetLabel }: { m: ExecutionDetailModel; currency
   const meta = [TRIGGER_LABEL[h.trigger] ?? h.trigger, KIND_LABEL[h.kind] ?? h.kind].filter(Boolean).join(' ')
   return (
     <div className="mt-3">
-      <div className={`inline-flex items-center gap-2 text-[15px] font-semibold ${v.cls}`}>
+      <div className={`inline-flex items-center gap-2 text-[16px] font-semibold ${v.cls}`}>
         {v.icon} {v.text}
       </div>
-      <div className="num mt-2 text-[13px] text-ink-2">
+      <div className="num mt-2 text-[14px] text-ink-2">
         {meta && <span className="text-ink-3">{meta} · </span>}
         {h.durationSec != null && <span className="text-ink-3">{fmtDuration(h.durationSec)} · </span>}
         {assetLabel} {fmtEquity(h.equityBefore)} → {h.equityAfter == null ? '—' : <NumberTicker value={h.equityAfter} format={{ minimumFractionDigits: 2, maximumFractionDigits: 2 }} />}
@@ -199,7 +199,7 @@ function SnapshotNote({ m, assetLabel }: { m: ExecutionDetailModel; assetLabel: 
   const note = posBad
     ? `执行后账户快照为「${label(h.sourcePosition)}」——到位度与${assetLabel}均基于非真实快照，仅供参考。`
     : `执行前基线为「${label(h.sourceEquity)}」——${assetLabel}变动与敞口对比不可得；到位度基于执行后真实快照，仍然可信。`
-  return <div className="mt-2 rounded bg-warn-soft px-2.5 py-1.5 text-[12.5px] text-warn">{note}</div>
+  return <div className="mt-2 rounded bg-warn-soft px-2.5 py-1.5 text-[13.5px] text-warn">{note}</div>
 }
 
 /**
@@ -225,7 +225,7 @@ function TargetChangeView({ m }: { m: ExecutionDetailModel }) {
   return (
     <div className="mb-4">
       <div className="mb-2 text-xs font-semibold tracking-wide text-ink-3">目标变化</div>
-      <div className="num text-[13px] text-ink-2">
+      <div className="num text-[14px] text-ink-2">
         {tc.rows.map((r) => (
           <span key={r.symbol} className="mr-4 inline-block">
             {r.symbol}{' '}
@@ -235,12 +235,12 @@ function TargetChangeView({ m }: { m: ExecutionDetailModel }) {
         ))}
       </div>
       {(tc.algorithm || tc.algoParams) && (
-        <div className="mt-1.5 text-[12px] text-ink-3">
+        <div className="mt-1.5 text-[13px] text-ink-3">
           {[tc.algorithm, tc.algoParams].filter(Boolean).join(' · ')}
         </div>
       )}
       {(tc.forbidden.length > 0 || tc.risk.length > 0) && (
-        <div className="mt-1 text-[12px] text-warn">
+        <div className="mt-1 text-[13px] text-warn">
           {tc.forbidden.length > 0 && <span>禁止 {tc.forbidden.join('/')} </span>}
           {tc.risk.length > 0 && <span>风控 {tc.risk.join('/')}</span>}
         </div>
@@ -256,12 +256,12 @@ function OrderTree({ orders, currency, units }: { orders: ExecOrder[]; currency:
   const hasFills = orders.some((o) => (o.filled_volume ?? 0) > 0)
   return (
     <details className="mt-1.5">
-      <summary className="cursor-pointer select-none text-[11.5px] text-ink-3 hover:text-ink-2">
+      <summary className="cursor-pointer select-none text-[12.5px] text-ink-3 hover:text-ink-2">
         订单与成交（{formatOrderTradeCounts(orders.length, nTrades, hasFills, ' · ')}）
       </summary>
       <div className="mt-1 border-l border-line pl-3">
         {orders.map((o) => (
-          <div key={o.order_id} className="num py-1 text-[11.5px]">
+          <div key={o.order_id} className="num py-1 text-[12.5px]">
             <div className="text-ink-2">
               {o.side === 'sell' ? '卖' : o.side === 'buy' ? '买' : ''} {ORDER_TYPE_LABEL[o.order_type] ?? o.order_type}
               {o.price != null && <span> @{fmtPrice(o.price, units, currency)}</span>}
@@ -317,21 +317,21 @@ function SymbolChainRow({
     <div className={`border-t border-line py-3 first:border-t-0 ${s.broken ? 'bg-warn-soft/50 -mx-6 px-6' : ''}`}>
       <div className="flex items-baseline justify-between gap-3">
         <div className="flex items-baseline gap-2">
-          <span className="text-[13.5px] font-medium">{s.symbol}</span>
-          <span className="text-[11px] text-ink-3">{ACTION_LABEL[s.action]}</span>
+          <span className="text-[14.5px] font-medium">{s.symbol}</span>
+          <span className="text-[12px] text-ink-3">{ACTION_LABEL[s.action]}</span>
         </div>
-        <span className={`text-[13px] font-semibold ${outcome.cls}`}>{outcome.node}</span>
+        <span className={`text-[14px] font-semibold ${outcome.cls}`}>{outcome.node}</span>
       </div>
 
       {/* 意图 → 结果 */}
-      <div className="num mt-1 text-[12.5px] text-ink-2">
+      <div className="num mt-1 text-[13.5px] text-ink-2">
         意图 {fmtQty(s.before, units)} → {fmtQty(s.after, units)}
         {s.target != null && <span className="text-ink-3"> （目标 {fmtQty(s.target, units)}）</span>}
       </div>
 
       {/* 决策 + 成交 */}
       {s.side !== 'none' && s.filled !== 0 && (
-        <div className="num mt-0.5 text-[12.5px] text-ink-3">
+        <div className="num mt-0.5 text-[13.5px] text-ink-3">
           {s.algorithm && <span>{s.algorithm} · </span>}
           {sideText} {fmtQty(s.filled, units)}
           {s.avgPrice != null && <span> @{fmtPrice(s.avgPrice, units, currency)}</span>}
@@ -345,7 +345,7 @@ function SymbolChainRow({
 
       {/* 执行质量（TCA）：主/被动 · 滑点 · 费用 · 单/成交笔数 */}
       {hasQuality && (
-        <div className="num mt-0.5 text-[12px]">
+        <div className="num mt-0.5 text-[13px]">
           {tca.liquidity && <span className="text-ink-2">{LIQUIDITY_LABEL[tca.liquidity] ?? tca.liquidity}</span>}
           {tca.slippage_bps != null && (
             <span className={bpsCls(tca.slippage_bps)}>
@@ -367,12 +367,12 @@ function SymbolChainRow({
 
       {/* 订单腿原因：断点时琥珀主因（为何没到位）；已到位时降为中性注脚（受阻/空跑，安静即好）。 */}
       {s.reason && (
-        <div className={`mt-0.5 text-[12px] ${s.broken ? 'font-medium text-warn' : 'text-ink-3'}`}>{s.reason}</div>
+        <div className={`mt-0.5 text-[13px] ${s.broken ? 'font-medium text-warn' : 'text-ink-3'}`}>{s.reason}</div>
       )}
 
       {/* 浮盈 / drift */}
       {(pnlLevel != null || driftNotable) && (
-        <div className="num mt-0.5 text-[11.5px] text-ink-3">
+        <div className="num mt-0.5 text-[12.5px] text-ink-3">
           {pnlLevel != null && (
             <span>浮盈 {showPnlDelta ? `${s.pnlBefore!.toFixed(1)} → ${s.pnlAfter!.toFixed(1)}` : pnlLevel.toFixed(1)}</span>
           )}
@@ -399,10 +399,10 @@ function Spine({ m }: { m: ExecutionDetailModel }) {
             <span
               className={`absolute -left-[17px] top-[9px] h-[9px] w-[9px] rounded-full border-2 border-surface ${DOT_CLASS[n.status] ?? DOT_CLASS.INFO}`}
             />
-            {n.time && <span className="num w-20 flex-none text-[11px] text-ink-3">{n.time}</span>}
+            {n.time && <span className="num w-20 flex-none text-[12px] text-ink-3">{n.time}</span>}
             {!n.time && <span className="w-20 flex-none" />}
-            <span className={`text-[13px] ${n.broken ? 'font-medium text-warn' : 'text-ink-2'}`}>{n.label}</span>
-            {n.detail && <span className="num text-[12px] text-ink-3">{n.detail}</span>}
+            <span className={`text-[14px] ${n.broken ? 'font-medium text-warn' : 'text-ink-2'}`}>{n.label}</span>
+            {n.detail && <span className="num text-[13px] text-ink-3">{n.detail}</span>}
           </div>
         ))}
       </div>
@@ -429,12 +429,12 @@ function SymbolActionStream({
   if (lines.length === 0) return <OrderTree orders={orders} currency={currency} units={units} />
   return (
     <details className="mt-1.5">
-      <summary className="cursor-pointer select-none text-[11.5px] text-ink-3 hover:text-ink-2">
+      <summary className="cursor-pointer select-none text-[12.5px] text-ink-3 hover:text-ink-2">
         动作流（{lines.length} 步）
       </summary>
       <div className="mt-1 border-l border-line pl-3">
         {lines.map((l) => (
-          <div key={l.key} className="num flex items-baseline gap-2 py-0.5 text-[12px]">
+          <div key={l.key} className="num flex items-baseline gap-2 py-0.5 text-[13px]">
             {l.time && <span className="w-16 flex-none text-ink-3">{l.time}</span>}
             {/* 三态：琥珀断点 / accent 蓝正向确认(成交·对账成功) / 中性过程步 */}
             <span className={l.broken ? 'font-medium text-warn' : l.good ? 'text-accent' : 'text-ink-2'}>{l.text}</span>
@@ -496,19 +496,19 @@ function Evidence({ m, currency, assetLabel }: { m: ExecutionDetailModel; curren
       <div className="mb-2 flex items-center justify-between">
         <span className="text-xs font-semibold tracking-wide text-ink-3">证据</span>
         {m.artifacts.length > 0 && (
-          <button type="button" onClick={copy} className="text-[12px] text-accent hover:underline">
+          <button type="button" onClick={copy} className="text-[13px] text-accent hover:underline">
             {copied ? '已复制' : `复制原始附件（${m.artifacts.length}）`}
           </button>
         )}
       </div>
       {hasAccount && (
-        <div className="num text-[12.5px] text-ink-2">
+        <div className="num text-[13.5px] text-ink-2">
           <BookendRow label="现金" before={b.cashBefore} after={b.cashAfter} currency={currency} />
           <BookendRow label={assetLabel} before={b.equityBefore} after={b.equityAfter} currency={currency} pnl />
           <BookendRow label="市值" before={b.mvBefore} after={b.mvAfter} currency={currency} />
         </div>
       )}
-      {b.timeoutSec != null && <div className="mt-1 text-[12px] text-ink-3">冻结输入 · 执行超时 {b.timeoutSec}s</div>}
+      {b.timeoutSec != null && <div className="mt-1 text-[13px] text-ink-3">冻结输入 · 执行超时 {b.timeoutSec}s</div>}
     </div>
   )
 }
@@ -584,7 +584,7 @@ export function ExecutionDetailPage() {
           flip={false}
         />
       </div>
-      <div className="num mt-2 text-[15px] font-mono text-ink-2">{executionId}</div>
+      <div className="num mt-2 text-[16px] font-mono text-ink-2">{executionId}</div>
       <div>
         <ErrorNotice title="执行状态加载失败" error={status.error} onRetry={status.refresh} />
       </div>
@@ -592,7 +592,7 @@ export function ExecutionDetailPage() {
 
       {/* 运行中：顶部给一条确定态阶段条作一瞥总览；逐事件细节仍在下方脊柱。 */}
       {isLive && running && running.status === 'queued' && (
-        <div className="mt-3 text-[14px] text-ink-2">已受理，等待开跑</div>
+        <div className="mt-3 text-[15px] text-ink-2">已受理，等待开跑</div>
       )}
       {isLive && running && (running.status === 'running' || running.status === 'terminating') && (
         <div className="mt-3">
@@ -628,7 +628,7 @@ export function ExecutionDetailPage() {
                 })}
               </>
             ) : (
-              <p className="text-[13px] text-ink-3">
+              <p className="text-[14px] text-ink-3">
                 {model.task?.status === 'FAILED' && model.task.started_at == null
                   ? '执行未进入执行链路，未产生逐只结果和账户快照。'
                   : '本次执行未产生逐只对账。'}

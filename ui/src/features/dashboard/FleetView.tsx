@@ -47,30 +47,30 @@ function FleetCard({
     >
       <div className="flex items-center gap-3">
         <span
-          className="text-[15px] font-[620]"
+          className="text-[16px] font-[620]"
           style={transitioning ? { viewTransitionName: `account-name-${item.account_id}` } : undefined}
         >
           {item.name}
         </span>
         {/* 渠道徽章与账户名同一逻辑单元：同门控挂名、同轨飞行，不与名字撕开。 */}
         <span
-          className="rounded-chip bg-fill px-2 py-0.5 text-[11px] text-ink-2"
+          className="rounded-chip bg-fill px-2 py-0.5 text-[12px] text-ink-2"
           style={transitioning ? { viewTransitionName: `account-channel-${item.account_id}` } : undefined}
         >
           {channelLabel(item.trade_channel, '')}
         </span>
         {gate.gate === 'paused' && (
-          <span className="rounded-chip bg-fill px-2 py-0.5 text-[11px] text-ink-3">{gate.label}</span>
+          <span className="rounded-chip bg-fill px-2 py-0.5 text-[12px] text-ink-3">{gate.label}</span>
         )}
         <span className="text-xs text-ink-3">{portfolioName ?? (item.portfolio_id ? `组合 #${item.portfolio_id}` : '未绑定组合')}</span>
         {live ? (
-          <span className="ml-auto inline-flex items-center gap-1.5 text-[13.5px] font-semibold text-accent">
+          <span className="ml-auto inline-flex items-center gap-1.5 text-[14.5px] font-semibold text-accent">
             {isExecutingStatus(live.status)
               ? `⟳ 正在${runVerb(live.kind)} · ${phaseLabel(live.phase)}${live.pendingExecutionId ? ' · 结束后再调一次' : ''}`
               : '等待执行'}
           </span>
         ) : (
-          <span className={`ml-auto inline-flex items-center gap-1.5 text-[13.5px] font-semibold ${INTEGRITY_TEXT_CLASS[state.integrity]}`}>
+          <span className={`ml-auto inline-flex items-center gap-1.5 text-[14.5px] font-semibold ${INTEGRITY_TEXT_CLASS[state.integrity]}`}>
             {INTEGRITY_ICON[state.integrity]} {state.text}
           </span>
         )}
@@ -78,12 +78,12 @@ function FleetCard({
 
       <div className="mt-3 flex items-end justify-between gap-3">
         <div className="flex flex-wrap items-baseline gap-2">
-          <span className="num text-[26px] font-[640] tracking-tight">
+          <span className="num text-[27px] font-[640] tracking-tight">
             <NumberTicker value={item.total_asset} format={{ minimumFractionDigits: 2, maximumFractionDigits: 2 }} />
           </span>
-          <span className="text-[13px] text-ink-3">{displayCurrencyUnit(item.currency)}</span>
+          <span className="text-[14px] text-ink-3">{displayCurrencyUnit(item.currency)}</span>
           {pct != null && (
-            <span className={`num text-[13px] ${pctCls}`}>
+            <span className={`num text-[14px] ${pctCls}`}>
               今日 {pct >= 0 ? '+' : '−'}
               <NumberTicker value={Math.abs(pct)} format={{ minimumFractionDigits: 2, maximumFractionDigits: 2 }} suffix="%" />
             </span>
@@ -92,7 +92,7 @@ function FleetCard({
         <Sparkline data={item.equity_series} width={120} height={34} />
       </div>
 
-      <div className="mt-3 flex gap-2.5 border-t border-line pt-3 text-[13.5px]">
+      <div className="mt-3 flex gap-2.5 border-t border-line pt-3 text-[14.5px]">
         <span className="min-w-14 flex-none text-ink-3">当前持仓</span>
         <span>{holdingText(item.holdings_count, item.position_weights)}</span>
       </div>
@@ -125,7 +125,7 @@ export function FleetView({
   return (
     <section>
       <div className="mx-0.5 my-2 mb-6 flex flex-wrap items-center justify-between gap-3">
-        <span className={`inline-flex items-center gap-1.5 text-[16px] font-[640] ${INTEGRITY_TEXT_CLASS[rollup.key]}`}>
+        <span className={`inline-flex items-center gap-1.5 text-[17px] font-[640] ${INTEGRITY_TEXT_CLASS[rollup.key]}`}>
           {INTEGRITY_ICON[rollup.key]} {rollup.text}
         </span>
       </div>
@@ -139,7 +139,7 @@ export function FleetView({
       {/* 列表页主动作收尾：末位一张安静的新建入口，不与账户卡争层级。 */}
       <Link
         to="/setup/acct/channel"
-        className="flex items-center justify-center gap-1.5 rounded-card border border-dashed border-line py-3 text-[13px] text-ink-3 transition-colors duration-150 hover:border-border-strong hover:text-ink-1 motion-reduce:transition-none"
+        className="flex items-center justify-center gap-1.5 rounded-card border border-dashed border-line py-3 text-[14px] text-ink-3 transition-colors duration-150 hover:border-border-strong hover:text-ink-1 motion-reduce:transition-none"
       >
         <Plus size={14} aria-hidden />新建账户
       </Link>

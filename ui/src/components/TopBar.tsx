@@ -40,11 +40,11 @@ export function TopBar() {
     : `与服务器失联 · ${shortErrorReason(error)}`
 
   return (
-    <header className="flex flex-none flex-wrap items-center gap-3 border-b border-line bg-surface px-5 py-2.5">
+    <header className="flex flex-none flex-wrap items-center gap-3 border-b border-line bg-surface px-5 py-3">
       <Link to="/" aria-label="axile 首页">
         <BrandWordmark />
       </Link>
-      <span className="flex items-center gap-1.5 text-[13px] text-ink-2">
+      <span className="flex items-center gap-1.5 text-[14px] text-ink-2">
         {/* 心跳灯（离开红绿，红绿专供行情涨跌）：通电=信号青常亮（亮而不动，安静即好），
             连接中=青点搏动，失联=琥珀点。全站的「系统活着」都循同一灯语。 */}
         <span
@@ -75,7 +75,7 @@ export function TopBar() {
         <Link
           to="/"
           title={`${offCount} 个账户偏离目标 · 需要看看`}
-          className="inline-flex items-center gap-1.5 rounded-chip border border-warn/45 bg-warn-tint px-2.5 py-1 text-[13px] font-medium text-warn hover:border-warn/70"
+          className="inline-flex items-center gap-1.5 rounded-chip border border-warn/45 bg-warn-tint px-2.5 py-1 text-[14px] font-medium text-warn hover:border-warn/70"
         >
           <TriangleAlert size={13} aria-hidden /> {offCount} 个偏离
         </Link>

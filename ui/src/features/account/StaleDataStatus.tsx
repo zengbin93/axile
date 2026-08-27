@@ -12,7 +12,7 @@ export function StaleDataStatus({
 }) {
   if (updatedAt == null) return null
   return (
-    <span role="status" className="flex-none whitespace-nowrap text-[11.5px] font-medium text-warn">
+    <span role="status" className="flex-none whitespace-nowrap text-[12.5px] font-medium text-warn">
       {label}停留在 {timeAgo(updatedAt, now)}
     </span>
   )

@@ -17,8 +17,8 @@ export function WizardPage({
   return (
     <div className="mx-auto max-w-[1728px] px-5 pt-8 pb-6 sm:px-12">
       <div className="mb-1.5 text-xs font-semibold tracking-wide text-accent">{kicker}</div>
-      <div className="text-[22px] font-[680] tracking-tight">{title}</div>
-      {lead && <div className="mt-1.5 max-w-[560px] text-[14px] text-ink-2">{lead}</div>}
+      <div className="text-[23px] font-[680] tracking-tight">{title}</div>
+      {lead && <div className="mt-1.5 max-w-[560px] text-[15px] text-ink-2">{lead}</div>}
       <div className="mt-[18px]">{children}</div>
     </div>
   )
@@ -61,7 +61,7 @@ export function WizardNav({
     <div className="flex gap-3 border-t border-line bg-surface px-5 py-3.5 sm:px-12">
       {prevTo ? (
         <button
-          className="cursor-pointer rounded-[11px] border border-line bg-surface px-[22px] py-2.5 text-[14px] text-ink-2"
+          className="cursor-pointer rounded-[11px] border border-line bg-surface px-[22px] py-2.5 text-[15px] text-ink-2"
           onClick={() => navigate(prevTo)}
         >
           上一步
@@ -71,7 +71,7 @@ export function WizardNav({
       )}
       <span className="flex-1" />
       <button
-        className={`cursor-pointer rounded-[11px] border px-[22px] py-2.5 text-[14px] disabled:opacity-45 ${nextCls}`}
+        className={`cursor-pointer rounded-[11px] border px-[22px] py-2.5 text-[15px] disabled:opacity-45 ${nextCls}`}
         onClick={handleNext}
         disabled={nextDisabled || busy}
       >

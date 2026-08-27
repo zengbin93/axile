@@ -73,7 +73,7 @@ function Ruler({ row, scale }: { row: RebalanceRow; scale: number }) {
   return (
     <div className="flex-1">
       {/* 变化句：身份贴在数字上（当前→目标），居中对齐表头零轴、不随值漂移 */}
-      <div className="num mb-1.5 whitespace-nowrap text-center text-[11px] leading-none">
+      <div className="num mb-1.5 whitespace-nowrap text-center text-[12px] leading-none">
         <span className="text-ink-3">当前 </span>
         <span className={`font-semibold ${dirCls(row.cur)}`}>{pctLabel(row.cur)}</span>
         {!aligned && (
@@ -139,16 +139,16 @@ export function HoldingsView({
   const heldCount = plan.rows.filter((r) => Math.abs(r.cur) >= 0.05).length
 
   if (plan.rows.length === 0) {
-    return <p className="text-[14px] text-ink-2">当前空仓，且无目标持仓。</p>
+    return <p className="text-[15px] text-ink-2">当前空仓，且无目标持仓。</p>
   }
 
   return (
     <>
-      <div className="mb-1 text-[13px] text-ink-2">
+      <div className="mb-1 text-[14px] text-ink-2">
         {plan.rows.length} 只 · {plan.rows.length - plan.off} 到位
         {plan.off > 0 && <span className="font-semibold text-warn"> · {plan.off} 待调整</span>}
       </div>
-      <div className="num mb-3 text-[12px] text-ink-3">
+      <div className="num mb-3 text-[13px] text-ink-3">
         <span className="text-ink-2">当前 {heldCount === 0 ? '空仓' : `持有 ${heldCount} 只`}</span>
         {equity > 0 && (
           <>
@@ -165,7 +165,7 @@ export function HoldingsView({
         )}
       </div>
 
-      <div className="flex items-center gap-4 py-1.5 text-[11px] text-ink-3">
+      <div className="flex items-center gap-4 py-1.5 text-[12px] text-ink-3">
         <span className="w-28 flex-none">代码</span>
         <span className="flex-1 text-center">空 ◄ 0 ► 多</span>
         <span className="w-32 flex-none text-right">成交</span>
@@ -180,22 +180,22 @@ export function HoldingsView({
             className={`flex items-center gap-4 border-t border-line py-3 ${aligned ? 'opacity-55' : ''}`}
           >
             <div className="w-28 min-w-0 flex-none self-center">
-              <OverflowText className="text-[13.5px] font-medium" text={r.symbol} />
+              <OverflowText className="text-[14.5px] font-medium" text={r.symbol} />
             </div>
             <Ruler row={r} scale={scale} />
             <div className="w-32 flex-none self-center text-right">
               {aligned ? (
-                <span className="text-[13px] text-ink-3">到位</span>
+                <span className="text-[14px] text-ink-3">到位</span>
               ) : (
                 <>
-                  <div className="num text-[13px] font-semibold">
+                  <div className="num text-[14px] font-semibold">
                     {r.side === 'buy' ? '买' : '卖'}{' '}
                     {equity > 0
                       ? withCurrency(fmtMoney((r.amount / 100) * equity), currency)
                       : `${r.amount.toFixed(1)}%`}
                     {equity > 0 && <span className="font-normal text-ink-3"> ({r.amount.toFixed(1)}%)</span>}
                   </div>
-                  {tag && <div className={`text-[10px] ${tag.cls}`}>{tag.text}</div>}
+                  {tag && <div className={`text-[11px] ${tag.cls}`}>{tag.text}</div>}
                 </>
               )}
             </div>

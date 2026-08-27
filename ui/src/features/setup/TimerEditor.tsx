@@ -538,15 +538,15 @@ export function TimerEditor({ tradeChannel, scheduleKind, nightSchedule, value, 
 
   // !v.autoOn 只在 page 布局可达（step 的预览随总开关收进折叠区，不会渲染）。
   const previewBody = !v.autoOn ? (
-    <p className="text-[13px] text-ink-3">开启自动调仓后显示。</p>
+    <p className="text-[14px] text-ink-3">开启自动调仓后显示。</p>
   ) : !tradeChannel ? (
-    <p className="text-[13px] text-ink-3">选择交易渠道后显示。</p>
+    <p className="text-[14px] text-ink-3">选择交易渠道后显示。</p>
   ) : rawErr ? (
-    <p className="text-[13px] text-ink-3">修正自定义节奏后显示。</p>
+    <p className="text-[14px] text-ink-3">修正自定义节奏后显示。</p>
   ) : customEmpty ? (
-    <p className="text-[13px] text-ink-3">输入自定义节奏后显示。</p>
+    <p className="text-[14px] text-ink-3">输入自定义节奏后显示。</p>
   ) : previewError ? (
-    <p className="border-l-2 border-warn px-3 text-[13px] text-warn">预览暂不可用，仍可保存。{previewError}</p>
+    <p className="border-l-2 border-warn px-3 text-[14px] text-warn">预览暂不可用，仍可保存。{previewError}</p>
   ) : expectPreview && !schedulePreview ? (
     <div className="space-y-2" aria-label="正在加载排程预览">{Array.from({ length: 4 }, (_, index) => <div key={index} className="h-4 w-full animate-pulse rounded bg-fill motion-reduce:animate-none" />)}</div>
   ) : schedulePreview?.items.length ? (
@@ -564,7 +564,7 @@ export function TimerEditor({ tradeChannel, scheduleKind, nightSchedule, value, 
         return (
           <div
             key={item.scheduled_at}
-            className={`grid grid-cols-[92px_minmax(0,1fr)] gap-3 text-[13px] ${
+            className={`grid grid-cols-[92px_minmax(0,1fr)] gap-3 text-[14px] ${
               warning ? 'text-warn' : item.action === 'skip' ? 'text-ink-3' : 'text-ink-2'
             } ${cascadeRows ? 'schedule-preview-row-in' : ''}`}
             style={cascadeRows ? {
@@ -585,7 +585,7 @@ export function TimerEditor({ tradeChannel, scheduleKind, nightSchedule, value, 
               ))}
             </div>
           ) : previewMoreError ? (
-            <div className="flex items-center justify-between gap-2 border-l-2 border-warn px-2 text-[12px] text-warn">
+            <div className="flex items-center justify-between gap-2 border-l-2 border-warn px-2 text-[13px] text-warn">
               <span title={previewMoreError}>未来排程续取失败</span>
               <button type="button" className="flex-none font-semibold hover:underline" onClick={loadMore}>
                 重试
@@ -598,7 +598,7 @@ export function TimerEditor({ tradeChannel, scheduleKind, nightSchedule, value, 
       )}
     </div>
   ) : (
-    <p className="text-[13px] text-ink-3">选择有效节奏后显示。</p>
+    <p className="text-[14px] text-ink-3">选择有效节奏后显示。</p>
   )
 
   // page 布局：预览是页面级右列——与编辑流同起于开关行，高度由外层高度链（视口）

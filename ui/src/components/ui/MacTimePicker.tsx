@@ -117,7 +117,7 @@ function WheelColumn({
             id={`${labelledBy}-${n}`}
             role="option"
             aria-selected={n === value}
-            className={`flex h-9 w-full shrink-0 cursor-pointer items-center justify-center font-mono text-[20px] font-[640] tabular-nums ${
+            className={`flex h-9 w-full shrink-0 cursor-pointer items-center justify-center font-mono text-[21px] font-[640] tabular-nums ${
               n === value ? 'text-ink-1' : 'text-ink-3'
             }`}
             onClick={() => onChange(n)}
@@ -246,7 +246,7 @@ export function MacTimePicker({
         style={{ top: pos.top, left: pos.left }}
       >
         <div className="flex flex-col items-center">
-          <span id={`${baseId}-h`} className="mb-0.5 text-[11px] font-semibold tracking-wide text-ink-3">
+          <span id={`${baseId}-h`} className="mb-0.5 text-[12px] font-semibold tracking-wide text-ink-3">
             时
           </span>
           <WheelColumn
@@ -261,7 +261,7 @@ export function MacTimePicker({
         </div>
         <div className="w-px self-stretch bg-line" aria-hidden />
         <div className="flex flex-col items-center">
-          <span id={`${baseId}-m`} className="mb-0.5 text-[11px] font-semibold tracking-wide text-ink-3">
+          <span id={`${baseId}-m`} className="mb-0.5 text-[12px] font-semibold tracking-wide text-ink-3">
             分
           </span>
           <WheelColumn
@@ -320,7 +320,7 @@ export function MacTimePicker({
           aria-label="时"
           aria-pressed={part === 'h'}
           onClick={() => openMenu('h')}
-          className={`min-w-[3.4rem] px-3.5 py-2.5 font-mono text-[28px] font-[640] leading-none tabular-nums tracking-tight transition-colors ${segClass('h')}`}
+          className={`min-w-[3.4rem] px-3.5 py-2.5 font-mono text-[29px] font-[640] leading-none tabular-nums tracking-tight transition-colors ${segClass('h')}`}
         >
           {empty && !open ? '––' : pad2(h)}
         </button>
@@ -329,7 +329,7 @@ export function MacTimePicker({
           aria-label="分"
           aria-pressed={part === 'm'}
           onClick={() => openMenu('m')}
-          className={`min-w-[3.4rem] px-3.5 py-2.5 font-mono text-[28px] font-[640] leading-none tabular-nums tracking-tight transition-colors ${segClass('m')}`}
+          className={`min-w-[3.4rem] px-3.5 py-2.5 font-mono text-[29px] font-[640] leading-none tabular-nums tracking-tight transition-colors ${segClass('m')}`}
         >
           {empty && !open ? '––' : pad2(m)}
         </button>

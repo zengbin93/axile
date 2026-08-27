@@ -98,7 +98,7 @@ export function PortfolioDetailPage() {
           <>
             <div className="flex flex-wrap items-center gap-3">
               <span
-                className="text-[18px] font-[640]"
+                className="text-[19px] font-[640]"
                 style={pfNameVt ? { viewTransitionName: `portfolio-name-${portfolioId}` } : undefined}
               >
                 {head.name}
@@ -106,7 +106,7 @@ export function PortfolioDetailPage() {
               <Chip>{head.market}</Chip>
               <Chip>自定义函数</Chip>
             </div>
-            {head.description && <div className="mt-2 text-[13px] text-ink-2">{head.description}</div>}
+            {head.description && <div className="mt-2 text-[14px] text-ink-2">{head.description}</div>}
             <div className="mt-6 flex gap-8 border-t border-line pt-4">
               <Meta k="跟随账户" v={accountsError ? <span className="text-warn">暂不可用</span> : accounts == null ? <Skeleton className="h-5 w-16" /> : boundAccount ? '1 个' : '未绑定'} />
               <Meta k="目标覆盖" v={!weights.data && weights.loading ? <Skeleton className="h-5 w-16" /> : weights.error ? <span className="text-warn">暂不可用</span> : targetRows.length ? `${coverage.toFixed(0)}%` : '—'} />
@@ -114,14 +114,14 @@ export function PortfolioDetailPage() {
             </div>
             <div className="mt-6 flex gap-2.5">
               <button
-                className="cursor-pointer rounded-[9px] border border-line bg-surface px-4 py-2 text-[13.5px] text-ink-2 hover:border-ink-3/40 hover:text-ink-1"
+                className="cursor-pointer rounded-[9px] border border-line bg-surface px-4 py-2 text-[14.5px] text-ink-2 hover:border-ink-3/40 hover:text-ink-1"
                 onClick={() => navigate(`/portfolios/${portfolioId}/edit`)}
               >
                 编辑组合
               </button>
               {accounts != null && !accountsError && boundAccount && (
                 <button
-                  className="cursor-pointer rounded-[9px] border-0 bg-ink-1 px-4 py-2 text-[13.5px] font-[550] text-surface"
+                  className="cursor-pointer rounded-[9px] border-0 bg-ink-1 px-4 py-2 text-[14.5px] font-[550] text-surface"
                   onClick={runFanout}
                 >
                   全部跟随账户立即执行
@@ -167,14 +167,14 @@ export function PortfolioDetailPage() {
           onRetry={weights.reloadSnapshot}
         />
         {pf && !weights.loading && !weights.error && !weights.data?.calculated_at && (
-          <p className="text-[13px] text-ink-3">尚无目标权重，点击刷新按钮计算。</p>
+          <p className="text-[14px] text-ink-3">尚无目标权重，点击刷新按钮计算。</p>
         )}
         {pf && !weights.loading && !weights.error && weights.data?.calculated_at && targetRows.length === 0 && (
-          <p className="text-[13px] text-ink-3">当前目标为空仓。</p>
+          <p className="text-[14px] text-ink-3">当前目标为空仓。</p>
         )}
         {targetRows.length > 0 && (
           <>
-            <div className="mb-2 text-[13px] text-ink-2">
+            <div className="mb-2 text-[14px] text-ink-2">
               {targetRows.length} 只 · 净 <span className="num">{net.toFixed(1)}%</span> / 总 <span className="num">{coverage.toFixed(1)}%</span>
             </div>
             <WeightBars weights={targetRows} />
@@ -196,17 +196,17 @@ export function PortfolioDetailPage() {
           >
             <div>
               <div
-                className="text-[14px] font-semibold"
+                className="text-[15px] font-semibold"
                 style={acctNameVt ? { viewTransitionName: `account-name-${boundAccount.account_id}` } : undefined}
               >
                 {boundAccount.name}
               </div>
               <div className="text-xs text-ink-3">{channelLabel(boundAccount.trade_channel, boundAccount.market)}</div>
             </div>
-            <span className="ml-auto text-[18px] text-ink-3">›</span>
+            <span className="ml-auto text-[19px] text-ink-3">›</span>
           </Link>
         ) : (
-          <p className="py-3 text-[13px] text-ink-3">暂无账户跟随此组合。</p>
+          <p className="py-3 text-[14px] text-ink-3">暂无账户跟随此组合。</p>
         )}
       </Card>
 
@@ -219,7 +219,7 @@ function Meta({ k, v }: { k: string; v: ReactNode }) {
   return (
     <div>
       <div className="text-xs text-ink-3">{k}</div>
-      <div className="mt-px text-[16px] font-semibold">{v}</div>
+      <div className="mt-px text-[17px] font-semibold">{v}</div>
     </div>
   )
 }

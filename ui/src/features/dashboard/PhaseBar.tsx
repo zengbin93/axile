@@ -36,7 +36,7 @@ export function PhaseBar({ phase }: { phase: string }) {
               {/* 右连接线（末列无） */}
               {i < PHASES.length - 1 && <div className={`h-0.5 flex-1 ${i < cur ? 'bg-accent' : 'bg-line'}`} />}
             </div>
-            <span className={`text-[11px] ${active ? 'font-semibold text-accent' : done ? 'text-ink-2' : 'text-ink-3'}`}>
+            <span className={`text-[12px] ${active ? 'font-semibold text-accent' : done ? 'text-ink-2' : 'text-ink-3'}`}>
               {p.label}
             </span>
           </div>

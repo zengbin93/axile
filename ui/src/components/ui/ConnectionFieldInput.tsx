@@ -95,7 +95,7 @@ export const ConnectionFieldInput = forwardRef<HTMLInputElement, Props>(function
         className={`rounded-[8px] border bg-surface px-3.5 pt-2 pb-2 transition-colors duration-150 focus-within:border-accent ${message ? 'border-warn' : 'border-line'}`}
         onClick={() => inputRef.current?.focus()}
       >
-        <label htmlFor={id} className="block text-[12px] leading-4 text-ink-2">
+        <label htmlFor={id} className="block text-[13px] leading-4 text-ink-2">
           {label}{required ? <span className="ml-0.5 text-ink-3">*</span> : null}
         </label>
         <div className="mt-0.5 flex min-h-8 min-w-0 items-center gap-1">
@@ -115,7 +115,7 @@ export const ConnectionFieldInput = forwardRef<HTMLInputElement, Props>(function
             data-bwignore="true"
             aria-invalid={message ? true : undefined}
             aria-describedby={message || help ? `${id}-message` : undefined}
-            className={`min-w-0 flex-1 bg-transparent text-[15px] leading-7 outline-none placeholder:text-ink-3 ${mono ? 'font-mono' : ''}`}
+            className={`min-w-0 flex-1 bg-transparent text-[16px] leading-7 outline-none placeholder:text-ink-3 ${mono ? 'font-mono' : ''}`}
             style={maskStyle}
             onChange={(event) => onChange(event.target.value)}
             onPaste={handlePaste}
@@ -161,7 +161,7 @@ export const ConnectionFieldInput = forwardRef<HTMLInputElement, Props>(function
         </div>
       </div>
       {(message || help) && (
-        <div id={`${id}-message`} className={`mt-1 min-h-4 text-[12px] ${message ? 'text-warn' : 'text-ink-3'}`}>
+        <div id={`${id}-message`} className={`mt-1 min-h-4 text-[13px] ${message ? 'text-warn' : 'text-ink-3'}`}>
           {message ?? help}
         </div>
       )}

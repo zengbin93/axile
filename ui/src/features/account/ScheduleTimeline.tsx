@@ -23,7 +23,7 @@ interface ScheduleSummaryProps {
 /** 账户头部的最近执行与下次计划摘要。 */
 export function ScheduleSummary({ lastExecutedAt, nextRunAt, now = Date.now() }: ScheduleSummaryProps) {
   return (
-    <div className="mt-1.5 text-[13px] text-ink-3">
+    <div className="mt-1.5 text-[14px] text-ink-3">
       {lastExecutedAt ? (
         <time dateTime={lastExecutedAt} title={formatBeijingTimestamp(lastExecutedAt)}>
           上次 {formatRecentExecution(lastExecutedAt, now)}
@@ -48,7 +48,7 @@ export function ScheduleTimeline({ lastExecutedAt, nextRunTimes, now = Date.now(
   const upcoming = nextRunTimes.slice(0, 3)
   return (
     <div className="border-t border-line">
-      <div className="flex items-center justify-between gap-3 py-1.5 text-[14px]">
+      <div className="flex items-center justify-between gap-3 py-1.5 text-[15px]">
         <span className="text-ink-2">最近一次执行</span>
         {lastExecutedAt ? (
           <time
@@ -63,7 +63,7 @@ export function ScheduleTimeline({ lastExecutedAt, nextRunTimes, now = Date.now(
         )}
       </div>
 
-      <div className="border-t border-line py-1.5 text-[14px]">
+      <div className="border-t border-line py-1.5 text-[15px]">
         <div className="mb-1 text-ink-2">接下来</div>
         {upcoming.length > 0 ? (
           <div role="list" aria-label="未来自动执行计划" className="space-y-1">
@@ -72,7 +72,7 @@ export function ScheduleTimeline({ lastExecutedAt, nextRunTimes, now = Date.now(
                 <time dateTime={iso} title={formatBeijingTimestamp(iso)} className="num font-medium text-ink-1">
                   {formatPlannedAt(iso, now)}
                 </time>
-                <span className="flex-none text-[12px] text-ink-3">{formatTimeUntil(iso, now)}</span>
+                <span className="flex-none text-[13px] text-ink-3">{formatTimeUntil(iso, now)}</span>
               </div>
             ))}
           </div>

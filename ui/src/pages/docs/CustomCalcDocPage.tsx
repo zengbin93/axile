@@ -63,12 +63,12 @@ function CodeBlock({ code }: { code: string }) {
   return (
     <div className="relative">
       <button
-        className="absolute right-2.5 top-2.5 cursor-pointer rounded-md border border-line bg-surface px-2.5 py-1 text-[12px] text-ink-2 hover:text-ink-1"
+        className="absolute right-2.5 top-2.5 cursor-pointer rounded-md border border-line bg-surface px-2.5 py-1 text-[13px] text-ink-2 hover:text-ink-1"
         onClick={copy}
       >
         {copied ? '已复制' : '复制'}
       </button>
-      <pre className="overflow-auto rounded-[12px] bg-code-bg p-[18px] font-mono text-[13px] leading-relaxed text-code-fg">
+      <pre className="overflow-auto rounded-[12px] bg-code-bg p-[18px] font-mono text-[14px] leading-relaxed text-code-fg">
         {code}
       </pre>
     </div>
@@ -86,20 +86,20 @@ export function CustomCalcDocPage() {
     <div className="min-h-screen bg-bg">
       <div className="mx-auto max-w-[1408px] px-8 py-12">
         <div className="text-xs font-semibold tracking-wide text-accent">组合 · 自定义逻辑</div>
-        <h1 className="mt-1.5 text-[26px] font-[680] tracking-tight">开发自定义组合逻辑</h1>
-        <p className="mt-3 text-[14.5px] leading-relaxed text-ink-2">
+        <h1 className="mt-1.5 text-[27px] font-[680] tracking-tight">开发自定义组合逻辑</h1>
+        <p className="mt-3 text-[15.5px] leading-relaxed text-ink-2">
           自定义逻辑让你用一段 Python 决定组合「交易什么」。在本地写好并调试后，把
-          <code className="mx-1 rounded bg-fill px-1.5 py-0.5 font-mono text-[13px]">calculate_portfolio</code>
+          <code className="mx-1 rounded bg-fill px-1.5 py-0.5 font-mono text-[14px]">calculate_portfolio</code>
           函数粘贴到组合编辑器，点「试跑」跑一次确认无误（默认空跑，也可切到某真实账户）。
         </p>
 
         {/* 契约 */}
-        <h2 className="mt-9 text-[18px] font-[640]">函数契约</h2>
-        <p className="mt-2 text-[14px] leading-relaxed text-ink-2">
+        <h2 className="mt-9 text-[19px] font-[640]">函数契约</h2>
+        <p className="mt-2 text-[15px] leading-relaxed text-ink-2">
           脚本必须定义一个恰好接收一个参数的函数
-          <code className="mx-1 rounded bg-fill px-1.5 py-0.5 font-mono text-[13px]">calculate_portfolio(context)</code>，
-          返回一个「品种 → 目标权重」的字典（<code className="rounded bg-fill px-1.5 py-0.5 font-mono text-[13px]">dict[str, float]</code>）。
-          返回空字典 <code className="rounded bg-fill px-1.5 py-0.5 font-mono text-[13px]">{'{}'}</code> 表示空仓。
+          <code className="mx-1 rounded bg-fill px-1.5 py-0.5 font-mono text-[14px]">calculate_portfolio(context)</code>，
+          返回一个「品种 → 目标权重」的字典（<code className="rounded bg-fill px-1.5 py-0.5 font-mono text-[14px]">dict[str, float]</code>）。
+          返回空字典 <code className="rounded bg-fill px-1.5 py-0.5 font-mono text-[14px]">{'{}'}</code> 表示空仓。
         </p>
         <div className="mt-3">
           <CodeBlock
@@ -107,20 +107,20 @@ export function CustomCalcDocPage() {
     # 返回 {品种: 目标权重}，例如 0.5 表示半仓多头，-0.5 表示半仓空头
     return {"rb2610": 0.5, "ag2612": 0.5}`}
           />
-          <p className="mt-3 text-[13px] leading-relaxed text-ink-3">
+          <p className="mt-3 text-[14px] leading-relaxed text-ink-3">
             标的格式由交易渠道决定；新建组合时请以当前市场自动生成的示例为准。
           </p>
         </div>
 
         {/* context 字段 */}
-        <h2 className="mt-9 text-[18px] font-[640]">可用的 context 字段</h2>
-        <p className="mt-2 text-[14px] leading-relaxed text-ink-2">
-          <code className="rounded bg-fill px-1.5 py-0.5 font-mono text-[13px]">context</code>
+        <h2 className="mt-9 text-[19px] font-[640]">可用的 context 字段</h2>
+        <p className="mt-2 text-[15px] leading-relaxed text-ink-2">
+          <code className="rounded bg-fill px-1.5 py-0.5 font-mono text-[14px]">context</code>
           提供账户当日 / 历史的统计指标。<b>空跑</b>会喂入一组固定的假值让脚本跑通；
           切到某<b>真实账户</b>则取该账户的真实数据，口径与真实调仓一致。
         </p>
         <div className="mt-3 overflow-hidden rounded-[12px] border border-line">
-          <table className="w-full border-collapse text-[13.5px]">
+          <table className="w-full border-collapse text-[14.5px]">
             <thead>
               <tr className="bg-fill text-left text-ink-2">
                 <th className="px-4 py-2.5 font-[550]">字段</th>
@@ -131,8 +131,8 @@ export function CustomCalcDocPage() {
             <tbody>
               {CTX_FIELDS.map((f) => (
                 <tr key={f.name} className="border-t border-line">
-                  <td className="px-4 py-2.5 font-mono text-[12.5px] text-ink-1">{f.name}</td>
-                  <td className="px-4 py-2.5 font-mono text-[12.5px] text-ink-3">{f.type}</td>
+                  <td className="px-4 py-2.5 font-mono text-[13.5px] text-ink-1">{f.name}</td>
+                  <td className="px-4 py-2.5 font-mono text-[13.5px] text-ink-3">{f.type}</td>
                   <td className="px-4 py-2.5 text-ink-2">{f.desc}</td>
                 </tr>
               ))}
@@ -141,20 +141,20 @@ export function CustomCalcDocPage() {
         </div>
 
         {/* 示例 */}
-        <h2 className="mt-9 text-[18px] font-[640]">示例</h2>
+        <h2 className="mt-9 text-[19px] font-[640]">示例</h2>
         <div className="mt-3 flex flex-col gap-6">
           {EXAMPLES.map((ex) => (
             <div key={ex.key}>
-              <div className="text-[15px] font-[550]">{ex.title}</div>
-              <div className="mb-2 mt-0.5 text-[13.5px] text-ink-2">{ex.desc}</div>
+              <div className="text-[16px] font-[550]">{ex.title}</div>
+              <div className="mb-2 mt-0.5 text-[14.5px] text-ink-2">{ex.desc}</div>
               <CodeBlock code={ex.code} />
             </div>
           ))}
         </div>
 
         {/* 注意事项 */}
-        <h2 className="mt-9 text-[18px] font-[640]">注意事项</h2>
-        <ul className="mt-2 flex list-disc flex-col gap-1.5 pl-5 text-[14px] leading-relaxed text-ink-2">
+        <h2 className="mt-9 text-[19px] font-[640]">注意事项</h2>
+        <ul className="mt-2 flex list-disc flex-col gap-1.5 pl-5 text-[15px] leading-relaxed text-ink-2">
           <li>权重为小数（0.5 = 半仓）；正数为多头，负数为空头。</li>
           <li>脚本在服务端执行，请勿引入不可信的第三方依赖或访问外部网络。</li>
           <li>发生异常时试跑会把错误标在出错的代码行上，据此定位问题后再重新试跑。</li>

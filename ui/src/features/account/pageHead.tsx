@@ -58,7 +58,7 @@ export function AccountPageTitle({
   const nameVt = flip && transitioning && name != null
   return (
     <>
-      <h1 className="text-[18px] font-[640]">
+      <h1 className="text-[19px] font-[640]">
         {page} ·{' '}
         <span
           style={nameVt ? { viewTransitionName: `account-name-${accountId}` } : undefined}

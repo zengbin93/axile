@@ -20,7 +20,7 @@ export function ExecutionTimeoutHelp() {
       <button
         type="button"
         aria-label="查看执行超时说明"
-        className="grid h-7 w-7 cursor-help place-items-center rounded-md border-0 bg-transparent text-[16px] text-ink-3 transition-colors hover:bg-fill hover:text-ink-2"
+        className="grid h-7 w-7 cursor-help place-items-center rounded-md border-0 bg-transparent text-[17px] text-ink-3 transition-colors hover:bg-fill hover:text-ink-2"
       >
         ⓘ
       </button>

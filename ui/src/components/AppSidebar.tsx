@@ -42,7 +42,7 @@ function NavSection({
 }) {
   return (
     <section className={compact ? 'mt-3.5 first:mt-0' : 'mt-5 first:mt-0'}>
-      <div className="mb-1 truncate px-2.5 text-[11px] font-semibold tracking-[0.14em] text-ink-3" title={label}>
+      <div className="mb-1 truncate px-2.5 text-[12px] font-semibold tracking-[0.14em] text-ink-3" title={label}>
         {label}
       </div>
       <div>{children}</div>
@@ -120,7 +120,7 @@ function NavItem({ item }: { item: NavItemSpec }) {
         <span aria-hidden className="absolute top-1 bottom-1 left-0 w-[2.5px] rounded-full bg-accent" style={activeMarkerStyle} />
       )}
       <span className="relative z-[1] flex items-center gap-2.5">
-        {Icon && <Icon size={15} aria-hidden />}
+        {Icon && <Icon size={16} aria-hidden />}
         <span>{item.label}</span>
       </span>
     </>
@@ -128,7 +128,7 @@ function NavItem({ item }: { item: NavItemSpec }) {
 
   if (!item.to) {
     return (
-      <span className="relative flex h-7.5 items-center gap-2 px-2.5 text-[13px] text-ink-3" aria-disabled="true">
+      <span className="relative flex h-8.5 items-center gap-2 px-2.5 text-[14px] text-ink-3" aria-disabled="true">
         {content}
       </span>
     )
@@ -138,7 +138,7 @@ function NavItem({ item }: { item: NavItemSpec }) {
     <Link
       to={item.to}
       aria-current={active ? 'page' : undefined}
-      className={`relative flex h-7.5 items-center gap-2 px-2.5 text-[13px] transition-colors duration-150 motion-reduce:transition-none ${
+      className={`relative flex h-8.5 items-center gap-2 px-2.5 text-[14px] transition-colors duration-150 motion-reduce:transition-none ${
         active ? 'font-[550] text-ink-1' : 'text-ink-2 hover:text-ink-1'
       }`}
     >
@@ -219,7 +219,7 @@ export function AppSidebar() {
               <div className="mt-4 border-t border-line" />
               {noAccounts ? (
                 <NavSection label="当前账户">
-                  <p className="px-2.5 py-1.5 text-[12px] leading-relaxed text-ink-3">
+                  <p className="px-2.5 py-1.5 text-[13px] leading-relaxed text-ink-3">
                     创建账户后，这里会出现它的持仓、参数与执行入口。
                   </p>
                 </NavSection>
@@ -228,11 +228,11 @@ export function AppSidebar() {
                    整段条目属于这个账户。不用围合面板，层次靠线。 */
                 <div className="mt-4 ml-1.5 border-l border-line pl-2">
                   <div className="mb-1 flex min-w-0 items-center gap-1.5 px-2.5 pt-0.5" title={activeAccount?.name ?? '当前账户'}>
-                    <span className="truncate text-[13px] font-[620] text-ink-1">
+                    <span className="truncate text-[14px] font-[620] text-ink-1">
                       {activeAccount?.name ?? '当前账户'}
                     </span>
                     {activeAccount && (
-                      <span className="flex-none rounded-chip bg-fill px-1.5 py-px text-[10.5px] text-ink-2">
+                      <span className="flex-none rounded-chip bg-fill px-1.5 py-px text-[11.5px] text-ink-2">
                         {channelLabel(activeAccount.trade_channel, activeAccount.market)}
                       </span>
                     )}
@@ -258,10 +258,10 @@ export function AppSidebar() {
 
       <div className="mt-3 border-t border-line pt-3">
         <div className="grid grid-cols-2 gap-1.5">
-          <Link to="/setup/acct/channel" className="flex items-center justify-center gap-1.5 rounded-chip border border-line px-2 py-1.5 text-[12px] text-ink-2 hover:border-border-strong hover:text-ink-1">
+          <Link to="/setup/acct/channel" className="flex items-center justify-center gap-1.5 rounded-chip border border-line px-2 py-1.5 text-[13px] text-ink-2 hover:border-border-strong hover:text-ink-1">
             <Plus size={14} aria-hidden />新建账户
           </Link>
-          <Link to="/setup/pf/name" className="flex items-center justify-center gap-1.5 rounded-chip border border-line px-2 py-1.5 text-[12px] text-ink-2 hover:border-border-strong hover:text-ink-1">
+          <Link to="/setup/pf/name" className="flex items-center justify-center gap-1.5 rounded-chip border border-line px-2 py-1.5 text-[13px] text-ink-2 hover:border-border-strong hover:text-ink-1">
             <Plus size={14} aria-hidden />新建组合
           </Link>
         </div>
