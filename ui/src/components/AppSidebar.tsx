@@ -1,26 +1,16 @@
 import { useEffect, useRef, useState, type ComponentType, type CSSProperties, type ReactNode, type RefObject } from 'react'
 import { useLocation } from 'react-router'
 import {
-  Ban,
   BellRing,
   Boxes,
-  ChartNoAxesCombined,
   ChevronDown,
   ChevronUp,
   CircleGauge,
-  Layers3,
-  ListChecks,
   Plus,
-  Scale,
   Settings2,
-  ShieldKeyhole,
-  SlidersHorizontal,
-  Timer,
-  UserRoundCog,
-  WalletCards,
-  Workflow,
 } from 'lucide-react'
 import { Link } from '@/components/ui/nav'
+import { channelLabel } from '@/features/dashboard/display'
 import { useDomainStore } from '@/stores/domain'
 import { useNavigationStore } from '@/stores/ui'
 
@@ -179,36 +169,36 @@ export function AppSidebar() {
   const accountId = routeAccountId ?? activeAccountId
   const accountPath = (suffix = '') => accountId == null ? null : `/accounts/${accountId}${suffix}`
   const exact = (to: string | null) => (pathname: string) => to != null && pathname === to
-  // 组标题带上账户名：明示「这些条目属于哪个账户」，与顶层「所有账户」入口（列表落点）相区别。
-  const activeName = accounts?.find((a) => a.account_id === accountId)?.name
+  // 账户段身份：块头直接署名当前账户（名称 + 渠道），本段所有条目都属于它。
+  const activeAccount = accounts?.find((a) => a.account_id === accountId)
   // 库里确定没有账户时收拢账户导航：三组入口此刻只有占位价值，一行说明它的归宿比 12 个禁用项安静。
   const noAccounts = accounts != null && accounts.length === 0 && accountId == null
 
   const navRef = useRef<HTMLElement>(null)
   const scrollEdges = useScrollEdges(navRef)
 
+  // 账户段条目不带图标：归属已由「身份块头 + 左缘线 + 缩进」表达，段内保持素净。
   const accountOverview: NavItemSpec[] = [
-    { label: '账户概览', icon: CircleGauge, to: accountPath(), active: exact(accountPath()) },
-    { label: '持仓明细', icon: WalletCards, to: accountPath('/holdings'), active: exact(accountPath('/holdings')) },
+    { label: '账户概览', to: accountPath(), active: exact(accountPath()) },
+    { label: '持仓明细', to: accountPath('/holdings'), active: exact(accountPath('/holdings')) },
     {
       label: '执行记录',
-      icon: ListChecks,
       to: accountPath('/executions'),
       active: (pathname) => pathname === accountPath('/executions') || pathname.startsWith(`${accountPath('/executions')}/`),
     },
-    { label: '回看与绩效', icon: ChartNoAxesCombined, to: accountPath('/history'), active: exact(accountPath('/history')) },
+    { label: '回看与绩效', to: accountPath('/history'), active: exact(accountPath('/history')) },
   ]
   const accountParameters: NavItemSpec[] = [
-    { label: '基本信息', icon: UserRoundCog, to: accountPath('/edit'), active: exact(accountPath('/edit')) },
-    { label: '连接设置', icon: ShieldKeyhole, to: accountPath('/edit/connection'), active: exact(accountPath('/edit/connection')) },
-    { label: '杠杆设置', icon: Scale, to: accountPath('/edit/leverage'), active: exact(accountPath('/edit/leverage')) },
-    { label: '品种控制', icon: Ban, to: accountPath('/edit/symbols'), active: exact(accountPath('/edit/symbols')) },
+    { label: '基本信息', to: accountPath('/edit'), active: exact(accountPath('/edit')) },
+    { label: '连接设置', to: accountPath('/edit/connection'), active: exact(accountPath('/edit/connection')) },
+    { label: '杠杆设置', to: accountPath('/edit/leverage'), active: exact(accountPath('/edit/leverage')) },
+    { label: '品种控制', to: accountPath('/edit/symbols'), active: exact(accountPath('/edit/symbols')) },
   ]
   const accountExecution: NavItemSpec[] = [
-    { label: '定时节奏', icon: Timer, to: accountPath('/edit/timer'), active: exact(accountPath('/edit/timer')) },
-    { label: '执行算法', icon: Workflow, to: accountPath('/edit/algorithm'), active: exact(accountPath('/edit/algorithm')) },
-    { label: '执行流控', icon: SlidersHorizontal, to: accountPath('/edit/control'), active: exact(accountPath('/edit/control')) },
-    { label: '绑定组合', icon: Layers3, to: accountPath('/edit/portfolio'), active: exact(accountPath('/edit/portfolio')) },
+    { label: '定时节奏', to: accountPath('/edit/timer'), active: exact(accountPath('/edit/timer')) },
+    { label: '执行算法', to: accountPath('/edit/algorithm'), active: exact(accountPath('/edit/algorithm')) },
+    { label: '执行流控', to: accountPath('/edit/control'), active: exact(accountPath('/edit/control')) },
+    { label: '绑定组合', to: accountPath('/edit/portfolio'), active: exact(accountPath('/edit/portfolio')) },
   ]
 
   return (
@@ -230,18 +220,26 @@ export function AppSidebar() {
                   </p>
                 </NavSection>
               ) : (
-                /* 账户块：hairline 边 + 微沉底的内嵌面板，把「概览/参数/执行」三组
-                   圈成一个整体——这些条目都属于同一个账户，与顶层列表入口相区别。 */
-                <div className="mt-5 rounded-card border border-line bg-bg-subtle py-2 pl-1.5 pr-1">
-                  <NavSection compact label={activeName ? `当前账户 · ${activeName}` : '当前账户'}>
+                /* 账户段：身份块头（账户名 + 渠道）+ 左缘贯通 hairline + 统一缩进——
+                   整段条目属于这个账户。不用围合面板，层次靠线。 */
+                <div className="mt-5 ml-1.5 border-l border-line pl-2">
+                  <div className="mb-1 flex min-w-0 items-center gap-1.5 px-2.5 pt-0.5" title={activeAccount?.name ?? '当前账户'}>
+                    <span className="truncate text-[13px] font-[620] text-ink-1">
+                      {activeAccount?.name ?? '当前账户'}
+                    </span>
+                    {activeAccount && (
+                      <span className="flex-none rounded-chip bg-fill px-1.5 py-px text-[10.5px] text-ink-2">
+                        {channelLabel(activeAccount.trade_channel, activeAccount.market)}
+                      </span>
+                    )}
+                  </div>
+                  <div>
                     {accountOverview.map((item) => <NavItem key={item.label} item={item} />)}
-                  </NavSection>
-
-                  <NavSection compact label="账户参数">
+                  </div>
+                  <NavSection compact label="参数">
                     {accountParameters.map((item) => <NavItem key={item.label} item={item} />)}
                   </NavSection>
-
-                  <NavSection compact label="自动执行">
+                  <NavSection compact label="执行">
                     {accountExecution.map((item) => <NavItem key={item.label} item={item} />)}
                   </NavSection>
                 </div>
