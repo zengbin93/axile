@@ -16,7 +16,12 @@ from axile.executor.account_control.exceptions import AccountControlBlockedError
 from axile.executor.algorithms.core.base import AlgorithmInput, resolve_algorithm
 from axile.executor.execution_runtime import ExecutionRuntime
 from axile.executor.execution_session import ExecutionSession
-from axile.executor.models.execution_result import AlgorithmResult, ExecutionStatus, is_success_status
+from axile.executor.models.execution_result import (
+    AlgorithmResult,
+    ExecutionStatus,
+    TargetSizingDecision,
+    is_success_status,
+)
 from axile.executor.models.unified_account_assets import UnifiedAccountAssets
 from axile.executor.models.unified_input import UnifiedStandardInput
 from axile.executor.models.unified_order import UnifiedOrder
@@ -144,6 +149,7 @@ class _PreparedSymbolAlgorithm:
     algorithm_name: str
     algorithm_input: AlgorithmInput
     audit_context: AuditContext | None = None
+    sizing: TargetSizingDecision | None = None
 
 
 @dataclass(frozen=True)
@@ -157,6 +163,7 @@ class _PlannedSymbolAlgorithm:
     audit_context: AuditContext | None
     current_volume: float
     final_target_volume: TargetVolumeValue
+    sizing: TargetSizingDecision
 
 
 @dataclass(frozen=True)
@@ -355,7 +362,9 @@ class ExecutionEngine:
             成功时返回算法结果；失败时返回归一化后的错误结果。
         """
         try:
-            return runner()
+            result = runner()
+            result.sizing = task.sizing
+            return result
         except ExecutionTerminated:
             # 协作式终止不是失败：必须穿透 symbol 级错误捕获，交给上层 lifecycle
             # 记录为 TERMINATED（携带 reason/mode），否则会被归一化成「执行失败：未知原因」。
@@ -366,12 +375,14 @@ class ExecutionEngine:
                 algorithm_name=task.algorithm_name,
                 error=str(exc),
                 status=ExecutionStatus.BLOCKED,
+                sizing=task.sizing,
             )
         except Exception as exc:
             return self._build_failed_algorithm_result(
                 symbol=task.symbol,
                 algorithm_name=task.algorithm_name,
                 error=str(exc),
+                sizing=task.sizing,
             )
 
     def _run_prepared_symbol_algorithms(
@@ -428,7 +439,7 @@ class ExecutionEngine:
     ) -> _DispatchPlanningResult:
         """为明确给定的 symbol 集合组装通用算法计划。"""
         planning_failures = list(planning_failures or [])
-        planning_market_data, target_volumes = self._plan_target_volumes_for_symbols(
+        planning_market_data, sizing_decisions = self._plan_target_volumes_for_symbols(
             standard_input=standard_input,
             account_assets=account_assets,
             symbols=symbols,
@@ -438,7 +449,8 @@ class ExecutionEngine:
         for symbol in symbols:
             resolved_algorithm = standard_input.get_resolved_symbol_algorithm(symbol)
             algorithm_name = self._get_symbol_algorithm_name(standard_input, symbol)
-            target_volume = target_volumes.get(symbol)
+            sizing = sizing_decisions.get(symbol)
+            target_volume = sizing.target_quantity if sizing is not None else None
             if target_volume is None:
                 planning_failures.append(
                     self._build_failed_algorithm_result(
@@ -451,9 +463,12 @@ class ExecutionEngine:
                         ),
                         account_assets=account_assets,
                         first_tick=clone_price_data(planning_market_data.get(symbol)),
+                        sizing=sizing,
                     )
                 )
                 continue
+            current_volume = self._owner.get_current_volume(symbol, account_assets)
+            sizing.current_quantity = current_volume
             plans.append(
                 _PlannedSymbolAlgorithm(
                     symbol=symbol,
@@ -461,8 +476,9 @@ class ExecutionEngine:
                     params=resolved_algorithm.get("params"),
                     trade_rule=dict(standard_input.trade_rules.get(symbol, {})),
                     audit_context=self._build_symbol_audit_context(standard_input, symbol, algorithm_name),
-                    current_volume=self._owner.get_current_volume(symbol, account_assets),
+                    current_volume=current_volume,
                     final_target_volume=target_volume,
+                    sizing=sizing,
                 )
             )
         return _DispatchPlanningResult(
@@ -491,7 +507,7 @@ class ExecutionEngine:
         account_assets: UnifiedAccountAssets,
         symbols: list[str],
         effective_curr_target: dict[str, float] | None = None,
-    ) -> tuple[dict[str, UnifiedPriceData], dict[str, TargetVolumeValue]]:
+    ) -> tuple[dict[str, UnifiedPriceData], dict[str, TargetSizingDecision]]:
         """基于指定账户快照为一组品种规划目标数量."""
         if not symbols:
             return {}, {}
@@ -502,7 +518,7 @@ class ExecutionEngine:
             symbol: weight for symbol, weight in standard_input.last_target.items() if symbol in set(symbols)
         }
         planning_market_data = self._owner.get_market_data(symbols)
-        target_volumes = self._owner.calculate_target_volume(
+        sizing_decisions = self._owner.calculate_target_sizing(
             scoped_curr_target,
             account_assets,
             planning_market_data,
@@ -510,7 +526,7 @@ class ExecutionEngine:
             scoped_last_target,
             standard_input.forbidden_symbols,
         )
-        return planning_market_data, target_volumes
+        return planning_market_data, sizing_decisions
 
     def _classify_symbol_dispatch_phases(
         self,
@@ -629,6 +645,8 @@ class ExecutionEngine:
         self,
         plan: _PlannedSymbolAlgorithm,
         target_volume: TargetVolumeValue,
+        *,
+        sizing: TargetSizingDecision | None = None,
     ) -> _PreparedSymbolAlgorithm:
         """将阶段计划转换为可执行的算法任务."""
         return _PreparedSymbolAlgorithm(
@@ -641,6 +659,7 @@ class ExecutionEngine:
                 params=plan.params,
             ),
             audit_context=plan.audit_context,
+            sizing=sizing or plan.sizing,
         )
 
     def _build_noop_algorithm_result(
@@ -655,6 +674,7 @@ class ExecutionEngine:
             orders=[],
             account_assets=account_assets,
             target_volume=plan.final_target_volume,
+            sizing=plan.sizing,
             first_tick=clone_price_data(market_data.get(plan.symbol)),
             memory={},
             status=ExecutionStatus.NOOP,
@@ -682,6 +702,7 @@ class ExecutionEngine:
                     status=ExecutionStatus.BLOCKED,
                     account_assets=account_assets,
                     target_volume=plan.final_target_volume,
+                    sizing=plan.sizing,
                     first_tick=clone_price_data(market_data.get(plan.symbol)),
                 )
             )
@@ -700,7 +721,7 @@ class ExecutionEngine:
         phase_two_plans = {plan.symbol: plan for plan in plans}
         refreshed_account_assets = self._owner.get_account_assets()
         effective_curr_target = self._build_effective_curr_target(standard_input, refreshed_account_assets)
-        planning_market_data, target_volumes = self._plan_target_volumes_for_symbols(
+        planning_market_data, sizing_decisions = self._plan_target_volumes_for_symbols(
             standard_input=standard_input,
             account_assets=refreshed_account_assets,
             symbols=phase_two_symbols,
@@ -711,7 +732,8 @@ class ExecutionEngine:
         planning_failures: list[AlgorithmResult] = []
         for symbol in phase_two_symbols:
             plan = phase_two_plans[symbol]
-            target_volume = target_volumes.get(symbol)
+            sizing = sizing_decisions.get(symbol)
+            target_volume = sizing.target_quantity if sizing is not None else None
             if target_volume is None:
                 planning_failures.append(
                     self._build_failed_algorithm_result(
@@ -725,10 +747,13 @@ class ExecutionEngine:
                         account_assets=refreshed_account_assets,
                         target_volume=plan.final_target_volume,
                         first_tick=clone_price_data(planning_market_data.get(symbol)),
+                        sizing=sizing,
                     )
                 )
                 continue
-            tasks.append(self._build_prepared_symbol_algorithm(plan, target_volume))
+            if sizing is not None:
+                sizing.current_quantity = self._owner.get_current_volume(symbol, refreshed_account_assets)
+            tasks.append(self._build_prepared_symbol_algorithm(plan, target_volume, sizing=sizing))
         return _PhaseTwoReplanResult(tasks=tasks, planning_failures=planning_failures)
 
     def _has_unsuccessful_results(self, results: list[AlgorithmResult]) -> bool:
@@ -768,6 +793,7 @@ class ExecutionEngine:
             orders=[*previous.orders, *current.orders],
             account_assets=current.account_assets,
             target_volume=current.target_volume if current.target_volume is not None else previous.target_volume,
+            sizing=current.sizing if current.sizing is not None else previous.sizing,
             first_tick=current.first_tick if current.first_tick is not None else previous.first_tick,
             memory=merged_memory,
             status=merged_status,
@@ -884,7 +910,11 @@ class ExecutionEngine:
             reason_code = (
                 decision_reason_code
                 if isinstance(decision_reason_code, str)
-                else ("COMMON.SYMBOL_SKIPPED" if is_skipped else "COMMON.SYMBOL_DECISION_MADE")
+                else (
+                    result.sizing.reason_code
+                    if is_skipped and result.sizing is not None
+                    else ("COMMON.SYMBOL_SKIPPED" if is_skipped else "COMMON.SYMBOL_DECISION_MADE")
+                )
             )
             reason_family = (
                 ExecutionReasonFamily(decision_reason_family)
@@ -901,6 +931,8 @@ class ExecutionEngine:
                     "orders_count": len(result.orders),
                 },
             }
+            if result.sizing is not None:
+                details["sizing"] = result.sizing.model_dump(mode="json")
             if result.error:
                 details["debug"] = {"error": result.error}
             self._runtime.emit_audit_event(
@@ -925,12 +957,14 @@ class ExecutionEngine:
         target_volume: TargetVolumeValue | None = None,
         first_tick: UnifiedPriceData | None = None,
         memory: dict[str, object] | None = None,
+        sizing: TargetSizingDecision | None = None,
     ) -> AlgorithmResult:
         """构造单个品种的失败算法结果."""
         return AlgorithmResult(
             orders=list(orders or []),
             account_assets=account_assets or self._owner.get_account_assets(),
             target_volume=target_volume,
+            sizing=sizing,
             first_tick=first_tick,
             memory=dict(memory or {}),
             status=status,

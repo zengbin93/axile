@@ -4,22 +4,41 @@ from __future__ import annotations
 
 from collections.abc import AsyncGenerator
 
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from axile.common.trade_channel import TradeChannel
+from axile.domain.execution import ExecutionArtifactType
 from axile.server.api.deps import get_db
 from axile.server.api.routes import account as account_routes
 from axile.server.api.routes import account_execution as account_execution_routes
-from axile.server.db.models import Account, Portfolio, TargetWeightSnapshot
+from axile.server.db.models import Account, ExecutionArtifact, Portfolio, TargetWeightSnapshot
+
+
+class _ScalarRows:
+    def __init__(self, rows: list[ExecutionArtifact]) -> None:
+        self._rows = rows
+
+    def scalars(self) -> _ScalarRows:
+        return self
+
+    def all(self) -> list[ExecutionArtifact]:
+        return self._rows
 
 
 class _RouteSession:
     """支持按模型区分 ``get(Account, id)`` 与 ``get(Portfolio, id)`` 的极简会话。"""
 
-    def __init__(self, account: Account | None, portfolio: Portfolio | None) -> None:
+    def __init__(
+        self,
+        account: Account | None,
+        portfolio: Portfolio | None,
+        artifacts: list[ExecutionArtifact] | None = None,
+    ) -> None:
         self._account = account
         self._portfolio = portfolio
+        self._artifacts = artifacts or []
 
     async def get(self, model: object, obj_id: int) -> object | None:
         if model is Account:
@@ -31,6 +50,9 @@ class _RouteSession:
                 return self._portfolio
             return None
         return None
+
+    async def execute(self, _statement: object) -> _ScalarRows:
+        return _ScalarRows(self._artifacts)
 
 
 def _build_account(
@@ -126,10 +148,6 @@ def _patch_resolution(
         fake_append_target_weight_snapshot,
     )
 
-    async def fake_snapshots(_session: object, _account_id: int, limit: int = 1) -> list[object]:
-        return []
-
-    monkeypatch.setattr(account_execution_routes, "get_recent_account_asset_snapshots", fake_snapshots)
     return saved
 
 
@@ -142,6 +160,8 @@ def test_account_target_weights_applies_long_leverage(monkeypatch) -> None:
 
     assert response.status_code == 200
     assert response.json()["weights"] == {"rb2610": 1.5, "ag2612": 1.5}
+    assert response.json()["quantities"] is None
+    assert response.json()["sizing"]["status"] == "pending_execution"
     assert saved[0].source == "manual"
 
 
@@ -190,7 +210,8 @@ def test_account_target_snapshot_get_only_reads_snapshot(monkeypatch) -> None:
     assert response.status_code == 200
     assert response.json()["weights"] == {"rb2610": 1.5}
     assert response.json()["source"] == "execution"
-    assert response.json()["quantities"] == {}
+    assert response.json()["quantities"] is None
+    assert response.json()["sizing"]["status"] == "legacy"
 
 
 def test_account_target_snapshot_returns_uncalculated_without_bound_portfolio(monkeypatch) -> None:
@@ -225,8 +246,8 @@ def test_account_target_refresh_rejects_operation_conflict(monkeypatch) -> None:
     assert response.status_code == 409
 
 
-def test_account_target_snapshot_canonicalizes_and_quantizes_from_book(monkeypatch) -> None:
-    """账户快照把 TA2701 收到 TA701，并按当前账面一手名义量化手数。"""
+def test_account_target_snapshot_does_not_recalculate_legacy_quantity_from_current_book(monkeypatch) -> None:
+    """历史执行缺少当时证据时只规范 symbol，不拿当前账面和行情反推数量."""
     session = _RouteSession(_build_account(), _build_portfolio())
     _patch_resolution(monkeypatch, portfolio_id=7, raw_target={"TA2701": -0.08})
 
@@ -242,34 +263,152 @@ def test_account_target_snapshot_canonicalizes_and_quantizes_from_book(monkeypat
             calculated_at="2026-08-26T21:35:10",
         )
 
-    async def fake_snapshots(_session: object, _account_id: int, limit: int = 1) -> list[object]:
-        return [
-            type(
-                "Snap",
-                (),
-                {
-                    "assets": {
-                        "total_asset": 992_670.6124999999,
-                        "positions": [
-                            {
-                                "symbol": "TA701",
-                                "volume": 2.0,
-                                "market_value": 55000.0,
-                                "direction": "空头",
-                                "extra": {"net_position": -2.0},
-                            }
-                        ],
-                    }
-                },
-            )()
-        ]
-
     monkeypatch.setattr(account_execution_routes, "get_latest_account_target_snapshot", fake_latest)
-    monkeypatch.setattr(account_execution_routes, "get_recent_account_asset_snapshots", fake_snapshots)
 
     response = TestClient(_build_app(session)).get("/account/1/target_snapshot")
 
     assert response.status_code == 200
     body = response.json()
     assert body["weights"] == {"TA701": -0.08}
-    assert body["quantities"] == {"TA701": -2.0}
+    assert body["quantities"] is None
+    assert body["sizing"]["status"] == "legacy"
+
+
+def test_account_target_snapshot_returns_complete_execution_sizing(monkeypatch) -> None:
+    """仅同一次 v2 执行的完整逐只证据可形成 quantities."""
+    artifacts = [
+        ExecutionArtifact(
+            execution_id="exec-v2",
+            artifact_type=ExecutionArtifactType.TARGET_SNAPSHOT,
+            schema_version=2,
+            content={"sizing_context": {"weight_precision": 0.01}},
+        ),
+        ExecutionArtifact(
+            execution_id="exec-v2",
+            artifact_type=ExecutionArtifactType.EXECUTION_SUMMARY,
+            schema_version=2,
+            content={
+                "reconciliation": {
+                    "symbols": [
+                        {
+                            "symbol": "TA701",
+                            "sizing": {
+                                "symbol": "TA701",
+                                "reason_code": "COMMON.SIZING.QUANTIZED",
+                                "account_weight": -0.32,
+                                "equity": 99_974.0,
+                                "reference_price": 4_840.0,
+                                "unit_multiplier": 5.0,
+                                "unit_notional": 24_200.0,
+                                "raw_quantity": -1.322,
+                                "target_quantity": -1.0,
+                                "quantity_step": 1.0,
+                            },
+                        }
+                    ]
+                }
+            },
+        ),
+    ]
+    session = _RouteSession(_build_account(), _build_portfolio(), artifacts)
+    _patch_resolution(monkeypatch, portfolio_id=7, raw_target={})
+
+    async def fake_latest(_session: object, _account_id: int, _portfolio_id: int) -> TargetWeightSnapshot:
+        return TargetWeightSnapshot(
+            id=4,
+            portfolio_id=7,
+            account_id=1,
+            raw_weights={"TA2701": -0.1067},
+            normalized_weights={"TA2701": -0.32},
+            source="execution",
+            execution_id="exec-v2",
+            calculated_at="2026-08-27T13:30:00",
+        )
+
+    monkeypatch.setattr(account_execution_routes, "get_latest_account_target_snapshot", fake_latest)
+    response = TestClient(_build_app(session)).get("/account/1/target_snapshot")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["strategy_weights"] == {"TA701": -0.1067}
+    assert body["account_weights"] == {"TA701": -0.32}
+    assert body["quantities"] == {"TA701": -1.0}
+    assert body["sizing"]["status"] == "available"
+    assert body["sizing"]["rows"]["TA701"]["account_multiplier"] == pytest.approx(2.99906279)
+    assert body["sizing"]["rows"]["TA701"]["weight_precision"] == 0.01
+
+
+@pytest.mark.parametrize(
+    ("artifacts", "expected_status"),
+    [
+        (
+            [
+                ExecutionArtifact(
+                    execution_id="exec-status",
+                    artifact_type=ExecutionArtifactType.TARGET_SNAPSHOT,
+                    schema_version=2,
+                    content={"sizing_context": {"weight_precision": 0.01}},
+                )
+            ],
+            "pending_execution",
+        ),
+        (
+            [
+                ExecutionArtifact(
+                    execution_id="exec-status",
+                    artifact_type=ExecutionArtifactType.TARGET_SNAPSHOT,
+                    schema_version=2,
+                    content={"sizing_context": {"weight_precision": 0.01}},
+                ),
+                ExecutionArtifact(
+                    execution_id="exec-status",
+                    artifact_type=ExecutionArtifactType.EXECUTION_SUMMARY,
+                    schema_version=2,
+                    content={"reconciliation": {"symbols": []}},
+                ),
+            ],
+            "unavailable",
+        ),
+        (
+            [
+                ExecutionArtifact(
+                    execution_id="exec-status",
+                    artifact_type=ExecutionArtifactType.EXECUTION_SUMMARY,
+                    schema_version=1,
+                    content={"reconciliation": {"symbols": []}},
+                )
+            ],
+            "legacy",
+        ),
+    ],
+    ids=["v2-target-pending", "v2-summary-incomplete", "v1-summary-legacy"],
+)
+def test_account_target_snapshot_reports_sizing_evidence_state(
+    monkeypatch,
+    artifacts: list[ExecutionArtifact],
+    expected_status: str,
+) -> None:
+    """API 应区分执行尚未完成、证据不完整与旧协议记录."""
+    session = _RouteSession(_build_account(), _build_portfolio(), artifacts)
+    _patch_resolution(monkeypatch, portfolio_id=7, raw_target={})
+
+    async def fake_latest(_session: object, _account_id: int, _portfolio_id: int) -> TargetWeightSnapshot:
+        return TargetWeightSnapshot(
+            id=5,
+            portfolio_id=7,
+            account_id=1,
+            raw_weights={"rb2610": 0.1},
+            normalized_weights={"rb2610": 0.3},
+            source="execution",
+            execution_id="exec-status",
+            calculated_at="2026-08-27T14:00:00",
+        )
+
+    monkeypatch.setattr(account_execution_routes, "get_latest_account_target_snapshot", fake_latest)
+
+    response = TestClient(_build_app(session)).get("/account/1/target_snapshot")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["sizing"]["status"] == expected_status
+    assert body["quantities"] is None

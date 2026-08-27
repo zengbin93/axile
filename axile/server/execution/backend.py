@@ -261,8 +261,12 @@ async def _append_rebalance_start_audit(
     await append_execution_artifact(
         execution_id=execution_id,
         artifact_type=ExecutionArtifactType.TARGET_SNAPSHOT,
+        schema_version=2,
         content={
             "curr_target": request.curr_target,
+            "strategy_target": request.audit_input.get("strategy_target", {}),
+            "account_target": request.curr_target,
+            "sizing_context": request.audit_input.get("sizing_context", {}),
             "last_target": request.last_target,
         },
     )

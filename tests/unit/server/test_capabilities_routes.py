@@ -41,6 +41,7 @@ def test_channels_reports_all_available_when_deps_present(client: TestClient, mo
         assert "fields" in item["account_form"]
         assert "quantity_kind" in item["units"]
         assert "show_short_leverage" in item["ui"]
+        assert item["ui"]["position_value_label"]
         assert item["schedule"]["kind"] in {"continuous", "cn_stock", "cn_futures"}
         assert item["calendar"] == {"calendar_id": "china", "label": "中国交易日历"}
         assert "market_label" in item["portfolio"]
@@ -52,8 +53,10 @@ def test_channels_reports_all_available_when_deps_present(client: TestClient, mo
     assert connection_mode["options"][1]["label"] == "终端 RPC 地址"
     assert gm["schedule"]["night"] is None
     ctp = next(item for item in payload if item["channel"] == TradeChannel.CTP.value)
+    assert ctp["ui"]["position_value_label"] == "货值"
     assert ctp["schedule"]["night"]["range_label"] == "21:00–次日 02:30"
     assert ctp["schedule"]["night"]["m60"] == ["22:00", "23:00", "00:00", "01:00", "02:00", "02:30"]
+    assert gm["ui"]["position_value_label"] == "市值"
 
 
 def test_channels_reports_missing_dependency_with_install_extra(

@@ -77,6 +77,9 @@ from axile.server.db.models.schedule import (
     ScheduleSkipActivity,
 )
 from axile.server.db.models.target_weight_snapshot import (
+    TargetSizingAvailability,
+    TargetSizingPublic,
+    TargetSizingRowPublic,
     TargetWeightSnapshot,
     TargetWeightSnapshotPublic,
     TargetWeightSnapshotSource,
@@ -104,6 +107,9 @@ __all__ = [
     "TargetWeightSnapshot",
     "TargetWeightSnapshotPublic",
     "TargetWeightSnapshotSource",
+    "TargetSizingAvailability",
+    "TargetSizingPublic",
+    "TargetSizingRowPublic",
     "ValidateCustomCalcRequest",
     "ValidateCustomCalcResponse",
     "AccountBase",

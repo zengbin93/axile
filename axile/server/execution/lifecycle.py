@@ -438,6 +438,7 @@ async def append_execution_result_artifacts(
     await append_execution_artifact(
         execution_id=execution_id,
         artifact_type=ExecutionArtifactType.EXECUTION_SUMMARY,
+        schema_version=2,
         content={
             "summary": build_execution_summary_from_symbol_results(result),
             "success": result.get("success", True),

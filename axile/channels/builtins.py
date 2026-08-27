@@ -105,6 +105,7 @@ def _ctp_plugin() -> ChannelPlugin:
                 quantity_label="手",
                 quantity_max_decimals=0,
             ),
+            ui=ChannelUi(position_value_label="货值"),
             defaults=ChannelDefaults(
                 long_leverage=3,
                 short_leverage=3,
@@ -186,6 +187,7 @@ def _gm_plugin() -> ChannelPlugin:
                 leverage_note="A 股仅多头，是投入权益比例",
                 long_leverage_label="仓位系数（做多）",
                 show_short_leverage=False,
+                position_value_label="市值",
             ),
             defaults=ChannelDefaults(
                 long_leverage=1,
@@ -282,7 +284,10 @@ def _tq_plugin() -> ChannelPlugin:
                 quantity_label="手",
                 quantity_max_decimals=0,
             ),
-            ui=ChannelUi(account_connect_lead="选择账户模式后填写对应凭据。"),
+            ui=ChannelUi(
+                account_connect_lead="选择账户模式后填写对应凭据。",
+                position_value_label="货值",
+            ),
             defaults=ChannelDefaults(
                 long_leverage=3,
                 short_leverage=3,

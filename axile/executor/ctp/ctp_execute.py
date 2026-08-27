@@ -63,7 +63,7 @@ from axile.executor.ctp_product_sessions import (
     get_ctp_product_sessions,
 )
 from axile.executor.execution_engine import ExecutionEngine, _DispatchPlanningResult
-from axile.executor.models.execution_result import AlgorithmResult, ExecutionStatus
+from axile.executor.models.execution_result import AlgorithmResult, ExecutionStatus, TargetSizingDecision
 from axile.executor.models.unified_account_assets import UnifiedAccountAssets
 from axile.executor.models.unified_callback import (
     UnifiedCallbackClient,
@@ -596,7 +596,7 @@ class CTPExecutor(AbstractExecutor, UnifiedCallbackClient):
         return v if v > 0 else None
 
     @override
-    def _calculate_generic_volume(
+    def _calculate_generic_sizing(
         self,
         weight: float,
         price: float,
@@ -604,18 +604,65 @@ class CTPExecutor(AbstractExecutor, UnifiedCallbackClient):
         trade_rule: dict[str, object],
         *,
         symbol: str | None = None,
-    ) -> float:
-        """按合约乘数将目标权重换算为合法 CTP 手数。"""
-        sizing_mode = trade_rule.get("sizing_mode", "weight")
+    ) -> TargetSizingDecision:
+        """按 CTP 合约规格生成目标手数及换算证据."""
+        sizing_mode = str(trade_rule.get("sizing_mode", "weight"))
         if sizing_mode == "lots":
-            return self._round_lots(weight, trade_rule)
+            target = self._round_lots(weight, trade_rule)
+            step = self._quantity_step(trade_rule)
+            return TargetSizingDecision(
+                symbol=symbol or "",
+                sizing_mode=sizing_mode,
+                reason_code=("COMMON.SIZING.EXACT" if abs(target - weight) <= 1e-12 else "COMMON.SIZING.QUANTIZED"),
+                account_weight=weight,
+                equity=account_assets.total_asset,
+                raw_quantity=weight,
+                target_quantity=target,
+                quantity_step=step,
+                min_quantity=step,
+            )
         if price <= 0:
-            return 0.0
+            return TargetSizingDecision(
+                symbol=symbol or "",
+                status="UNAVAILABLE",
+                reason_code="COMMON.SIZING.INVALID_PRICE",
+                account_weight=weight,
+                equity=account_assets.total_asset,
+                reference_price=price,
+            )
         multiplier = self._resolve_volume_multiple(symbol, trade_rule)
         if multiplier <= 0:
-            return 0.0
-        target = account_assets.total_asset * weight / (price * multiplier)
-        return self._round_lots(target, trade_rule)
+            return TargetSizingDecision(
+                symbol=symbol or "",
+                status="UNAVAILABLE",
+                reason_code="COMMON.SIZING.MISSING_UNIT_MULTIPLIER",
+                account_weight=weight,
+                equity=account_assets.total_asset,
+                reference_price=price,
+            )
+        raw_quantity = account_assets.total_asset * weight / (price * multiplier)
+        target_quantity = self._round_lots(raw_quantity, trade_rule)
+        reason = "COMMON.SIZING.EXACT"
+        if raw_quantity != 0 and target_quantity == 0:
+            reason = "COMMON.SIZING.BELOW_MIN_QUANTITY"
+        elif abs(raw_quantity - target_quantity) > 1e-12:
+            reason = "COMMON.SIZING.QUANTIZED"
+        step = self._quantity_step(trade_rule)
+        return TargetSizingDecision(
+            symbol=symbol or "",
+            sizing_mode=sizing_mode,
+            reason_code=reason,
+            account_weight=weight,
+            equity=account_assets.total_asset,
+            reference_price=price,
+            unit_multiplier=float(multiplier),
+            unit_notional=price * multiplier,
+            target_notional=abs(account_assets.total_asset * weight),
+            raw_quantity=raw_quantity,
+            target_quantity=target_quantity,
+            quantity_step=step,
+            min_quantity=step,
+        )
 
     def _resolve_volume_multiple(self, symbol: str | None, trade_rule: dict[str, object]) -> int:
         instrument = self._instruments.get(symbol) if symbol else None
@@ -638,6 +685,14 @@ class CTPExecutor(AbstractExecutor, UnifiedCallbackClient):
             sign = 1.0 if volume >= 0 else -1.0
             return sign * (int(abs(volume) / lot) * lot)
         return float(int(volume)) if volume >= 0 else float(-int(-volume))
+
+    @staticmethod
+    def _quantity_step(trade_rule: dict[str, object]) -> float:
+        precision = trade_rule.get("quantity_precision")
+        if isinstance(precision, int) and not isinstance(precision, bool):
+            return 10 ** (-precision)
+        minimum = trade_rule.get("最小交易单位", 1)
+        return float(minimum) if isinstance(minimum, int | float) and not isinstance(minimum, bool) else 1.0
 
     def _on_quote(self, row):
         q = quote_to_unified(row)

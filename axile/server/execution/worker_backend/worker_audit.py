@@ -120,8 +120,12 @@ def _append_trade_pre_execute_audit(
     append_execution_artifact_sync(
         execution_id=execution_id,
         artifact_type=ExecutionArtifactType.TARGET_SNAPSHOT,
+        schema_version=2,
         content={
             "curr_target": standard_input.curr_target,
+            "strategy_target": audit_input.get("strategy_target", {}),
+            "account_target": standard_input.curr_target,
+            "sizing_context": audit_input.get("sizing_context", {}),
             "last_target": standard_input.last_target,
         },
     )
@@ -235,6 +239,7 @@ def _append_success_audit(
     append_execution_artifact_sync(
         execution_id=execution_id,
         artifact_type=ExecutionArtifactType.EXECUTION_SUMMARY,
+        schema_version=2,
         content={
             "summary": build_execution_summary_from_symbol_results(result),
             "success": result.get("success", True),

@@ -4,7 +4,7 @@ import { useDomainStore } from '@/stores/domain'
 import { integrityOf } from '@/lib/derive'
 import { ThemeToggle } from '@/components/ThemeToggle'
 import { timeAgo } from '@/lib/format'
-import { RefreshCw, TriangleAlert } from 'lucide-react'
+import { Menu, RefreshCw, TriangleAlert } from 'lucide-react'
 import { Tooltip } from '@/components/ui/Tooltip'
 import { shortErrorReason } from '@/lib/errorInfo'
 import { BrandWordmark } from '@/components/brand/BrandWordmark'
@@ -15,7 +15,7 @@ import { BrandWordmark } from '@/components/brand/BrandWordmark'
  * 活性点/新鲜度直接来自共享账户数据的刷新（比单独 ping health 更诚实）：
  * 有数据且最近一次刷新无误=中性+「数据 N 秒前」；刷新出错=琥珀并保留原因。
  */
-export function TopBar() {
+export function TopBar({ onOpenNavigation }: { onOpenNavigation?: () => void }) {
   const updatedAt = useDomainStore((s) => s.accountsUpdatedAt)
   const error = useDomainStore((s) => s.accountsError)
   const accounts = useDomainStore((s) => s.accounts)
@@ -41,6 +41,14 @@ export function TopBar() {
 
   return (
     <header className="flex flex-none flex-wrap items-center gap-3 border-b border-line bg-surface px-5 py-3">
+      <button
+        type="button"
+        aria-label="打开主导航"
+        className="text-ink-2 hover:text-ink-1 md:hidden"
+        onClick={onOpenNavigation}
+      >
+        <Menu size={18} aria-hidden />
+      </button>
       <Link to="/" aria-label="axile 首页">
         <BrandWordmark />
       </Link>

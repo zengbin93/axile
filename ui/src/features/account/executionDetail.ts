@@ -16,6 +16,7 @@ import type {
   ExecutionReconciliation,
   ExecutionStatus,
   SymbolTca,
+  TargetSizingRow,
 } from '@/types/api'
 
 /** 逐只动作分类（描述这次执行对该品种做了什么）。 */
@@ -58,6 +59,8 @@ export interface SymbolChain {
   broken: boolean
   /** 断点原因（跳过/失败/撤销时的可读说明）。 */
   reason: string
+  /** 当次 execution 持久化的目标数量换算依据。 */
+  sizing: TargetSizingRow | null
 }
 
 /** 头条：整条链坍缩成的结论。 */
@@ -68,6 +71,9 @@ export interface ExecutionHeader {
   reachedCount: number
   totalCount: number
   failedCount: number
+  tradedReachedCount: number
+  alreadyReachedCount: number
+  quantizedZeroCount: number
   equityBefore: number | null
   equityAfter: number | null
   /** 敞口 = 持仓市值 / 总权益（%）。 */
@@ -92,7 +98,7 @@ export interface ExecutionHeader {
 
 /** 目标变化段：回答「为什么调仓」。 */
 export interface TargetChange {
-  rows: { symbol: string; last: number | null; curr: number }[]
+  rows: { symbol: string; last: number | null; curr: number; strategy: number | null }[]
   algorithm: string | null
   algoParams: string | null
   forbidden: string[]
@@ -134,6 +140,34 @@ export interface ExecutionDetailModel {
   failure: FailureReason | null
   /** 执行任务状态真源；旧记录或接口不可用时为 null。 */
   task: ExecutionStatus | null
+}
+
+/** 把执行结果压成一条自然语言结论；正常完成保持中性。 */
+export function executionHeadline(
+  model: ExecutionDetailModel,
+  quantityLabel: string,
+): { level: 'neutral' | 'warn'; text: string } {
+  const {
+    reachedCount,
+    totalCount,
+    failedCount,
+    tradedReachedCount,
+    alreadyReachedCount,
+    quantizedZeroCount,
+  } = model.header
+  const notReached = totalCount - reachedCount
+  if (model.failure) return { level: 'warn', text: `执行失败：${model.failure.category}` }
+  if (model.task?.status === 'TERMINATED') return { level: 'neutral', text: '执行已终止。' }
+  if (failedCount > 0) return { level: 'warn', text: `执行完成：${failedCount}只失败。` }
+  if (notReached > 0) return { level: 'warn', text: `执行完成：${reachedCount}只到位，${notReached}只未到位。` }
+  if (totalCount === 0) return { level: 'neutral', text: '本次执行没有逐只结果。' }
+  const parts: string[] = []
+  if (tradedReachedCount > 0) parts.push(`${tradedReachedCount}只成交到位`)
+  if (alreadyReachedCount > 0) parts.push(`${alreadyReachedCount}只原已到位`)
+  if (quantizedZeroCount > 0) {
+    parts.push(`${quantizedZeroCount}只因${quantityLabel === '手' ? '不足1手' : '不足最小交易单位'}未下单`)
+  }
+  return { level: 'neutral', text: `执行完成：${parts.join('，')}。` }
 }
 
 type Dict = Record<string, unknown>
@@ -219,6 +253,7 @@ function pnlBySymbol(assets: Dict | null): Map<string, number> {
 function classifyAction(before: number, after: number, target: number | null): ChainAction {
   const eps = 1e-9
   if (target == null) return Math.abs(after - before) < eps ? 'aligned' : 'reduce'
+  if (Math.abs(before - target) < eps) return 'aligned'
   if (Math.abs(before) < eps && Math.abs(target) >= eps) return 'open'
   if (Math.abs(target) < eps) return 'close'
   if (Math.sign(before) !== Math.sign(target) && Math.abs(before) >= eps) return 'flip'
@@ -310,12 +345,13 @@ function buildSymbolChain(
   const order = orders.get(symbol)
   const decision = decisions.get(symbol)
   const skipReason = skips.get(symbol)
+  const sizing = asDict(recon.sizing) as TargetSizingRow | null
 
   let action = classifyAction(before, after, target)
   let reason = ''
   if (skipReason) {
-    action = 'skipped'
     reason = skipReason
+    if (reached !== true) action = 'skipped'
   } else if (decision?.status && decision.status !== 'SUCCEEDED') {
     // 订单腿非成功（FAILED/BLOCKED/NOOP…）：是否「失败」由仓位真相判定，而非订单枚举。
     // 仅「确认到位」（reached===true）免罪：受阻/空跑但仓位已在目标 → 保持原动作、不判失败；
@@ -358,6 +394,7 @@ function buildSymbolChain(
     orders: Array.isArray(recon.orders) ? (recon.orders as ExecOrder[]) : [],
     broken,
     reason,
+    sizing,
   }
 }
 
@@ -379,13 +416,15 @@ function algoParamsText(params: Dict | null): string | null {
 function buildTargetChange(artifacts: ExecutionArtifact[]): TargetChange | null {
   const target = artifactContent(artifacts, AT.target)
   const stdInput = asDict(artifactContent(artifacts, AT.standardInput)?.input)
-  const curr = asDict(target?.curr_target) ?? asDict(stdInput?.curr_target)
+  const curr = asDict(target?.account_target) ?? asDict(target?.curr_target) ?? asDict(stdInput?.curr_target)
   if (!curr) return null
+  const strategy = asDict(target?.strategy_target)
   const last = asDict(target?.last_target) ?? asDict(stdInput?.last_target)
   const rows = Object.keys(curr).map((symbol) => ({
     symbol,
     curr: asNum(curr[symbol]) ?? 0,
     last: last ? asNum(last[symbol]) : null,
+    strategy: strategy ? asNum(strategy[symbol]) : null,
   }))
   const algo = asDict(stdInput?.algorithm)
   const forbidden = Array.isArray(stdInput?.forbidden_symbols) ? (stdInput.forbidden_symbols as string[]) : []
@@ -636,6 +675,20 @@ export function buildExecutionDetail(
   )
 
   const reachedCount = symbols.filter((s) => s.reached === true).length
+  const quantizedZeroCount = symbols.filter((s) => {
+    const sizing = s.sizing
+    return Boolean(
+      s.reached === true
+        && sizing
+        && sizing.reason_code === 'COMMON.SIZING.BELOW_MIN_QUANTITY'
+        && sizing.raw_quantity != null
+        && Math.abs(sizing.raw_quantity) > 1e-9
+        && sizing.target_quantity != null
+        && Math.abs(sizing.target_quantity) <= 1e-9,
+    )
+  }).length
+  const tradedReachedCount = symbols.filter((s) => s.reached === true && Math.abs(s.filled) > 1e-9).length
+  const alreadyReachedCount = reachedCount - tradedReachedCount - quantizedZeroCount
   // 「项失败」是逐只成交结果口径：真正判失败的品种数，而非 ERROR 事件数。对账失败等
   // 生命周期 ERROR 只是逐只失败的回声，重复计入会虚增（交给脊柱表达即可）。
   const failedCount = symbols.filter((s) => s.action === 'failed').length
@@ -653,6 +706,9 @@ export function buildExecutionDetail(
     reachedCount,
     totalCount: symbols.length,
     failedCount,
+    tradedReachedCount,
+    alreadyReachedCount,
+    quantizedZeroCount,
     equityBefore: recon?.account.equity_before ?? asNum(beforeAssets?.total_asset),
     equityAfter: recon?.account.equity_after ?? asNum(afterAssets?.total_asset),
     exposureBefore: exposure(beforeAssets),

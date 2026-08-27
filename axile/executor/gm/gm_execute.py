@@ -56,6 +56,7 @@ from axile.executor.gm.core.api_bridge import (
 )
 from axile.executor.gm.core.callback_dispatcher import GMCallbackDispatcher
 from axile.executor.gm.core.strategy_bridge import GMStrategyBridge
+from axile.executor.models.execution_result import TargetSizingDecision
 from axile.executor.models.unified_account_assets import Position, PositionDirection, UnifiedAccountAssets
 from axile.executor.models.unified_callback import (
     OrderUpdateCallback,
@@ -78,6 +79,12 @@ __all__ = [
 def _is_gm_ashare_symbol(symbol: str) -> bool:
     """判断是否为 Axile 统一格式的沪深北 A 股标的."""
     return symbol.endswith((".SH", ".SZ", ".BJ"))
+
+
+def _gm_available_volume(position: dict[str, Any]) -> float:
+    """读取 GM 当前真实可平数量，并兼容不含 ``available_now`` 的旧 SDK."""
+    raw_available = position["available_now"] if "available_now" in position else position.get("available", 0)
+    return max(float(raw_available or 0), 0.0)
 
 
 # ==================== GM 执行器 ====================
@@ -368,7 +375,7 @@ class GMExecutor(AbstractExecutor, UnifiedCallbackClient):
             position = Position.model_construct(
                 symbol=GM_SYMBOL_RESOLVER.to_axile(str(pos_dict.get("symbol", ""))),
                 volume=float(pos_dict.get("volume", 0)),
-                available_volume=float(pos_dict.get("available", 0)),
+                available_volume=_gm_available_volume(pos_dict),
                 market_value=float(pos_dict.get("market_value", 0)),
                 direction=direction,
                 avg_price=0.0,
@@ -672,8 +679,7 @@ class GMExecutor(AbstractExecutor, UnifiedCallbackClient):
                 continue
             if int(pos_dict.get("side", 1)) != 1:
                 continue
-            available_raw = pos_dict.get("available", pos_dict.get("volume", 0))
-            available_long_volume += max(float(available_raw or 0), 0.0)
+            available_long_volume += _gm_available_volume(pos_dict)
         return available_long_volume
 
     def _get_pending_orders_impl(self, symbol: str | None = None) -> list[UnifiedOrder]:
@@ -922,7 +928,7 @@ class GMExecutor(AbstractExecutor, UnifiedCallbackClient):
 
     # ==================== 重写父类方法 ====================
 
-    def _calculate_generic_volume(
+    def _calculate_generic_sizing(
         self,
         weight: float,
         price: float,
@@ -930,16 +936,32 @@ class GMExecutor(AbstractExecutor, UnifiedCallbackClient):
         trade_rule: dict[str, Any],
         *,
         symbol: str | None = None,
-    ) -> int:
-        """重写持仓数量计算逻辑，适应GM股票交易."""
-        del symbol  # GM 渠道按"一手数量"取整，不依赖 symbol。
+    ) -> TargetSizingDecision:
+        """按股票整手规则生成目标股数及换算证据."""
         total_asset = account_assets.total_asset
-        lot_size = trade_rule.get("一手数量", 100)
-
-        target_shares = total_asset * weight / price
-        target_shares = math.floor(target_shares / lot_size) * lot_size
-
-        return int(target_shares)
+        raw_lot_size = trade_rule.get("一手数量", 100)
+        lot_size = float(raw_lot_size) if isinstance(raw_lot_size, int | float) else 100.0
+        raw_quantity = total_asset * weight / price
+        target_quantity = math.floor(raw_quantity / lot_size) * lot_size
+        reason_code = "COMMON.SIZING.EXACT"
+        if raw_quantity != 0 and target_quantity == 0:
+            reason_code = "COMMON.SIZING.BELOW_MIN_QUANTITY"
+        elif abs(raw_quantity - target_quantity) > 1e-12:
+            reason_code = "COMMON.SIZING.QUANTIZED"
+        return TargetSizingDecision(
+            symbol=symbol or "",
+            account_weight=weight,
+            equity=total_asset,
+            reference_price=price,
+            unit_multiplier=1.0,
+            unit_notional=price,
+            target_notional=abs(total_asset * weight),
+            raw_quantity=raw_quantity,
+            target_quantity=float(target_quantity),
+            quantity_step=lot_size,
+            min_quantity=lot_size,
+            reason_code=reason_code,
+        )
 
     def _get_default_trade_rules_for_empty(self, _symbols: list[str]) -> dict[str, Any]:
         """获取清仓时的默认交易规则."""

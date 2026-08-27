@@ -4,12 +4,15 @@ import { Card } from '@/components/ui/Card'
 import { SkeletonLines } from '@/components/ui/Skeleton'
 import { NumberTicker } from '@/components/ui/NumberTicker'
 import { ErrorNotice } from '@/components/ui/ErrorNotice'
+import { SizingEvidence } from '@/features/account/SizingEvidence'
+import { isQuantizedZero, weightText } from '@/features/account/sizingEvidenceModel'
 import { usePolling } from '@/lib/hooks/usePolling'
 import { getExecutionArtifacts, getExecutionEvents, getExecutionStatus } from '@/lib/api/executions'
 import { currencyOf } from '@/lib/derive'
 import { displayCurrencyUnit, fmtMoney, withCurrency } from '@/lib/format'
 import {
   buildExecutionDetail,
+  executionHeadline,
   formatOrderTradeCounts,
   SOURCE_DEGRADED_LABEL,
   type ChainAction,
@@ -20,7 +23,7 @@ import { buildSymbolActionStream, type ActionLine } from '@/features/account/act
 import { AccountPageTitle } from '@/features/account/pageHead'
 import { BLAME_LABEL, type FailureReason } from '@/features/account/failureReason'
 import { PhaseBar } from '@/features/dashboard/PhaseBar'
-import { accountAssetTerms } from '@/features/dashboard/display'
+import { accountAssetTerms, positionValueLabelOf } from '@/features/dashboard/display'
 import { useDomainStore } from '@/stores/domain'
 import { useChannelDescriptor } from '@/stores/channels'
 import { useRunning } from '@/stores/liveExec'
@@ -136,29 +139,24 @@ function bpsCls(v: number): string {
   return 'text-ink-3'
 }
 
-/** 头条判词（成交结果口径，非事件计数）。 */
-function verdict(m: ExecutionDetailModel): { icon: string; cls: string; text: string } {
-  const { reachedCount, totalCount, failedCount } = m.header
-  const notReached = totalCount - reachedCount
-  // 执行级失败（如时钟偏移 -1021 在下单前中止）优先做判词，别让 0 逐只塌成中性「无结果」。
-  if (m.failure) return { icon: '✕', cls: 'text-warn font-bold', text: `执行失败 · ${m.failure.category}` }
-  if (m.task?.status === 'TERMINATED') return { icon: '■', cls: 'text-ink-2', text: '执行已终止' }
-  if (failedCount > 0) return { icon: '✕', cls: 'text-warn font-bold', text: `${failedCount} 项失败` }
-  if (notReached > 0) return { icon: '⚠', cls: 'text-warn', text: `${reachedCount}/${totalCount} 到位 · ${notReached} 只未到位` }
-  if (totalCount === 0) return { icon: '–', cls: 'text-ink-3', text: '无逐只结果' }
-  return { icon: '✓', cls: 'text-accent', text: `${totalCount} 只到位` }
-}
-
 /** 头条：整条链坍缩成的结论 + 诚实来源条。 */
-function Header({ m, currency, assetLabel }: { m: ExecutionDetailModel; currency: string; assetLabel: string }) {
-  const v = verdict(m)
+function Header({
+  m,
+  currency,
+  assetLabel,
+  quantityLabel,
+}: {
+  m: ExecutionDetailModel
+  currency: string
+  assetLabel: string
+  quantityLabel: string
+}) {
+  const v = executionHeadline(m, quantityLabel)
   const h = m.header
   const meta = [TRIGGER_LABEL[h.trigger] ?? h.trigger, KIND_LABEL[h.kind] ?? h.kind].filter(Boolean).join(' ')
   return (
     <div className="mt-3">
-      <div className={`inline-flex items-center gap-2 text-[16px] font-semibold ${v.cls}`}>
-        {v.icon} {v.text}
-      </div>
+      <div className={`text-[16px] ${v.level === 'warn' ? 'font-semibold text-warn' : 'text-ink-1'}`}>{v.text}</div>
       <div className="num mt-2 text-[14px] text-ink-2">
         {meta && <span className="text-ink-3">{meta} · </span>}
         {h.durationSec != null && <span className="text-ink-3">{fmtDuration(h.durationSec)} · </span>}
@@ -229,8 +227,17 @@ function TargetChangeView({ m }: { m: ExecutionDetailModel }) {
         {tc.rows.map((r) => (
           <span key={r.symbol} className="mr-4 inline-block">
             {r.symbol}{' '}
-            {r.last != null && <span className="text-ink-3">{(r.last * 100).toFixed(0)}% → </span>}
-            <span className="font-medium">{(r.curr * 100).toFixed(0)}%</span>
+            {r.strategy != null ? (
+              <>
+                <span className="text-ink-3">策略 {weightText(r.strategy)} → </span>
+                <span>账户 {weightText(r.curr)}</span>
+              </>
+            ) : (
+              <>
+                {r.last != null && <span className="text-ink-3">{weightText(r.last)} → </span>}
+                <span>{weightText(r.curr)}</span>
+              </>
+            )}
           </span>
         ))}
       </div>
@@ -301,8 +308,11 @@ function SymbolChainRow({
     s.attainedRatio == null ? null : (
       <NumberTicker value={s.attainedRatio * 100} format={{ minimumFractionDigits: 2, maximumFractionDigits: 2 }} suffix="%" />
     )
-  const outcome = s.reached
-    ? { cls: 'text-accent', node: <>到位 ✓ {ratioNode ?? '—'}</> }
+  const quantizedZero = isQuantizedZero(s.sizing)
+  const outcome = quantizedZero && s.reached
+    ? { cls: 'text-ink-3', node: <>无需下单</> }
+    : s.reached
+    ? { cls: 'text-accent', node: <>到位 {ratioNode ?? '—'}</> }
     : { cls: 'text-warn', node: ratioNode != null ? <>⚠ 欠量 · 到位 {ratioNode}</> : <>⚠ 未到位</> }
   const sideText = s.side === 'sell' ? '卖' : s.side === 'buy' ? '买' : ''
   const driftNotable = Math.abs(s.drift) > 1e-6
@@ -323,10 +333,16 @@ function SymbolChainRow({
         <span className={`text-[14px] font-semibold ${outcome.cls}`}>{outcome.node}</span>
       </div>
 
-      {/* 意图 → 结果 */}
-      <div className="num mt-1 text-[13.5px] text-ink-2">
-        意图 {fmtQty(s.before, units)} → {fmtQty(s.after, units)}
-        {s.target != null && <span className="text-ink-3"> （目标 {fmtQty(s.target, units)}）</span>}
+      {s.sizing ? (
+        <div className="mt-1">
+          <SizingEvidence row={s.sizing} quantityLabel={units.quantity_label} currency={currency} />
+        </div>
+      ) : (
+        <div className="mt-1 text-[12.5px] text-warn">当时未记录换算依据</div>
+      )}
+      <div className="num mt-0.5 text-[13px] text-ink-3">
+        实际 {fmtQty(s.before, units)} → {fmtQty(s.after, units)}
+        {s.target != null && <span> · 可执行目标 {fmtQty(s.target, units)}</span>}
       </div>
 
       {/* 决策 + 成交 */}
@@ -481,7 +497,17 @@ function BookendRow({
 }
 
 /** ⑤ 证据：账户前后的结构化事实 + 一键复制原始附件（不再内联裸 JSON）。 */
-function Evidence({ m, currency, assetLabel }: { m: ExecutionDetailModel; currency: string; assetLabel: string }) {
+function Evidence({
+  m,
+  currency,
+  assetLabel,
+  positionValueLabel,
+}: {
+  m: ExecutionDetailModel
+  currency: string
+  assetLabel: string
+  positionValueLabel: string
+}) {
   const b = m.bookends
   const [copied, setCopied] = useState(false)
   const copy = () => {
@@ -505,7 +531,7 @@ function Evidence({ m, currency, assetLabel }: { m: ExecutionDetailModel; curren
         <div className="num text-[13.5px] text-ink-2">
           <BookendRow label="现金" before={b.cashBefore} after={b.cashAfter} currency={currency} />
           <BookendRow label={assetLabel} before={b.equityBefore} after={b.equityAfter} currency={currency} pnl />
-          <BookendRow label="市值" before={b.mvBefore} after={b.mvAfter} currency={currency} />
+          <BookendRow label={positionValueLabel} before={b.mvBefore} after={b.mvAfter} currency={currency} />
         </div>
       )}
       {b.timeoutSec != null && <div className="mt-1 text-[13px] text-ink-3">冻结输入 · 执行超时 {b.timeoutSec}s</div>}
@@ -528,6 +554,7 @@ export function ExecutionDetailPage() {
   const currency = currencyOf(item?.currency)
   const descriptor = useChannelDescriptor(item?.trade_channel)
   const units = descriptor?.units ?? DEFAULT_UNITS
+  const positionValueLabel = positionValueLabelOf(descriptor?.ui)
   const assetTerms = accountAssetTerms(item?.trade_channel)
 
   const statusFetcher = useCallback(
@@ -588,7 +615,7 @@ export function ExecutionDetailPage() {
       <div>
         <ErrorNotice title="执行状态加载失败" error={status.error} onRetry={status.refresh} />
       </div>
-      {model && <Header m={model} currency={currency} assetLabel={assetTerms.shortLabel} />}
+      {model && <Header m={model} currency={currency} assetLabel={assetTerms.shortLabel} quantityLabel={units.quantity_label} />}
 
       {/* 运行中：顶部给一条确定态阶段条作一瞥总览；逐事件细节仍在下方脊柱。 */}
       {isLive && running && running.status === 'queued' && (
@@ -635,7 +662,12 @@ export function ExecutionDetailPage() {
               </p>
             )}
             <Spine m={model} />
-            <Evidence m={model} currency={currency} assetLabel={assetTerms.shortLabel} />
+            <Evidence
+              m={model}
+              currency={currency}
+              assetLabel={assetTerms.shortLabel}
+              positionValueLabel={positionValueLabel}
+            />
           </>
         )}
       </Card>

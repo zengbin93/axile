@@ -24,7 +24,14 @@ import {
   type CurrentHoldingPreview,
 } from '@/features/account/holdingPreview'
 import { ScheduleSummary, ScheduleTimeline, ScheduleTimelineSkeleton } from '@/features/account/ScheduleTimeline'
-import { accountAssetTerms, INTEGRITY_ICON, INTEGRITY_TEXT_CLASS, STATUS_TEXT_CLASS, channelLabel } from '@/features/dashboard/display'
+import {
+  accountAssetTerms,
+  INTEGRITY_ICON,
+  INTEGRITY_TEXT_CLASS,
+  positionValueLabelOf,
+  STATUS_TEXT_CLASS,
+  channelLabel,
+} from '@/features/dashboard/display'
 import { isExecutingStatus, phaseLabel, runVerb } from '@/features/dashboard/execProgress'
 import { executionJustSettled, useRunning } from '@/stores/liveExec'
 import { useDomainStore } from '@/stores/domain'
@@ -259,6 +266,7 @@ export function AccountDetail({
   const tEditSymbols = useViewTransitionState(`/accounts/${accountId}/edit/symbols`)
   const tEditAlgorithm = useViewTransitionState(`/accounts/${accountId}/edit/algorithm`)
   const showShortLeverage = channelDescriptor?.ui.show_short_leverage ?? true
+  const positionValueLabel = positionValueLabelOf(channelDescriptor?.ui)
   // 真源到位即写缓存：编辑页首帧同步读出，FLIP 落点不断档。
   useEffect(() => {
     if (acc) writeAccountConfigSummary(accountId, acc, { showShortLeverage })
@@ -584,7 +592,7 @@ export function AccountDetail({
                 <Skeleton className="h-2 w-full" />
               </div>
               <div className="min-w-0 border-t border-line lg:border-t-0 lg:border-l lg:pl-5">
-                <HoldingsPreviewTable holdings={null} />
+                <HoldingsPreviewTable holdings={null} positionValueLabel={positionValueLabel} />
               </div>
             </SkeletonGroup>
           ) : comparisonError ? null : !weights.data?.calculated_at ? (
@@ -614,7 +622,11 @@ export function AccountDetail({
                 )}
               </div>
               <div className="min-w-0 border-t border-line lg:border-t-0 lg:border-l lg:pl-5">
-                <HoldingsPreviewTable holdings={currentHoldings} currency={item.currency} />
+                <HoldingsPreviewTable
+                  holdings={currentHoldings}
+                  currency={item.currency}
+                  positionValueLabel={positionValueLabel}
+                />
               </div>
             </div>
           ) : null}
@@ -844,10 +856,12 @@ const PREVIEW_COL = 'w-[1%] whitespace-nowrap'
 function HoldingsPreviewTable({
   holdings,
   currency = '',
+  positionValueLabel,
 }: {
   /** `null` = 对照仍在加载，表结构在、单元格骨架占位。 */
   holdings: CurrentHoldingPreview[] | null
   currency?: string
+  positionValueLabel: string
 }) {
   return (
     <div
@@ -867,7 +881,7 @@ function HoldingsPreviewTable({
               持仓/可用
             </th>
             <th scope="col" className={`${PREVIEW_TH} border-b border-line pl-1.5 text-right whitespace-nowrap`}>
-              市值
+              {positionValueLabel}
             </th>
           </tr>
         </thead>

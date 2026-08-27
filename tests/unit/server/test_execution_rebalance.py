@@ -655,6 +655,7 @@ def test_trade_emits_execution_events_and_artifacts(
     account = build_account(trade_rules={"ag2612": {"min_notional": 5.0}})
     captured_events: list[tuple[str, str]] = []
     captured_artifacts: list[str] = []
+    artifact_versions: dict[str, int] = {}
     execution_summary_content: dict[str, object] | None = None
     target_snapshot_content: dict[str, object] | None = None
 
@@ -671,6 +672,7 @@ def test_trade_emits_execution_events_and_artifacts(
         nonlocal execution_summary_content, target_snapshot_content
         artifact_type = cast(ExecutionArtifactType, kwargs["artifact_type"])
         captured_artifacts.append(artifact_type.value)
+        artifact_versions[artifact_type.value] = cast(int, kwargs.get("schema_version", 1))
         if artifact_type == ExecutionArtifactType.EXECUTION_SUMMARY:
             execution_summary_content = cast("dict[str, object]", kwargs["content"])
         if artifact_type == ExecutionArtifactType.TARGET_SNAPSHOT:
@@ -722,6 +724,8 @@ def test_trade_emits_execution_events_and_artifacts(
     assert "account_snapshot_before" in captured_artifacts
     assert "account_snapshot" in captured_artifacts
     assert "execution_summary" in captured_artifacts
+    assert artifact_versions["target_snapshot"] == 2
+    assert artifact_versions["execution_summary"] == 2
     assert execution_summary_content is not None
     assert execution_summary_content["summary"] == {
         "symbols_total": 1,
@@ -741,6 +745,13 @@ def test_trade_emits_execution_events_and_artifacts(
     assert ag_row["after"] == 0.0
     assert ag_row["reached"] is False
     assert target_snapshot_content is not None
+    assert target_snapshot_content["strategy_target"] == {"ag2612": 0.1}
+    assert target_snapshot_content["account_target"] == {"ag2612": 0.1}
+    assert target_snapshot_content["sizing_context"] == {
+        "long_leverage": 1.0,
+        "short_leverage": 1.0,
+        "weight_precision": 0.001,
+    }
 
 
 def test_trade_prepares_execution_runtime_before_pre_execute_audit_events(

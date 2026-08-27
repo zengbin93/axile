@@ -8,7 +8,7 @@ from sqlalchemy import func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col, desc, select
 
-from axile.server.db.models import TargetWeightSnapshot, TargetWeightSnapshotPublic
+from axile.server.db.models import TargetSizingPublic, TargetWeightSnapshot, TargetWeightSnapshotPublic
 
 
 async def append_target_weight_snapshot(
@@ -133,6 +133,9 @@ def target_snapshot_public(
     weight_kind: Literal["raw", "normalized"],
     weights: dict[str, float] | None = None,
     quantities: dict[str, float] | None = None,
+    strategy_weights: dict[str, float] | None = None,
+    account_weights: dict[str, float] | None = None,
+    sizing: TargetSizingPublic | None = None,
 ) -> TargetWeightSnapshotPublic:
     """把数据库快照转换为稳定的页面响应；无记录时返回未计算态."""
     if snapshot is None:
@@ -141,6 +144,9 @@ def target_snapshot_public(
     return TargetWeightSnapshotPublic(
         weights=weights if weights is not None else (stored or {}),
         quantities=quantities,
+        strategy_weights=strategy_weights,
+        account_weights=account_weights,
+        sizing=sizing,
         calculated_at=snapshot.calculated_at,
         source=snapshot.source,
         execution_id=snapshot.execution_id,

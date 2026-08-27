@@ -137,6 +137,8 @@ class ChannelUi(_FrozenDescriptorModel):
         空头杠杆输入项标签。
     show_short_leverage : bool
         是否展示并提交空头杠杆配置。
+    position_value_label : str
+        持仓金额在界面中的业务名称。
     """
 
     account_connect_lead: str = ""
@@ -145,6 +147,7 @@ class ChannelUi(_FrozenDescriptorModel):
     long_leverage_label: str = "做多杠杆"
     short_leverage_label: str = "做空杠杆"
     show_short_leverage: bool = True
+    position_value_label: str = "市值"
 
 
 class ChannelAccountOption(_FrozenDescriptorModel):

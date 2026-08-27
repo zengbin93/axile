@@ -357,6 +357,7 @@ def _build_symbol_row(
             attained_ratio = after_qty / target
             reached = abs(after_qty - target) <= abs(target) * _ATTAINED_TOLERANCE
 
+    sizing = symbol_result.get("sizing")
     return {
         "symbol": symbol,
         "status": symbol_result.get("status"),
@@ -370,6 +371,7 @@ def _build_symbol_row(
         "drift": drift,
         "attained_ratio": attained_ratio,
         "reached": reached,
+        "sizing": sizing if isinstance(sizing, dict) else None,
         "tca": _symbol_tca(symbol_result, avg_price, filled < 0),
         "orders": _build_orders_tree(symbol_result),
     }

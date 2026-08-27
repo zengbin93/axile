@@ -12,6 +12,7 @@ import { usePolling } from '@/lib/hooks/usePolling'
 import { useTargetSnapshot } from '@/lib/hooks/useTargetSnapshot'
 import { currencyOf, observedTotalAsset, positionsOfAssets } from '@/lib/derive'
 import { useDomainStore } from '@/stores/domain'
+import { useChannelDescriptor } from '@/stores/channels'
 import { isExecutingStatus } from '@/features/dashboard/execProgress'
 import { executionJustSettled, useRunning } from '@/stores/liveExec'
 
@@ -28,6 +29,7 @@ export function AccountHoldingsPage() {
   const refreshAccounts = useDomainStore((s) => s.refreshAccounts)
   const item = accounts?.find((a) => a.account_id === accountId) ?? null
   const assetTerms = accountAssetTerms(item?.trade_channel)
+  const descriptor = useChannelDescriptor(item?.trade_channel)
   const running = useRunning(accountId)
 
   const account = usePolling(useCallback((s: AbortSignal) => getAccount(accountId, s), [accountId]), {
@@ -117,6 +119,8 @@ export function AccountHoldingsPage() {
             currency={currencyOf(item?.currency)}
             assetLabel={assetTerms.shortLabel}
             quantities={weights.data?.quantities ?? null}
+            sizing={weights.data?.sizing ?? null}
+            quantityLabel={descriptor?.units.quantity_label ?? ''}
           />
         )}
         <ErrorNotice

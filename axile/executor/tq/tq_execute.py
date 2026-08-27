@@ -16,7 +16,7 @@ from axile.executor.abstract_executor.base import AbstractExecutor
 from axile.executor.account_control.exceptions import AccountControlBlockedError
 from axile.executor.china_futures_session import is_within_possible_china_futures_session
 from axile.executor.execution_engine import ExecutionEngine, _DispatchPlanningResult
-from axile.executor.models.execution_result import AlgorithmResult, ExecutionStatus
+from axile.executor.models.execution_result import AlgorithmResult, ExecutionStatus, TargetSizingDecision
 from axile.executor.models.unified_account_assets import UnifiedAccountAssets
 from axile.executor.models.unified_callback import OrderUpdateCallback, PriceDataCallback, TradeRecordCallback
 from axile.executor.models.unified_input import AccountConfig, TQAccountConfig, UnifiedStandardInput
@@ -487,7 +487,7 @@ class TQExecutor(AbstractExecutor):
         return tick if tick > 0 else None
 
     @override
-    def _calculate_generic_volume(
+    def _calculate_generic_sizing(
         self,
         weight: float,
         price: float,
@@ -495,11 +495,32 @@ class TQExecutor(AbstractExecutor):
         trade_rule: dict[str, object],
         *,
         symbol: str | None = None,
-    ) -> float:
-        if trade_rule.get("sizing_mode", "weight") == "lots":
-            return float(int(weight))
+    ) -> TargetSizingDecision:
+        """按天勤合约规格生成整数手目标及换算证据."""
+        sizing_mode = str(trade_rule.get("sizing_mode", "weight"))
+        if sizing_mode == "lots":
+            target = float(int(weight))
+            reason = "COMMON.SIZING.EXACT" if target == weight else "COMMON.SIZING.QUANTIZED"
+            return TargetSizingDecision(
+                symbol=symbol or "",
+                sizing_mode=sizing_mode,
+                reason_code=reason,
+                account_weight=weight,
+                equity=account_assets.total_asset,
+                raw_quantity=weight,
+                target_quantity=target,
+                quantity_step=1.0,
+                min_quantity=1.0,
+            )
         if not symbol or price <= 0:
-            return 0.0
+            return TargetSizingDecision(
+                symbol=symbol or "",
+                status="UNAVAILABLE",
+                reason_code="COMMON.SIZING.INVALID_PRICE",
+                account_weight=weight,
+                equity=account_assets.total_asset,
+                reference_price=price,
+            )
         native = self._quote_snapshot(symbol).get("volume_multiple", 0)
         fallback = trade_rule.get("contract_multiplier", 0)
         try:
@@ -507,8 +528,36 @@ class TQExecutor(AbstractExecutor):
         except (TypeError, ValueError):
             multiplier = 0
         if multiplier <= 0:
-            return 0.0
-        return float(int(account_assets.total_asset * weight / (price * multiplier)))
+            return TargetSizingDecision(
+                symbol=symbol,
+                status="UNAVAILABLE",
+                reason_code="COMMON.SIZING.MISSING_UNIT_MULTIPLIER",
+                account_weight=weight,
+                equity=account_assets.total_asset,
+                reference_price=price,
+            )
+        raw_quantity = account_assets.total_asset * weight / (price * multiplier)
+        target_quantity = float(int(raw_quantity))
+        reason = "COMMON.SIZING.EXACT"
+        if raw_quantity != 0 and target_quantity == 0:
+            reason = "COMMON.SIZING.BELOW_MIN_QUANTITY"
+        elif abs(raw_quantity - target_quantity) > 1e-12:
+            reason = "COMMON.SIZING.QUANTIZED"
+        return TargetSizingDecision(
+            symbol=symbol,
+            sizing_mode=sizing_mode,
+            reason_code=reason,
+            account_weight=weight,
+            equity=account_assets.total_asset,
+            reference_price=price,
+            unit_multiplier=multiplier,
+            unit_notional=price * multiplier,
+            target_notional=abs(account_assets.total_asset * weight),
+            raw_quantity=raw_quantity,
+            target_quantity=target_quantity,
+            quantity_step=1.0,
+            min_quantity=1.0,
+        )
 
     @override
     def initialize_websocket(self, symbols: list[str] | None = None) -> None:

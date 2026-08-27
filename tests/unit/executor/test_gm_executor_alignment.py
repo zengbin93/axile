@@ -13,6 +13,7 @@ import pytest
 from axile.common.trade_channel import TradeChannel
 from axile.executor.algorithms.utils.order_tracker import OrderTracker
 from axile.executor.constants.order_status import OrderStatus
+from axile.executor.models.unified_account_assets import UnifiedAccountAssets
 from axile.executor.models.unified_order import OrderDirection, OrderType, UnifiedOrder
 
 
@@ -587,7 +588,7 @@ def test_place_order_passes_gm_market_order_type_for_market_orders(monkeypatch: 
 
 
 def test_place_order_casts_volume_to_int_for_gm_sdk(monkeypatch: Any) -> None:
-    """GM 下单传给 SDK 的 volume 应是 int，而不是统一层 float。"""
+    """旧 SDK 无 available_now 时仍回退 available，并向 SDK 传 int 数量。"""
     executor = _build_executor()
     order_volume_calls: list[dict[str, Any]] = []
 
@@ -623,6 +624,31 @@ def test_place_order_casts_volume_to_int_for_gm_sdk(monkeypatch: Any) -> None:
     assert isinstance(order_volume_calls[0]["volume"], int)
 
 
+def test_get_account_assets_prefers_current_available_volume(monkeypatch: Any) -> None:
+    """GM 资产快照应展示扣除 T+1 等限制后的当前真实可平数量。"""
+    executor = _build_executor()
+    monkeypatch.setattr(
+        gm_api_bridge_module,
+        "get_position",
+        lambda **_kwargs: [
+            {
+                "symbol": "SHSE.512660",
+                "side": 1,
+                "volume": 900,
+                "available": 900,
+                "available_now": 0,
+                "market_value": 1003.5,
+            }
+        ],
+    )
+    monkeypatch.setattr(gm_api_bridge_module, "get_cash", lambda **_kwargs: {"available": 98_000})
+
+    assets = executor.get_account_assets()
+
+    assert assets.positions[0].volume == 900
+    assert assets.positions[0].available_volume == 0
+
+
 def test_place_order_fails_fast_when_sell_close_exceeds_available_long(monkeypatch: Any) -> None:
     """GM A股卖出超过可平仓数量时，应在本地下单前直接失败。"""
     executor = _build_executor()
@@ -636,7 +662,8 @@ def test_place_order_fails_fast_when_sell_close_exceeds_available_long(monkeypat
                 "symbol": "SHSE.588000",
                 "side": 1,
                 "volume": 100,
-                "available": 0,
+                "available": 100,
+                "available_now": 0,
             }
         ],
     )
@@ -897,3 +924,26 @@ def test_callback_strategy_trade_conversion_preserves_account_id() -> None:
     )
 
     assert trade.extra["account_id"] == "gm-account"
+
+
+def test_gm_target_sizing_is_floored_to_board_lot() -> None:
+    executor = object.__new__(GMExecutor)
+    assets = UnifiedAccountAssets(
+        available_cash=100_000.0,
+        total_asset=100_000.0,
+        market_value=0.0,
+        positions=[],
+    )
+
+    sizing = executor._calculate_generic_sizing(
+        0.031,
+        20.0,
+        assets,
+        {"一手数量": 100},
+        symbol="SHSE.600000",
+    )
+
+    assert sizing.raw_quantity == 155
+    assert sizing.target_quantity == 100
+    assert sizing.quantity_step == 100
+    assert sizing.reason_code == "COMMON.SIZING.QUANTIZED"

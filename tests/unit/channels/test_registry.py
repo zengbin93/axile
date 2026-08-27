@@ -284,6 +284,7 @@ def test_capabilities_expose_descriptor_and_runtime_availability() -> None:
     assert capability.units.quantity_kind == "base_asset"
     assert capability.units.quantity_max_decimals == 8
     assert capability.ui.account_connect_lead == "填写供应商令牌。"
+    assert capability.ui.position_value_label == "市值"
     assert capability.defaults.execution_timeout == 90
     assert capability.account_form.fields[0].name == "token"
     assert capability.portfolio.market_label == "Vendor"

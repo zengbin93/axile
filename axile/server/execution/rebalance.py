@@ -345,11 +345,19 @@ async def _build_rebalance_backend_request(
         execution_id=execution_id,
         trigger_source=trigger_source,
     )
+    long_leverage, short_leverage = resolve_account_leverages(account)
+    audit_input = sanitize_standard_input_for_audit(standard_input)
+    audit_input["strategy_target"] = dict(curr_target)
+    audit_input["sizing_context"] = {
+        "long_leverage": long_leverage,
+        "short_leverage": short_leverage,
+        "weight_precision": account.weight_precision,
+    }
     return execution_backend.RebalanceBackendRequest(
         account=account,
         standard_input=standard_input,
         standard_input_dict=standard_input.to_dict(),
-        audit_input=sanitize_standard_input_for_audit(standard_input),
+        audit_input=audit_input,
         execution_id=execution_id,
         trigger_source=trigger_source,
         cleanup=cleanup,

@@ -13,7 +13,7 @@ from loguru import logger
 from sqlmodel import func, select
 
 from axile.channels import get_channel
-from axile.domain.execution import ExecutionTaskStatus
+from axile.domain.execution import ExecutionArtifactType, ExecutionTaskStatus
 from axile.server.api.deps import SchedDep, SessionDep
 from axile.server.api.routes.account_support import _get_account_or_404
 from axile.server.api.routes.portfolio import resolve_portfolio_target
@@ -31,6 +31,8 @@ from axile.server.db.models import (
     ExecutionTerminateResponse,
     ExecutionTriggerResponse,
     Portfolio,
+    TargetSizingPublic,
+    TargetSizingRowPublic,
     TargetWeightSnapshot,
     TargetWeightSnapshotPublic,
 )
@@ -47,11 +49,7 @@ from axile.server.execution.registry import (
     try_register_target_refresh,
 )
 from axile.server.execution.scheduler import delete_job
-from axile.server.integrity import plan_executable_target
-from axile.server.repositories import (
-    get_latest_portfolio_id_by_account_id,
-    get_recent_account_asset_snapshots,
-)
+from axile.server.repositories import get_latest_portfolio_id_by_account_id
 from axile.server.target_weight_snapshots import (
     append_target_weight_snapshot,
     get_latest_account_target_snapshot,
@@ -61,43 +59,101 @@ from axile.server.target_weight_snapshots import (
 router = APIRouter()
 
 
-async def _latest_book(session: SessionDep, account_id: int) -> tuple[list[object], float]:
-    """读取账户最近一条资产快照的持仓与权益；无快照时视为空仓."""
-    snapshots = await get_recent_account_asset_snapshots(session, account_id, limit=1)
-    if not snapshots:
-        return [], 0.0
-    assets = snapshots[0].assets if isinstance(snapshots[0].assets, dict) else {}
-    raw_positions = assets.get("positions")
-    positions = raw_positions if isinstance(raw_positions, list) else []
-    try:
-        equity = float(assets.get("total_asset") or 0.0)
-    except (TypeError, ValueError):
-        equity = 0.0
-    return positions, equity
-
-
-def _account_target_public(
+async def _account_target_public(
+    session: SessionDep,
     account: object,
     snapshot: TargetWeightSnapshot | None,
-    positions: list[object],
-    equity: float,
 ) -> TargetWeightSnapshotPublic:
-    """账户目标快照：权重 key 与持仓对齐，并附带渠道量化后的目标数量."""
+    """返回账户权重与同 execution 的完整数量换算证据."""
     if snapshot is None:
         return TargetWeightSnapshotPublic()
     plugin = get_channel(getattr(account, "trade_channel"))
-    plan = plan_executable_target(
-        positions,
-        snapshot.normalized_weights or {},
-        equity,
-        canonicalize_symbol=plugin.canonicalize_symbol,
-        quantize_target_quantity=plugin.quantize_target_quantity,
-    )
+    strategy_weights = {
+        plugin.canonicalize_symbol(symbol): float(weight) for symbol, weight in (snapshot.raw_weights or {}).items()
+    }
+    account_weights = {
+        plugin.canonicalize_symbol(symbol): float(weight)
+        for symbol, weight in (snapshot.normalized_weights or {}).items()
+    }
+    sizing_status = "pending_execution" if snapshot.source == "manual" or not snapshot.execution_id else "unavailable"
+    sizing_rows: dict[str, TargetSizingRowPublic] = {}
+    target_context: dict[str, object] = {}
+    if snapshot.execution_id:
+        artifacts = (
+            (
+                await session.execute(
+                    select(ExecutionArtifact).where(
+                        ExecutionArtifact.execution_id == snapshot.execution_id,
+                        ExecutionArtifact.artifact_type.in_(
+                            [ExecutionArtifactType.TARGET_SNAPSHOT, ExecutionArtifactType.EXECUTION_SUMMARY]
+                        ),
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        by_type = {artifact.artifact_type: artifact for artifact in artifacts}
+        target_artifact = by_type.get(ExecutionArtifactType.TARGET_SNAPSHOT)
+        summary_artifact = by_type.get(ExecutionArtifactType.EXECUTION_SUMMARY)
+        if target_artifact is not None:
+            raw_context = target_artifact.content.get("sizing_context")
+            if isinstance(raw_context, dict):
+                target_context = cast("dict[str, object]", raw_context)
+        if summary_artifact is not None and summary_artifact.schema_version >= 2:
+            reconciliation = summary_artifact.content.get("reconciliation")
+            symbols = reconciliation.get("symbols") if isinstance(reconciliation, dict) else None
+            if isinstance(symbols, list):
+                for item in symbols:
+                    if not isinstance(item, dict) or not isinstance(item.get("symbol"), str):
+                        continue
+                    raw_sizing = item.get("sizing")
+                    if not isinstance(raw_sizing, dict):
+                        continue
+                    symbol = plugin.canonicalize_symbol(item["symbol"])
+                    row = cast("dict[str, object]", dict(raw_sizing))
+                    row["symbol"] = symbol
+                    row["strategy_weight"] = strategy_weights.get(symbol)
+                    row["account_weight"] = account_weights.get(symbol, row.get("account_weight"))
+                    raw_weight = strategy_weights.get(symbol)
+                    account_weight = account_weights.get(symbol)
+                    row["account_multiplier"] = (
+                        account_weight / raw_weight
+                        if raw_weight not in (None, 0.0) and account_weight is not None
+                        else None
+                    )
+                    row["weight_precision"] = target_context.get("weight_precision")
+                    sizing_rows[symbol] = TargetSizingRowPublic.model_validate(row)
+            sizing_status = "available" if sizing_rows and set(account_weights).issubset(sizing_rows) else "unavailable"
+        elif summary_artifact is not None:
+            sizing_status = "legacy"
+        elif target_artifact is not None and target_artifact.schema_version >= 2:
+            sizing_status = "pending_execution"
+        else:
+            sizing_status = "legacy"
+
+    quantities: dict[str, float] | None = None
+    if sizing_status == "available":
+        quantities = {
+            symbol: float(row.target_quantity) for symbol, row in sizing_rows.items() if row.target_quantity is not None
+        }
+        if not set(account_weights).issubset(quantities):
+            quantities = None
+            sizing_status = "unavailable"
+
     return target_snapshot_public(
         snapshot,
         weight_kind="normalized",
-        weights=plan.weights,
-        quantities=plan.quantities,
+        weights=account_weights,
+        quantities=quantities,
+        strategy_weights=strategy_weights,
+        account_weights=account_weights,
+        sizing=TargetSizingPublic(
+            status=cast("Any", sizing_status),
+            execution_id=snapshot.execution_id,
+            calculated_at=snapshot.calculated_at,
+            rows=sizing_rows,
+        ),
     )
 
 
@@ -149,8 +205,7 @@ async def account_target_snapshot(session: SessionDep, account_id: int) -> Targe
     if portfolio_id is None:
         return TargetWeightSnapshotPublic()
     snapshot = await get_latest_account_target_snapshot(session, account_id, portfolio_id)
-    positions, equity = await _latest_book(session, account_id)
-    return _account_target_public(account, snapshot, positions, equity)
+    return await _account_target_public(session, account, snapshot)
 
 
 @router.post("/{account_id}/target_snapshot/refresh", response_model=TargetWeightSnapshotPublic)
@@ -181,8 +236,7 @@ async def refresh_account_target_snapshot(session: SessionDep, account_id: int) 
             normalized_weights=normalized_target,
             source="manual",
         )
-        positions, equity = await _latest_book(session, account_id)
-        return _account_target_public(account, snapshot, positions, equity)
+        return await _account_target_public(session, account, snapshot)
     finally:
         clear_target_refresh(portfolio_id, account_id)
 

@@ -9,7 +9,11 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, cast
 
 from axile.channels import get_channel
-from axile.executor.models.execution_result import ExecutionStatus
+from axile.executor.models.execution_result import (
+    ExecutionStatus,
+    TargetSizingDecision,
+    TargetSizingStatus,
+)
 from axile.executor.models.unified_account_assets import Position, PositionDirection, UnifiedAccountAssets
 from axile.executor.models.unified_input import UnifiedStandardInput
 from axile.executor.models.unified_output import UnifiedStandardOutput
@@ -182,6 +186,31 @@ class AbstractExecutorCapabilityMixin:
         dict[str, int | float]
             各品种计算后的目标持仓数量。
         """
+        decisions = AbstractExecutorCapabilityMixin._calculate_target_sizing_base(
+            self,
+            curr_target,
+            account_assets,
+            market_data,
+            trade_rules,
+            last_target,
+            forbidden_symbols,
+        )
+        return {
+            symbol: decision.target_quantity
+            for symbol, decision in decisions.items()
+            if decision.target_quantity is not None
+        }
+
+    def _calculate_target_sizing_base(
+        self,
+        curr_target: dict[str, float],
+        account_assets: UnifiedAccountAssets,
+        market_data: dict[str, UnifiedPriceData],
+        trade_rules: dict[str, dict[str, object]],
+        last_target: dict[str, float],
+        forbidden_symbols: list[str] | None = None,
+    ) -> dict[str, TargetSizingDecision]:
+        """按统一目标集合生成逐品种数量及其换算证据."""
         executor = _executor(self)
         forbidden_symbol_set = set(forbidden_symbols or [])
         working_target = dict(curr_target)
@@ -192,35 +221,144 @@ class AbstractExecutorCapabilityMixin:
             if symbol not in working_target:
                 working_target[symbol] = 0.0
 
-        target_volume: dict[str, int | float] = {}
+        decisions: dict[str, TargetSizingDecision] = {}
 
         for symbol, weight in working_target.items():
             if weight == 0:
-                target_volume[symbol] = 0
+                decisions[symbol] = TargetSizingDecision(
+                    symbol=symbol,
+                    reason_code="COMMON.SIZING.ZERO_TARGET",
+                    account_weight=weight,
+                    equity=account_assets.total_asset,
+                    raw_quantity=0.0,
+                    target_quantity=0.0,
+                )
                 continue
 
             if symbol not in market_data:
                 executor.logger.warning(f"品种 {symbol} 没有价格数据，跳过")
+                decisions[symbol] = TargetSizingDecision(
+                    symbol=symbol,
+                    status=TargetSizingStatus.UNAVAILABLE,
+                    reason_code="COMMON.SIZING.MISSING_MARKET_DATA",
+                    account_weight=weight,
+                    equity=account_assets.total_asset,
+                )
                 continue
 
             price = market_data[symbol].last_price
             if price <= 0:
                 executor.logger.warning(f"品种 {symbol} 价格无效: {price}")
+                decisions[symbol] = TargetSizingDecision(
+                    symbol=symbol,
+                    status=TargetSizingStatus.UNAVAILABLE,
+                    reason_code="COMMON.SIZING.INVALID_PRICE",
+                    account_weight=weight,
+                    equity=account_assets.total_asset,
+                    reference_price=price,
+                )
                 continue
 
             trade_rule = trade_rules.get(symbol, {})
-            volume = executor._calculate_generic_volume(
+            instance_volume = getattr(executor, "__dict__", {}).get("_calculate_generic_volume")
+            class_volume = getattr(type(executor), "_calculate_generic_volume", None)
+            if callable(instance_volume) or (
+                class_volume is not None
+                and class_volume is not AbstractExecutorCapabilityMixin._calculate_generic_volume
+            ):
+                volume = executor._calculate_generic_volume(
+                    weight,
+                    price,
+                    account_assets,
+                    trade_rule,
+                    symbol=symbol,
+                )
+                raw_quantity = account_assets.total_asset * weight / price
+                decisions[symbol] = TargetSizingDecision(
+                    symbol=symbol,
+                    reason_code=(
+                        "COMMON.SIZING.EXACT"
+                        if abs(raw_quantity - float(volume)) <= 1e-12
+                        else "COMMON.SIZING.QUANTIZED"
+                    ),
+                    account_weight=weight,
+                    equity=account_assets.total_asset,
+                    reference_price=price,
+                    unit_multiplier=1.0,
+                    unit_notional=price,
+                    target_notional=abs(account_assets.total_asset * weight),
+                    raw_quantity=raw_quantity,
+                    target_quantity=float(volume),
+                )
+                continue
+            decisions[symbol] = executor._calculate_generic_sizing(
                 weight,
                 price,
                 account_assets,
                 trade_rule,
                 symbol=symbol,
             )
-            target_volume[symbol] = volume
-
-        return target_volume
+        return decisions
 
     calculate_target_volume_base = _calculate_target_volume_base
+    calculate_target_sizing_base = _calculate_target_sizing_base
+
+    def _calculate_generic_sizing(
+        self,
+        weight: float,
+        price: float,
+        account_assets: UnifiedAccountAssets,
+        trade_rule: dict[str, object],
+        *,
+        symbol: str | None = None,
+    ) -> TargetSizingDecision:
+        """生成通用现货数量及其取整证据."""
+        executor = _executor(self)
+        min_volume_raw = trade_rule.get("最小交易单位", 1)
+        min_volume = (
+            float(min_volume_raw)
+            if isinstance(min_volume_raw, int | float) and not isinstance(min_volume_raw, bool)
+            else 1.0
+        )
+        precision_raw = trade_rule.get("quantity_precision")
+        precision = precision_raw if isinstance(precision_raw, int) and not isinstance(precision_raw, bool) else None
+        raw_quantity = account_assets.total_asset * weight / price
+        target_quantity = raw_quantity
+        quantity_step: float | None = None
+        if precision is not None:
+            quantity_step = 10 ** (-precision)
+            target_quantity = round(raw_quantity, precision)
+        elif min_volume > 1:
+            quantity_step = min_volume
+            target_quantity = int(raw_quantity / min_volume) * min_volume
+
+        min_notional: float | None = None
+        if symbol:
+            try:
+                min_notional = executor.get_min_notional(symbol)
+            except Exception:
+                min_notional = None
+        reason_code = "COMMON.SIZING.EXACT"
+        if raw_quantity != 0 and target_quantity == 0:
+            reason_code = "COMMON.SIZING.BELOW_MIN_QUANTITY"
+        elif abs(raw_quantity - target_quantity) > 1e-12:
+            reason_code = "COMMON.SIZING.QUANTIZED"
+
+        return TargetSizingDecision(
+            symbol=symbol or "",
+            account_weight=weight,
+            equity=account_assets.total_asset,
+            reference_price=price,
+            unit_multiplier=1.0,
+            unit_notional=price,
+            target_notional=abs(account_assets.total_asset * weight),
+            raw_quantity=raw_quantity,
+            target_quantity=float(target_quantity),
+            quantity_step=quantity_step,
+            min_quantity=quantity_step,
+            min_notional=min_notional,
+            reason_code=reason_code,
+        )
 
     def _calculate_generic_volume(
         self,
@@ -261,24 +399,14 @@ class AbstractExecutorCapabilityMixin:
         切换：``weight``（默认）/ ``lots``（直接当目标手数）/
         ``premium_weight``（按权利金权重换算，期权专用）。
         """
-        del symbol  # 通用基类不依赖 symbol；渠道 override 才需要它读合约缓存。
-        total_asset = account_assets.total_asset
-        min_volume_raw = trade_rule.get("最小交易单位", 1)
-        min_volume = (
-            float(min_volume_raw)
-            if isinstance(min_volume_raw, int | float) and not isinstance(min_volume_raw, bool)
-            else 1.0
+        decision = self._calculate_generic_sizing(
+            weight,
+            price,
+            account_assets,
+            trade_rule,
+            symbol=symbol,
         )
-        precision_raw = trade_rule.get("quantity_precision")
-        precision = precision_raw if isinstance(precision_raw, int) and not isinstance(precision_raw, bool) else None
-
-        target_volume = total_asset * weight / price
-        if precision is not None:
-            target_volume = round(target_volume, precision)
-        elif min_volume > 1:
-            target_volume = int(target_volume / min_volume) * min_volume
-
-        return target_volume
+        return float(decision.target_quantity or 0.0)
 
     def get_current_volume(self, symbol: str, account_assets: UnifiedAccountAssets) -> float:
         """
@@ -363,6 +491,26 @@ class AbstractExecutorCapabilityMixin:
         """
         executor = _executor(self)
         return executor._calculate_target_volume_base(
+            curr_target,
+            account_assets,
+            market_data,
+            trade_rules,
+            last_target,
+            forbidden_symbols,
+        )
+
+    def calculate_target_sizing(
+        self,
+        curr_target: dict[str, float],
+        account_assets: UnifiedAccountAssets,
+        market_data: dict[str, UnifiedPriceData],
+        trade_rules: dict[str, dict[str, object]],
+        last_target: dict[str, float],
+        forbidden_symbols: list[str] | None = None,
+    ) -> dict[str, TargetSizingDecision]:
+        """返回目标数量与换算证据；供执行规划与审计共用."""
+        executor = _executor(self)
+        return executor._calculate_target_sizing_base(
             curr_target,
             account_assets,
             market_data,

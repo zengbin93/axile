@@ -1,6 +1,6 @@
 /** 仪表盘展示层常量与小工具。 */
 import type { Integrity, StatusLevel } from '@/lib/derive'
-import type { TradeChannel } from '@/types/api'
+import type { ChannelCapability, TradeChannel } from '@/types/api'
 import { getChannelDescriptor } from '@/stores/channels'
 
 /** 状态图标。 */
@@ -84,6 +84,13 @@ export function accountAssetTerms(channel: TradeChannel | null | undefined): Acc
     pointLabel: '权益点',
     ratioLabel: '占权益',
   }
+}
+
+/** 读取渠道声明的持仓金额称谓；兼容未携带新字段的旧服务。 */
+export function positionValueLabelOf(
+  ui: Pick<ChannelCapability['ui'], 'position_value_label'> | null | undefined,
+): string {
+  return ui?.position_value_label || '市值'
 }
 
 /** 渠道 + 市场的完整描述（hero 胶囊用）。 */

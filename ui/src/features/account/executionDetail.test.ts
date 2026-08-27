@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'bun:test'
 
-import { buildExecutionDetail, formatOrderTradeCounts } from './executionDetail'
+import { buildExecutionDetail, executionHeadline, formatOrderTradeCounts } from './executionDetail'
 import type { ExecutionArtifact, ExecutionEvent, ExecutionStatus } from '@/types/api'
 
 /** 造一条最小可用的执行事件。 */
@@ -138,6 +138,69 @@ describe('buildExecutionDetail · 头条', () => {
     expect(header.failedCount).toBe(1)
     expect(header.success).toBe(false)
   })
+
+  it('两只成交到位、两只不足一手时单独说明量化残差', () => {
+    const { events, artifacts } = baseFixture()
+    for (const artifact of artifacts) artifact.execution_id = 'b780185776f64818bedff2e18b09abf7'
+    const summary = artifacts.find((a) => a.artifact_type === 'execution_summary')!
+    const symbols = (summary.content.reconciliation as { symbols: Record<string, unknown>[] }).symbols
+    symbols.splice(
+      0,
+      symbols.length,
+      {
+        symbol: 'TA701', status: 'SUCCEEDED', target: -1, filled: -1, filled_value: -27_810,
+        avg_price: 5562, before: 0, after: -1, moved: -1, drift: 0, attained_ratio: 1, reached: true,
+        sizing: {
+          symbol: 'TA701', reason_code: 'COMMON.SIZING.QUANTIZED', strategy_weight: -0.0317,
+          account_weight: -0.32, account_multiplier: 10.0946, equity: 99_973.5875,
+          reference_price: 5564, unit_multiplier: 5, unit_notional: 27_820,
+          target_notional: 31_991.548, raw_quantity: -1.14995, target_quantity: -1, quantity_step: 1,
+        },
+      },
+      {
+        symbol: 'rb2610', status: 'SUCCEEDED', target: 1, filled: 1, filled_value: 30_860,
+        avg_price: 3086, before: 0, after: 1, moved: 1, drift: 0, attained_ratio: 1, reached: true,
+        sizing: {
+          symbol: 'rb2610', reason_code: 'COMMON.SIZING.QUANTIZED', strategy_weight: 0.0377,
+          account_weight: 0.38, account_multiplier: 10.0796, equity: 99_973.5875,
+          reference_price: 3086, unit_multiplier: 10, unit_notional: 30_860,
+          target_notional: 37_989.963, raw_quantity: 1.23104, target_quantity: 1, quantity_step: 1,
+        },
+      },
+      {
+        symbol: 'm2701', status: 'NOOP', target: 0, filled: 0, filled_value: 0,
+        avg_price: null, before: 0, after: 0, moved: 0, drift: 0, attained_ratio: 1, reached: true,
+        sizing: {
+          symbol: 'm2701', reason_code: 'COMMON.SIZING.BELOW_MIN_QUANTITY', strategy_weight: -0.0175,
+          account_weight: -0.18, account_multiplier: 10.2857, equity: 99_973.5875,
+          reference_price: 3336, unit_multiplier: 10, unit_notional: 33_360,
+          target_notional: 17_995.246, raw_quantity: -0.53943, target_quantity: 0, quantity_step: 1,
+        },
+      },
+      {
+        symbol: 'c2611', status: 'NOOP', target: 0, filled: 0, filled_value: 0,
+        avg_price: null, before: 0, after: 0, moved: 0, drift: 0, attained_ratio: 1, reached: true,
+        sizing: {
+          symbol: 'c2611', reason_code: 'COMMON.SIZING.BELOW_MIN_QUANTITY', strategy_weight: 0.01,
+          account_weight: 0.1, account_multiplier: 10, equity: 99_973.5875,
+          reference_price: 2286, unit_multiplier: 10, unit_notional: 22_860,
+          target_notional: 9_997.359, raw_quantity: 0.43733, target_quantity: 0, quantity_step: 1,
+        },
+      },
+    )
+    events.push(
+      ev({ event_type: 'symbol_skipped', symbol: 'm2701', reason_code: 'COMMON.SIZING.BELOW_MIN_QUANTITY' }),
+      ev({ event_type: 'symbol_skipped', symbol: 'c2611', reason_code: 'COMMON.SIZING.BELOW_MIN_QUANTITY' }),
+    )
+
+    const model = buildExecutionDetail(events, artifacts)
+
+    expect(model.header.tradedReachedCount).toBe(2)
+    expect(model.header.quantizedZeroCount).toBe(2)
+    expect(model.symbols.find((symbol) => symbol.symbol === 'm2701')?.action).toBe('aligned')
+    expect(model.symbols.find((symbol) => symbol.symbol === 'm2701')?.broken).toBe(false)
+    expect(executionHeadline(model, '手').text).toBe('执行完成：2只成交到位，2只因不足1手未下单。')
+  })
 })
 
 describe('formatOrderTradeCounts', () => {
@@ -161,7 +224,7 @@ describe('buildExecutionDetail · 目标变化', () => {
   it('给出 last→curr 与算法参数摘要', () => {
     const { events, artifacts } = baseFixture()
     const tc = buildExecutionDetail(events, artifacts).targetChange
-    expect(tc?.rows).toEqual([{ symbol: 'ag2612', curr: 0.9, last: 1.5 }])
+    expect(tc?.rows).toEqual([{ symbol: 'ag2612', curr: 0.9, last: 1.5, strategy: null }])
     expect(tc?.algorithm).toBe('SINGLE-MAKER')
     expect(tc?.algoParams).toContain('PASSIVE')
     expect(tc?.algoParams).toContain('追价')
@@ -301,6 +364,21 @@ describe('buildExecutionDetail · 逐只子链', () => {
     expect(au.action).toBe('skipped')
     expect(au.broken).toBe(true)
     expect(au.reason).toBe('受账户交易限制')
+  })
+
+  it('已到位的 symbol_skipped 仅保留原因，不标成断点', () => {
+    const { events, artifacts } = baseFixture()
+    events.push(ev({ event_type: 'symbol_skipped', symbol: 'rb2610', reason_code: 'RISK.FORBIDDEN' }))
+    const summary = artifacts.find((a) => a.artifact_type === 'execution_summary')!
+    ;(summary.content.reconciliation as { symbols: unknown[] }).symbols.push({
+      symbol: 'rb2610', status: 'NOOP', target: 1, filled: 0, filled_value: 0, avg_price: null,
+      before: 1, after: 1, moved: 0, drift: 0, attained_ratio: 1, reached: true,
+    })
+
+    const rb = buildExecutionDetail(events, artifacts).symbols.find((s) => s.symbol === 'rb2610')!
+    expect(rb.action).toBe('aligned')
+    expect(rb.broken).toBe(false)
+    expect(rb.reason).toBe('受账户交易限制')
   })
 })
 

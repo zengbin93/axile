@@ -287,6 +287,39 @@ def test_reconciliation_none_target_leaves_ratio_unset() -> None:
     assert row["reached"] is None
 
 
+def test_reconciliation_preserves_target_sizing_evidence() -> None:
+    """逐只对账必须原样保留执行器当时生成的数量换算证据."""
+    sizing = {
+        "symbol": "m2701",
+        "status": "SIZED",
+        "reason_code": "COMMON.SIZING.BELOW_MIN_QUANTITY",
+        "account_weight": -0.18,
+        "equity": 99_973.5875,
+        "reference_price": 3_336.0,
+        "unit_multiplier": 10.0,
+        "unit_notional": 33_360.0,
+        "target_notional": 17_995.24575,
+        "raw_quantity": -0.539425832,
+        "target_quantity": 0.0,
+        "quantity_step": 1.0,
+    }
+    result = {
+        "account_assets": {"total_asset": 99_973.5875, "positions": [], "source": "real"},
+        "symbol_results": {
+            "m2701": {
+                "target_volume": 0.0,
+                "orders": [],
+                "status": "NOOP",
+                "sizing": sizing,
+            },
+        },
+    }
+
+    row = build_symbol_reconciliation(result, result["account_assets"])["symbols"][0]
+
+    assert row["sizing"] == sizing
+
+
 def test_account_assets_default_source_is_real() -> None:
     """``UnifiedAccountAssets`` 默认来源标为 real。"""
     assets = UnifiedAccountAssets(available_cash=1.0, total_asset=1.0, market_value=0.0, positions=[])

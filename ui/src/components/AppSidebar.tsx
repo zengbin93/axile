@@ -8,6 +8,7 @@ import {
   CircleGauge,
   Plus,
   Settings2,
+  X,
 } from 'lucide-react'
 import { Link } from '@/components/ui/nav'
 import { channelLabel } from '@/features/dashboard/display'
@@ -148,7 +149,13 @@ function NavItem({ item }: { item: NavItemSpec }) {
 }
 
 /** 悬浮式常驻导航：层级只表达归属，每个二级入口均直接抵达最终页面。 */
-export function AppSidebar() {
+export function AppSidebar({
+  mobileOpen = false,
+  onClose,
+}: {
+  mobileOpen?: boolean
+  onClose?: () => void
+}) {
   const location = useLocation()
   const accounts = useDomainStore((state) => state.accounts)
   const activeAccountId = useNavigationStore((state) => state.activeAccountId)
@@ -165,6 +172,10 @@ export function AppSidebar() {
         : (accounts[0]?.account_id ?? null)
     if (next !== activeAccountId) setActiveAccountId(next)
   }, [accounts, routeAccountId, activeAccountId, setActiveAccountId])
+
+  useEffect(() => {
+    onClose?.()
+  }, [location.pathname, onClose])
 
   const accountId = routeAccountId ?? activeAccountId
   const accountPath = (suffix = '') => accountId == null ? null : `/accounts/${accountId}${suffix}`
@@ -202,10 +213,28 @@ export function AppSidebar() {
   ]
 
   return (
-    <aside
-      className="flex w-[218px] flex-none flex-col border-r border-line bg-surface py-3.5 pr-2.5 pl-3"
-      aria-label="主导航"
-    >
+    <>
+      <button
+        type="button"
+        aria-label="关闭主导航"
+        tabIndex={mobileOpen ? 0 : -1}
+        onClick={onClose}
+        className={`fixed inset-0 z-30 bg-ink-1/20 transition-opacity duration-200 motion-reduce:transition-none md:hidden ${
+          mobileOpen ? 'opacity-100' : 'pointer-events-none opacity-0'
+        }`}
+      />
+      <aside
+        className={`fixed inset-y-0 left-0 z-40 flex w-[218px] flex-none flex-col border-r border-line bg-surface py-3.5 pr-2.5 pl-3 transition-transform duration-200 motion-reduce:transition-none md:static md:z-auto md:translate-x-0 ${
+          mobileOpen ? 'visible translate-x-0' : 'invisible -translate-x-full md:visible'
+        }`}
+        aria-label="主导航"
+      >
+      <div className="mb-2 flex items-center justify-between px-2.5 md:hidden">
+        <span className="text-[13px] font-medium text-ink-2">导航</span>
+        <button type="button" aria-label="关闭主导航" className="text-ink-2 hover:text-ink-1" onClick={onClose}>
+          <X size={18} aria-hidden />
+        </button>
+      </div>
       <div className="relative flex min-h-0 flex-1 flex-col">
         <nav ref={navRef} className="quiet-scrollbar min-h-0 flex-1 overflow-y-auto pb-2" aria-label="功能导航">
           <div className="flex min-h-full flex-col justify-between">
@@ -266,6 +295,7 @@ export function AppSidebar() {
           </Link>
         </div>
       </div>
-    </aside>
+      </aside>
+    </>
   )
 }

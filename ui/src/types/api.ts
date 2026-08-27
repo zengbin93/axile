@@ -107,6 +107,7 @@ export interface ChannelCapability {
     long_leverage_label: string
     short_leverage_label: string
     show_short_leverage: boolean
+    position_value_label?: string
   }
   defaults: {
     long_leverage: number
@@ -351,11 +352,49 @@ export interface PortfolioList {
 /** 目标权重映射：symbol → weight（可负=空头）。 */
 export type LatestWeights = Record<string, number>
 
+export type TargetSizingAvailability = 'available' | 'pending_execution' | 'legacy' | 'unavailable'
+
+/** 单品种从策略目标到可执行数量的完整换算证据。 */
+export interface TargetSizingRow {
+  symbol: string
+  sizing_mode: string
+  status: string
+  reason_code: string
+  strategy_weight: number | null
+  account_weight: number | null
+  account_multiplier: number | null
+  weight_precision: number | null
+  equity: number | null
+  reference_price: number | null
+  unit_multiplier: number | null
+  unit_notional: number | null
+  target_notional: number | null
+  raw_quantity: number | null
+  target_quantity: number | null
+  current_quantity: number | null
+  quantity_step: number | null
+  min_quantity: number | null
+  min_notional: number | null
+}
+
+export interface TargetSizing {
+  status: TargetSizingAvailability
+  execution_id: string | null
+  calculated_at: string | null
+  rows: Record<string, TargetSizingRow>
+}
+
 /** 最近一次成功计算的目标权重快照；`calculated_at=null` 表示从未计算。 */
 export interface TargetWeightSnapshot {
   weights: LatestWeights
   /** 渠道量化后的目标数量（与 weights 同 key）；渠道未提供时为 null。 */
   quantities?: LatestWeights | null
+  /** 组合脚本直接给出的策略权重。 */
+  strategy_weights?: LatestWeights | null
+  /** 经过账户多空杠杆与精度后的执行器权重。 */
+  account_weights?: LatestWeights | null
+  /** 当次 execution 持久化的数量换算依据；旧记录不做现价反推。 */
+  sizing?: TargetSizing | null
   calculated_at: string | null
   source: 'manual' | 'execution' | null
   execution_id: string | null
@@ -539,6 +578,7 @@ export interface ExecutionArtifact {
   id: number | null
   execution_id: string
   artifact_type: string
+  schema_version?: number
   content: Record<string, unknown>
   created_at: string
 }
@@ -614,6 +654,8 @@ export interface SymbolReconciliation {
   attained_ratio: number | null
   /** 是否到位；`target` 缺失时为 `null`。 */
   reached: boolean | null
+  /** 当次执行记录的目标数量换算依据。 */
+  sizing: TargetSizingRow | null
   /** 逐只执行质量（TCA-lite）。 */
   tca: SymbolTca
   /** 订单→成交树。 */
