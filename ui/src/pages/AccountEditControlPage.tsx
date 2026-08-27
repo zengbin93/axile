@@ -428,7 +428,7 @@ export function AccountEditControlPage() {
   }
 
   return (
-    <section className="pb-24">
+    <section>
       {title}
       <EditSynopsis note="控制交易请求的频率与间隔；保存后从下一次执行开始生效。">
         {model.preset_display_name} · {overrideCount ? `${overrideCount} 处自定义` : '全部使用预设值'}

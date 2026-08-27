@@ -101,7 +101,7 @@ export function PortfolioEditPage() {
   }
 
   return (
-    <section className="mx-auto w-full max-w-[1440px] pb-24">
+    <section className="mx-auto w-full max-w-[1440px]">
       <h1 className="text-[19px] font-[640]">
         组合 ·{' '}
         <span style={tDetail ? { viewTransitionName: `portfolio-name-${portfolioId}` } : undefined}>{pf.name}</span>

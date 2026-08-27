@@ -344,7 +344,7 @@ export function AccountEditPage({ section = 'basic' }: { section?: EditSection }
   }
 
   return (
-    <section className="pb-24">
+    <section>
       {pageChrome}
 
       {section === 'basic' && (

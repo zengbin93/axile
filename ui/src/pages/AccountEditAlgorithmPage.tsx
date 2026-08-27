@@ -201,7 +201,7 @@ export function AccountEditAlgorithmPage() {
   )
 
   return (
-    <section className="pb-24">
+    <section>
       {title}
       {synopsis}
 

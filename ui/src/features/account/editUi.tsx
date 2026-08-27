@@ -5,7 +5,7 @@
  * （同构壳几何连续，不共享文案内容 morph）。底栏仅 opacity。
  */
 
-import type { CSSProperties, ReactNode } from 'react'
+import { useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { Link } from '@/components/ui/nav'
 import { OverflowText } from '@/components/ui/OverflowText'
 import { Skeleton } from '@/components/ui/Skeleton'
@@ -309,36 +309,53 @@ export function EditSaveBar({
   error?: unknown | null
 }) {
   const open = changes.length > 0
+  const barRef = useRef<HTMLDivElement>(null)
+  const [barHeight, setBarHeight] = useState(0)
+
+  useLayoutEffect(() => {
+    const bar = barRef.current
+    if (!bar) return
+    const updateHeight = () => setBarHeight(bar.offsetHeight)
+    updateHeight()
+    const observer = new ResizeObserver(updateHeight)
+    observer.observe(bar)
+    return () => observer.disconnect()
+  }, [])
+
   return (
-    <div
-      className={`fixed bottom-0 left-[calc(50%+6rem)] z-30 w-full max-w-[1376px] -translate-x-1/2 border-t border-line bg-surface/85 backdrop-blur-md transition-opacity ${MOTION_LAYOUT} ${
-        open ? 'opacity-100' : 'pointer-events-none opacity-0'
-      }`}
-      aria-hidden={!open}
-    >
-      <div className="flex items-center gap-4 px-6 py-3">
-        <div className="min-w-0 flex-1">
-          <div className="text-[12px] font-semibold tracking-wide text-ink-3">
-            待保存 · {changes.length} 项{blocked && <span className="text-warn"> · 有错误</span>}
+    <>
+      <div aria-hidden style={{ height: open ? barHeight : 0 }} />
+      <div
+        ref={barRef}
+        className={`fixed right-0 bottom-0 left-[218px] z-30 border-t border-line bg-surface/85 backdrop-blur-md transition-opacity ${MOTION_LAYOUT} ${
+          open ? 'opacity-100' : 'pointer-events-none opacity-0'
+        }`}
+        aria-hidden={!open}
+      >
+        <div className="mx-auto w-full max-w-[2176px] px-10">
+          <div className="flex items-center gap-4 py-3">
+            <div className="min-w-0 flex-1">
+              <div className="text-[12px] font-semibold tracking-wide text-ink-3">
+                待保存 · {changes.length} 项{blocked && <span className="text-warn"> · 有错误</span>}
+              </div>
+              <OverflowText className="num text-[14px] text-ink-1" text={changes.join('  ·  ')} />
+            </div>
+            <Link to={cancelTo} className="flex-none text-[14px] text-ink-2 hover:text-ink-1" tabIndex={open ? 0 : -1}>
+              取消
+            </Link>
+            <button
+              type="button"
+              className="flex-none cursor-pointer rounded-[9px] border-0 bg-ink-1 px-5 py-2 text-[14.5px] font-semibold text-surface disabled:opacity-45"
+              onClick={onSave}
+              disabled={blocked || saving || !open}
+              tabIndex={open ? 0 : -1}
+            >
+              {saving ? '保存中…' : '保存'}
+            </button>
           </div>
-          <OverflowText className="num text-[14px] text-ink-1" text={changes.join('  ·  ')} />
+          <ErrorNotice title="保存失败" error={error} variant="mutation" onRetry={onSave} />
         </div>
-        <Link to={cancelTo} className="flex-none text-[14px] text-ink-2 hover:text-ink-1" tabIndex={open ? 0 : -1}>
-          取消
-        </Link>
-        <button
-          type="button"
-          className="flex-none cursor-pointer rounded-[9px] border-0 bg-ink-1 px-5 py-2 text-[14.5px] font-semibold text-surface disabled:opacity-45"
-          onClick={onSave}
-          disabled={blocked || saving || !open}
-          tabIndex={open ? 0 : -1}
-        >
-          {saving ? '保存中…' : '保存'}
-        </button>
       </div>
-      <div className="px-6">
-        <ErrorNotice title="保存失败" error={error} variant="mutation" onRetry={onSave} />
-      </div>
-    </div>
+    </>
   )
 }
