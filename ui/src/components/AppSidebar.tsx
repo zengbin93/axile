@@ -35,14 +35,20 @@ function NavSection({
   label,
   children,
   compact = false,
+  dense = false,
 }: {
   label: string
   children: ReactNode
   /** 账户块内部使用：组间距收紧，让块内多组读起来是一个整体。 */
   compact?: boolean
+  /** 侧栏溢出时进一步压缩纵向密度。 */
+  dense?: boolean
 }) {
+  const margin = compact
+    ? dense ? 'mt-2.5' : 'mt-3.5'
+    : dense ? 'mt-4' : 'mt-5'
   return (
-    <section className={compact ? 'mt-3.5 first:mt-0' : 'mt-5 first:mt-0'}>
+    <section className={`${margin} first:mt-0 transition-[margin] duration-200 motion-reduce:transition-none`}>
       <div className="mb-1 truncate px-2.5 text-[12px] font-semibold tracking-[0.14em] text-ink-3" title={label}>
         {label}
       </div>
@@ -52,8 +58,15 @@ function NavSection({
 }
 
 /** 跟踪滚动容器两端是否还有被裁掉的内容，用于驱动边缘渐隐提示。 */
-function useScrollEdges(ref: RefObject<HTMLElement | null>): { up: boolean; down: boolean; overflowing: boolean; measured: boolean } {
-  const [edges, setEdges] = useState({ up: false, down: false, overflowing: false, measured: false })
+function useScrollEdges(ref: RefObject<HTMLElement | null>): {
+  up: boolean
+  down: boolean
+  overflowing: boolean
+  measured: boolean
+  scrollHeight: number
+  clientHeight: number
+} {
+  const [edges, setEdges] = useState({ up: false, down: false, overflowing: false, measured: false, scrollHeight: 0, clientHeight: 0 })
   useLayoutEffect(() => {
     const el = ref.current
     if (!el) return
@@ -65,12 +78,16 @@ function useScrollEdges(ref: RefObject<HTMLElement | null>): { up: boolean; down
         down: remaining > 1,
         overflowing: el.scrollHeight - el.clientHeight > 1,
         measured: true,
+        scrollHeight: el.scrollHeight,
+        clientHeight: el.clientHeight,
       }
       setEdges((prev) => (
         prev.up === next.up
         && prev.down === next.down
         && prev.overflowing === next.overflowing
         && prev.measured === next.measured
+        && prev.scrollHeight === next.scrollHeight
+        && prev.clientHeight === next.clientHeight
           ? prev
           : next
       ))
@@ -90,7 +107,7 @@ function useScrollEdges(ref: RefObject<HTMLElement | null>): { up: boolean; down
 
 type SettingsMovePhase = 'idle' | 'leaving' | 'placed' | 'entering'
 
-function GlobalSettingsNav({ phase }: { phase: SettingsMovePhase }) {
+function GlobalSettingsNav({ phase, dense }: { phase: SettingsMovePhase; dense: boolean }) {
   const exact = (to: string) => (pathname: string) => pathname === to
   const hidden = phase === 'leaving' || phase === 'placed'
   const items: NavItemSpec[] = [
@@ -103,12 +120,12 @@ function GlobalSettingsNav({ phase }: { phase: SettingsMovePhase }) {
       {items.map((item, index) => (
         <div
           key={item.label}
-          className={`sidebar-setting-row ${hidden ? 'sidebar-setting-row-hidden' : ''}`}
+          className={`sidebar-setting-row ${dense ? 'sidebar-setting-row-dense' : ''} ${hidden ? 'sidebar-setting-row-hidden' : ''}`}
           style={{ '--sidebar-setting-index': index } as CSSProperties}
           inert={hidden}
         >
           <div className={`sidebar-setting-item ${hidden ? 'sidebar-setting-item-hidden' : ''}`}>
-            <NavItem item={item} />
+            <NavItem item={item} dense={dense} />
           </div>
         </div>
       ))}
@@ -131,7 +148,7 @@ function EdgeScrollHint({ edge, visible, target }: { edge: 'up' | 'down'; visibl
   return (
     <div
       aria-hidden={!visible}
-      className={`pointer-events-none absolute inset-x-0 z-[2] flex h-10 from-surface via-surface/80 to-transparent transition-opacity duration-200 motion-reduce:transition-none ${
+      className={`pointer-events-none absolute inset-x-0 z-[2] flex h-5 from-surface via-surface/80 to-transparent transition-opacity duration-200 motion-reduce:transition-none ${
         edge === 'up' ? 'top-0 items-start bg-gradient-to-b' : 'bottom-0 items-end bg-gradient-to-t'
       } ${visible ? 'opacity-100' : 'opacity-0'}`}
     >
@@ -140,7 +157,7 @@ function EdgeScrollHint({ edge, visible, target }: { edge: 'up' | 'down'; visibl
         aria-label={edge === 'up' ? '向上滚动导航' : '向下滚动导航'}
         tabIndex={visible ? 0 : -1}
         onClick={nudge}
-        className={`mx-auto px-3 text-ink-3 transition-colors duration-150 hover:text-ink-1 ${edge === 'up' ? 'pt-1' : 'pb-1'} ${
+        className={`mx-auto px-3 text-ink-3 transition-colors duration-150 hover:text-ink-1 ${
           visible ? 'pointer-events-auto' : 'pointer-events-none'
         }`}
       >
@@ -150,7 +167,7 @@ function EdgeScrollHint({ edge, visible, target }: { edge: 'up' | 'down'; visibl
   )
 }
 
-function NavItem({ item }: { item: NavItemSpec }) {
+function NavItem({ item, dense = false }: { item: NavItemSpec; dense?: boolean }) {
   const location = useLocation()
   const active = item.active(location.pathname, location.hash)
   const Icon = item.icon
@@ -169,7 +186,7 @@ function NavItem({ item }: { item: NavItemSpec }) {
 
   if (!item.to) {
     return (
-      <span className="relative flex h-8.5 items-center gap-2 px-2.5 text-[14px] text-ink-3" aria-disabled="true">
+      <span className={`relative flex items-center gap-2 px-2.5 text-[14px] text-ink-3 transition-[height] duration-200 motion-reduce:transition-none ${dense ? 'h-[30px]' : 'h-8.5'}`} aria-disabled="true">
         {content}
       </span>
     )
@@ -179,7 +196,7 @@ function NavItem({ item }: { item: NavItemSpec }) {
     <Link
       to={item.to}
       aria-current={active ? 'page' : undefined}
-      className={`relative flex h-8.5 items-center gap-2 px-2.5 text-[14px] transition-colors duration-150 motion-reduce:transition-none ${
+      className={`relative flex items-center gap-2 px-2.5 text-[14px] transition-[height,color] duration-200 motion-reduce:transition-none ${dense ? 'h-[30px]' : 'h-8.5'} ${
         active ? 'font-[550] text-ink-1' : 'text-ink-2 hover:text-ink-1'
       }`}
     >
@@ -232,8 +249,11 @@ export function AppSidebar({
   const wasMobileOpen = useRef(mobileOpen)
   const scrollEdges = useScrollEdges(navRef)
   const [settingsAtBottom, setSettingsAtBottom] = useState(false)
+  const [denseNav, setDenseNav] = useState(false)
   const [settingsMovePhase, setSettingsMovePhase] = useState<SettingsMovePhase>('idle')
   const settingsAtBottomRef = useRef(false)
+  const denseNavRef = useRef(false)
+  const naturalNavHeight = useRef(0)
   const overflowInitialized = useRef(false)
   const movingSettings = useRef(false)
   const settingsMoveTimers = useRef<number[]>([])
@@ -255,22 +275,32 @@ export function AppSidebar({
 
   useLayoutEffect(() => {
     if (!scrollEdges.measured || movingSettings.current) return
+    const shouldCompact = denseNavRef.current
+      ? scrollEdges.clientHeight < naturalNavHeight.current - 1
+      : scrollEdges.overflowing
     if (!overflowInitialized.current) {
       overflowInitialized.current = true
-      settingsAtBottomRef.current = scrollEdges.overflowing
-      setSettingsAtBottom(scrollEdges.overflowing)
+      if (shouldCompact) naturalNavHeight.current = scrollEdges.scrollHeight
+      denseNavRef.current = shouldCompact
+      settingsAtBottomRef.current = shouldCompact
+      setDenseNav(shouldCompact)
+      setSettingsAtBottom(shouldCompact)
       return
     }
-    if (scrollEdges.overflowing === settingsAtBottomRef.current) return
+    if (shouldCompact === settingsAtBottomRef.current) return
+
+    if (shouldCompact) naturalNavHeight.current = scrollEdges.scrollHeight
+    denseNavRef.current = shouldCompact
+    setDenseNav(shouldCompact)
 
     const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches
     if (reduced) {
-      settingsAtBottomRef.current = scrollEdges.overflowing
-      setSettingsAtBottom(scrollEdges.overflowing)
+      settingsAtBottomRef.current = shouldCompact
+      setSettingsAtBottom(shouldCompact)
       return
     }
 
-    const targetAtBottom = scrollEdges.overflowing
+    const targetAtBottom = shouldCompact
     movingSettings.current = true
     setSettingsMovePhase('leaving')
     const placeTimer = window.setTimeout(() => {
@@ -284,7 +314,7 @@ export function AppSidebar({
       movingSettings.current = false
     }, 540)
     settingsMoveTimers.current = [placeTimer, finishTimer]
-  }, [scrollEdges.measured, scrollEdges.overflowing])
+  }, [scrollEdges.clientHeight, scrollEdges.measured, scrollEdges.overflowing, scrollEdges.scrollHeight])
 
   useEffect(() => () => {
     settingsMoveTimers.current.forEach((timer) => window.clearTimeout(timer))
@@ -341,14 +371,14 @@ export function AppSidebar({
         <nav ref={navRef} className="quiet-scrollbar min-h-0 flex-1 overflow-y-auto pb-2" aria-label="功能导航">
           <div className="flex min-h-full flex-col justify-between">
             <div>
-              <NavItem item={{ label: '所有账户', icon: CircleGauge, to: '/', active: (pathname) => pathname === '/' }} />
-              <NavItem item={{ label: '所有组合', icon: Boxes, to: '/portfolios', active: (pathname) => pathname.startsWith('/portfolios') }} />
-              {!settingsAtBottom && <GlobalSettingsNav phase={settingsMovePhase} />}
+              <NavItem dense={denseNav} item={{ label: '所有账户', icon: CircleGauge, to: '/', active: (pathname) => pathname === '/' }} />
+              <NavItem dense={denseNav} item={{ label: '所有组合', icon: Boxes, to: '/portfolios', active: (pathname) => pathname.startsWith('/portfolios') }} />
+              {!settingsAtBottom && <GlobalSettingsNav phase={settingsMovePhase} dense={denseNav} />}
 
               {/* 横线分割：顶层（全局与系统设置）与账户段各自成块。 */}
-              <div className="mt-4 border-t border-line" />
+              <div className={`${denseNav ? 'mt-3' : 'mt-4'} border-t border-line transition-[margin] duration-200 motion-reduce:transition-none`} />
               {noAccounts ? (
-                <NavSection label="当前账户">
+                <NavSection label="当前账户" dense={denseNav}>
                   <p className="px-2.5 py-1.5 text-[13px] leading-relaxed text-ink-3">
                     创建账户后，这里会出现它的持仓、参数与执行入口。
                   </p>
@@ -356,7 +386,7 @@ export function AppSidebar({
               ) : (
                 /* 账户段：身份块头（账户名 + 渠道）+ 左缘贯通 hairline + 统一缩进——
                    整段条目属于这个账户。不用围合面板，层次靠线。 */
-                <div className="mt-4 ml-1.5 border-l border-line pl-2">
+                <div className={`${denseNav ? 'mt-3' : 'mt-4'} ml-1.5 border-l border-line pl-2 transition-[margin] duration-200 motion-reduce:transition-none`}>
                   <div className="mb-1 flex min-w-0 items-center gap-1.5 px-2.5 pt-0.5" title={activeAccount?.name ?? '当前账户'}>
                     <span className="truncate text-[14px] font-[620] text-ink-1">
                       {activeAccount?.name ?? '当前账户'}
@@ -368,19 +398,19 @@ export function AppSidebar({
                     )}
                   </div>
                   <div>
-                    {accountOverview.map((item) => <NavItem key={item.label} item={item} />)}
+                    {accountOverview.map((item) => <NavItem key={item.label} item={item} dense={denseNav} />)}
                   </div>
-                  <NavSection compact label="参数">
-                    {accountParameters.map((item) => <NavItem key={item.label} item={item} />)}
+                  <NavSection compact dense={denseNav} label="参数">
+                    {accountParameters.map((item) => <NavItem key={item.label} item={item} dense={denseNav} />)}
                   </NavSection>
-                  <NavSection compact label="执行">
-                    {accountExecution.map((item) => <NavItem key={item.label} item={item} />)}
+                  <NavSection compact dense={denseNav} label="执行">
+                    {accountExecution.map((item) => <NavItem key={item.label} item={item} dense={denseNav} />)}
                   </NavSection>
                 </div>
               )}
               {settingsAtBottom && (
-                <div className="mt-4 border-t border-line pt-4">
-                  <GlobalSettingsNav phase={settingsMovePhase} />
+                <div className={`${denseNav ? 'mt-3 pt-3' : 'mt-4 pt-4'} border-t border-line transition-[margin,padding] duration-200 motion-reduce:transition-none`}>
+                  <GlobalSettingsNav phase={settingsMovePhase} dense={denseNav} />
                 </div>
               )}
             </div>

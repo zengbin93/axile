@@ -233,6 +233,10 @@
   transition-delay: calc(var(--sidebar-setting-index) * 40ms);
 }
 
+.sidebar-setting-row-dense {
+  max-height: 30px;
+}
+
 .sidebar-setting-item {
   opacity: 1;
   transform: translateX(0);
@@ -240,7 +244,7 @@
   transition-delay: calc(70ms + var(--sidebar-setting-index) * 40ms);
 }
 
-.sidebar-setting-row-hidden {
+.sidebar-setting-row.sidebar-setting-row-hidden {
   max-height: 0;
   transition-delay: calc(90ms + var(--sidebar-setting-index) * 40ms);
 }
