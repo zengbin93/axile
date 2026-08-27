@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import asyncio
-from threading import Lock
+from threading import Event, Lock
 
 import pytest
 
 from axile.common.trade_channel import TradeChannel
 from axile.executor.models.execution_result import ExecutionStatus
+from axile.executor.termination import ExecutionTerminated, ExecutionTerminationController
+from axile.server.execution.worker_backend import manager as worker_manager_module
 from axile.server.execution.worker_backend.manager import (
     WorkerBackendExecutionError,
     WorkerBackendManager,
@@ -79,6 +81,18 @@ class _FakeConnection:
         self.closed = True
 
 
+class _FakeControlConnection:
+    def __init__(self) -> None:
+        self.closed = False
+        self.sent: list[object] = []
+
+    def send(self, payload: object) -> None:
+        self.sent.append(payload)
+
+    def close(self) -> None:
+        self.closed = True
+
+
 class _FakeHandle:
     def __init__(
         self,
@@ -90,6 +104,7 @@ class _FakeHandle:
         self.account_id = 2
         self.process = _FakeProcess(is_alive=is_alive, join_stops=join_stops)
         self.connection = _FakeConnection(poll_result=poll_result)
+        self.control_connection = _FakeControlConnection()
         self.request_lock = Lock()
 
 
@@ -201,8 +216,8 @@ def test_execute_trade_worker_timeout_follows_standard_input(monkeypatch: pytest
 
     async def fake_to_thread(func: object, *args: object) -> WorkerBackendResponse:
         del func
-        captured_timeouts.append(float(args[-1]))
-        request = args[-2]
+        captured_timeouts.append(float(args[2]))
+        request = args[1]
         assert isinstance(request, WorkerBackendRequest)
         return WorkerBackendResponse(request_id=request.request_id, kind="result", output_payload={})
 
@@ -234,8 +249,8 @@ def test_empty_positions_worker_timeout_follows_clear_timeout(monkeypatch: pytes
 
     async def fake_to_thread(func: object, *args: object) -> WorkerBackendResponse:
         del func
-        captured_timeouts.append(float(args[-1]))
-        request = args[-2]
+        captured_timeouts.append(float(args[2]))
+        request = args[1]
         assert isinstance(request, WorkerBackendRequest)
         return WorkerBackendResponse(request_id=request.request_id, kind="result", output_payload={})
 
@@ -301,7 +316,7 @@ def test_prepare_account_sends_expected_trading_day(monkeypatch: pytest.MonkeyPa
 
     async def fake_to_thread(func: object, *args: object) -> WorkerBackendResponse:
         del func
-        request = args[-2]
+        request = args[1]
         assert isinstance(request, WorkerBackendRequest)
         captured.append(request)
         return WorkerBackendResponse(
@@ -317,6 +332,35 @@ def test_prepare_account_sends_expected_trading_day(monkeypatch: pytest.MonkeyPa
     assert result["trading_day"] == "20260824"
     assert captured[0].command == "prepare"
     assert captured[0].payload == {"expected_trading_day": "20260824"}
+
+
+def test_request_blocking_force_terminates_unresponsive_worker_after_cancel(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """worker 不响应协作终止时应强杀并返回结构化 terminated，而非永久占槽."""
+    manager = WorkerBackendManager()
+    handle = _FakeHandle(is_alive=True, poll_result=False)
+    manager._workers[2] = handle
+    cancel_event = Event()
+    cancel_event.set()
+    controller = ExecutionTerminationController(
+        cancel_event=cancel_event,
+        reason_provider=lambda: "operator stop",
+        mode_provider=lambda: "cancel_pending",
+    )
+    request = _execute_request()
+    request.execution_id = "exec-force-stop"
+    monkeypatch.setattr(worker_manager_module, "_TERMINATION_GRACE_SECONDS", 0.0)
+
+    with pytest.raises(ExecutionTerminated) as caught:
+        manager._request_blocking(2, request, timeout=10.0, termination_controller=controller)
+
+    assert caught.value.forced is True
+    assert caught.value.cancel_unconfirmed is True
+    assert caught.value.mode == "cancel_pending"
+    assert handle.process.terminate_called is True
+    assert manager._workers == {}
+    assert len(handle.control_connection.sent) == 1
 
 
 def test_drop_account_disposes_registered_worker(monkeypatch: pytest.MonkeyPatch) -> None:

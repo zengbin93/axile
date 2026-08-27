@@ -90,6 +90,9 @@ class _TerminationSnapshot:
     acked_at: str | None
     cancel_failed_order_ids: list[str]
     trigger: str
+    forced: bool
+    cancel_attempted: bool | None
+    cancel_unconfirmed: bool
 
 
 def _resolve_termination_snapshot(
@@ -120,6 +123,9 @@ def _resolve_termination_snapshot(
         acked_at=exc.acked_at,
         cancel_failed_order_ids=exc.cancel_failed_order_ids,
         trigger=exc.trigger,
+        forced=exc.forced,
+        cancel_attempted=exc.cancel_attempted,
+        cancel_unconfirmed=exc.cancel_unconfirmed,
     )
 
 
@@ -295,9 +301,15 @@ async def _record_terminated_execution(
         requested_at=requested_at,
         acked_at=termination.acked_at,
         finished_at=finished_at,
-        cancel_attempted=bool(termination.mode == ExecutionTerminateMode.CANCEL_PENDING.value),
+        cancel_attempted=(
+            termination.cancel_attempted
+            if termination.cancel_attempted is not None
+            else bool(termination.mode == ExecutionTerminateMode.CANCEL_PENDING.value)
+        ),
         cancel_failed_order_ids=termination.cancel_failed_order_ids,
         trigger=termination.trigger,
+        forced=termination.forced,
+        cancel_unconfirmed=termination.cancel_unconfirmed,
     )
     if current_state is not None and current_state.channel is not None and current_state.algorithm:
         await append_execution_event(
@@ -316,6 +328,8 @@ async def _record_terminated_execution(
                     "trigger": termination.trigger,
                     "execution_kind": execution_kind.value,
                     "cancel_failed_order_ids": termination.cancel_failed_order_ids,
+                    "forced": termination.forced,
+                    "cancel_unconfirmed": termination.cancel_unconfirmed,
                 }
             },
         )

@@ -9,9 +9,11 @@ from __future__ import annotations
 
 import asyncio
 import json
-from dataclasses import dataclass
+import threading
+from dataclasses import dataclass, field
 
 from axile.common.trade_channel import TradeChannel
+from axile.executor.termination import ExecutionTerminationController
 from axile.server.db.models import Account
 from axile.server.execution.audit_sink import build_server_execution_audit_sink
 from axile.server.execution.execution_account_control import (
@@ -19,6 +21,7 @@ from axile.server.execution.execution_account_control import (
     flush_account_control_records,
 )
 from axile.server.execution.factory import create_executor_instance
+from axile.server.execution.worker_backend.protocol import WorkerTerminationSignal
 
 
 @dataclass(slots=True)
@@ -34,6 +37,69 @@ class _WorkerBackendState:
     executor: object | None = None
     account_id: int | None = None
     config_signature: str | None = None
+    termination_lock: threading.Lock = field(default_factory=threading.Lock)
+    active_execution_id: str | None = None
+    termination_event: threading.Event = field(default_factory=threading.Event)
+    termination_reason: str | None = None
+    termination_mode: str | None = None
+    pending_terminations: dict[str, WorkerTerminationSignal] = field(default_factory=dict)
+
+
+def _request_worker_termination(state: _WorkerBackendState, signal: WorkerTerminationSignal) -> None:
+    """把控制线程收到的终止信号投递给当前或即将启动的 execution."""
+    with state.termination_lock:
+        if state.active_execution_id != signal.execution_id:
+            state.pending_terminations[signal.execution_id] = signal
+            return
+        state.termination_reason = signal.reason
+        state.termination_mode = signal.mode
+        state.termination_event.set()
+
+
+def _activate_worker_termination(
+    state: _WorkerBackendState,
+    execution_id: str | None,
+) -> ExecutionTerminationController | None:
+    """为 worker 当前请求创建可由控制管道唤醒的终止控制器."""
+    if execution_id is None:
+        return None
+    with state.termination_lock:
+        state.active_execution_id = execution_id
+        state.termination_event.clear()
+        state.termination_reason = None
+        state.termination_mode = None
+        pending = state.pending_terminations.pop(execution_id, None)
+        if pending is not None:
+            state.termination_reason = pending.reason
+            state.termination_mode = pending.mode
+            state.termination_event.set()
+
+    def _reason() -> str | None:
+        with state.termination_lock:
+            return state.termination_reason
+
+    def _mode() -> str | None:
+        with state.termination_lock:
+            return state.termination_mode
+
+    return ExecutionTerminationController(
+        cancel_event=state.termination_event,
+        reason_provider=_reason,
+        mode_provider=_mode,
+    )
+
+
+def _clear_worker_termination(state: _WorkerBackendState, execution_id: str | None) -> None:
+    """清除已完成请求的终止上下文，避免污染常驻 worker 的下一次请求."""
+    if execution_id is None:
+        return
+    with state.termination_lock:
+        if state.active_execution_id != execution_id:
+            return
+        state.active_execution_id = None
+        state.termination_event.clear()
+        state.termination_reason = None
+        state.termination_mode = None
 
 
 def _close_executor(executor: object | None) -> None:
@@ -123,6 +189,7 @@ def _prepare_executor(
     account: Account,
     execution_id: str | None,
     audit_context: dict[str, object],
+    termination_controller: ExecutionTerminationController | None = None,
 ) -> None:
     """
     为当前请求准备执行器的审计与账户控制运行时。
@@ -157,6 +224,10 @@ def _prepare_executor(
     if callable(set_account_control_guard):
         set_account_control_guard(guard)
 
+    set_termination_controller = getattr(executor, "set_termination_controller", None)
+    if callable(set_termination_controller):
+        set_termination_controller(termination_controller)
+
     prepare_execution_runtime = getattr(executor, "prepare_execution_runtime", None)
     if callable(prepare_execution_runtime):
         prepare_execution_runtime()
@@ -168,6 +239,7 @@ def _resolve_prepared_executor(
     account: Account,
     execution_id: str | None,
     audit_context: dict[str, object],
+    termination_controller: ExecutionTerminationController | None = None,
 ) -> object:
     """
     解析并准备本次请求要使用的执行器实例。
@@ -194,6 +266,7 @@ def _resolve_prepared_executor(
         account=account,
         execution_id=execution_id,
         audit_context=audit_context,
+        termination_controller=termination_controller,
     )
     return executor
 

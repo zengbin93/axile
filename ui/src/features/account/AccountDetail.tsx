@@ -14,6 +14,8 @@ import { Skeleton, SkeletonGroup, SkeletonText } from '@/components/ui/Skeleton'
 import { AccountActions } from '@/features/account/AccountActions'
 import { useExecutionRunner } from '@/features/account/useExecutionRunner'
 import { useTerminateAction } from '@/features/account/useTerminateAction'
+import { executionRecordError } from '@/features/account/executionRecordError'
+import { describeFailureText } from '@/features/account/failureReason'
 import { buildRecentActivity, recentRowText } from '@/features/account/recent'
 import { StaleDataStatus } from '@/features/account/StaleDataStatus'
 import { connectionStaleAt, localQueryError } from '@/features/account/staleData'
@@ -232,20 +234,34 @@ export function AccountDetail({
   const gate = gateOf({ ...item, is_started: isStarted })
   // 执行态：服务端 live 优先，runner 仅首帧前乐观。queued ≠ 正在下单。
   const isBusy = !!(live || runner.running)
-  const isExecuting = live != null && isExecutingStatus(live.status)
-  const isQueued = isBusy && !isExecuting
   // 终止动作 + 防连点：点后乐观进「终止中…」并禁用按钮，执行离开运行态即复位。
   const { terminating, terminate } = useTerminateAction(accountId, isBusy, activity.refresh)
+  const isExecuting = live != null && isExecutingStatus(live.status)
+  const isTerminating = terminating || live?.status === 'terminating'
+  const isActivelyExecuting = live?.status === 'running'
+  const isQueued = isBusy && !isExecuting
   const runKind = live?.kind ?? (runner.kind === 'clear' ? 'clear' : 'rebalance')
-  const statusHeadline = isExecuting
-    ? `正在${runVerb(runKind)}`
-    : isQueued
-      ? '等待执行'
-      : `${INTEGRITY_ICON[state.integrity]} ${state.text}`
+  const latestFailedRecord = recordList.find((record) =>
+    record.raw_result?.status !== 'BLOCKED'
+    && record.raw_result?.task_status !== 'TERMINATED'
+    && record.is_success !== 1
+    && record.execution_id,
+  )
+  const latestFailureText = latestFailedRecord ? executionRecordError(latestFailedRecord) : ''
+  const latestFailure = latestFailureText ? describeFailureText(latestFailureText) : null
+  const statusHeadline = isTerminating
+    ? `正在终止${runVerb(runKind)}`
+    : isExecuting
+      ? `正在${runVerb(runKind)}`
+      : isQueued
+        ? '等待执行'
+        : state.integrity === 'off' && latestFailure
+          ? `执行失败：${latestFailure.human}`
+          : `${INTEGRITY_ICON[state.integrity]} ${state.text}`
   // 「需要看看」兑现：空闲且上次失败时，状态行点进最近失败执行详情（与近期失败行同构）。
   const lastFailExecId =
     !isBusy && state.integrity === 'off' && item.last_output_status !== 'BLOCKED'
-      ? (recordList.find((r) => r.raw_result?.status !== 'BLOCKED' && r.is_success !== 1 && r.execution_id)?.execution_id ?? null)
+      ? (latestFailedRecord?.execution_id ?? null)
       : null
   const statusNavId = runningExecId ?? lastFailExecId
   const goStatusNav = statusNavId
@@ -383,14 +399,14 @@ export function AccountDetail({
          * 可点：在途 → 当前执行；「需要看看」→ 最近失败执行。外层始终 div，避免 Link remount 打断换字。
          */}
         <div
-          className={`relative mt-[18px] inline-flex min-w-0 items-center gap-2 text-[24px] font-[640] tracking-tight transition-[padding-left] duration-[440ms] ease-[cubic-bezier(.4,0,.2,1)] motion-reduce:transition-none ${
+          className={`relative mt-[18px] inline-flex max-w-full min-w-0 items-center gap-2 text-[20px] font-[640] tracking-tight transition-[padding-left] duration-[440ms] ease-[cubic-bezier(.4,0,.2,1)] motion-reduce:transition-none sm:text-[24px] ${
             isBusy ? 'pl-[18px]' : 'pl-0'
-          } ${isBusy ? 'text-accent' : INTEGRITY_TEXT_CLASS[state.integrity]}${
+          } ${isTerminating ? 'text-warn' : isBusy ? 'text-accent' : INTEGRITY_TEXT_CLASS[state.integrity]}${
             statusNavId ? ' cursor-pointer hover:opacity-80' : ''
           }`}
           role={statusNavId ? 'link' : undefined}
           tabIndex={statusNavId ? 0 : undefined}
-          title={lastFailExecId ? '查看失败执行详情' : undefined}
+          title={lastFailExecId ? latestFailureText || '查看失败执行详情' : undefined}
           onClick={goStatusNav}
           onKeyDown={
             goStatusNav
@@ -420,13 +436,21 @@ export function AccountDetail({
             tone="prose"
             fluid
             className="min-w-0"
-            textClassName={isExecuting ? 'text-accent exec-flow' : isBusy ? 'text-accent' : INTEGRITY_TEXT_CLASS[state.integrity]}
+            textClassName={
+              isTerminating
+                ? 'text-warn'
+                : isActivelyExecuting
+                  ? 'text-accent exec-flow'
+                  : isBusy
+                    ? 'text-accent'
+                    : INTEGRITY_TEXT_CLASS[state.integrity]
+            }
           />
           {/* 相位副标：外壳 phase-grow 让入场 footprint 宽度 0→内容（grid-fr，箭头随 reflow 挪、
               进执行那刻不被瞬时占位顶跳）；内层 phase-enter 管 opacity 淡入。相位词逐步推进走
               label 档日记换字（触发→冻结输入→算目标→下单→对账），宽变由内层 InkRewrite fluid 自理。
               首帧不播、纯 opacity 无 blur，不与主句流光抢；「·」静态钉住只重写相位词。 */}
-          {isExecuting && (
+          {isActivelyExecuting && (
             <span className="phase-grow">
               <span className="phase-enter inline-flex min-w-0 items-center gap-1 overflow-hidden whitespace-nowrap text-[16px] font-medium text-ink-2">
                 <span aria-hidden>·</span>
@@ -434,7 +458,7 @@ export function AccountDetail({
               </span>
             </span>
           )}
-          {isExecuting && live?.pendingExecutionId ? (
+          {isActivelyExecuting && live?.pendingExecutionId ? (
             <span className="text-[16px] font-medium text-ink-2">· 结束后再调一次</span>
           ) : null}
           {/* 可点暗示：执行中用生命体征箭头；失败「需要看看」用静止 →，色随父级琥珀。
@@ -443,7 +467,7 @@ export function AccountDetail({
               exec-arrow 自体漂移只在 running 时挂在此层。 */}
           {statusNavId && (
             <span
-              className={`inline-block text-[16px] font-medium ${isExecuting ? 'exec-arrow' : ''}`}
+              className={`inline-block text-[16px] font-medium ${isActivelyExecuting ? 'exec-arrow' : ''}`}
               aria-hidden
             >
               →

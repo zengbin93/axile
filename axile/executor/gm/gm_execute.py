@@ -121,9 +121,9 @@ class GMExecutor(AbstractExecutor, UnifiedCallbackClient):
 
         super().__init__(TradeChannel.GM, account_config)
 
-        # 创建阶段默认尝试进入回调模式，保持与“默认回调”语义一致。
-        # 若回调启动失败，构造不会抛异常，由后续查询链路按可用方式执行。
-        self.start_callback_monitoring()
+        # GM 下单依赖回调收敛状态，创建阶段必须确认 bridge 可用；失败直接交给
+        # worker/API 生命周期落成 FAILED，不能吞掉后在执行阶段重复等待。
+        self._ensure_strategy_bridge()
         self._register_execution_query_runtime_callback_observers()
 
     def _normalize_symbol(self, symbol: str) -> str:
@@ -160,7 +160,7 @@ class GMExecutor(AbstractExecutor, UnifiedCallbackClient):
             self._ensure_strategy_bridge(timeout=30.0)
             return True
         except Exception as e:
-            logger.error(f"验证连接失败: {e}")
+            logger.opt(exception=e).error("验证连接失败: {}", e)
             return False
 
     def _check_trading_time(self) -> bool:
@@ -197,7 +197,7 @@ class GMExecutor(AbstractExecutor, UnifiedCallbackClient):
             logger.success("回调监控启动成功")
             return True
         except Exception as e:
-            logger.error(f"回调监控启动失败: {e}")
+            logger.opt(exception=e).error("回调监控启动失败: {}", e)
             return False
 
     def subscribe_price(self, symbols: list[str]) -> None:

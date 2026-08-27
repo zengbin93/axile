@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import atexit
+import time
 from dataclasses import dataclass, field
 from multiprocessing import get_context
 from multiprocessing.connection import Connection
@@ -17,12 +18,13 @@ from axile.executor.models.execution_result import ExecutionStatus
 from axile.executor.models.unified_account_assets import UnifiedAccountAssets
 from axile.executor.models.unified_input import UnifiedStandardInput
 from axile.executor.models.unified_output import UnifiedStandardOutput
-from axile.executor.termination import ExecutionTerminated
+from axile.executor.termination import ExecutionTerminated, ExecutionTerminationController
 from axile.server.db.models import Account
 from axile.server.execution.worker_backend.protocol import (
     WorkerBackendErrorPayload,
     WorkerBackendRequest,
     WorkerBackendResponse,
+    WorkerTerminationSignal,
 )
 from axile.server.execution.worker_backend.worker import run_worker_backend_loop
 
@@ -56,6 +58,12 @@ _DEFAULT_PREPARE_RECV_TIMEOUT_SECONDS = 60.0
 
 _ACCOUNT_ASSET_RECV_TIMEOUT_SECONDS = 30.0
 """人工账户资产查询的最大等待时限（秒）."""
+
+_TERMINATION_POLL_SECONDS = 0.1
+"""等待 worker 响应时观察人工终止事件的最大间隔（秒）."""
+
+_TERMINATION_GRACE_SECONDS = 5.0
+"""人工终止后等待 worker 协作撤单并退出的宽限时间（秒）."""
 
 _worker_backend_manager: "WorkerBackendManager | None" = None
 
@@ -100,6 +108,7 @@ class _WorkerBackendHandle:
     account_id: int
     process: SpawnProcess
     connection: Connection
+    control_connection: Connection
     request_lock: Lock = field(default_factory=Lock)
 
 
@@ -159,18 +168,21 @@ class WorkerBackendManager:
 
     def _spawn_worker(self, account_id: int) -> _WorkerBackendHandle:
         parent_conn, child_conn = self._ctx.Pipe(duplex=True)
+        child_control_conn, parent_control_conn = self._ctx.Pipe(duplex=False)
         process = self._ctx.Process(
             target=run_worker_backend_loop,
-            args=(child_conn, account_id),
+            args=(child_conn, account_id, child_control_conn),
             name=f"axile-execution-worker-{account_id}",
             daemon=True,
         )
         process.start()
         child_conn.close()
+        child_control_conn.close()
         return _WorkerBackendHandle(
             account_id=account_id,
             process=process,
             connection=cast("Connection", parent_conn),
+            control_connection=cast("Connection", parent_control_conn),
         )
 
     def _send_shutdown(self, handle: _WorkerBackendHandle) -> None:
@@ -203,6 +215,10 @@ class WorkerBackendManager:
             handle.connection.close()
         except OSError:
             pass
+        try:
+            handle.control_connection.close()
+        except OSError:
+            pass
         if handle.process.is_alive():
             handle.process.terminate()
             handle.process.join(timeout=2.0)
@@ -220,6 +236,14 @@ class WorkerBackendManager:
             pass
         try:
             handle.connection.close()
+        except OSError:
+            pass
+        try:
+            handle.control_connection.send(None)
+        except (BrokenPipeError, EOFError, OSError):
+            pass
+        try:
+            handle.control_connection.close()
         except OSError:
             pass
         if handle.process.is_alive():
@@ -277,6 +301,7 @@ class WorkerBackendManager:
         account_id: int,
         request: WorkerBackendRequest,
         timeout: float,
+        termination_controller: ExecutionTerminationController | None = None,
     ) -> WorkerBackendResponse:
         """向 worker 发送请求并在超时约束下阻塞等待响应.
 
@@ -304,14 +329,55 @@ class WorkerBackendManager:
         handle = self._get_or_create_worker(account_id)
         response: object = None
         failure: Exception | None = None
+        force_termination = False
         with handle.request_lock:
             try:
                 handle.connection.send(request)
-                if not handle.connection.poll(timeout):
-                    raise WorkerBackendTimeoutError(f"worker backend 响应超时（{timeout}s）")
-                response = handle.connection.recv()
+                if termination_controller is None:
+                    if not handle.connection.poll(timeout):
+                        raise WorkerBackendTimeoutError(f"worker backend 响应超时（{timeout}s）")
+                    response = handle.connection.recv()
+                else:
+                    response_deadline = time.monotonic() + timeout
+                    termination_deadline: float | None = None
+                    termination_sent = False
+                    while response is None:
+                        now = time.monotonic()
+                        remaining = response_deadline - now
+                        if remaining <= 0:
+                            raise WorkerBackendTimeoutError(f"worker backend 响应超时（{timeout}s）")
+                        if termination_controller.is_requested() and not termination_sent:
+                            handle.control_connection.send(
+                                WorkerTerminationSignal(
+                                    execution_id=request.execution_id or "",
+                                    reason=termination_controller.reason(),
+                                    mode=termination_controller.mode(),
+                                )
+                            )
+                            termination_sent = True
+                            termination_deadline = now + _TERMINATION_GRACE_SECONDS
+                        if termination_deadline is not None and now >= termination_deadline:
+                            force_termination = True
+                            break
+                        wait_for = min(_TERMINATION_POLL_SECONDS, remaining)
+                        if termination_deadline is not None:
+                            wait_for = min(wait_for, max(termination_deadline - now, 0.0))
+                        if handle.connection.poll(wait_for):
+                            response = handle.connection.recv()
             except (BrokenPipeError, EOFError, OSError, WorkerBackendTimeoutError) as exc:
                 failure = exc
+
+        if force_termination:
+            self._force_drop_worker(account_id, handle)
+            termination_controller.acknowledge_if_requested()
+            raise ExecutionTerminated(
+                reason=termination_controller.reason(),
+                mode=termination_controller.mode(),
+                acked_at=termination_controller.acked_at,
+                forced=True,
+                cancel_attempted=None,
+                cancel_unconfirmed=termination_controller.mode() == "cancel_pending",
+            )
 
         # 兜底清理必须在释放 request_lock 之后进行：_force_drop_worker /
         # _terminate_process 都不再获取该锁，避免与当前线程二次死锁。
@@ -335,6 +401,18 @@ class WorkerBackendManager:
         if response.request_id != request.request_id:
             raise WorkerBackendExecutionError("worker backend 返回了不匹配的 request_id")
         return response
+
+    @staticmethod
+    def _termination_controller(execution_id: str | None) -> ExecutionTerminationController | None:
+        """从主进程 execution registry 解析本次请求的终止控制器."""
+        if execution_id is None:
+            return None
+        from axile.server.execution.registry import create_termination_controller, get_execution_task_state
+
+        state = get_execution_task_state(execution_id)
+        if state is None or state.cancel_event is None:
+            return None
+        return create_termination_controller(execution_id, state.cancel_event)
 
     @staticmethod
     def _build_output(response: WorkerBackendResponse) -> UnifiedStandardOutput:
@@ -386,6 +464,9 @@ class WorkerBackendManager:
                 acked_at=response.acked_at,
                 trigger=response.trigger,
                 cancel_failed_order_ids=response.cancel_failed_order_ids,
+                forced=response.forced,
+                cancel_attempted=response.cancel_attempted,
+                cancel_unconfirmed=response.cancel_unconfirmed,
             )
         if response.kind == "error":
             return WorkerBackendManager._build_failed_output(
@@ -394,13 +475,20 @@ class WorkerBackendManager:
             )
         raise WorkerBackendExecutionError("worker backend 返回了未知响应状态")
 
-    async def prepare_account(self, account: Account, expected_trading_day: str | None = None) -> dict[str, object]:
+    async def prepare_account(
+        self,
+        account: Account,
+        expected_trading_day: str | None = None,
+        *,
+        execution_id: str | None = None,
+        termination_controller: ExecutionTerminationController | None = None,
+    ) -> dict[str, object]:
         """创建或复用账户 Worker 中的长连接执行器。"""
         request = WorkerBackendRequest(
             request_id=uuid4().hex,
             command="prepare",
             account_payload=account.model_dump(mode="json"),
-            execution_id=None,
+            execution_id=execution_id,
             payload={"expected_trading_day": expected_trading_day or ""},
         )
         response = await asyncio.to_thread(
@@ -408,6 +496,7 @@ class WorkerBackendManager:
             _require_account_id(account),
             request,
             _DEFAULT_PREPARE_RECV_TIMEOUT_SECONDS,
+            termination_controller,
         )
         if response.kind != "result" or response.output_payload is None:
             message = response.error.message if response.error is not None else "账户通道准备失败"
@@ -474,7 +563,12 @@ class WorkerBackendManager:
         tuple[UnifiedStandardOutput, dict[str, object] | None]
             多进程 worker 返回的执行结果及归一化 symbol 字段。
         """
-        await self.prepare_account(account)
+        termination_controller = self._termination_controller(execution_id)
+        await self.prepare_account(
+            account,
+            execution_id=execution_id,
+            termination_controller=termination_controller,
+        )
         request = WorkerBackendRequest(
             request_id=uuid4().hex,
             command="execute_trade",
@@ -495,6 +589,7 @@ class WorkerBackendManager:
                 standard_input.execution_timeout,
                 fallback=self._execute_recv_timeout,
             ),
+            termination_controller,
         )
         return self._handle_response(response), response.normalized_symbol_fields
 
@@ -525,7 +620,12 @@ class WorkerBackendManager:
         UnifiedStandardOutput
             多进程 worker 返回并经统一封装后的清仓结果。
         """
-        await self.prepare_account(account)
+        termination_controller = self._termination_controller(execution_id)
+        await self.prepare_account(
+            account,
+            execution_id=execution_id,
+            termination_controller=termination_controller,
+        )
         request = WorkerBackendRequest(
             request_id=uuid4().hex,
             command="empty_positions",
@@ -544,6 +644,7 @@ class WorkerBackendManager:
                 empty_kwargs.get("execution_timeout"),
                 fallback=self._execute_recv_timeout,
             ),
+            termination_controller,
         )
         result = self._handle_response(response)
         if not account.is_started:

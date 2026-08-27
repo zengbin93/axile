@@ -225,6 +225,39 @@
   }
 }
 
+/* 侧栏溢出时，一次性设置入口逐项撤离并收拢，让账户入口自然补位。 */
+.sidebar-setting-row {
+  max-height: 34px;
+  overflow: hidden;
+  transition: max-height 140ms cubic-bezier(.4, 0, .2, 1);
+  transition-delay: calc(var(--sidebar-setting-index) * 40ms);
+}
+
+.sidebar-setting-item {
+  opacity: 1;
+  transform: translateX(0);
+  transition: opacity 130ms cubic-bezier(.4, 0, .2, 1), transform 130ms cubic-bezier(.4, 0, .2, 1);
+  transition-delay: calc(70ms + var(--sidebar-setting-index) * 40ms);
+}
+
+.sidebar-setting-row-hidden {
+  max-height: 0;
+  transition-delay: calc(90ms + var(--sidebar-setting-index) * 40ms);
+}
+
+.sidebar-setting-item-hidden {
+  opacity: 0;
+  transform: translateX(-12px);
+  transition-delay: calc(var(--sidebar-setting-index) * 40ms);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sidebar-setting-row,
+  .sidebar-setting-item {
+    transition: none;
+  }
+}
+
 .app-workspace {
   view-transition-name: app-workspace;
 }

@@ -174,6 +174,11 @@ function Header({
         )}
       </div>
       <SnapshotNote m={m} assetLabel={assetLabel} />
+      {m.terminationWarning && (
+        <div className="mt-2 rounded bg-warn-soft px-2.5 py-1.5 text-[13.5px] text-warn">
+          {m.terminationWarning}
+        </div>
+      )}
       {m.failure && <FailureNote f={m.failure} />}
     </div>
   )

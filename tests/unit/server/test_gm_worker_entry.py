@@ -553,6 +553,14 @@ def test_worker_loop_returns_structured_error_for_uncaught_base_exception(
             self.closed = True
 
     connection = _Connection()
+
+    class _ControlConnection:
+        def recv(self) -> None:
+            raise EOFError
+
+        def close(self) -> None:
+            return None
+
     monkeypatch.setattr(
         worker_backend_entry,
         "_handle_worker_request",
@@ -560,7 +568,11 @@ def test_worker_loop_returns_structured_error_for_uncaught_base_exception(
     )
     monkeypatch.setattr(worker_backend_entry, "_close_executor", lambda _executor: None)
 
-    worker_backend_entry.run_worker_backend_loop(connection, account_id=2)  # type: ignore[arg-type]
+    worker_backend_entry.run_worker_backend_loop(  # type: ignore[arg-type]
+        connection,
+        account_id=2,
+        control_connection=_ControlConnection(),
+    )
 
     assert connection.closed is True
     assert len(connection.sent) == 1

@@ -76,6 +76,8 @@ def test_handle_inline_execution_terminated_persists_record_and_updates_state(mo
         "cancel_failed_order_ids": ["order-1"],
         # 人工终止的默认来源；超时终止会在同一位置落 "timeout"。
         "trigger": "operator",
+        "forced": False,
+        "cancel_unconfirmed": False,
     }
     assert captured["events"] == [
         {
@@ -94,6 +96,8 @@ def test_handle_inline_execution_terminated_persists_record_and_updates_state(mo
                     "trigger": "operator",
                     "execution_kind": ExecutionKind.REBALANCE.value,
                     "cancel_failed_order_ids": ["order-1"],
+                    "forced": False,
+                    "cancel_unconfirmed": False,
                 }
             },
         }
@@ -176,6 +180,8 @@ def test_run_execution_task_uses_state_termination_fallbacks(monkeypatch) -> Non
         "cancel_attempted": True,
         "cancel_failed_order_ids": ["order-9"],
         "trigger": "operator",
+        "forced": False,
+        "cancel_unconfirmed": False,
     }
     assert captured["events"] == [
         {
@@ -194,6 +200,8 @@ def test_run_execution_task_uses_state_termination_fallbacks(monkeypatch) -> Non
                     "trigger": "operator",
                     "execution_kind": ExecutionKind.REBALANCE.value,
                     "cancel_failed_order_ids": ["order-9"],
+                    "forced": False,
+                    "cancel_unconfirmed": False,
                 }
             },
         }

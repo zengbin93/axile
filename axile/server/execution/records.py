@@ -116,7 +116,7 @@ async def append_error_execute_record(
         已写入数据库的失败执行记录。
     """
     persisted_raw_result = dict(raw_result or {"msg": msg})
-    logger.error(msg)
+    logger.error("{}", msg)
     return await _persist_execute_record(
         account_id=cast("int", account_id),
         execution_id=execution_id,
@@ -186,6 +186,8 @@ async def append_terminated_execute_record(
     cancel_attempted: bool,
     cancel_failed_order_ids: list[str],
     trigger: str = TERMINATION_TRIGGER_OPERATOR,
+    forced: bool = False,
+    cancel_unconfirmed: bool = False,
     raw_input: dict[str, object] | None = None,
     raw_result: dict[str, object] | None = None,
     session_factory: SessionFactory = SessionLocal,
@@ -243,6 +245,8 @@ async def append_terminated_execute_record(
         "finished_at": finished_at,
         "cancel_attempted": cancel_attempted,
         "cancel_failed_order_ids": list(cancel_failed_order_ids),
+        "forced": forced,
+        "cancel_unconfirmed": cancel_unconfirmed,
     }
     return await _persist_execute_record(
         account_id=account_id,

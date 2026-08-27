@@ -37,6 +37,15 @@ class WorkerBackendErrorPayload:
 
 
 @dataclass(slots=True)
+class WorkerTerminationSignal:
+    """主进程通过独立控制管道发送的 execution 终止信号."""
+
+    execution_id: str
+    reason: str | None
+    mode: str | None
+
+
+@dataclass(slots=True)
 class WorkerBackendRequest:
     """描述主进程发送给多进程 worker 的请求载荷.
 
@@ -138,4 +147,7 @@ class WorkerBackendResponse:
     acked_at: str | None = None
     trigger: str = TERMINATION_TRIGGER_OPERATOR
     cancel_failed_order_ids: list[str] = field(default_factory=list)
+    forced: bool = False
+    cancel_attempted: bool | None = None
+    cancel_unconfirmed: bool = False
     normalized_symbol_fields: dict[str, object] | None = None

@@ -65,12 +65,18 @@ class ExecutionTerminated(RuntimeError):
         cancel_failed_order_ids: list[str] | None = None,
         acked_at: str | None = None,
         trigger: str = TERMINATION_TRIGGER_OPERATOR,
+        forced: bool = False,
+        cancel_attempted: bool | None = None,
+        cancel_unconfirmed: bool = False,
     ) -> None:
         self.reason = reason
         self.mode = mode
         self.cancel_failed_order_ids = list(cancel_failed_order_ids or [])
         self.acked_at = acked_at
         self.trigger = trigger
+        self.forced = forced
+        self.cancel_attempted = cancel_attempted
+        self.cancel_unconfirmed = cancel_unconfirmed
         message_parts = ["execution terminated"]
         if trigger and trigger != TERMINATION_TRIGGER_OPERATOR:
             message_parts.append(f"trigger={trigger}")

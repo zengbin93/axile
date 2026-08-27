@@ -139,7 +139,7 @@ async def _run_rebalance_via_worker_process(request: RebalanceBackendRequest) ->
     except Exception as exc:
         msg = f"调仓执行失败, 错误原因: {exc}"
         await _append_rebalance_error_record(request, msg)
-        request.logger.exception(msg)
+        request.logger.opt(exception=exc).error("{}", msg)
         raise
 
 
@@ -363,7 +363,7 @@ async def _record_rebalance_inline_failure(
             details={"debug": {"error": str(error), "trigger_source": request.trigger_source}},
         )
     await _append_rebalance_error_record(request, msg)
-    request.logger.exception(msg)
+    request.logger.opt(exception=error).error("{}", msg)
 
 
 async def _append_rebalance_error_record(request: RebalanceBackendRequest, msg: str) -> None:
@@ -560,7 +560,7 @@ async def _record_clear_positions_failure(
         details={"debug": {"error": str(error), "trigger_source": request.trigger_source}},
     )
     await _append_clear_positions_error_record(request, msg)
-    request.logger.exception(msg)
+    request.logger.opt(exception=error).error("{}", msg)
 
 
 async def _append_clear_positions_error_record(

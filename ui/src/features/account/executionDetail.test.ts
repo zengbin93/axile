@@ -83,6 +83,26 @@ function baseFixture(): { events: ExecutionEvent[]; artifacts: ExecutionArtifact
 }
 
 describe('buildExecutionDetail · 头条', () => {
+  it('强制停止且挂单状态未确认时给出风险提示', () => {
+    const events = [ev({
+      event_type: 'execution_terminated',
+      status: 'WARNING',
+      details: { termination: { forced: true, cancel_unconfirmed: true } },
+    })]
+
+    expect(buildExecutionDetail(events, []).terminationWarning).toBe('worker 已强制停止，挂单状态未确认')
+  })
+
+  it('协作终止不显示强制停止风险提示', () => {
+    const events = [ev({
+      event_type: 'execution_terminated',
+      status: 'WARNING',
+      details: { termination: { forced: false, cancel_unconfirmed: false } },
+    })]
+
+    expect(buildExecutionDetail(events, []).terminationWarning).toBeNull()
+  })
+
   it('status 失败在空事件和空附件时仍生成真实失败判词', () => {
     const task = {
       execution_id: 'e', account_id: 3, execution_kind: null, status: 'FAILED',

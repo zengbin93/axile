@@ -109,7 +109,7 @@ from axile.executor.gm.core.bridge_context import (
     get_gm_strategy_runtime_context,
     install_gm_strategy_runtime_context,
 )
-from axile.executor.gm.core.strategy_bridge import GMStrategyBridge
+from axile.executor.gm.core.strategy_bridge import GMAuthenticationError, GMStrategyBridge
 from axile.executor.gm.gm_execute import GMExecutor
 from axile.executor.models.unified_input import GMAccountConfig
 
@@ -414,6 +414,32 @@ def test_strategy_bridge_start_timeout_logs_startup_phase(
 
     assert bridge.start(timeout=0.01) is False
     assert any("phase=trade_connected" in message for message in errors)
+
+
+def test_strategy_bridge_invalid_token_fails_without_waiting_full_timeout() -> None:
+    """SDK 已明确拒绝 token 时应立即抛出安全错误，不能伪装成启动超时."""
+    bridge = GMStrategyBridge(
+        token="secret-token",
+        account_id="account-id",
+        callback_dispatcher=object(),  # type: ignore[arg-type]
+    )
+
+    class _InvalidTokenError(RuntimeError):
+        status = 1000
+
+        def __str__(self) -> str:
+            return '{"status": 1000, "message": "错误或无效的token", "function": "run"}'
+
+    def _raise_invalid_token(_strategy_file: str) -> None:
+        raise _InvalidTokenError
+
+    bridge._execute_strategy = _raise_invalid_token  # type: ignore[method-assign]
+    started_at = time.monotonic()
+
+    with pytest.raises(GMAuthenticationError, match="GM token 无效或已失效"):
+        bridge.start(timeout=5.0)
+
+    assert time.monotonic() - started_at < 0.5
 
 
 def test_strategy_bridge_stop_accepts_late_thread_exit_without_warning(

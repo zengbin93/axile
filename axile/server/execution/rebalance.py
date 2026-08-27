@@ -177,7 +177,7 @@ async def _load_rebalance_account(
         account = await session.get(Account, account_id)
         if not account:
             msg = f"无法执行任务 账户id: {account_id} 不存在"
-            logger.error(msg)
+            logger.error("{}", msg)
             raise ValueError(msg)
     return account
 
@@ -233,7 +233,7 @@ async def _load_last_target_snapshot(account: Account) -> dict[str, object]:
         async with SessionLocal() as session:
             last_record = await get_latest_success_execute_record_by_account_id(session, account.id)
     except Exception as e:
-        loguru.logger.exception(e)
+        loguru.logger.opt(exception=e).error("{}", e)
         raise
 
     if last_record is None or last_record.is_success != 1:
@@ -502,7 +502,7 @@ async def execute_trade(
             account = await session.get(Account, account_id)
         if not account:
             msg = f"无法执行任务 账户id: {account_id} 不存在"
-            loguru.logger.error(msg)
+            loguru.logger.error("{}", msg)
             raise ValueError(msg)
         tracked_execution_id = register_inline_execution(
             account=account,
@@ -519,7 +519,7 @@ async def execute_trade(
                 account = await session.get(Account, account_id)
                 if not account:
                     msg = f"无法执行任务 账户id: {account_id} 不存在"
-                    loguru.logger.error(msg)
+                    loguru.logger.error("{}", msg)
                     raise ValueError(msg)
 
         with loguru.logger.contextualize(

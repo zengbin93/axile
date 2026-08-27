@@ -140,6 +140,8 @@ export interface ExecutionDetailModel {
   failure: FailureReason | null
   /** 执行任务状态真源；旧记录或接口不可用时为 null。 */
   task: ExecutionStatus | null
+  /** worker 被强制停止且无法确认挂单状态时的风险提示。 */
+  terminationWarning: string | null
 }
 
 /** 把执行结果压成一条自然语言结论；正常完成保持中性。 */
@@ -732,6 +734,11 @@ export function buildExecutionDetail(
   const targetChange = buildTargetChange(artifacts)
   const failure = describeFailure(eventAt(events, 'execution_failed'))
     ?? (task?.status === 'FAILED' ? describeFailureText(task.error ?? '') : null)
+  const terminatedDetails = asDict(eventAt(events, 'execution_terminated')?.details)
+  const termination = asDict(terminatedDetails?.termination)
+  const terminationWarning = termination?.forced === true && termination.cancel_unconfirmed === true
+    ? 'worker 已强制停止，挂单状态未确认'
+    : null
 
   return {
     header,
@@ -743,5 +750,6 @@ export function buildExecutionDetail(
     hasReconciliation: recon != null,
     failure,
     task,
+    terminationWarning,
   }
 }

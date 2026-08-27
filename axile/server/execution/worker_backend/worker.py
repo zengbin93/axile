@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import threading
 from multiprocessing.connection import Connection
 from typing import cast
 
@@ -22,6 +23,7 @@ from axile.server.execution.worker_backend.protocol import (
     WorkerBackendErrorPayload,
     WorkerBackendRequest,
     WorkerBackendResponse,
+    WorkerTerminationSignal,
 )
 from axile.server.execution.worker_backend.worker_audit import (
     _append_empty_positions_pre_execute_audit,
@@ -34,14 +36,18 @@ from axile.server.execution.worker_backend.worker_requests import (
     _parse_execute_trade_request,
 )
 from axile.server.execution.worker_backend.worker_responses import (
+    _build_error_payload,
     _build_result_response,
     _build_terminated_response,
     _dump_output_payload,
     _handle_worker_command_failure,
 )
 from axile.server.execution.worker_backend.worker_state import (
+    _activate_worker_termination,
+    _clear_worker_termination,
     _close_executor,
     _finalize_executor,
+    _request_worker_termination,
     _resolve_executor,
     _resolve_prepared_executor,
     _WorkerBackendState,
@@ -61,6 +67,7 @@ def _handle_prepare(request: WorkerBackendRequest, state: _WorkerBackendState) -
     """创建或复用账户执行器，并返回通道准备结果。"""
     account = Account.model_validate(request.account_payload)
     expected = str(request.payload.get("expected_trading_day", "") or "") or None
+    _activate_worker_termination(state, request.execution_id)
     try:
         executor = _resolve_executor(state, account, expected)
         return WorkerBackendResponse(
@@ -76,8 +83,10 @@ def _handle_prepare(request: WorkerBackendRequest, state: _WorkerBackendState) -
             request_id=request.request_id,
             kind="error",
             channel_type=account.trade_channel,
-            error=WorkerBackendErrorPayload(type="channel_not_ready", message=str(exc), retryable=True),
+            error=_build_error_payload(exc),
         )
+    finally:
+        _clear_worker_termination(state, request.execution_id)
 
 
 def _capture_before_account_snapshot(executor: object) -> dict[str, object] | None:
@@ -153,6 +162,7 @@ def _handle_execute_trade(
     """
     context = _parse_execute_trade_request(request)
     executor = None
+    termination_controller = _activate_worker_termination(state, request.execution_id)
     normalized_symbol_fields: dict[str, object] | None = None
     try:
         # worker 入口只保留命令级主线，具体的状态准备和审计细节都下沉到专用模块。
@@ -161,6 +171,7 @@ def _handle_execute_trade(
             account=context.account,
             execution_id=request.execution_id,
             audit_context=context.audit_context,
+            termination_controller=termination_controller,
         )
         normalize = getattr(executor, "_normalize_standard_input", lambda value: value)
         normalize_connected = getattr(executor, "_normalize_connected_standard_input", lambda value: value)
@@ -224,6 +235,7 @@ def _handle_execute_trade(
         )
     finally:
         _finalize_executor(executor)
+        _clear_worker_termination(state, request.execution_id)
 
 
 def _handle_empty_positions(
@@ -246,6 +258,7 @@ def _handle_empty_positions(
     """
     context = _parse_empty_positions_request(request)
     executor = None
+    termination_controller = _activate_worker_termination(state, request.execution_id)
     try:
         # 清仓和调仓共用同一套外层骨架，差异只保留在请求解析、pre-audit 和真实调用上。
         executor = _resolve_prepared_executor(
@@ -253,6 +266,7 @@ def _handle_empty_positions(
             account=context.account,
             execution_id=request.execution_id,
             audit_context=context.audit_context,
+            termination_controller=termination_controller,
         )
         before_account_assets = _capture_before_account_snapshot(executor)
         _append_empty_positions_pre_execute_audit(
@@ -299,6 +313,7 @@ def _handle_empty_positions(
         )
     finally:
         _finalize_executor(executor)
+        _clear_worker_termination(state, request.execution_id)
 
 
 def _handle_shutdown(
@@ -361,7 +376,20 @@ def _handle_worker_request(
     return _handle_shutdown(request, state)
 
 
-def run_worker_backend_loop(connection: Connection, account_id: int) -> None:
+def _run_termination_control_loop(connection: Connection, state: _WorkerBackendState) -> None:
+    """监听独立控制管道，使业务请求阻塞时仍能接收终止信号."""
+    try:
+        while True:
+            signal = connection.recv()
+            if signal is None:
+                return
+            if isinstance(signal, WorkerTerminationSignal):
+                _request_worker_termination(state, signal)
+    except (EOFError, OSError):
+        return
+
+
+def run_worker_backend_loop(connection: Connection, account_id: int, control_connection: Connection) -> None:
     """运行多进程 worker 的阻塞请求循环.
 
     Parameters
@@ -372,6 +400,13 @@ def run_worker_backend_loop(connection: Connection, account_id: int) -> None:
         该 worker 绑定的账户标识。
     """
     state = _WorkerBackendState(account_id=account_id)
+    control_thread = threading.Thread(
+        target=_run_termination_control_loop,
+        args=(control_connection, state),
+        name=f"axile-worker-control-{account_id}",
+        daemon=True,
+    )
+    control_thread.start()
     logger.info("worker 启动 | account_id={}", account_id)
     current_request: WorkerBackendRequest | None = None
     try:
@@ -432,4 +467,8 @@ def run_worker_backend_loop(connection: Connection, account_id: int) -> None:
                 "管道关闭失败 | account_id={}",
                 account_id,
             )
+        try:
+            control_connection.close()
+        except OSError:
+            pass
         logger.info("worker 退出 | account_id={}", account_id)

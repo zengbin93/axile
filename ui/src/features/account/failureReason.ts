@@ -67,6 +67,14 @@ interface Pattern {
  */
 const PATTERNS: Pattern[] = [
   {
+    test: /gm_authentication_error|GM.*token.*(?:无效|失效)|错误或无效的token|["']?status["']?\s*:\s*1000/i,
+    category: 'GM 凭证',
+    human: 'GM token 无效或已失效',
+    blame: 'account',
+    retryable: false,
+    action: '检查账户配置中的 GM token，更新后重试',
+  },
+  {
     test: /CTP.*交易前置断线.*4097|交易前置断线.*4097/i,
     category: 'CTP 连接',
     human: 'CTP 交易前置已断开',

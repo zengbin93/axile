@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ComponentType, type CSSProperties, type ReactNode, type RefObject } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, type ComponentType, type CSSProperties, type ReactNode, type RefObject } from 'react'
 import { useLocation } from 'react-router'
 import {
   BellRing,
@@ -52,16 +52,28 @@ function NavSection({
 }
 
 /** 跟踪滚动容器两端是否还有被裁掉的内容，用于驱动边缘渐隐提示。 */
-function useScrollEdges(ref: RefObject<HTMLElement | null>): { up: boolean; down: boolean } {
-  const [edges, setEdges] = useState({ up: false, down: false })
-  useEffect(() => {
+function useScrollEdges(ref: RefObject<HTMLElement | null>): { up: boolean; down: boolean; overflowing: boolean; measured: boolean } {
+  const [edges, setEdges] = useState({ up: false, down: false, overflowing: false, measured: false })
+  useLayoutEffect(() => {
     const el = ref.current
     if (!el) return
     const content = el.firstElementChild
     const update = () => {
       const remaining = el.scrollHeight - el.clientHeight - el.scrollTop
-      const next = { up: el.scrollTop > 1, down: remaining > 1 }
-      setEdges((prev) => (prev.up === next.up && prev.down === next.down ? prev : next))
+      const next = {
+        up: el.scrollTop > 1,
+        down: remaining > 1,
+        overflowing: el.scrollHeight - el.clientHeight > 1,
+        measured: true,
+      }
+      setEdges((prev) => (
+        prev.up === next.up
+        && prev.down === next.down
+        && prev.overflowing === next.overflowing
+        && prev.measured === next.measured
+          ? prev
+          : next
+      ))
     }
     update()
     el.addEventListener('scroll', update, { passive: true })
@@ -74,6 +86,34 @@ function useScrollEdges(ref: RefObject<HTMLElement | null>): { up: boolean; down
     }
   }, [ref])
   return edges
+}
+
+type SettingsMovePhase = 'idle' | 'leaving' | 'placed' | 'entering'
+
+function GlobalSettingsNav({ phase }: { phase: SettingsMovePhase }) {
+  const exact = (to: string) => (pathname: string) => pathname === to
+  const hidden = phase === 'leaving' || phase === 'placed'
+  const items: NavItemSpec[] = [
+    { label: '飞书告警', icon: BellRing, to: '/settings', active: exact('/settings') },
+    { label: '高级设置', icon: Settings2, to: '/settings/advanced', active: exact('/settings/advanced') },
+  ]
+
+  return (
+    <div aria-hidden={hidden ? true : undefined}>
+      {items.map((item, index) => (
+        <div
+          key={item.label}
+          className={`sidebar-setting-row ${hidden ? 'sidebar-setting-row-hidden' : ''}`}
+          style={{ '--sidebar-setting-index': index } as CSSProperties}
+          inert={hidden}
+        >
+          <div className={`sidebar-setting-item ${hidden ? 'sidebar-setting-item-hidden' : ''}`}>
+            <NavItem item={item} />
+          </div>
+        </div>
+      ))}
+    </div>
+  )
 }
 
 /** 溢出端的方向提示：渐隐带 + 可点击箭头，点击按接近一屏的步长朝该端滚动。 */
@@ -191,6 +231,12 @@ export function AppSidebar({
   const closeButtonRef = useRef<HTMLButtonElement>(null)
   const wasMobileOpen = useRef(mobileOpen)
   const scrollEdges = useScrollEdges(navRef)
+  const [settingsAtBottom, setSettingsAtBottom] = useState(false)
+  const [settingsMovePhase, setSettingsMovePhase] = useState<SettingsMovePhase>('idle')
+  const settingsAtBottomRef = useRef(false)
+  const overflowInitialized = useRef(false)
+  const movingSettings = useRef(false)
+  const settingsMoveTimers = useRef<number[]>([])
 
   useEffect(() => {
     if (mobileOpen) closeButtonRef.current?.focus()
@@ -206,6 +252,43 @@ export function AppSidebar({
     window.addEventListener('keydown', closeOnEscape)
     return () => window.removeEventListener('keydown', closeOnEscape)
   }, [mobileOpen, onClose])
+
+  useLayoutEffect(() => {
+    if (!scrollEdges.measured || movingSettings.current) return
+    if (!overflowInitialized.current) {
+      overflowInitialized.current = true
+      settingsAtBottomRef.current = scrollEdges.overflowing
+      setSettingsAtBottom(scrollEdges.overflowing)
+      return
+    }
+    if (scrollEdges.overflowing === settingsAtBottomRef.current) return
+
+    const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    if (reduced) {
+      settingsAtBottomRef.current = scrollEdges.overflowing
+      setSettingsAtBottom(scrollEdges.overflowing)
+      return
+    }
+
+    const targetAtBottom = scrollEdges.overflowing
+    movingSettings.current = true
+    setSettingsMovePhase('leaving')
+    const placeTimer = window.setTimeout(() => {
+      settingsAtBottomRef.current = targetAtBottom
+      setSettingsAtBottom(targetAtBottom)
+      setSettingsMovePhase('placed')
+      requestAnimationFrame(() => requestAnimationFrame(() => setSettingsMovePhase('entering')))
+    }, 270)
+    const finishTimer = window.setTimeout(() => {
+      setSettingsMovePhase('idle')
+      movingSettings.current = false
+    }, 540)
+    settingsMoveTimers.current = [placeTimer, finishTimer]
+  }, [scrollEdges.measured, scrollEdges.overflowing])
+
+  useEffect(() => () => {
+    settingsMoveTimers.current.forEach((timer) => window.clearTimeout(timer))
+  }, [])
 
   // 账户段条目不带图标：归属已由「身份块头 + 左缘线 + 缩进」表达，段内保持素净。
   const accountOverview: NavItemSpec[] = [
@@ -260,8 +343,7 @@ export function AppSidebar({
             <div>
               <NavItem item={{ label: '所有账户', icon: CircleGauge, to: '/', active: (pathname) => pathname === '/' }} />
               <NavItem item={{ label: '所有组合', icon: Boxes, to: '/portfolios', active: (pathname) => pathname.startsWith('/portfolios') }} />
-              <NavItem item={{ label: '飞书告警', icon: BellRing, to: '/settings', active: exact('/settings') }} />
-              <NavItem item={{ label: '高级设置', icon: Settings2, to: '/settings/advanced', active: exact('/settings/advanced') }} />
+              {!settingsAtBottom && <GlobalSettingsNav phase={settingsMovePhase} />}
 
               {/* 横线分割：顶层（全局与系统设置）与账户段各自成块。 */}
               <div className="mt-4 border-t border-line" />
@@ -294,6 +376,11 @@ export function AppSidebar({
                   <NavSection compact label="执行">
                     {accountExecution.map((item) => <NavItem key={item.label} item={item} />)}
                   </NavSection>
+                </div>
+              )}
+              {settingsAtBottom && (
+                <div className="mt-4 border-t border-line pt-4">
+                  <GlobalSettingsNav phase={settingsMovePhase} />
                 </div>
               )}
             </div>

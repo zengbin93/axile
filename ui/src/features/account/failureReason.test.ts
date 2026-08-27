@@ -65,3 +65,11 @@ test('状态接口的 CTP 4097 → CTP 连接，可在恢复后重试', () => {
   expect(f.human).toBe('CTP 交易前置已断开')
   expect(f.retryable).toBe(true)
 })
+
+test('GM token 状态码 1000 → GM 凭证 · 归账户 · 不可直接重试', () => {
+  const f = describeFailureText('gm_authentication_error: {"status": 1000, "message": "错误或无效的token"}')
+  expect(f.category).toBe('GM 凭证')
+  expect(f.human).toBe('GM token 无效或已失效')
+  expect(f.blame).toBe('account')
+  expect(f.retryable).toBe(false)
+})

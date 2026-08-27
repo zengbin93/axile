@@ -44,6 +44,23 @@ GMBridgeResult: TypeAlias = GMBridgeScalar | GMBridgeResultMapping | list[GMBrid
 SignalHandler: TypeAlias = int | Callable[[int, FrameType | None], None] | None
 
 
+class GMBridgeStartupError(RuntimeError):
+    """GM bridge 启动失败."""
+
+
+class GMAuthenticationError(GMBridgeStartupError):
+    """GM token 无效或已失效."""
+
+
+def _normalize_startup_error(error: Exception) -> GMBridgeStartupError:
+    """把 GM SDK 启动异常收敛为安全、稳定的错误类型."""
+    status = getattr(error, "status", None)
+    message = str(error)
+    if status == 1000 or "错误或无效的token" in message:
+        return GMAuthenticationError("GM token 无效或已失效")
+    return GMBridgeStartupError(f"GM bridge 启动失败: {message or error.__class__.__name__}")
+
+
 class GMBridgeEventSink(Protocol):
     """GM bridge 可写入的事件 sink 协议."""
 
@@ -158,6 +175,7 @@ class GMStrategyBridge:
         self._thread: threading.Thread | None = None
         self._ready_event = threading.Event()
         self._stop_event = threading.Event()
+        self._startup_error: Exception | None = None
         self._runtime_stop_requested = threading.Event()
         self._runtime_stop_lock = threading.Lock()
         self._request_queue: queue.Queue[GMBridgeRequest] = queue.Queue()
@@ -197,6 +215,7 @@ class GMStrategyBridge:
         self._stop_event.clear()
         self._ready_event.clear()
         self._runtime_stop_requested.clear()
+        self._startup_error = None
         self._update_startup_state("thread_starting")
 
         # 在后台线程中运行策略框架
@@ -207,11 +226,23 @@ class GMStrategyBridge:
         )
         self._thread.start()
 
-        # 等待策略框架就绪
-        if self._ready_event.wait(timeout=timeout):
+        # 小步等待可同时观察 ready 与后台线程异常，避免线程早已退出却仍等满 30 秒。
+        deadline = time.monotonic() + max(timeout, 0.0)
+        while not self._ready_event.is_set() and self._startup_error is None:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            self._ready_event.wait(timeout=min(0.05, remaining))
+
+        if self._ready_event.is_set():
             self._running = True
             logger.success("StrategyBridge 启动成功")
             return True
+
+        if self._startup_error is not None:
+            startup_error = _normalize_startup_error(self._startup_error)
+            self.stop()
+            raise startup_error from self._startup_error
 
         grace_timeout = self._compute_startup_grace_timeout(timeout)
         thread_alive = self._thread is not None and self._thread.is_alive()
@@ -461,8 +492,9 @@ class GMStrategyBridge:
 
         except Exception as e:
             self._stats["errors"] += 1
+            self._startup_error = e
             self._update_startup_state("thread_error", error=str(e))
-            logger.error(f"策略框架运行出错: {e}", exc_info=True)
+            logger.opt(exception=e).error("策略框架运行出错: {}", e)
         finally:
             self._update_startup_state("thread_exiting")
             self._running = False

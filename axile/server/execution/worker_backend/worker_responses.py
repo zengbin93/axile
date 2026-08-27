@@ -84,6 +84,9 @@ def _build_terminated_response(
         acked_at=exc.acked_at,
         trigger=exc.trigger,
         cancel_failed_order_ids=exc.cancel_failed_order_ids,
+        forced=exc.forced,
+        cancel_attempted=exc.cancel_attempted,
+        cancel_unconfirmed=exc.cancel_unconfirmed,
     )
 
 
