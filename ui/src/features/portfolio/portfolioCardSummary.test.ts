@@ -5,6 +5,7 @@ import {
   portfolioTargetState,
   portfolioTargetSummary,
   targetDirectionClass,
+  targetWeightSummary,
 } from './portfolioCardSummary'
 import type { TargetWeightSnapshot } from '@/types/api'
 
@@ -42,6 +43,15 @@ describe('portfolioTargetSummary', () => {
 
   it('允许总敞口超过 100%', () => {
     expect(portfolioTargetSummary(snapshot({ long: 1.2, short: -0.4 })).grossExposure).toBe(1.6)
+  })
+})
+
+describe('targetWeightSummary', () => {
+  it('为编辑结果汇总品种数量、净敞口和总敞口', () => {
+    const summary = targetWeightSummary({ BTCUSDT: 0.8, ETHUSDT: 0.4, SOLUSDT: -0.2, zero: 0 })
+    expect(summary.activeCount).toBe(3)
+    expect(summary.netExposure).toBeCloseTo(1)
+    expect(summary.grossExposure).toBeCloseTo(1.4)
   })
 })
 

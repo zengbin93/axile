@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { useParams, useViewTransitionState } from 'react-router'
-import { Clipboard, Pencil, Play } from 'lucide-react'
+import { Clipboard, ChevronDown, Pencil, Play } from 'lucide-react'
 import { Link } from '@/components/ui/nav'
 import { Chip } from '@/components/ui/Card'
 import { Skeleton } from '@/components/ui/Skeleton'
@@ -22,6 +22,7 @@ const MIN_INSPECTOR_WIDTH = 260
 const MAX_INSPECTOR_WIDTH = 480
 const INSPECTOR_WIDTH_KEY = 'axon.portfolioWorkbench.inspectorWidth'
 const PANEL_SPLIT_KEY = 'axon.portfolioWorkbench.panelSplit'
+const EDITOR_SPLIT_KEY = 'axon.portfolioWorkbench.editorSplit'
 
 function clampInspectorWidth(width: number, containerWidth = Number.POSITIVE_INFINITY) {
   const available = Math.max(MIN_INSPECTOR_WIDTH, containerWidth - 520)
@@ -40,9 +41,16 @@ function initialPanelSplit() {
   return Number.isFinite(stored) && stored >= 0.2 && stored <= 0.8 ? stored : 0.5
 }
 
+function initialEditorSplit() {
+  if (typeof window === 'undefined') return 0.35
+  const stored = Number(window.localStorage.getItem(EDITOR_SPLIT_KEY))
+  return Number.isFinite(stored) && stored >= 0.2 && stored <= 0.8 ? stored : 0.35
+}
+
 /**
- * 组合工作台（VSCode 式布局）：上排是控制 / 代码，下排是返回值 / 问题；
- * 两列共用一条水平分界，让业务输出与代码诊断各归其位。
+ * 组合工作台（VSCode 式布局）：左列是控制 / 试跑结果 / 跟随账户，
+ * 右列是代码 / 问题（问题贴代码底部，共用一条水平 split）；
+ * 业务输出与代码诊断各归其位。
  * 保存成功后留在原地（改 → 试跑 → 保存 → 再改的循环不被打断）。
  * 窄视口（<md）退化为单列堆叠，编辑器保底 420px 高、页面恢复滚动。
  */
@@ -65,12 +73,15 @@ export function PortfolioEditPage() {
   const [saveError, setSaveError] = useState<Error | null>(null)
   const [resultOpen, setResultOpen] = useState(false)
   const [problemsOpen, setProblemsOpen] = useState(false)
+  const [followersOpen, setFollowersOpen] = useState(true)
   const [inspectorWidth, setInspectorWidth] = useState(initialInspectorWidth)
   const [resizingInspector, setResizingInspector] = useState(false)
   const [panelSplit, setPanelSplit] = useState(initialPanelSplit)
+  const [editorSplit, setEditorSplit] = useState(initialEditorSplit)
   const [resizingPanels, setResizingPanels] = useState(false)
   const editorRef = useRef<PythonEditorHandle>(null)
   const workbenchRef = useRef<HTMLDivElement>(null)
+  const editorPaneRef = useRef<HTMLDivElement>(null)
   const inspectorRef = useRef<HTMLDivElement>(null)
   const inspectorControlsRef = useRef<HTMLElement>(null)
   const pf = portfolio.data
@@ -91,7 +102,7 @@ export function PortfolioEditPage() {
   // 试跑状态机（与初始化向导共用）：上下文选择、结果、stale、Ctrl+Enter 的回调目标。
   const calc = useCustomCalcValidation(code)
 
-  // 两列是独立 split pane：成功只展开返回值，失败只展开问题。
+  // 成功只展开返回值（左列），失败只展开问题（右列贴代码）；两列是独立 split pane。
   useEffect(() => {
     if (!calc.editorResult) return
     if (calc.editorResult.valid) {
@@ -123,6 +134,8 @@ export function PortfolioEditPage() {
     window.localStorage.setItem(INSPECTOR_WIDTH_KEY, String(width))
   }
 
+  // 左列 split：从上顶（控制区底）量指针位置，panelSplit 是返回值占可用高度的份额；
+  // 与右列的从底量法互成镜像。
   const panelSplitAt = (clientY: number) => {
     const inspectorBounds = inspectorRef.current?.getBoundingClientRect()
     const controlsBounds = inspectorControlsRef.current?.getBoundingClientRect()
@@ -133,15 +146,31 @@ export function PortfolioEditPage() {
     return Math.min(Math.max((clientY - controlsBounds.bottom) / available, minShare), 1 - minShare)
   }
 
-  // 七条轨道始终同构：控制区 / 弹性留白 / 结果标题 / 结果正文 / 分隔条 / 问题标题 / 问题正文。
+  // 右列 split：问题面板贴底（VSCode Problems 位），editorSplit 是问题区占可用高度
+  // （列高 − 分隔条 − 面板标题）的份额；从底部量指针位置。
+  const editorSplitAt = (clientY: number) => {
+    const bounds = editorPaneRef.current?.getBoundingClientRect()
+    if (!bounds) return editorSplit
+    const available = bounds.height - 5 - 36
+    if (available <= 0) return editorSplit
+    const minShare = Math.min(0.45, 120 / available)
+    return Math.min(Math.max((bounds.bottom - clientY - 41) / available, minShare), 1 - minShare)
+  }
+
+  // 七条轨道始终同构：控制区 / 弹性留白 / 结果标题 / 结果正文 / 分隔条 / 跟随账户标题 / 跟随账户正文。
   // 标题的固定 36px 与正文 fr 分离，避免 minmax 在触及下限时切换算法造成高度回弹。
-  const inspectorRows = resultOpen && problemsOpen
+  const inspectorRows = resultOpen && followersOpen
     ? `auto minmax(0, 0fr) 36px minmax(0, ${panelSplit}fr) 5px 36px minmax(0, ${1 - panelSplit}fr)`
     : resultOpen
       ? 'auto minmax(0, 0fr) 36px minmax(0, 1fr) 0px 36px minmax(0, 0fr)'
-      : problemsOpen
+      : followersOpen
         ? 'auto minmax(0, 0fr) 36px minmax(0, 0fr) 0px 36px minmax(0, 1fr)'
         : 'auto minmax(0, 1fr) 36px minmax(0, 0fr) 0px 36px minmax(0, 0fr)'
+
+  // 右列轨道：代码区 / 分隔条 / 问题标题 / 问题正文；收起时正文归零、分隔条让位。
+  const editorRows = problemsOpen
+    ? `minmax(0, ${1 - editorSplit}fr) 5px 36px minmax(0, ${editorSplit}fr)`
+    : 'minmax(0, 1fr) 0px 36px minmax(0, 0fr)'
 
   // 保存后留在原地：toast 确认、基线更新为已保存态，迭代循环不跳出工作台。
   const publish = async (validated = false) => {
@@ -284,30 +313,6 @@ export function PortfolioEditPage() {
           </div>
 
           <div className="flex-none">
-            {followers.length > 0 && (
-              <div className="mt-5">
-                <div className="text-[12px] font-semibold tracking-wide text-ink-3">跟随账户 · {followers.length}</div>
-                <ul className="mt-1.5 flex flex-col">
-                  {followers.map((account) => (
-                    <li key={account.account_id}>
-                      <Link
-                        to={`/accounts/${account.account_id}`}
-                        className="group -mx-2 flex items-center gap-2 rounded-[8px] px-2 py-1.5 hover:bg-fill"
-                      >
-                        <span className="min-w-0 truncate text-[14px] text-ink-1">{account.name}</span>
-                        <span className="flex-none rounded-chip bg-fill px-1.5 py-px text-[11.5px] text-ink-2">
-                          {channelLabel(account.trade_channel, account.market)}
-                        </span>
-                        <span className="ml-auto flex-none text-ink-3 transition-colors group-hover:text-ink-1" aria-hidden>
-                          ›
-                        </span>
-                      </Link>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
-
             <div className="mt-4 flex flex-col gap-1.5">
                 <Select<number | null>
                   ariaLabel="试跑数据来源"
@@ -316,23 +321,17 @@ export function PortfolioEditPage() {
                   options={calc.contextOptions}
                   className="w-full justify-between px-2.5 py-1.5 text-[13.5px]"
                 />
-                {/* 来源说明：同一槽位原地换字（InkRewrite 是单行槽，文案必须压进一行）。
-                    账户名不重复——Select 触发器上已有。选真实账户升琥珀：主动交易有真实委托。 */}
-                <p
-                  className={`border-l-2 pl-2 text-[12.5px] leading-5 ${
-                    calc.accountId == null ? 'border-transparent' : 'border-warn'
-                  }`}
-                >
+                {/* 来源警示：选真实账户才升琥珀（主动交易有真实委托）。
+                    样例来源不再加说明——Select 选项本身已写「不连接真实渠道」，此处零信号。 */}
+                {calc.accountId != null && (
+                <p className="border-l-2 border-warn pl-2 text-[12.5px] leading-5">
                   <InkRewrite
-                    text={
-                      calc.accountId == null
-                        ? '假数据 · 不连真实渠道 · 只验证逻辑'
-                        : '真实数据 · 主动交易将产生真实委托'
-                    }
+                    text="真实数据 · 主动交易将产生真实委托"
                     tone="label"
-                    textClassName={calc.accountId == null ? 'text-ink-3' : 'text-warn'}
+                    textClassName="text-warn"
                   />
                 </p>
+                )}
                 <button
                   type="button"
                   className="inline-flex w-full cursor-pointer items-center justify-center gap-1.5 rounded-[6px] border-0 bg-ink-1 px-3 py-1.5 text-[14px] font-[550] text-surface disabled:cursor-default disabled:opacity-45"
@@ -348,18 +347,6 @@ export function PortfolioEditPage() {
                 </button>
             </div>
 
-            <div className="mt-3 flex items-center gap-4">
-                <button
-                  type="button"
-                  className="inline-flex cursor-pointer items-center gap-1.5 text-[14px] text-accent"
-                  onClick={() => void paste()}
-                >
-                  <Clipboard size={14} /> 粘贴
-                </button>
-                <a className="text-[14px] text-accent" href="/docs/custom-calc" target="_blank" rel="noopener">
-                  开发文档 ↗
-                </a>
-            </div>
           </div>
 
           </aside>
@@ -379,23 +366,23 @@ export function PortfolioEditPage() {
 
           <div
             role="separator"
-            aria-label="调整试跑结果与问题的高度"
+            aria-label="调整试跑结果与跟随账户的高度"
             aria-orientation="horizontal"
             aria-valuemin={20}
             aria-valuemax={80}
             aria-valuenow={Math.round(panelSplit * 100)}
-            tabIndex={resultOpen && problemsOpen ? 0 : -1}
-            inert={!(resultOpen && problemsOpen)}
+            tabIndex={resultOpen && followersOpen ? 0 : -1}
+            inert={!(resultOpen && followersOpen)}
             title="拖动分配面板高度 · 双击平均分配"
             className={`group relative z-10 cursor-row-resize touch-none outline-none md:border-r md:border-line ${
-              resultOpen && problemsOpen ? 'block' : 'invisible'
+              resultOpen && followersOpen ? 'block' : 'invisible'
             }`}
             onDoubleClick={() => {
               setPanelSplit(0.5)
               window.localStorage.setItem(PANEL_SPLIT_KEY, '0.5')
             }}
             onPointerDown={(event) => {
-              if (!(resultOpen && problemsOpen)) return
+              if (!(resultOpen && followersOpen)) return
               event.preventDefault()
               event.currentTarget.setPointerCapture(event.pointerId)
               setResizingPanels(true)
@@ -430,22 +417,84 @@ export function PortfolioEditPage() {
             <span className="absolute inset-x-0 top-1/2 h-px bg-line transition-colors duration-130 group-hover:bg-accent group-focus:bg-accent" />
           </div>
 
-          <PythonRunPanel
-            kind="problems"
-            open={problemsOpen}
-            onToggle={() => setProblemsOpen((open) => !open)}
-            className="border-line border-t md:border-r"
-            running={calc.validating}
-            result={calc.editorResult}
-            stale={calc.stale}
-            onRevealError={(line) => editorRef.current?.revealLine(line)}
-          />
+          {/* 跟随账户占原问题位：跟随关系是组合的静态元数据，跟试跑结果同属左列上下文。
+              面板 chrome 与 PythonRunPanel 同构（36px 标题 + chevron 收放 + subgrid 正文）。 */}
+          <section
+            aria-label="跟随账户"
+            className="row-span-2 grid min-h-0 overflow-hidden border-t border-line bg-surface [grid-template-rows:subgrid] md:border-r"
+          >
+            <header className={`flex h-9 flex-none items-stretch ${followersOpen ? 'border-b border-line' : ''}`}>
+              <button
+                type="button"
+                aria-expanded={followersOpen}
+                className={`flex cursor-pointer items-center gap-1.5 px-3.5 text-[12px] font-semibold tracking-wide text-ink-1 ${
+                  followersOpen ? 'border-b border-accent' : ''
+                }`}
+                onClick={() => setFollowersOpen((open) => !open)}
+              >
+                <ChevronDown
+                  size={13}
+                  aria-hidden
+                  className={`text-ink-3 transition-transform duration-200 motion-reduce:transition-none ${
+                    followersOpen ? '' : '-rotate-90'
+                  }`}
+                />
+                跟随账户 · {followers.length}
+              </button>
+            </header>
+            <div inert={!followersOpen} className="min-h-0 flex-1 overflow-auto px-1.5 py-1.5 [scrollbar-gutter:stable]">
+              {followers.length > 0 ? (
+                <ul className="flex flex-col">
+                  {followers.map((account) => (
+                    <li key={account.account_id}>
+                      <Link
+                        to={`/accounts/${account.account_id}`}
+                        className="group flex items-center gap-2 rounded-[8px] px-2 py-1.5 hover:bg-fill"
+                      >
+                        <span className="min-w-0 truncate text-[14px] text-ink-1">{account.name}</span>
+                        <span className="flex-none rounded-chip bg-fill px-1.5 py-px text-[11.5px] text-ink-2">
+                          {channelLabel(account.trade_channel, account.market)}
+                        </span>
+                        <span className="ml-auto flex-none text-ink-3 transition-colors group-hover:text-ink-1" aria-hidden>
+                          ›
+                        </span>
+                      </Link>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="px-2 py-1.5 text-[13.5px] text-ink-3">暂无账户跟随该组合。</p>
+              )}
+            </div>
+          </section>
         </div>
 
-        {/* 右侧只承担代码阅读与编辑；运行上下文、返回值和问题全部收口在左列。 */}
-        <div className="flex min-h-[420px] min-w-0 flex-1 flex-col bg-code-bg md:min-h-0">
-          <div className="flex h-8 flex-none items-center border-b border-line bg-surface px-3 text-[12px] text-ink-2">
+        {/* 右列：代码 + 问题面板共用一条水平分界（VSCode 底部 Problems 位），
+            问题贴着它诊断的代码，错误行点击就地滚入可视区。 */}
+        <div
+          ref={editorPaneRef}
+          className={`grid min-h-0 transition-[grid-template-rows] duration-200 motion-reduce:transition-none ${
+            resizingPanels ? '!transition-none' : ''
+          }`}
+          style={{ gridTemplateRows: editorRows }}
+        >
+          <div className="flex min-h-[420px] min-w-0 flex-col bg-code-bg md:min-h-0">
+          {/* 编辑辅助动作（粘贴 / 文档）与代码同列：console 布局里它们住代码上方工具条，
+              workbench 无工具条，就落在代码页头栏；粘贴与空态大按钮互斥，只在有代码时出现。 */}
+          <div className="flex h-8 flex-none items-center gap-3 border-b border-line bg-surface px-3 text-[12px] text-ink-2">
             <span className="font-[550] text-ink-1">目标函数</span>
+            {code.trim() && (
+              <button
+                type="button"
+                className="inline-flex cursor-pointer items-center gap-1 text-accent"
+                onClick={() => void paste()}
+              >
+                <Clipboard size={12} /> 粘贴
+              </button>
+            )}
+            <a className="text-accent" href="/docs/custom-calc" target="_blank" rel="noopener">
+              开发文档 ↗
+            </a>
             <span className="ml-auto font-mono text-[11px] text-ink-3">⌘/Ctrl+Enter 试跑</span>
           </div>
           <PythonFunctionEditor
@@ -461,6 +510,71 @@ export function PortfolioEditPage() {
             stale={calc.stale}
             result={calc.editorResult}
             onRun={() => void calc.run()}
+          />
+          </div>
+
+          <div
+            role="separator"
+            aria-label="调整代码与问题的高度"
+            aria-orientation="horizontal"
+            aria-valuemin={20}
+            aria-valuemax={80}
+            aria-valuenow={Math.round(editorSplit * 100)}
+            tabIndex={problemsOpen ? 0 : -1}
+            inert={!problemsOpen}
+            title="拖动分配代码与问题的高度 · 双击平均分配"
+            className={`group relative z-10 cursor-row-resize touch-none outline-none ${
+              problemsOpen ? 'block' : 'invisible'
+            }`}
+            onDoubleClick={() => {
+              setEditorSplit(0.35)
+              window.localStorage.setItem(EDITOR_SPLIT_KEY, '0.35')
+            }}
+            onPointerDown={(event) => {
+              if (!problemsOpen) return
+              event.preventDefault()
+              event.currentTarget.setPointerCapture(event.pointerId)
+              setResizingPanels(true)
+              setEditorSplit(editorSplitAt(event.clientY))
+            }}
+            onPointerMove={(event) => {
+              if (event.currentTarget.hasPointerCapture(event.pointerId)) setEditorSplit(editorSplitAt(event.clientY))
+            }}
+            onPointerUp={(event) => {
+              const finalSplit = editorSplitAt(event.clientY)
+              if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+                event.currentTarget.releasePointerCapture(event.pointerId)
+              }
+              setEditorSplit(finalSplit)
+              setResizingPanels(false)
+              window.localStorage.setItem(EDITOR_SPLIT_KEY, String(finalSplit))
+            }}
+            onPointerCancel={() => setResizingPanels(false)}
+            onKeyDown={(event) => {
+              let next = editorSplit
+              if (event.key === 'ArrowUp') next += 0.05
+              else if (event.key === 'ArrowDown') next -= 0.05
+              else if (event.key === 'Home') next = 0.2
+              else if (event.key === 'End') next = 0.8
+              else return
+              event.preventDefault()
+              next = Math.min(Math.max(next, 0.2), 0.8)
+              setEditorSplit(next)
+              window.localStorage.setItem(EDITOR_SPLIT_KEY, String(next))
+            }}
+          >
+            <span className="absolute inset-x-0 top-1/2 h-px bg-line transition-colors duration-130 group-hover:bg-accent group-focus:bg-accent" />
+          </div>
+
+          <PythonRunPanel
+            kind="problems"
+            open={problemsOpen}
+            onToggle={() => setProblemsOpen((open) => !open)}
+            className="border-t border-line"
+            running={calc.validating}
+            result={calc.editorResult}
+            stale={calc.stale}
+            onRevealError={(line) => editorRef.current?.revealLine(line)}
           />
         </div>
 
