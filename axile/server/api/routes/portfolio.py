@@ -1,8 +1,6 @@
 """自定义函数投资组合路由."""
 
 import asyncio
-import math
-import traceback
 from typing import cast
 
 from fastapi import APIRouter, HTTPException, status
@@ -10,8 +8,6 @@ from loguru import logger
 from sqlmodel import select
 
 from axile.server.api.deps import SessionDep
-from axile.server.context import Context, build_sample_context
-from axile.server.core.db import SessionLocal
 from axile.server.db.models import (
     Account,
     Message,
@@ -27,9 +23,12 @@ from axile.server.db.models import (
 )
 from axile.server.execution.rebalance import _normalize_rebalance_target
 from axile.server.execution.registry import clear_target_refresh, try_register_target_refresh
-from axile.server.portfolio_targets import calculate_portfolio_target
+from axile.server.portfolio_runner import calculate_sample_portfolio
+from axile.server.portfolio_targets import (
+    calculate_portfolio_for_account,
+    portfolio_result_from_exception,
+)
 from axile.server.repositories import get_latest_account_id_by_portfolio_id, get_portfolios_every_account
-from axile.server.sandbox import ScriptExecutionError
 from axile.server.target_weight_snapshots import (
     append_target_weight_snapshot,
     get_latest_portfolio_target_snapshot,
@@ -114,29 +113,18 @@ async def update_portfolio(session: SessionDep, portfolio_id: int, portfolio: Po
     return await _portfolio_public(session, db_portfolio)
 
 
-def _ensure_weight_mapping(target: object) -> None:
-    """校验组合函数返回 ``symbol -> finite weight`` 映射."""
-    if not isinstance(target, dict):
-        raise ValueError(f"calculate_portfolio 必须返回 dict[str, float]，实际返回 {type(target).__name__}")
-    for key, value in cast("dict[object, object]", target).items():
-        if not isinstance(key, str):
-            raise ValueError(f"权重字典的键必须是品种字符串，实际为 {type(key).__name__}: {key!r}")
-        if isinstance(value, bool) or not isinstance(value, (int, float)):
-            raise ValueError(f"品种 {key} 的权重必须是数字，实际为 {type(value).__name__}: {value!r}")
-        if not math.isfinite(float(value)):
-            raise ValueError(f"品种 {key} 的权重不是有限数值: {value!r}")
-
-
-async def resolve_portfolio_target(portfolio: Portfolio, context: object) -> dict[str, float]:
+async def resolve_portfolio_target(portfolio: Portfolio, account: Account | None) -> dict[str, float]:
     """执行组合函数并返回未经账户杠杆和精度处理的目标权重."""
-    result = await asyncio.to_thread(calculate_portfolio_target, portfolio.custom_calc_py_code, context)
+    if account is None:
+        result = await asyncio.to_thread(calculate_sample_portfolio, portfolio.custom_calc_py_code)
+    else:
+        result = await calculate_portfolio_for_account(account, portfolio.custom_calc_py_code)
     if not result.ok or result.target is None:
-        error = result.error or ScriptExecutionError("自定义组合函数执行失败")
+        error = result.error or ValueError("自定义组合函数执行失败")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"自定义组合函数执行失败, 原因: {error}",
         )
-    _ensure_weight_mapping(result.target)
     return result.target
 
 
@@ -161,17 +149,13 @@ async def refresh_portfolio_target_snapshot(session: SessionDep, portfolio_id: i
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="组合或上下文账户正在执行或刷新，请稍后再试")
     try:
         if account_id is None:
-            raw_target = await resolve_portfolio_target(portfolio, build_sample_context())
+            raw_target = await resolve_portfolio_target(portfolio, None)
             normalized_target = None
         else:
             account = await session.get(Account, account_id)
             if account is None:
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="绑定账户不存在")
-            async with SessionLocal() as context_session:
-                raw_target = await resolve_portfolio_target(
-                    portfolio,
-                    Context(session=context_session, account_id=account_id),
-                )
+            raw_target = await resolve_portfolio_target(portfolio, account)
             normalized_target = _normalize_rebalance_target(account, raw_target)
 
         snapshot = await append_target_weight_snapshot(
@@ -187,23 +171,21 @@ async def refresh_portfolio_target_snapshot(session: SessionDep, portfolio_id: i
         clear_target_refresh(portfolio_id, account_id)
 
 
-def _extract_user_code_error(exc: BaseException) -> tuple[int | None, int | None, str, str]:
-    """从异常中提取用户代码行列和错误摘要."""
-    error_type = type(exc).__name__
-    if isinstance(exc, SyntaxError):
-        return exc.lineno, exc.offset, error_type, exc.msg or str(exc)
-    line: int | None = None
-    for frame in traceback.extract_tb(exc.__traceback__):
-        if frame.filename == "<string>":
-            line = frame.lineno
-    return line, None, error_type, str(exc)
-
-
-async def _run_custom_calc_validation(context: object, custom_calc_py_code: str) -> ValidateCustomCalcResponse:
+async def _run_custom_calc_validation(
+    account: Account | None,
+    custom_calc_py_code: str,
+) -> ValidateCustomCalcResponse:
     """在给定上下文中试跑自定义组合函数并返回结构化结果."""
-    result = await asyncio.to_thread(calculate_portfolio_target, custom_calc_py_code, context)
+    try:
+        if account is None:
+            result = await asyncio.to_thread(calculate_sample_portfolio, custom_calc_py_code)
+        else:
+            result = await calculate_portfolio_for_account(account, custom_calc_py_code)
+    except BaseException as exc:  # noqa: BLE001 - 校验接口统一返回执行器与 IPC 错误
+        result = portfolio_result_from_exception(exc)
     if not result.ok or result.target is None:
-        error = result.error or ScriptExecutionError("自定义组合函数执行失败")
+        error = result.error or portfolio_result_from_exception(ValueError("自定义组合函数执行失败")).error
+        assert error is not None
         return ValidateCustomCalcResponse(
             valid=False,
             error=str(error),
@@ -213,20 +195,6 @@ async def _run_custom_calc_validation(context: object, custom_calc_py_code: str)
             error_type=error.error_type,
             error_message=error.error_message,
         )
-
-    try:
-        _ensure_weight_mapping(result.target)
-    except Exception as exc:
-        line, offset, error_type, message = _extract_user_code_error(exc)
-        return ValidateCustomCalcResponse(
-            valid=False,
-            error=str(exc),
-            traceback=traceback.format_exc(),
-            error_line=line,
-            error_offset=offset,
-            error_type=error_type,
-            error_message=message,
-        )
     return ValidateCustomCalcResponse(valid=True, target=result.target)
 
 
@@ -234,11 +202,9 @@ async def _run_custom_calc_validation(context: object, custom_calc_py_code: str)
 async def validate_custom_calc(session: SessionDep, payload: ValidateCustomCalcRequest) -> ValidateCustomCalcResponse:
     """使用样例或真实账户上下文试跑自定义组合函数."""
     if payload.account_id is None:
-        return await _run_custom_calc_validation(build_sample_context(), payload.custom_calc_py_code)
+        return await _run_custom_calc_validation(None, payload.custom_calc_py_code)
 
-    if await session.get(Account, payload.account_id) is None:
+    account = await session.get(Account, payload.account_id)
+    if account is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="账户不存在")
-
-    async with SessionLocal() as context_session:
-        context = Context(session=context_session, account_id=payload.account_id)
-        return await _run_custom_calc_validation(context, payload.custom_calc_py_code)
+    return await _run_custom_calc_validation(account, payload.custom_calc_py_code)

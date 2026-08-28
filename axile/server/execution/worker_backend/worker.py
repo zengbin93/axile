@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import os
 import threading
 from multiprocessing.connection import Connection
 from typing import cast
@@ -17,6 +18,7 @@ from axile.executor.models.unified_account_assets import UnifiedAccountAssets
 from axile.executor.models.unified_input import UnifiedStandardInput
 from axile.executor.models.unified_output import UnifiedStandardOutput
 from axile.executor.termination import ExecutionTerminated
+from axile.server.context import Context, PortfolioExecutor
 from axile.server.db.models import Account
 from axile.server.execution.execution_records_output import sanitize_standard_input_for_audit
 from axile.server.execution.worker_backend.protocol import (
@@ -52,6 +54,8 @@ from axile.server.execution.worker_backend.worker_state import (
     _resolve_prepared_executor,
     _WorkerBackendState,
 )
+from axile.server.portfolio_function import calculate_portfolio_target
+from axile.server.portfolio_runner import PORTFOLIO_FUNCTION_TIMEOUT_SECONDS
 
 _SYMBOL_FIELDS = (
     "curr_target",
@@ -134,12 +138,61 @@ def _handle_get_account_assets(
             request_id=request.request_id,
             kind="error",
             channel_type=account.trade_channel,
-            error=WorkerBackendErrorPayload(
-                type=exc.__class__.__name__,
-                message=str(exc) or exc.__class__.__name__,
-                retryable=isinstance(exc, TimeoutError),
-            ),
+            error=_build_error_payload(exc),
         )
+
+
+def _handle_calculate_portfolio(
+    request: WorkerBackendRequest,
+    state: _WorkerBackendState,
+) -> WorkerBackendResponse:
+    """使用账户常驻执行器运行自定义组合函数."""
+    account = Account.model_validate(request.account_payload)
+    executor = None
+    calculation_finished = threading.Event()
+    try:
+        executor = _resolve_prepared_executor(
+            state=state,
+            account=account,
+            execution_id=request.execution_id,
+            audit_context={
+                "execution_id": request.execution_id,
+                "account_id": account.id,
+                "channel": str(account.trade_channel),
+                "trigger_source": "portfolio_calculation",
+            },
+        )
+        code = str(request.payload.get("code", ""))
+        watchdog = threading.Thread(
+            target=_terminate_stuck_portfolio_calculation,
+            args=(calculation_finished, PORTFOLIO_FUNCTION_TIMEOUT_SECONDS),
+            name=f"axile-portfolio-watchdog-{account.id}",
+            daemon=True,
+        )
+        watchdog.start()
+        result = calculate_portfolio_target(code, Context(cast("PortfolioExecutor", executor)))
+        return WorkerBackendResponse(
+            request_id=request.request_id,
+            kind="result",
+            output_payload=result.to_payload(),
+            channel_type=account.trade_channel,
+        )
+    except Exception as exc:  # noqa: BLE001 - IPC 边界统一返回结构化错误
+        return WorkerBackendResponse(
+            request_id=request.request_id,
+            kind="error",
+            channel_type=account.trade_channel,
+            error=_build_error_payload(exc),
+        )
+    finally:
+        calculation_finished.set()
+        _finalize_executor(executor)
+
+
+def _terminate_stuck_portfolio_calculation(finished: threading.Event, timeout: float) -> None:
+    """组合函数超过墙钟上限时立即终止其所在 worker."""
+    if not finished.wait(timeout):
+        os._exit(124)
 
 
 def _handle_execute_trade(
@@ -369,6 +422,8 @@ def _handle_worker_request(
         return _handle_prepare(request, state)
     if request.command == "get_account_assets":
         return _handle_get_account_assets(request, state)
+    if request.command == "calculate_portfolio":
+        return _handle_calculate_portfolio(request, state)
     if request.command == "execute_trade":
         return _handle_execute_trade(request, state)
     if request.command == "empty_positions":

@@ -1,21 +1,15 @@
 import { useState } from 'react'
 
-/** context 对外暴露的字段（与后端 `Context` 属性一一对应）。 */
+/** context 对外暴露的通用能力（与后端 `Context` 一一对应）。 */
 const CTX_FIELDS: { name: string; type: string; desc: string }[] = [
-  { name: 'today_return', type: 'float', desc: '当日收益率，小数形式（0.025 表示 2.5%）' },
-  { name: 'today_max_drawdown', type: 'float', desc: '当日最大回撤，小数形式（0.05 表示 5%）' },
-  { name: 'current_leverage', type: 'float', desc: '当前杠杆倍数（总持仓市值 / 账户总资产）' },
-  { name: 'long_market_value', type: 'float', desc: '多头持仓市值' },
-  { name: 'short_market_value', type: 'float', desc: '空头持仓市值' },
-  { name: 'net_market_value', type: 'float', desc: '净市值（多头 − 空头）' },
-  { name: 'total_balance', type: 'float', desc: '账户总资产' },
-  { name: 'available_balance', type: 'float', desc: '可用余额' },
-  { name: 'frozen_funds', type: 'float', desc: '冻结资金（总资产 − 可用余额）' },
-  { name: 'used_margin', type: 'float', desc: '已用保证金（等于冻结资金）' },
-  { name: 'margin_usage_ratio', type: 'float', desc: '保证金占用比例' },
-  { name: 'yesterday_total_balance', type: 'float', desc: '昨日总资产（上一交易日最后一条成功记录）' },
-  { name: 'consecutive_loss_days', type: 'int', desc: '连续亏损天数' },
-  { name: 'last_update_time', type: 'str | None', desc: '最后一条成功记录的时间（ISO 8601）' },
+  { name: 'account', type: 'UnifiedAccountAssets', desc: '账户资产快照，包含总资产、可用资金和持仓' },
+  { name: 'positions', type: 'list[Position]', desc: '当前账户的统一持仓列表' },
+  { name: 'get_positions(symbol=None, direction=None)', type: 'list[Position]', desc: '按标的或多空方向筛选持仓' },
+  { name: 'get_quote(symbol)', type: 'UnifiedPriceData', desc: '获取最新统一行情，同一次计算内自动缓存' },
+  { name: 'get_price(symbol)', type: 'float', desc: '获取标的最新成交价' },
+  { name: 'get_pending_orders(symbol=None)', type: 'list[UnifiedOrder]', desc: '查询全部或指定标的的未完成订单' },
+  { name: 'query_trades(symbol, order_id)', type: 'list[TradeRecord]', desc: '查询指定订单的成交明细' },
+  { name: 'executor', type: '渠道执行器', desc: '高级入口，可直接使用当前账户渠道的专有能力' },
 ]
 
 /** 可复制的示例代码（原「示例」胶囊搬到文档，作为参考模板）。 */
@@ -29,25 +23,22 @@ const EXAMPLES: { key: string; title: string; desc: string; code: string }[] = [
     return {"rb2610": 0.5, "ag2612": 0.5}`,
   },
   {
-    key: 'dd',
-    title: '按回撤降仓',
-    desc: '回撤越深，仓位越轻；超过阈值直接清仓。',
+    key: 'price',
+    title: '按最新价格选择标的',
+    desc: '使用统一行情接口，GM、TQ、CTP 等渠道共用相同写法。',
     code: `def calculate_portfolio(context):
-    # 回撤越深，仓位越轻
-    if context.today_max_drawdown > 0.05:
-        return {}                          # 回撤超 5% 清仓
-    scale = 0.5 if context.today_max_drawdown > 0.02 else 1.0
-    return {"rb2610": 0.5 * scale, "ag2612": 0.5 * scale}`,
+    rb_price = context.get_price("rb2610")
+    ag_price = context.get_price("ag2612")
+    return {"rb2610": 1.0} if rb_price < ag_price else {"ag2612": 1.0}`,
   },
   {
-    key: 'loss',
-    title: '连亏清仓',
-    desc: '连续亏损达阈值则清仓观望。',
+    key: 'tq-multiplier',
+    title: '读取 TQ 合约乘数',
+    desc: '渠道专有信息通过 executor 获取；这段代码只适用于 TQ 账户。',
     code: `def calculate_portfolio(context):
-    # 连续亏损达阈值则清仓观望
-    if context.consecutive_loss_days >= 3:
-        return {}
-    return {"rb2610": 0.5, "ag2612": 0.5}`,
+    quote = context.executor.get_market_data(["KQ.m@SHFE.rb"])["KQ.m@SHFE.rb"]
+    multiplier = float(quote.extra["volume_multiple"])
+    return {"KQ.m@SHFE.rb": min(1.0, 10.0 / multiplier)}`,
   },
 ]
 
@@ -113,11 +104,11 @@ export function CustomCalcDocPage() {
         </div>
 
         {/* context 字段 */}
-        <h2 className="mt-9 text-[19px] font-[640]">可用的 context 字段</h2>
+        <h2 className="mt-9 text-[19px] font-[640]">可用的 context 能力</h2>
         <p className="mt-2 text-[15px] leading-relaxed text-ink-2">
           <code className="rounded bg-fill px-1.5 py-0.5 font-mono text-[14px]">context</code>
-          提供账户当日 / 历史的统计指标。<b>空跑</b>会喂入一组固定的假值让脚本跑通；
-          切到某<b>真实账户</b>则取该账户的真实数据，口径与真实调仓一致。
+          基于统一模型提供账户、持仓、行情和订单查询。<b>空跑</b>使用固定样例账户和行情；
+          切到某<b>真实账户</b>会准备该账户的真实渠道并执行实际查询，口径与真实调仓一致。
         </p>
         <div className="mt-3 overflow-hidden rounded-[12px] border border-line">
           <table className="w-full border-collapse text-[14.5px]">
@@ -156,7 +147,8 @@ export function CustomCalcDocPage() {
         <h2 className="mt-9 text-[19px] font-[640]">注意事项</h2>
         <ul className="mt-2 flex list-disc flex-col gap-1.5 pl-5 text-[15px] leading-relaxed text-ink-2">
           <li>权重为小数（0.5 = 半仓）；正数为多头，负数为空头。</li>
-          <li>脚本在服务端执行，请勿引入不可信的第三方依赖或访问外部网络。</li>
+          <li>脚本在服务端的正常 Python 环境执行，可以导入已安装的包；依赖由部署环境统一提供。</li>
+          <li>优先使用 context 的通用接口；只有渠道专有能力才直接使用 context.executor。</li>
           <li>发生异常时试跑会把错误标在出错的代码行上，据此定位问题后再重新试跑。</li>
         </ul>
       </div>

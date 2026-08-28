@@ -27,6 +27,11 @@ from axile.server.execution.worker_backend.protocol import (
     WorkerTerminationSignal,
 )
 from axile.server.execution.worker_backend.worker import run_worker_backend_loop
+from axile.server.portfolio_function import PortfolioFunctionResult
+from axile.server.portfolio_runner import (
+    PORTFOLIO_FUNCTION_IPC_GRACE_SECONDS,
+    PORTFOLIO_FUNCTION_TIMEOUT_SECONDS,
+)
 
 
 class WorkerBackendExecutionError(RuntimeError):
@@ -526,6 +531,34 @@ class WorkerBackendManager:
             message = response.error.message if response.error is not None else "账户资产查询失败"
             raise WorkerBackendExecutionError(message)
         return UnifiedAccountAssets.model_validate(response.output_payload)
+
+    async def calculate_portfolio(
+        self,
+        account: Account,
+        code: str,
+        *,
+        execution_id: str | None = None,
+    ) -> PortfolioFunctionResult:
+        """通过账户常驻 worker 执行自定义组合函数."""
+        termination_controller = self._termination_controller(execution_id)
+        request = WorkerBackendRequest(
+            request_id=uuid4().hex,
+            command="calculate_portfolio",
+            account_payload=account.model_dump(mode="json"),
+            execution_id=execution_id,
+            payload={"code": code},
+        )
+        response = await asyncio.to_thread(
+            self._request_blocking,
+            _require_account_id(account),
+            request,
+            PORTFOLIO_FUNCTION_TIMEOUT_SECONDS + PORTFOLIO_FUNCTION_IPC_GRACE_SECONDS,
+            termination_controller,
+        )
+        if response.kind != "result" or response.output_payload is None:
+            message = response.error.message if response.error is not None else "自定义组合函数执行失败"
+            raise WorkerBackendExecutionError(message)
+        return PortfolioFunctionResult.from_payload(response.output_payload)
 
     async def execute_trade(
         self,

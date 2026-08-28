@@ -37,7 +37,7 @@ class PortfolioBase(SQLModel):
     )
     custom_calc_py_code: str = Field(
         sa_column=Column(Text, nullable=False),
-        description="定义 calculate_portfolio(context) 的组合计算 Python 源码",
+        description="定义 calculate_portfolio(context) 的 Python 源码；context 提供统一账户、持仓、行情和订单查询",
     )
     status: Optional[str] = Field(
         default=None,

@@ -6,7 +6,6 @@
 与审计落库由相邻的 backend 与 lifecycle 模块负责。
 """
 
-import asyncio
 from dataclasses import dataclass
 from typing import cast
 
@@ -33,7 +32,7 @@ from axile.server.execution.registry import (
     clear_running_execution,
     register_inline_execution,
 )
-from axile.server.portfolio_targets import calculate_portfolio_target
+from axile.server.portfolio_targets import calculate_portfolio_for_account
 from axile.server.repositories import (
     get_latest_portfolio_id_by_account_id,
     get_latest_success_execute_record_by_account_id,
@@ -132,29 +131,13 @@ async def _execute_portfolio_function(
     ValueError
         当自定义脚本执行失败时抛出。
 
-    Notes
-    -----
-    脚本在**受限子进程**中执行（见 :mod:`axile.server.sandbox`）。这条路径在持有
-    账户执行锁的上下文里跑用户脚本，此前脚本卡死会一直占用该账户的执行槽（协程
-    取消杀不掉线程）；改为子进程后超时可直接强杀，执行槽随之释放。
-
-    上下文快照在**进入子进程前**于当前会话内采集完成——``Context`` 持有数据库
-    会话，无法跨进程传递。
     """
     try:
-        from axile.server.context import Context
-
-        async with SessionLocal() as session:
-            context = None
-            if account.id is not None:
-                context = Context(session=session, account_id=account.id)
-            else:
-                logger.warning("无法获取账户上下文, 原因: account.id为None")
-
-            # 快照采集与脚本执行都放进线程池：Context 的属性读取内部以 asyncio.run
-            # 触发自身查询，不能在当前事件循环线程里直接调用。
-            result = await asyncio.to_thread(calculate_portfolio_target, portfolio.custom_calc_py_code, context)
-
+        result = await calculate_portfolio_for_account(
+            account,
+            portfolio.custom_calc_py_code,
+            execution_id=execution_id,
+        )
         if not result.ok or result.target is None:
             raise result.error or ValueError("自定义组合脚本执行失败")
         return result.target

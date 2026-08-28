@@ -1,22 +1,42 @@
-"""自定义组合函数的目标权重计算入口."""
+"""编译并执行用户提供的组合目标函数."""
 
-from axile.server.sandbox import ScriptResult, run_portfolio_script, snapshot_context
+from __future__ import annotations
+
+from typing import cast
+
+from axile.server.portfolio_function import (
+    PortfolioFunctionError,
+    PortfolioFunctionResult,
+    calculate_portfolio_target,
+    portfolio_result_from_exception,
+)
 
 
-def calculate_portfolio_target(code: str, context: object | None) -> ScriptResult:
-    """
-    在隔离子进程中执行组合函数.
+async def calculate_portfolio_for_account(
+    account: object,
+    code: str,
+    *,
+    execution_id: str | None = None,
+) -> PortfolioFunctionResult:
+    """通过账户常驻 worker 运行自定义组合函数."""
+    from axile.server.db.models import Account
+    from axile.server.execution.worker_backend.manager import get_worker_backend_manager
 
-    Parameters
-    ----------
-    code : str
-        定义 ``calculate_portfolio(context)`` 的 Python 源码。
-    context : object | None
-        真实账户上下文或样例上下文。
+    resolved_account = cast("Account", account)
+    try:
+        return await get_worker_backend_manager().calculate_portfolio(
+            resolved_account,
+            code,
+            execution_id=execution_id,
+        )
+    except BaseException as exc:  # noqa: BLE001 - worker 故障也使用函数结果契约
+        return portfolio_result_from_exception(exc)
 
-    Returns
-    -------
-    ScriptResult
-        脚本执行结果及结构化错误。
-    """
-    return run_portfolio_script(code, snapshot_context(context))
+
+__all__ = [
+    "PortfolioFunctionError",
+    "PortfolioFunctionResult",
+    "calculate_portfolio_for_account",
+    "calculate_portfolio_target",
+    "portfolio_result_from_exception",
+]

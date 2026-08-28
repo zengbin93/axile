@@ -21,6 +21,10 @@ from axile.server.execution.worker_backend.protocol import (
     WorkerBackendRequest,
     WorkerBackendResponse,
 )
+from axile.server.portfolio_runner import (
+    PORTFOLIO_FUNCTION_IPC_GRACE_SECONDS,
+    PORTFOLIO_FUNCTION_TIMEOUT_SECONDS,
+)
 from tests.unit.server._execution_test_support import build_account
 
 
@@ -332,6 +336,36 @@ def test_prepare_account_sends_expected_trading_day(monkeypatch: pytest.MonkeyPa
     assert result["trading_day"] == "20260824"
     assert captured[0].command == "prepare"
     assert captured[0].payload == {"expected_trading_day": "20260824"}
+
+
+def test_calculate_portfolio_uses_dedicated_timeout_without_prepare(monkeypatch: pytest.MonkeyPatch) -> None:
+    manager = WorkerBackendManager()
+    account = build_account(id=2)
+    captured: list[tuple[WorkerBackendRequest, float]] = []
+
+    async def fail_prepare(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("calculate_portfolio 不应额外发送 prepare 请求")
+
+    async def fake_to_thread(func: object, *args: object) -> WorkerBackendResponse:
+        del func
+        request = args[1]
+        timeout = args[2]
+        assert isinstance(request, WorkerBackendRequest)
+        assert isinstance(timeout, float)
+        captured.append((request, timeout))
+        return WorkerBackendResponse(
+            request_id=request.request_id,
+            kind="result",
+            output_payload={"ok": True, "target": {"x": 1.0}},
+        )
+
+    monkeypatch.setattr(manager, "prepare_account", fail_prepare)
+    monkeypatch.setattr(asyncio, "to_thread", fake_to_thread)
+    result = asyncio.run(manager.calculate_portfolio(account, "code"))
+
+    assert result.target == {"x": 1.0}
+    assert captured[0][0].command == "calculate_portfolio"
+    assert captured[0][1] == PORTFOLIO_FUNCTION_TIMEOUT_SECONDS + PORTFOLIO_FUNCTION_IPC_GRACE_SECONDS
 
 
 def test_request_blocking_force_terminates_unresponsive_worker_after_cancel(

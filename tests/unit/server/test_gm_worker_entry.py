@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 from datetime import datetime
 from typing import cast
 
@@ -580,3 +581,12 @@ def test_worker_loop_returns_structured_error_for_uncaught_base_exception(
     assert connection.sent[0].error is not None
     assert connection.sent[0].error.type == "KeyboardInterrupt"
     assert connection.sent[0].error.message == "KeyboardInterrupt()"
+
+
+def test_portfolio_watchdog_exits_stuck_worker(monkeypatch: pytest.MonkeyPatch) -> None:
+    exit_codes: list[int] = []
+    monkeypatch.setattr(worker_backend_entry.os, "_exit", exit_codes.append)
+
+    worker_backend_entry._terminate_stuck_portfolio_calculation(threading.Event(), 0.0)
+
+    assert exit_codes == [124]

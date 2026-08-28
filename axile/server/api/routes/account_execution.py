@@ -17,8 +17,6 @@ from axile.domain.execution import ExecutionArtifactType, ExecutionTaskStatus
 from axile.server.api.deps import SchedDep, SessionDep
 from axile.server.api.routes.account_support import _get_account_or_404
 from axile.server.api.routes.portfolio import resolve_portfolio_target
-from axile.server.context import Context
-from axile.server.core.db import SessionLocal
 from axile.server.db.models import (
     ExecutionArtifact,
     ExecutionArtifactListPublic,
@@ -222,11 +220,7 @@ async def refresh_account_target_snapshot(session: SessionDep, account_id: int) 
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="账户正在执行或刷新，请稍后再试")
 
     try:
-        async with SessionLocal() as context_session:
-            raw_target = await resolve_portfolio_target(
-                portfolio,
-                Context(session=context_session, account_id=account_id),
-            )
+        raw_target = await resolve_portfolio_target(portfolio, account)
         normalized_target = _normalize_rebalance_target(account, raw_target)
         snapshot = await append_target_weight_snapshot(
             session,

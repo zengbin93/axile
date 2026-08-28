@@ -13,7 +13,14 @@ from typing import Literal
 from axile.common.trade_channel import TradeChannel
 from axile.executor.termination import TERMINATION_TRIGGER_OPERATOR
 
-WorkerBackendCommand = Literal["prepare", "get_account_assets", "execute_trade", "empty_positions", "shutdown"]
+WorkerBackendCommand = Literal[
+    "prepare",
+    "get_account_assets",
+    "calculate_portfolio",
+    "execute_trade",
+    "empty_positions",
+    "shutdown",
+]
 WorkerBackendResponseKind = Literal["result", "error", "terminated"]
 
 

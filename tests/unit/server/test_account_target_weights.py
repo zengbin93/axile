@@ -118,15 +118,8 @@ def _patch_resolution(
     async def fake_get_latest_portfolio_id_by_account_id(_session: object, _account_id: int) -> int | None:
         return portfolio_id
 
-    async def fake_resolve_portfolio_target(_portfolio: Portfolio, _context: object) -> dict[str, float]:
+    async def fake_resolve_portfolio_target(_portfolio: Portfolio, _account: object) -> dict[str, float]:
         return dict(raw_target)
-
-    class _ContextSession:
-        async def __aenter__(self) -> object:
-            return object()
-
-        async def __aexit__(self, *_args: object) -> None:
-            return None
 
     saved: list[TargetWeightSnapshot] = []
 
@@ -141,7 +134,6 @@ def _patch_resolution(
         fake_get_latest_portfolio_id_by_account_id,
     )
     monkeypatch.setattr(account_execution_routes, "resolve_portfolio_target", fake_resolve_portfolio_target)
-    monkeypatch.setattr(account_execution_routes, "SessionLocal", _ContextSession)
     monkeypatch.setattr(
         account_execution_routes,
         "append_target_weight_snapshot",
