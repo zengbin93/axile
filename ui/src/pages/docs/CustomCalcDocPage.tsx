@@ -1,4 +1,6 @@
 import { useState } from 'react'
+import { Check, Copy, TriangleAlert } from 'lucide-react'
+import { buildCustomCalcMarkdown } from './customCalcMarkdown'
 
 /** context 对外暴露的通用能力（与后端 `Context` 一一对应）。 */
 const CTX_FIELDS: { name: string; type: string; desc: string }[] = [
@@ -42,6 +44,17 @@ const EXAMPLES: { key: string; title: string; desc: string; code: string }[] = [
   },
 ]
 
+const CONTRACT_CODE = `def calculate_portfolio(context):
+    # 返回 {品种: 目标权重}，例如 0.5 表示半仓多头，-0.5 表示半仓空头
+    return {"rb2610": 0.5, "ag2612": 0.5}`
+
+const NOTES = [
+  '权重为小数（0.5 = 半仓）；正数为多头，负数为空头。',
+  '脚本在服务端的正常 Python 环境执行，可以导入已安装的包；依赖由部署环境统一提供。',
+  '优先使用 `context` 的通用接口；只有渠道专有能力才直接使用 `context.executor`。',
+  '发生异常时试跑会把错误标在出错的代码行上，据此定位问题后再重新试跑。',
+]
+
 /** 带「复制」按钮的代码块。 */
 function CodeBlock({ code }: { code: string }) {
   const [copied, setCopied] = useState(false)
@@ -73,11 +86,34 @@ function CodeBlock({ code }: { code: string }) {
  * 用户在本页之外（如本地 IDE）开发脚本，试跑通过后粘贴回组合编辑器。
  */
 export function CustomCalcDocPage() {
+  const [copyStatus, setCopyStatus] = useState<'idle' | 'copied' | 'error'>('idle')
+  const copyMarkdown = async () => {
+    try {
+      await navigator.clipboard.writeText(buildCustomCalcMarkdown(CTX_FIELDS, CONTRACT_CODE, EXAMPLES, NOTES))
+      setCopyStatus('copied')
+    } catch {
+      setCopyStatus('error')
+    }
+    setTimeout(() => setCopyStatus('idle'), 1800)
+  }
+
   return (
     <div className="min-h-screen bg-bg">
       <div className="mx-auto max-w-[1408px] px-8 py-12">
-        <div className="text-xs font-semibold tracking-wide text-accent">组合 · 自定义逻辑</div>
-        <h1 className="mt-1.5 text-[27px] font-[680] tracking-tight">开发自定义组合逻辑</h1>
+        <div className="flex flex-col items-start gap-4 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <div className="text-xs font-semibold tracking-wide text-accent">组合 · 自定义逻辑</div>
+            <h1 className="mt-1.5 text-[27px] font-[680] tracking-tight">开发自定义组合逻辑</h1>
+          </div>
+          <button
+            className={`inline-flex h-9 flex-none cursor-pointer items-center gap-2 rounded-[8px] border px-3 text-[14px] font-[520] ${copyStatus === 'error' ? 'border-warn/40 text-warn' : 'border-line text-ink-2 hover:border-ink-3 hover:text-ink-1'}`}
+            onClick={() => void copyMarkdown()}
+            type="button"
+          >
+            {copyStatus === 'copied' ? <Check size={15} /> : copyStatus === 'error' ? <TriangleAlert size={15} /> : <Copy size={15} />}
+            {copyStatus === 'copied' ? '已复制' : copyStatus === 'error' ? '复制失败' : '复制 Markdown'}
+          </button>
+        </div>
         <p className="mt-3 text-[15.5px] leading-relaxed text-ink-2">
           自定义逻辑让你用一段 Python 决定组合「交易什么」。在本地写好并调试后，把
           <code className="mx-1 rounded bg-fill px-1.5 py-0.5 font-mono text-[14px]">calculate_portfolio</code>
@@ -93,11 +129,7 @@ export function CustomCalcDocPage() {
           返回空字典 <code className="rounded bg-fill px-1.5 py-0.5 font-mono text-[14px]">{'{}'}</code> 表示空仓。
         </p>
         <div className="mt-3">
-          <CodeBlock
-            code={`def calculate_portfolio(context):
-    # 返回 {品种: 目标权重}，例如 0.5 表示半仓多头，-0.5 表示半仓空头
-    return {"rb2610": 0.5, "ag2612": 0.5}`}
-          />
+          <CodeBlock code={CONTRACT_CODE} />
           <p className="mt-3 text-[14px] leading-relaxed text-ink-3">
             标的格式由交易渠道决定；新建组合时请以当前市场自动生成的示例为准。
           </p>
@@ -146,10 +178,7 @@ export function CustomCalcDocPage() {
         {/* 注意事项 */}
         <h2 className="mt-9 text-[19px] font-[640]">注意事项</h2>
         <ul className="mt-2 flex list-disc flex-col gap-1.5 pl-5 text-[15px] leading-relaxed text-ink-2">
-          <li>权重为小数（0.5 = 半仓）；正数为多头，负数为空头。</li>
-          <li>脚本在服务端的正常 Python 环境执行，可以导入已安装的包；依赖由部署环境统一提供。</li>
-          <li>优先使用 context 的通用接口；只有渠道专有能力才直接使用 context.executor。</li>
-          <li>发生异常时试跑会把错误标在出错的代码行上，据此定位问题后再重新试跑。</li>
+          {NOTES.map((note) => <li key={note}>{note.replaceAll('`', '')}</li>)}
         </ul>
       </div>
     </div>
