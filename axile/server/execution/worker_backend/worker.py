@@ -146,7 +146,11 @@ def _handle_calculate_portfolio(
     request: WorkerBackendRequest,
     state: _WorkerBackendState,
 ) -> WorkerBackendResponse:
-    """使用账户常驻执行器运行自定义组合函数."""
+    """使用账户常驻执行器运行可信的自定义组合函数.
+
+    正常成功后保留完整 executor 及进程状态；失败结果由 manager 关闭并重建
+    worker，超时则由 watchdog 直接终止当前进程。
+    """
     account = Account.model_validate(request.account_payload)
     executor = None
     calculation_finished = threading.Event()

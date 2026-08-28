@@ -11,6 +11,17 @@ interface Example {
   code: string
 }
 
+export const CUSTOM_CALC_NOTES = [
+  '权重为小数（0.5 = 半仓）；正数为多头，负数为空头。',
+  '脚本在服务端的正常 Python 环境执行，可以导入已安装的包；依赖由部署环境统一提供。',
+  '优先使用 `context` 的通用接口；只有渠道专有能力才直接使用 `context.executor`。',
+  '`context.executor` 是完整、共享且常驻的真实渠道执行器；直接调用交易方法会立即产生渠道副作用。',
+  '成功执行后 executor、回调和模块全局状态可能继续复用；请勿无意修改属性、遗留回调或启动永久后台线程。',
+  '自定义资源应在 `finally` 中释放；脚本失败、超时或 worker 异常退出后，系统会在下次调用时重建 worker。',
+  '不选择真实账户的样例试跑使用一次性进程和样例 executor，不连接真实渠道。',
+  '发生异常时试跑会把错误标在出错的代码行上，据此定位问题后再重新试跑。',
+]
+
 /** 生成与页面内容一致、可直接粘贴到 Markdown 文档的纯文本。 */
 export function buildCustomCalcMarkdown(
   contextFields: ContextField[],

@@ -539,7 +539,7 @@ class WorkerBackendManager:
         *,
         execution_id: str | None = None,
     ) -> PortfolioFunctionResult:
-        """通过账户常驻 worker 执行自定义组合函数."""
+        """通过账户常驻 worker 执行自定义组合函数，失败后丢弃 worker."""
         termination_controller = self._termination_controller(execution_id)
         request = WorkerBackendRequest(
             request_id=uuid4().hex,
@@ -557,8 +557,16 @@ class WorkerBackendManager:
         )
         if response.kind != "result" or response.output_payload is None:
             message = response.error.message if response.error is not None else "自定义组合函数执行失败"
+            await self.drop_account(_require_account_id(account))
             raise WorkerBackendExecutionError(message)
-        return PortfolioFunctionResult.from_payload(response.output_payload)
+        try:
+            result = PortfolioFunctionResult.from_payload(response.output_payload)
+        except Exception:
+            await self.drop_account(_require_account_id(account))
+            raise
+        if not result.ok:
+            await self.drop_account(_require_account_id(account))
+        return result
 
     async def execute_trade(
         self,

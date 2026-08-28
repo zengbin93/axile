@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Check, Copy, TriangleAlert } from 'lucide-react'
-import { buildCustomCalcMarkdown } from './customCalcMarkdown'
+import { buildCustomCalcMarkdown, CUSTOM_CALC_NOTES } from './customCalcMarkdown'
 
 /** context 对外暴露的通用能力（与后端 `Context` 一一对应）。 */
 const CTX_FIELDS: { name: string; type: string; desc: string }[] = [
@@ -48,13 +48,6 @@ const CONTRACT_CODE = `def calculate_portfolio(context):
     # 返回 {品种: 目标权重}，例如 0.5 表示半仓多头，-0.5 表示半仓空头
     return {"rb2610": 0.5, "ag2612": 0.5}`
 
-const NOTES = [
-  '权重为小数（0.5 = 半仓）；正数为多头，负数为空头。',
-  '脚本在服务端的正常 Python 环境执行，可以导入已安装的包；依赖由部署环境统一提供。',
-  '优先使用 `context` 的通用接口；只有渠道专有能力才直接使用 `context.executor`。',
-  '发生异常时试跑会把错误标在出错的代码行上，据此定位问题后再重新试跑。',
-]
-
 /** 带「复制」按钮的代码块。 */
 function CodeBlock({ code }: { code: string }) {
   const [copied, setCopied] = useState(false)
@@ -89,7 +82,7 @@ export function CustomCalcDocPage() {
   const [copyStatus, setCopyStatus] = useState<'idle' | 'copied' | 'error'>('idle')
   const copyMarkdown = async () => {
     try {
-      await navigator.clipboard.writeText(buildCustomCalcMarkdown(CTX_FIELDS, CONTRACT_CODE, EXAMPLES, NOTES))
+      await navigator.clipboard.writeText(buildCustomCalcMarkdown(CTX_FIELDS, CONTRACT_CODE, EXAMPLES, CUSTOM_CALC_NOTES))
       setCopyStatus('copied')
     } catch {
       setCopyStatus('error')
@@ -178,7 +171,7 @@ export function CustomCalcDocPage() {
         {/* 注意事项 */}
         <h2 className="mt-9 text-[19px] font-[640]">注意事项</h2>
         <ul className="mt-2 flex list-disc flex-col gap-1.5 pl-5 text-[15px] leading-relaxed text-ink-2">
-          {NOTES.map((note) => <li key={note}>{note.replaceAll('`', '')}</li>)}
+          {CUSTOM_CALC_NOTES.map((note) => <li key={note}>{note.replaceAll('`', '')}</li>)}
         </ul>
       </div>
     </div>

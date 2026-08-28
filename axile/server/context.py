@@ -30,7 +30,13 @@ class PortfolioExecutor(Protocol):
 
 
 class Context:
-    """向自定义组合函数提供统一模型与底层执行器."""
+    """向自定义组合函数提供统一模型与完整的常驻渠道执行器.
+
+    Notes
+    -----
+    ``executor`` 是账户 worker 内复用的真实对象。用户代码对它、回调或模块
+    全局状态的修改可能延续到后续成功请求；这是可信高级代码的既定能力。
+    """
 
     def __init__(self, executor: PortfolioExecutor) -> None:
         """初始化组合上下文."""

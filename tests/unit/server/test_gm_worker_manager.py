@@ -342,6 +342,7 @@ def test_calculate_portfolio_uses_dedicated_timeout_without_prepare(monkeypatch:
     manager = WorkerBackendManager()
     account = build_account(id=2)
     captured: list[tuple[WorkerBackendRequest, float]] = []
+    dropped: list[int] = []
 
     async def fail_prepare(*_args: object, **_kwargs: object) -> None:
         raise AssertionError("calculate_portfolio 不应额外发送 prepare 请求")
@@ -359,13 +360,103 @@ def test_calculate_portfolio_uses_dedicated_timeout_without_prepare(monkeypatch:
             output_payload={"ok": True, "target": {"x": 1.0}},
         )
 
+    async def fake_drop_account(account_id: int) -> None:
+        dropped.append(account_id)
+
     monkeypatch.setattr(manager, "prepare_account", fail_prepare)
+    monkeypatch.setattr(manager, "drop_account", fake_drop_account)
     monkeypatch.setattr(asyncio, "to_thread", fake_to_thread)
     result = asyncio.run(manager.calculate_portfolio(account, "code"))
 
     assert result.target == {"x": 1.0}
     assert captured[0][0].command == "calculate_portfolio"
     assert captured[0][1] == PORTFOLIO_FUNCTION_TIMEOUT_SECONDS + PORTFOLIO_FUNCTION_IPC_GRACE_SECONDS
+    assert dropped == []
+
+
+def test_calculate_portfolio_drops_worker_after_script_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    manager = WorkerBackendManager()
+    account = build_account(id=2)
+    dropped: list[int] = []
+
+    async def fake_to_thread(func: object, *args: object) -> WorkerBackendResponse:
+        del func
+        request = args[1]
+        assert isinstance(request, WorkerBackendRequest)
+        return WorkerBackendResponse(
+            request_id=request.request_id,
+            kind="result",
+            output_payload={"ok": False, "error": "boom", "error_type": "RuntimeError"},
+        )
+
+    async def fake_drop_account(account_id: int) -> None:
+        dropped.append(account_id)
+
+    monkeypatch.setattr(asyncio, "to_thread", fake_to_thread)
+    monkeypatch.setattr(manager, "drop_account", fake_drop_account)
+
+    result = asyncio.run(manager.calculate_portfolio(account, "code"))
+
+    assert result.ok is False
+    assert dropped == [2]
+
+
+def test_calculate_portfolio_drops_worker_after_worker_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    manager = WorkerBackendManager()
+    account = build_account(id=2)
+    dropped: list[int] = []
+
+    async def fake_to_thread(func: object, *args: object) -> WorkerBackendResponse:
+        del func
+        request = args[1]
+        assert isinstance(request, WorkerBackendRequest)
+        return WorkerBackendResponse(
+            request_id=request.request_id,
+            kind="error",
+            error=WorkerBackendErrorPayload(type="RuntimeError", message="prepare failed"),
+        )
+
+    async def fake_drop_account(account_id: int) -> None:
+        dropped.append(account_id)
+
+    monkeypatch.setattr(asyncio, "to_thread", fake_to_thread)
+    monkeypatch.setattr(manager, "drop_account", fake_drop_account)
+
+    with pytest.raises(WorkerBackendExecutionError, match="prepare failed"):
+        asyncio.run(manager.calculate_portfolio(account, "code"))
+
+    assert dropped == [2]
+
+
+def test_calculate_portfolio_drops_worker_after_invalid_result(monkeypatch: pytest.MonkeyPatch) -> None:
+    manager = WorkerBackendManager()
+    account = build_account(id=2)
+    dropped: list[int] = []
+
+    async def fake_to_thread(func: object, *args: object) -> WorkerBackendResponse:
+        del func
+        request = args[1]
+        assert isinstance(request, WorkerBackendRequest)
+        return WorkerBackendResponse(
+            request_id=request.request_id,
+            kind="result",
+            output_payload={"ok": True, "target": "invalid"},
+        )
+
+    async def fake_drop_account(account_id: int) -> None:
+        dropped.append(account_id)
+
+    def fail_from_payload(_payload: dict[str, object]) -> object:
+        raise ValueError("invalid worker result")
+
+    monkeypatch.setattr(asyncio, "to_thread", fake_to_thread)
+    monkeypatch.setattr(manager, "drop_account", fake_drop_account)
+    monkeypatch.setattr(worker_manager_module.PortfolioFunctionResult, "from_payload", fail_from_payload)
+
+    with pytest.raises(ValueError, match="invalid worker result"):
+        asyncio.run(manager.calculate_portfolio(account, "code"))
+
+    assert dropped == [2]
 
 
 def test_request_blocking_force_terminates_unresponsive_worker_after_cancel(
