@@ -219,6 +219,7 @@ export function AppSidebar({
   const accounts = useDomainStore((state) => state.accounts)
   const activeAccountId = useNavigationStore((state) => state.activeAccountId)
   const setActiveAccountId = useNavigationStore((state) => state.setActiveAccountId)
+  const setSidebarCompact = useNavigationStore((state) => state.setSidebarCompact)
   const routeAccountId = accountIdFromPath(location.pathname)
 
   useEffect(() => {
@@ -284,6 +285,7 @@ export function AppSidebar({
       denseNavRef.current = shouldCompact
       settingsAtBottomRef.current = shouldCompact
       setDenseNav(shouldCompact)
+      setSidebarCompact(shouldCompact)
       setSettingsAtBottom(shouldCompact)
       return
     }
@@ -292,6 +294,7 @@ export function AppSidebar({
     if (shouldCompact) naturalNavHeight.current = scrollEdges.scrollHeight
     denseNavRef.current = shouldCompact
     setDenseNav(shouldCompact)
+    setSidebarCompact(shouldCompact)
 
     const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches
     if (reduced) {
@@ -314,11 +317,12 @@ export function AppSidebar({
       movingSettings.current = false
     }, 540)
     settingsMoveTimers.current = [placeTimer, finishTimer]
-  }, [scrollEdges.clientHeight, scrollEdges.measured, scrollEdges.overflowing, scrollEdges.scrollHeight])
+  }, [scrollEdges.clientHeight, scrollEdges.measured, scrollEdges.overflowing, scrollEdges.scrollHeight, setSidebarCompact])
 
   useEffect(() => () => {
     settingsMoveTimers.current.forEach((timer) => window.clearTimeout(timer))
-  }, [])
+    setSidebarCompact(false)
+  }, [setSidebarCompact])
 
   // 账户段条目不带图标：归属已由「身份块头 + 左缘线 + 缩进」表达，段内保持素净。
   const accountOverview: NavItemSpec[] = [

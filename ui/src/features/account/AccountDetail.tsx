@@ -64,7 +64,7 @@ import { shortErrorReason } from '@/lib/errorInfo'
 import { displayCurrencyUnit, fmtMoney, withCurrency } from '@/lib/format'
 import { describeCron } from '@/features/setup/cron'
 import { TimerQuickModal } from '@/features/setup/TimerQuickModal'
-import { useToastStore } from '@/stores/ui'
+import { useNavigationStore, useToastStore } from '@/stores/ui'
 import { useChannelDescriptor } from '@/stores/channels'
 import type { AccountDashboardItem } from '@/types/api'
 import { TargetSnapshotControl } from '@/features/portfolio/TargetSnapshotControl'
@@ -87,6 +87,7 @@ export function AccountDetail({
 }: AccountDetailProps) {
   const navigate = useNavigate()
   const toast = useToastStore((s) => s.toast)
+  const sidebarCompact = useNavigationStore((s) => s.sidebarCompact)
   const [timerOpen, setTimerOpen] = useState(false)
   const [refreshingAssets, setRefreshingAssets] = useState(false)
   // 启停乐观态：确认后立刻翻转，驱动按钮/状态句日记式换字；与 item 对齐后清除。
@@ -347,13 +348,30 @@ export function AccountDetail({
 
   return (
     <section>
-      {/* 面包屑回链：详情页永远有一条可见的「回到所有账户」路径。 */}
+      {/* 移动端侧栏默认隐藏，始终保留回链。 */}
       <Link
         to="/"
-        className="mb-3 inline-flex items-center gap-1 text-[14px] text-ink-3 transition-colors duration-150 hover:text-ink-1 motion-reduce:transition-none"
+        className="mb-3 inline-flex items-center gap-1 text-[14px] text-ink-3 transition-colors duration-150 hover:text-ink-1 motion-reduce:transition-none md:hidden"
       >
         <ArrowLeft size={14} aria-hidden />所有账户
       </Link>
+      {/* 桌面端侧栏已提供同一入口；紧凑时收起重复回链，把纵向空间还给账户内容。 */}
+      <div
+        aria-hidden={sidebarCompact ? true : undefined}
+        inert={sidebarCompact}
+        className={`hidden transition-[grid-template-rows] duration-200 motion-reduce:transition-none md:grid ${
+          sidebarCompact ? 'grid-rows-[0fr]' : 'grid-rows-[1fr]'
+        }`}
+      >
+        <div className="min-h-0 overflow-hidden">
+          <Link
+            to="/"
+            className="mb-3 inline-flex items-center gap-1 text-[14px] text-ink-3 transition-colors duration-150 hover:text-ink-1 motion-reduce:transition-none"
+          >
+            <ArrowLeft size={14} aria-hidden />所有账户
+          </Link>
+        </div>
+      </div>
       {/* Hero */}
       <Card className="p-6">
         <div className="flex flex-wrap items-center gap-3">

@@ -13,6 +13,9 @@ interface NavigationState {
   /** 全局页面没有账户 ID 时，侧栏仍保留用户最近选择的账户。 */
   activeAccountId: number | null
   setActiveAccountId: (accountId: number | null) => void
+  /** 侧栏是否因可用高度不足进入紧凑布局。 */
+  sidebarCompact: boolean
+  setSidebarCompact: (compact: boolean) => void
 }
 
 let timer: ReturnType<typeof setTimeout> | undefined
@@ -35,4 +38,6 @@ export const useToastStore = create<ToastState>((set) => ({
 export const useNavigationStore = create<NavigationState>((set) => ({
   activeAccountId: null,
   setActiveAccountId: (activeAccountId) => set({ activeAccountId }),
+  sidebarCompact: false,
+  setSidebarCompact: (sidebarCompact) => set({ sidebarCompact }),
 }))
