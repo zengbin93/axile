@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useImperativeHandle, useRef, type ReactNode, type Ref } from 'react'
 import { python } from '@codemirror/lang-python'
 import { lintGutter, setDiagnostics, type Diagnostic } from '@codemirror/lint'
 import { oneDark } from '@codemirror/theme-one-dark'
@@ -22,9 +22,75 @@ export interface PythonValidationState {
   traceback?: string | null
 }
 
+/** 暴露给外部控制的编辑器句柄（如「粘贴」按钮点击后把焦点还给代码区）。 */
+export interface PythonEditorHandle {
+  focus: () => void
+}
+
+export type PythonRunStatus = 'running' | 'idle' | 'stale' | 'pass' | 'fail'
+
+/** 试跑状态归约：console 工具条与工作台结果 panel 共用同一份状态语义。 */
+// oxlint-disable-next-line react/only-export-components -- 状态归约与编辑器组件同源，刻意合并
+export function pythonRunStatus(
+  running: boolean,
+  result: PythonValidationState | null,
+  stale: boolean,
+): PythonRunStatus {
+  return running ? 'running' : result == null ? 'idle' : stale ? 'stale' : result.valid ? 'pass' : 'fail'
+}
+
+/** 状态外观：成败不走红绿——通过/进行 = 蓝，未通过 = 琥珀，无事 = 中性。 */
+// oxlint-disable-next-line react/only-export-components -- 状态外观表与状态归约同槽，刻意合并
+export const PYTHON_RUN_STYLE: Record<PythonRunStatus, { rail: string; band: string; text: string; body: string }> = {
+  running: { rail: 'border-accent', band: 'border-accent/30 bg-accent-soft', text: 'text-accent', body: '试跑中…' },
+  idle: { rail: 'border-line', band: 'border-line bg-surface', text: 'text-ink-3', body: '尚未试跑' },
+  stale: { rail: 'border-line', band: 'border-line bg-surface', text: 'text-ink-3', body: '代码已改 · 结果为上次试跑' },
+  pass: { rail: 'border-accent', band: 'border-accent/30 bg-accent-soft', text: 'text-accent', body: '试跑通过' },
+  fail: { rail: 'border-warn', band: 'border-warn/30 bg-warn/10', text: 'text-warn', body: '未通过' },
+}
+
+/** 结果正文（console 结果带与 PythonRunPanel 共用）：通过 → resultContent；未通过 → 错误摘要 + traceback。 */
+export function PythonRunResultBody({
+  result,
+  stale,
+  resultContent,
+}: {
+  result: PythonValidationState
+  stale: boolean
+  resultContent?: ReactNode
+}) {
+  return (
+    <div className={stale ? 'opacity-55' : undefined}>
+      {result.valid ? (
+        (resultContent ?? <p className="text-[14px] text-ink-2">函数执行成功。</p>)
+      ) : (
+        <>
+          <p className="font-mono text-[13.5px] text-warn">
+            {[result.errorType, result.errorMessage].filter(Boolean).join(': ') || '执行出错'}
+          </p>
+          {result.traceback && (
+            <details className="mt-2.5 rounded-[8px] border border-line bg-code-bg px-4 py-3">
+              <summary className="cursor-pointer select-none text-[13.5px] text-ink-2">完整 traceback</summary>
+              <pre className="mt-2 max-h-[220px] overflow-auto whitespace-pre-wrap font-mono text-[13px] leading-relaxed text-warn">
+                {result.traceback}
+              </pre>
+            </details>
+          )}
+        </>
+      )}
+    </div>
+  )
+}
+
 /**
- * 代码 + 试跑 console：工具条（状态句/操作/试跑）钉在代码上方，结果区在工具条与
- * 代码之间 grid-fr 常挂收放，代码区自身封顶内滚——循环部件的位置与代码长度解耦。
+ * 代码 + 试跑 console，两种布局：
+ *
+ * - `console`（默认，表单/向导场景）：工具条（状态句/操作/试跑）钉在代码上方，
+ *   结果区在工具条与代码之间 grid-fr 常挂收放，代码区按 height/min/max 自定高度。
+ * - `workbench`（工作台编辑页）：纯代码区吃满父容器，无任何工具条——控制件与
+ *   结果呈现全部外置（结果走 :func:`PythonRunPanel`，可摆进左栏做 split pane）。
+ *
+ * 两种布局都支持 Ctrl/Cmd+Enter 试跑；失败时错误行进 lint 并滚入可视区。
  */
 export function PythonFunctionEditor({
   code,
@@ -41,6 +107,9 @@ export function PythonFunctionEditor({
   runLabel = '试跑',
   disabled = false,
   stale = false,
+  fill = false,
+  layout = 'console',
+  ref,
 }: {
   code: string
   onChange: (code: string) => void
@@ -57,31 +126,18 @@ export function PythonFunctionEditor({
   disabled?: boolean
   /** 代码在最后一次试跑后又改过：结果保留展示但整体降级为中性，不冒充新结论。 */
   stale?: boolean
+  /** 吃满父容器高度（父链须给出确定高度）；console 布局缺省按 height/min/max 定高。 */
+  fill?: boolean
+  /** 布局形态：console = 表单内嵌（工具条 + 结果带）；workbench = 纯代码区。 */
+  layout?: 'console' | 'workbench'
+  ref?: Ref<PythonEditorHandle>
 }) {
   const cmRef = useRef<ReactCodeMirrorRef>(null)
   const hasCode = code.trim().length > 0
-  const [dialogOpen, setDialogOpen] = useState(false)
-  const closeRef = useRef<HTMLButtonElement>(null)
-  const runTriggerRef = useRef<HTMLElement | null>(null)
+  const onRunRef = useRef(onRun)
+  onRunRef.current = onRun
 
-  // 试跑结束即弹窗呈现结果：代码框保持全宽，结果不再挤在编辑器下方。
-  useEffect(() => {
-    if (result) setDialogOpen(true)
-  }, [result])
-
-  useEffect(() => {
-    if (!dialogOpen) return
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setDialogOpen(false)
-    }
-    window.addEventListener('keydown', onKey)
-    runTriggerRef.current = document.activeElement as HTMLElement | null
-    closeRef.current?.focus({ preventScroll: true })
-    return () => {
-      window.removeEventListener('keydown', onKey)
-      runTriggerRef.current?.focus?.({ preventScroll: true })
-    }
-  }, [dialogOpen])
+  useImperativeHandle(ref, () => ({ focus: () => cmRef.current?.view?.focus() }), [])
 
   useEffect(() => {
     const view = cmRef.current?.view
@@ -111,20 +167,74 @@ export function PythonFunctionEditor({
     }
   }
 
-  const status = running ? 'running' : result == null ? 'idle' : stale ? 'stale' : result.valid ? 'pass' : 'fail'
-  const style = {
-    running: { rail: 'border-accent', band: 'border-accent/30 bg-accent-soft', text: 'text-accent', body: '试跑中…' },
-    idle: { rail: 'border-line', band: 'border-line bg-surface', text: 'text-ink-3', body: '尚未试跑' },
-    stale: { rail: 'border-line', band: 'border-line bg-surface', text: 'text-ink-3', body: '代码已改 · 结果为上次试跑' },
-    pass: { rail: 'border-accent', band: 'border-accent/30 bg-accent-soft', text: 'text-accent', body: '试跑通过' },
-    fail: { rail: 'border-warn', band: 'border-warn/30 bg-warn/10', text: 'text-warn', body: '未通过' },
-  }[status]
+  const status = pythonRunStatus(running, result, stale)
+  const style = PYTHON_RUN_STYLE[status]
 
+  // Ctrl/Cmd+Enter 试跑（VSCode Run 的肌肉记忆）；onRun 内部自行判断 canRun。
+  const runKeymap = EditorView.domEventHandlers({
+    keydown: (event) => {
+      if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
+        event.preventDefault()
+        onRunRef.current()
+        return true
+      }
+      return false
+    },
+  })
+  const extensions = [
+    oneDark,
+    editorTheme,
+    python(),
+    lintGutter(),
+    EditorView.lineWrapping,
+    EditorView.editable.of(!disabled),
+    runKeymap,
+  ]
+
+  const codeBlock = (
+    <div className={`relative bg-code-bg ${fill ? 'min-h-0 flex-1' : ''}`}>
+      <CodeMirror
+        ref={cmRef}
+        value={code}
+        onChange={onChange}
+        height={fill ? '100%' : height}
+        minHeight={fill ? undefined : minHeight}
+        maxHeight={fill ? undefined : maxHeight}
+        theme="none"
+        extensions={extensions}
+        basicSetup={{ foldGutter: false, highlightActiveLine: false, highlightActiveLineGutter: false, autocompletion: false }}
+      />
+      {!hasCode && (
+        <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-2">
+          <button className="pointer-events-auto inline-flex cursor-pointer items-center gap-2 rounded-[8px] border border-line bg-surface px-5 py-3 text-[15px] font-[550] text-ink-1 shadow-sm hover:border-ink-3" onClick={() => void paste()}>
+            <Clipboard size={16} /> 从剪贴板粘贴代码
+          </button>
+          <span className="text-[13.5px] text-ink-3">或点此直接输入</span>
+        </div>
+      )}
+    </div>
+  )
+
+  if (layout === 'workbench') {
+    // 工作台：纯代码区，吃满父容器；结果呈现由外部 PythonRunPanel 承担。
+    return (
+      <div className="flex h-full min-h-0 w-full flex-col">
+        <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-[8px]">{codeBlock}</div>
+      </div>
+    )
+  }
+
+  // console：表单/向导内嵌布局，工具条钉在代码上方，结果带内嵌收放。
+  const resultOpen = result != null
   return (
-    <div className="w-full">
-      <div className={`overflow-hidden rounded-[8px] border-l-[3px] ${hasCode ? style.rail : 'border-line'}`}>
+    <div className={fill ? 'flex h-full min-h-0 w-full flex-col' : 'w-full'}>
+      <div
+        className={`overflow-hidden rounded-[8px] border-l-[3px] ${hasCode ? style.rail : 'border-line'} ${
+          fill ? 'flex min-h-0 flex-1 flex-col' : ''
+        }`}
+      >
         {/* 工具条：状态句同槽换字；图标槽恒占 14px，出现/消失不推字。 */}
-        <div className={`flex flex-wrap items-center gap-x-3.5 gap-y-2 border-b px-3.5 py-2.5 ${style.band}`}>
+        <div className={`flex flex-none flex-wrap items-center gap-x-3.5 gap-y-2 border-b px-3.5 py-2.5 ${style.band}`}>
           <span className="flex min-w-[130px] flex-1 items-center gap-1.5 text-[14px] font-[520]">
             <span className="flex h-3.5 w-3.5 flex-none items-center justify-center">
               {status === 'pass' && <Check size={14} className="text-accent" />}
@@ -144,79 +254,24 @@ export function PythonFunctionEditor({
           </button>
         </div>
 
-        {/* 结果呈现走弹窗（试跑结束自动弹出，见下）：代码框保持全宽全高，不被结果挤压。 */}
-
-        <div className="relative bg-code-bg">
-          <CodeMirror
-            ref={cmRef}
-            value={code}
-            onChange={onChange}
-            height={height}
-            minHeight={minHeight}
-            maxHeight={maxHeight}
-            theme="none"
-            extensions={[oneDark, editorTheme, python(), lintGutter(), EditorView.lineWrapping, EditorView.editable.of(!disabled)]}
-            basicSetup={{ foldGutter: false, highlightActiveLine: false, highlightActiveLineGutter: false, autocompletion: false }}
-          />
-          {!hasCode && (
-            <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-2">
-              <button className="pointer-events-auto inline-flex cursor-pointer items-center gap-2 rounded-[8px] border border-line bg-surface px-5 py-3 text-[15px] font-[550] text-ink-1 shadow-sm hover:border-ink-3" onClick={() => void paste()}>
-                <Clipboard size={16} /> 从剪贴板粘贴代码
-              </button>
-              <span className="text-[13.5px] text-ink-3">或点此直接输入</span>
-            </div>
-          )}
+        {/* 结果区：工具条与代码之间 grid-fr 常挂收放（收放即全部连续性，不再叠 fade）；
+            stale 时整体降级，旧结论不冒充新结论。权重清单长时区内自滚，不挤压代码区。 */}
+        <div
+          inert={!resultOpen}
+          className={`flex-none grid transition-[grid-template-rows] duration-200 motion-reduce:transition-none ${
+            resultOpen ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'
+          }`}
+        >
+          <div className="min-h-0 overflow-hidden">
+            {result && (
+              <div className="max-h-[38vh] overflow-y-auto border-b border-line px-3.5 py-3">
+                <PythonRunResultBody result={result} stale={stale} resultContent={resultContent} />
+              </div>
+            )}
+          </div>
         </div>
-      </div>
 
-      {/* 试跑结果弹窗：通过 → resultContent（返回权重）；未通过 → 错误摘要 + traceback。 */}
-      <div
-        className={`fixed inset-0 z-[35] bg-scrim transition-opacity duration-150 ${dialogOpen ? 'opacity-100' : 'pointer-events-none opacity-0'}`}
-        onClick={() => setDialogOpen(false)}
-      />
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-label="试跑结果"
-        className={`fixed left-1/2 top-1/2 z-[36] w-[560px] max-w-[92vw] -translate-x-1/2 rounded-[18px] bg-surface shadow-[0_24px_60px_rgba(0,0,0,0.24)] transition-all duration-150 ${
-          dialogOpen ? '-translate-y-1/2 opacity-100' : 'pointer-events-none -translate-y-[46%] opacity-0'
-        }`}
-      >
-        {result && dialogOpen && (
-          <>
-            <div className={`flex items-center gap-2 px-[22px] pt-5 pb-1.5 text-[18px] font-[640] ${result.valid ? 'text-accent' : 'text-warn'}`}>
-              {result.valid ? <Check size={17} /> : <TriangleAlert size={17} />}
-              {result.valid ? '试跑通过' : '试跑未通过'}
-            </div>
-            <div className="max-h-[60vh] overflow-y-auto px-[22px] pb-[18px] text-[14.5px] leading-relaxed">
-              {result.valid
-                ? (resultContent ?? <p className="text-ink-2">函数执行成功。</p>)
-                : (
-                  <>
-                    <p className="font-mono text-[13.5px] text-warn">
-                      {[result.errorType, result.errorMessage].filter(Boolean).join(': ') || '执行出错'}
-                    </p>
-                    {result.traceback && (
-                      <details className="mt-3 rounded-[8px] border border-line bg-code-bg px-4 py-3" open>
-                        <summary className="cursor-pointer select-none text-[13.5px] text-ink-2">完整 traceback</summary>
-                        <pre className="mt-2 max-h-[220px] overflow-auto whitespace-pre-wrap font-mono text-[13px] leading-relaxed text-warn">{result.traceback}</pre>
-                      </details>
-                    )}
-                  </>
-                )}
-            </div>
-            <div className="flex justify-end border-t border-line px-5 py-3.5">
-              <button
-                ref={closeRef}
-                className="inline-flex cursor-pointer items-center rounded-[9px] border-0 bg-ink-1 px-[18px] py-2 text-sm font-[550] text-surface focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/55 focus-visible:ring-offset-2 focus-visible:ring-offset-surface"
-                onClick={() => setDialogOpen(false)}
-              >
-                关闭
-                <span aria-hidden className="text-[13px] leading-none opacity-55">⏎</span>
-              </button>
-            </div>
-          </>
-        )}
+        {codeBlock}
       </div>
     </div>
   )

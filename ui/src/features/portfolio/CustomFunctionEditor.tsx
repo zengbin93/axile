@@ -1,11 +1,9 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef } from 'react'
 import { Check } from 'lucide-react'
 import { PythonFunctionEditor } from '@/components/ui/PythonFunctionEditor'
 import { WeightBars } from '@/components/viz/WeightBars'
 import { Select } from '@/components/ui/Select'
-import { validateCustomCalc } from '@/lib/api/portfolios'
-import { useDomainStore } from '@/stores/domain'
-import type { ValidateCustomCalcResult } from '@/types/api'
+import { useCustomCalcValidation } from '@/features/portfolio/useCustomCalcValidation'
 
 export interface VerifiedState {
   ok: boolean
@@ -15,87 +13,58 @@ interface CustomFunctionEditorProps {
   code: string
   onChange: (code: string) => void
   onVerifiedChange?: (value: VerifiedState | null) => void
+  /** 吃满父容器高度（工作台布局）；缺省自动高度封顶 40vh（向导等表单场景）。 */
+  fill?: boolean
 }
 
-/** 编辑并试跑唯一的组合目标计算函数。 */
-export function CustomFunctionEditor({ code, onChange, onVerifiedChange }: CustomFunctionEditorProps) {
-  const [validating, setValidating] = useState(false)
-  const [result, setResult] = useState<ValidateCustomCalcResult | null>(null)
-  const [ranCode, setRanCode] = useState<string | null>(null)
-  const [accountId, setAccountId] = useState<number | null>(null)
-  const accounts = useDomainStore((state) => state.accounts) ?? []
+/**
+ * 编辑并试跑唯一的组合目标计算函数（console 布局：工具条 + 内嵌结果带）。
+ * 状态机在 :func:`useCustomCalcValidation`；工作台形态由页面直接组合
+ * PythonFunctionEditor + 该 hook，把控件摆进左栏。
+ */
+export function CustomFunctionEditor({ code, onChange, onVerifiedChange, fill = false }: CustomFunctionEditorProps) {
+  const v = useCustomCalcValidation(code)
   const onVerifiedChangeRef = useRef(onVerifiedChange)
 
   useEffect(() => {
     onVerifiedChangeRef.current = onVerifiedChange
   }, [onVerifiedChange])
-  // 改代码不清空结果：旧结果留着并降级 stale（面板在代码上方，清空收放会让打字中的代码跳）。
-  const stale = result != null && ranCode !== code
   useEffect(() => {
-    onVerifiedChangeRef.current?.(result == null || stale ? null : { ok: result.valid })
-  }, [result, stale])
-
-  const runValidation = async () => {
-    if (!code.trim() || validating) return
-    setValidating(true)
-    try {
-      setResult(await validateCustomCalc({ custom_calc_py_code: code, account_id: accountId }))
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error)
-      setResult({
-        valid: false,
-        target: null,
-        error: message,
-        traceback: null,
-        error_line: null,
-        error_offset: null,
-        error_type: null,
-        error_message: message,
-      })
-    }
-    setRanCode(code)
-    setValidating(false)
-  }
+    onVerifiedChangeRef.current?.(v.result == null || v.stale ? null : { ok: v.result.valid })
+  }, [v.result, v.stale])
 
   return (
     <PythonFunctionEditor
       code={code}
       onChange={onChange}
-      running={validating}
-      stale={stale}
-      result={result && {
-        valid: result.valid,
-        errorLine: result.error_line,
-        errorType: result.error_type,
-        errorMessage: result.error_message,
-        traceback: result.traceback,
-      }}
-      onRun={() => void runValidation()}
+      running={v.validating}
+      stale={v.stale}
+      result={v.editorResult}
+      onRun={() => void v.run()}
       docHref="/docs/custom-calc"
-      height="auto"
-      minHeight="240px"
-      maxHeight="40vh"
+      fill={fill}
+      height={fill ? undefined : 'auto'}
+      minHeight={fill ? undefined : '240px'}
+      maxHeight={fill ? undefined : '40vh'}
       controls={
         <Select<number | null>
           ariaLabel="试跑上下文"
-          value={accountId}
-          onChange={setAccountId}
-          options={[
-            { value: null, label: '样例上下文' },
-            ...accounts.map((account) => ({ value: account.account_id, label: account.name })),
-          ]}
+          value={v.accountId}
+          onChange={v.setAccountId}
+          options={v.contextOptions}
         />
       }
-      resultContent={result?.valid && result.target ? <WeightResult target={result.target} /> : null}
+      resultContent={v.result?.valid && v.result.target ? <WeightResult target={v.result.target} /> : null}
     />
   )
 }
 
-function WeightResult({ target }: { target: Record<string, number> }) {
+/** 试跑通过的返回权重清单；结果带 / panel 已提供分层，内容不套卡片壳。 */
+export function WeightResult({ target }: { target: Record<string, number> }) {
   const entries = Object.entries(target).sort((a, b) => Math.abs(b[1]) - Math.abs(a[1]))
   const total = entries.reduce((sum, [, weight]) => sum + weight, 0)
   return (
-    <div className="rounded-[8px] border border-line px-4 py-3.5">
+    <div>
       <div className="mb-2.5 flex items-center justify-between text-[14px]">
         <span className="flex items-center gap-1.5 font-[550] text-accent"><Check size={14} /> 返回权重</span>
         <span className="text-ink-3">合计 <span className="num text-ink-2">{total.toFixed(2)}</span></span>

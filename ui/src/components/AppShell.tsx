@@ -1,5 +1,5 @@
 import { useCallback, useRef, useState } from 'react'
-import { Outlet } from 'react-router'
+import { Outlet, useMatches } from 'react-router'
 import { AppSidebar } from '@/components/AppSidebar'
 import { TopBar } from '@/components/TopBar'
 import { Toast } from '@/components/Toast'
@@ -9,6 +9,10 @@ export function AppShell() {
   const [navigationOpen, setNavigationOpen] = useState(false)
   const navigationTriggerRef = useRef<HTMLButtonElement>(null)
   const closeNavigation = useCallback(() => setNavigationOpen(false), [])
+  // fullBleed 路由（工作台页）不要底部留白：页面自身 h-full 吃满视口，留白只会成为死空隙。
+  const fullBleed = useMatches().some(
+    (match) => (match.handle as { fullBleed?: boolean } | undefined)?.fullBleed === true,
+  )
 
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-bg">
@@ -22,7 +26,7 @@ export function AppShell() {
         {/* 内容列在导航栏右侧的余量里居中；不设全局最小宽，窄视口（高 zoom）下
             内容自然收缩，只留纵向滚动。 */}
         <main className="app-workspace h-full min-w-0 flex-1 overflow-y-auto px-4 [scrollbar-gutter:stable] md:px-10">
-          <div className="mx-auto h-full w-full max-w-[2176px] pt-5 pb-16">
+          <div className={`mx-auto h-full w-full max-w-[2176px] pt-5 ${fullBleed ? '' : 'pb-16'}`}>
             <Outlet />
           </div>
         </main>

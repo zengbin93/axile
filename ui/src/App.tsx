@@ -111,7 +111,7 @@ const router = createBrowserRouter([
           { path: 'accounts/:id/executions/:executionId', element: <ExecutionDetailPage /> },
           { path: 'portfolios', element: <PortfoliosPage /> },
           { path: 'portfolios/:id', element: <PortfolioDetailPage /> },
-          { path: 'portfolios/:id/edit', element: <PortfolioEditPage /> },
+          { path: 'portfolios/:id/edit', element: <PortfolioEditPage />, handle: { fullBleed: true } },
           { path: 'settings', element: <SystemConfigPage /> },
           { path: 'settings/advanced', element: <SystemConfigPage section="advanced" /> },
           { path: '*', element: <Placeholder title="页面不存在" milestone="—" /> },
