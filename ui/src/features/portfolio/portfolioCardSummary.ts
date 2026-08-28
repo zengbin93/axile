@@ -11,8 +11,8 @@ export interface PortfolioTargetSummary {
   activeCount: number
   grossExposure: number
   netExposure: number
-  topEntries: PortfolioTargetEntry[]
-  hiddenCount: number
+  /** 全部活跃品种，按 |weight| 降序；可见数量由卡片按容器宽度决定。 */
+  entries: PortfolioTargetEntry[]
 }
 
 export type PortfolioTargetState =
@@ -23,10 +23,7 @@ export type PortfolioTargetState =
   | { kind: 'ready'; calculatedAt: string; stale: boolean; summary: PortfolioTargetSummary }
 
 /** 将只读目标快照整理成组合卡片需要的稳定摘要。 */
-export function portfolioTargetSummary(
-  snapshot: TargetWeightSnapshot,
-  visibleLimit = 4,
-): PortfolioTargetSummary {
+export function portfolioTargetSummary(snapshot: TargetWeightSnapshot): PortfolioTargetSummary {
   const entries = Object.entries(snapshot.weights)
     .filter(([, weight]) => Math.abs(weight) > ACTIVE_WEIGHT_EPSILON)
     .sort((left, right) => Math.abs(right[1]) - Math.abs(left[1]))
@@ -35,8 +32,7 @@ export function portfolioTargetSummary(
     activeCount: entries.length,
     grossExposure: entries.reduce((sum, [, weight]) => sum + Math.abs(weight), 0),
     netExposure: entries.reduce((sum, [, weight]) => sum + weight, 0),
-    topEntries: entries.slice(0, visibleLimit).map(([symbol, weight]) => ({ symbol, weight })),
-    hiddenCount: Math.max(0, entries.length - visibleLimit),
+    entries: entries.map(([symbol, weight]) => ({ symbol, weight })),
   }
 }
 

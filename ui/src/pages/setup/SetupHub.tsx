@@ -11,12 +11,12 @@ export function SetupHub() {
       </div>
       <div className="mt-4 grid grid-cols-1 gap-[18px] md:grid-cols-2">
         <Link
-          to="/setup/pf/name"
+          to="/portfolios?new=1"
           className="rounded-card border border-line bg-surface p-[26px] transition-all duration-150 hover:-translate-y-0.5 hover:border-border-strong"
         >
           <div className="text-3xl">🎯</div>
           <h3 className="mt-3.5 text-[19px] font-semibold">新建组合</h3>
-          <p className="mt-1.5 text-[15px] text-ink-2">挑策略配权重，或自己写逻辑，产出目标持仓。</p>
+          <p className="mt-1.5 text-[15px] text-ink-2">挑市场定名称，进编辑器写目标逻辑。</p>
           <span className="mt-4 inline-block text-[15px] font-semibold text-accent">开始 →</span>
         </Link>
         <Link

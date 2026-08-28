@@ -430,7 +430,7 @@ export function AppSidebar({
           <Link to="/setup/acct/channel" className="flex items-center justify-center gap-1.5 rounded-chip border border-line px-2 py-1.5 text-[13px] text-ink-2 hover:border-border-strong hover:text-ink-1">
             <Plus size={14} aria-hidden />新建账户
           </Link>
-          <Link to="/setup/pf/name" className="flex items-center justify-center gap-1.5 rounded-chip border border-line px-2 py-1.5 text-[13px] text-ink-2 hover:border-border-strong hover:text-ink-1">
+          <Link to="/portfolios?new=1" className="flex items-center justify-center gap-1.5 rounded-chip border border-line px-2 py-1.5 text-[13px] text-ink-2 hover:border-border-strong hover:text-ink-1">
             <Plus size={14} aria-hidden />新建组合
           </Link>
         </div>

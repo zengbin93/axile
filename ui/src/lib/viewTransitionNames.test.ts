@@ -15,6 +15,7 @@ const ALLOWED_VT_PREFIXES = [
   'account-name-',
   'account-channel-',
   'portfolio-name-',
+  'portfolio-market-',
   'equity-amount-',
   'edit-shell-',
   'account-config-',

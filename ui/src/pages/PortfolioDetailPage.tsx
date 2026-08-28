@@ -103,8 +103,9 @@ export function PortfolioDetailPage() {
               >
                 {head.name}
               </span>
-              <Chip>{head.market}</Chip>
-              <Chip>自定义函数</Chip>
+              <Chip style={pfNameVt ? { viewTransitionName: `portfolio-market-${portfolioId}` } : undefined}>
+                {head.market}
+              </Chip>
             </div>
             {head.description && <div className="mt-2 text-[14px] text-ink-2">{head.description}</div>}
             <div className="mt-6 flex gap-8 border-t border-line pt-4">

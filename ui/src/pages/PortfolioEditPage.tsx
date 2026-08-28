@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties }
 import { useParams, useViewTransitionState } from 'react-router'
 import { Clipboard, Pencil, Play } from 'lucide-react'
 import { Link } from '@/components/ui/nav'
+import { Chip } from '@/components/ui/Card'
 import { Skeleton } from '@/components/ui/Skeleton'
 import { ErrorNotice } from '@/components/ui/ErrorNotice'
 import { InkRewrite } from '@/components/ui/InkRewrite'
@@ -9,7 +10,7 @@ import { Select } from '@/components/ui/Select'
 import { PythonFunctionEditor, type PythonEditorHandle } from '@/components/ui/PythonFunctionEditor'
 import { PythonRunPanel } from '@/components/ui/PythonRunPanel'
 import { channelLabel } from '@/features/dashboard/display'
-import { WeightResult } from '@/features/portfolio/CustomFunctionEditor'
+import { WeightResult } from '@/features/portfolio/WeightResult'
 import { useCustomCalcValidation } from '@/features/portfolio/useCustomCalcValidation'
 import { usePolling } from '@/lib/hooks/usePolling'
 import { getPortfolio, updatePortfolio } from '@/lib/api/portfolios'
@@ -102,7 +103,7 @@ export function PortfolioEditPage() {
     }
   }, [calc.editorResult])
 
-  // 组合名共享元素：详情 hero ↔ 本页左栏标题槽（同账户域「详情头 ↔ 标题槽」协议）。
+  // 组合名 + 市场 chip 共享元素：详情 hero ↔ 本页左栏标题槽（同账户域「详情头 ↔ 标题槽」协议）。
   const tDetail = useViewTransitionState(`/portfolios/${portfolioId}`)
 
   const dirty = name.trim() !== original.name || code !== original.code
@@ -206,7 +207,10 @@ export function PortfolioEditPage() {
       <section className="mx-auto flex h-full w-full max-w-[1440px] flex-col">
         <div className="flex min-h-0 flex-1 flex-col gap-6 md:flex-row md:gap-8">
           <div className="w-full md:w-[264px] md:flex-none">
-            <Skeleton className="h-5 w-40" />
+            <div className="flex items-center gap-2">
+              <Skeleton className="h-5 w-40" />
+              <Skeleton className="h-5 w-14" />
+            </div>
             <Skeleton className="mt-6 h-4 w-16" />
             <Skeleton className="mt-2 h-[38px] w-full" />
           </div>
@@ -261,10 +265,14 @@ export function PortfolioEditPage() {
                 setSaveError(null)
               }}
             />
-            {dirty && (
-              <span className="flex-none text-accent" title="有未保存改动" aria-label="有未保存改动">
-                ●
-              </span>
+            {/* 市场是身份元数据：只读中性胶囊，与详情 hero 同位（不做编辑入口，依赖缺口是已知问题）。 */}
+            {pf.market && (
+              <Chip
+                className="max-w-32 truncate"
+                style={tDetail ? { viewTransitionName: `portfolio-market-${portfolioId}` } : undefined}
+              >
+                {pf.market}
+              </Chip>
             )}
             {!dirty && (
               <Pencil

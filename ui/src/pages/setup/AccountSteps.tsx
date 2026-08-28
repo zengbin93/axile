@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { Bitcoin, ChartCandlestick, CircleHelp, Landmark, Monitor, RadioTower, type LucideIcon } from 'lucide-react'
-import { Link, useNavigate } from '@/components/ui/nav'
+import { useNavigate } from '@/components/ui/nav'
 import { ExecutionTimeoutInput } from '@/features/account/ExecutionTimeoutInput'
 import { executionTimeoutError } from '@/features/account/executionTimeout'
 import { LeverageInput } from '@/features/account/LeverageInput'
@@ -12,6 +12,7 @@ import { Skeleton } from '@/components/ui/Skeleton'
 import { WeightBars } from '@/components/viz/WeightBars'
 import { ErrorNotice } from '@/components/ui/ErrorNotice'
 import { ConnectionField } from '@/components/ui/ConnectionField'
+import { CreatePortfolioModal } from '@/features/portfolio/CreatePortfolioModal'
 import { DirectoryPicker } from '@/components/ui/DirectoryPicker'
 import type { ClipboardCandidate } from '@/components/ui/connectionFieldClipboard'
 import {
@@ -463,6 +464,7 @@ export function AcctPortfolio() {
   const { acct, setAcct } = useWizardStore()
   const portfolios = useDomainStore((s) => s.portfolios)
   const list = portfolios ?? []
+  const [createOpen, setCreateOpen] = useState(false)
 
   return (
     <div className="flex h-full flex-col">
@@ -483,17 +485,29 @@ export function AcctPortfolio() {
                 </span>
               </button>
             ))}
-            <Link to="/setup/pf/name" className="flex items-center gap-4 rounded-[14px] border border-dashed border-line p-[18px] text-ink-2 hover:border-ink-3/30">
+            <button
+              type="button"
+              onClick={() => setCreateOpen(true)}
+              className="flex w-full cursor-pointer items-center gap-4 rounded-[14px] border border-dashed border-line p-[18px] text-left text-ink-2 hover:border-ink-3/30"
+            >
               <span className="grid h-11 w-11 flex-none place-items-center rounded-xl bg-fill text-[23px]">＋</span>
               <span>
                 <span className="block text-[17px] font-[620]">新建组合</span>
-                <span className="mt-0.5 block text-[14px] text-ink-2">跳到组合设置</span>
+                <span className="mt-0.5 block text-[14px] text-ink-2">定名称和市场，代码之后在编辑器里写</span>
               </span>
-            </Link>
+            </button>
           </div>
         </WizardPage>
       </div>
       <WizardNav prevTo="/setup/acct/connect" nextTo="/setup/acct/trade" nextDisabled={acct.portfolioId == null} />
+      <CreatePortfolioModal
+        open={createOpen}
+        onClose={() => setCreateOpen(false)}
+        onCreated={(created) => {
+          setCreateOpen(false)
+          if (created.id != null) setAcct({ portfolioId: created.id })
+        }}
+      />
     </div>
   )
 }

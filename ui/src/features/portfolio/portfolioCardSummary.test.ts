@@ -27,19 +27,17 @@ describe('portfolioTargetSummary', () => {
     expect(summary.activeCount).toBe(3)
     expect(summary.grossExposure).toBeCloseTo(0.81)
     expect(summary.netExposure).toBeCloseTo(0.21)
-    expect(summary.topEntries).toEqual([
+    expect(summary.entries).toEqual([
         { symbol: 'long', weight: 0.5 },
         { symbol: 'short', weight: -0.3 },
         { symbol: 'small', weight: 0.01 },
     ])
-    expect(summary.hiddenCount).toBe(0)
   })
 
-  it('忽略零值和极小噪声，并限制可见品种数', () => {
+  it('忽略零值和极小噪声，返回全部活跃品种', () => {
     const summary = portfolioTargetSummary(snapshot({ a: 0.5, b: 0.4, c: 0.3, d: 0.2, e: 0.1, zero: 0, noise: 1e-10 }))
     expect(summary.activeCount).toBe(5)
-    expect(summary.topEntries.map((entry) => entry.symbol)).toEqual(['a', 'b', 'c', 'd'])
-    expect(summary.hiddenCount).toBe(1)
+    expect(summary.entries.map((entry) => entry.symbol)).toEqual(['a', 'b', 'c', 'd', 'e'])
   })
 
   it('允许总敞口超过 100%', () => {

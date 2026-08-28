@@ -25,7 +25,6 @@ import { Placeholder } from '@/pages/Placeholder'
 import { SystemConfigPage } from '@/pages/SystemConfigPage'
 import { WizardLayout } from '@/features/setup/WizardLayout'
 import { SetupHub } from '@/pages/setup/SetupHub'
-import { PfName, PfDefine, PfDone } from '@/pages/setup/PortfolioSteps'
 import { CustomCalcDocPage } from '@/pages/docs/CustomCalcDocPage'
 import {
   AcctChannel,
@@ -123,9 +122,6 @@ const router = createBrowserRouter([
         element: <WizardLayout />,
         children: [
           { index: true, element: <SetupHub /> },
-          { path: 'pf/name', element: <PfName /> },
-          { path: 'pf/define', element: <PfDefine /> },
-          { path: 'pf/done', element: <PfDone /> },
           { path: 'acct/channel', element: <AcctChannel /> },
           { path: 'acct/connect', element: <AcctConnect /> },
           { path: 'acct/portfolio', element: <AcctPortfolio /> },
