@@ -132,7 +132,8 @@ export function SymbolTagInput({
           }}
         />
       </div>
-      <div id={`${id}-help`} className="mt-1 min-h-4 text-[12px] text-ink-3" aria-live="polite">
+      {/* 仅承载冲突提示（aria-live）；录入规则说明由调用方在整个分组级别给一次。 */}
+      <div id={`${id}-help`} className="mt-1 text-[12px] text-ink-3" aria-live="polite">
         {conflicts.length ? (
           <span className="text-warn">
             {conflicts.join('、')} 已在「{otherLabel}」
@@ -149,9 +150,7 @@ export function SymbolTagInput({
               移至此组
             </button>
           </span>
-        ) : (
-          'Enter、Tab、逗号或空格确认；支持批量粘贴'
-        )}
+        ) : null}
       </div>
     </div>
   )

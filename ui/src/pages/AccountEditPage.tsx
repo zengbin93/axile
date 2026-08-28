@@ -708,6 +708,7 @@ export function AccountEditPage({ section = 'basic' }: { section?: EditSection }
             }}
           />
           </Row>
+          <p className="md:col-span-2 text-[12px] text-ink-3">Enter、Tab、逗号或空格确认；支持批量粘贴</p>
         </Section>
       )}
 
