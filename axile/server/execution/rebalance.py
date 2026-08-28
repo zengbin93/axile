@@ -264,6 +264,21 @@ def _build_rebalance_standard_input(
             "forbidden_symbols": account.forbidden_symbols,
             "risk_symbols": account.risk_symbols,
             "feishu_key": feishu_key,
+            "feishu_card_config": account.feishu_card_config.model_dump(mode="json", exclude_none=True)
+            if account.feishu_card_config
+            else None,
+            "feishu_account": {
+                "id": account.id,
+                "name": account.name,
+                "market": account.market,
+                "trade_channel": str(account.trade_channel),
+                "brokerage": account.brokerage,
+                "remark": account.remark,
+                "portfolio_id": account.portfolio_id,
+                "weight_precision": account.weight_precision,
+                "long_leverage": account.long_leverage,
+                "short_leverage": account.short_leverage,
+            },
             "execution_timeout": account.execution_timeout,
             "channel_type": str(account.trade_channel),
             "extra": {

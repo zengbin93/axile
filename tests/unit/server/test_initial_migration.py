@@ -35,6 +35,7 @@ def test_migration_history_is_linear() -> None:
         "0005_target_weight_snapshot.py",
         "0006_drop_trading_calendar.py",
         "0007_execution_intent.py",
+        "0008_feishu_card_config.py",
     ]
     initial = _load_migration(migration_paths[0])
     calendar = _load_migration(migration_paths[1])
@@ -43,6 +44,7 @@ def test_migration_history_is_linear() -> None:
     target_weight_snapshot = _load_migration(migration_paths[4])
     drop_trading_calendar = _load_migration(migration_paths[5])
     execution_intent = _load_migration(migration_paths[6])
+    feishu_card_config = _load_migration(migration_paths[7])
     assert initial.revision == "0001"
     assert initial.down_revision is None
     assert calendar.revision == "0002"
@@ -57,6 +59,27 @@ def test_migration_history_is_linear() -> None:
     assert drop_trading_calendar.down_revision == "0005"
     assert execution_intent.revision == "0007"
     assert execution_intent.down_revision == "0006"
+    assert feishu_card_config.revision == "0008"
+    assert feishu_card_config.down_revision == "0007"
+
+
+def test_feishu_card_config_migration_adds_nullable_account_column() -> None:
+    """历史账户迁移后应继续以空配置使用 Axon 默认卡片."""
+    migration = _load_migration(_MIGRATIONS_DIR / "0008_feishu_card_config.py")
+    engine = sa.create_engine("sqlite://")
+    metadata = sa.MetaData()
+    sa.Table("account", metadata, sa.Column("id", sa.Integer(), primary_key=True))
+
+    with engine.begin() as connection:
+        metadata.create_all(connection)
+        connection.execute(sa.text("INSERT INTO account (id) VALUES (1)"))
+        migration.op = Operations(MigrationContext.configure(connection))
+        migration.upgrade()
+
+        columns = {column["name"]: column for column in sa.inspect(connection).get_columns("account")}
+        row = connection.execute(sa.text("SELECT feishu_card_config FROM account WHERE id = 1")).one()
+        assert columns["feishu_card_config"]["nullable"] is True
+        assert row[0] is None
 
 
 def test_account_asset_snapshot_migration_backfills_execution_assets() -> None:

@@ -101,11 +101,19 @@ class AbstractExecutorExecutionLifecycleMixin(AbstractExecutorExecutionRuntimeFa
             # 统一经有界后台队列发送，隔离飞书网络延迟且避免线程随执行次数增长。
             if standard_input.feishu_key:
                 executor.logger.info("异步发送飞书通知")
-                enqueue_execute_results_to_feishu(
-                    cast("FeishuNotificationSource", executor),
-                    output,
-                    standard_input.feishu_key,
-                )
+                if standard_input.feishu_card_config is None:
+                    enqueue_execute_results_to_feishu(
+                        cast("FeishuNotificationSource", executor),
+                        output,
+                        standard_input.feishu_key,
+                    )
+                else:
+                    enqueue_execute_results_to_feishu(
+                        cast("FeishuNotificationSource", executor),
+                        output,
+                        standard_input.feishu_key,
+                        standard_input.feishu_card_config,
+                    )
 
             executor.logger.debug(f"交易执行完成 - 成功: {output.success}")
             return output

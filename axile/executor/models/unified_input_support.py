@@ -223,6 +223,8 @@ def _collect_unified_input_extra(data: dict[str, object]) -> dict[str, object]:
         "forbidden_symbols",
         "risk_symbols",
         "feishu_key",
+        "feishu_card_config",
+        "feishu_account",
         "execution_timeout",
         "extra",
     }

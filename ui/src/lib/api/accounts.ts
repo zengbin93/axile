@@ -11,7 +11,25 @@ import type {
   Message,
   PortfolioAccountList,
   TargetWeightSnapshot,
+  FeishuCardConfig,
 } from '@/types/api'
+
+export interface AccountFeishuTestResult {
+  ok: boolean
+  message: string
+}
+
+/** 使用当前页面草稿测试账户执行结果通知卡片。 */
+export function testAccountFeishu(
+  id: number,
+  feishuKey: string,
+  feishuCardConfig: FeishuCardConfig | null,
+): Promise<AccountFeishuTestResult> {
+  return apiSend<AccountFeishuTestResult>('POST', `/account/${id}/feishu/test`, {
+    feishu_key: feishuKey,
+    feishu_card_config: feishuCardConfig,
+  })
+}
 
 export interface SchedulePreview {
   timezone: 'Asia/Shanghai'

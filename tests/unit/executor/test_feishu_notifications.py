@@ -11,8 +11,9 @@ from axile.executor.abstract_executor import execution_lifecycle as abstract_exe
 from axile.executor.abstract_executor import facade as abstract_executor_facade_module
 from axile.executor.abstract_executor.base import AbstractExecutor
 from axile.executor.algorithms.core.base import AlgorithmResult
-from axile.executor.feishu_notifications import send_execute_results_to_feishu
+from axile.executor.feishu_notifications import build_execute_results_feishu_card, send_execute_results_to_feishu
 from axile.executor.models.execution_result import ExecutionStatus
+from axile.executor.models.feishu import FeishuCardConfig
 from axile.executor.models.unified_account_assets import Position, PositionDirection, UnifiedAccountAssets
 from axile.executor.models.unified_input import CTPAccountConfig, UnifiedStandardInput
 from axile.executor.models.unified_order import OrderDirection, OrderType, TradeRecord, UnifiedOrder
@@ -429,6 +430,61 @@ def test_send_execute_results_to_feishu_builds_expected_card(monkeypatch) -> Non
             "trade_id": "trade-1",
         }
     ]
+
+
+def test_custom_feishu_template_receives_structured_redacted_variables() -> None:
+    """自定义模板应获得版本化变量，但不得泄露凭据或渠道扩展字段。"""
+    standard_input = UnifiedStandardInput.from_dict(
+        {
+            "channel_type": TradeChannel.CTP.value,
+            "account_config": {
+                "broker_id": "b",
+                "investor_id": "i",
+                "password": "connection-secret",
+                "td_front": "tcp://td:1",
+                "md_front": "tcp://md:2",
+                "app_id": "app",
+                "auth_code": "auth",
+            },
+            "curr_target": {"rb2610": 0.2},
+            "algorithm": {"method": "TEST", "params": {"api_token": "hidden", "pace": 2}},
+            "feishu_account": {"id": 7, "name": "期货账户"},
+            "extra": {"audit": {"execution_id": "exec-1", "execution_kind": "rebalance"}},
+        }
+    )
+    output = _minimal_output()
+    output.inputs = standard_input
+    config = FeishuCardConfig(mode="template", template_id="user-template")
+
+    card = build_execute_results_feishu_card(_NotificationSource(), output, config)
+
+    assert card["data"]["template_id"] == "user-template"  # type: ignore[index]
+    variables = card["data"]["template_variable"]  # type: ignore[index]
+    assert variables["schema_version"] == 1  # type: ignore[index]
+    assert variables["account"] == {"id": 7, "name": "期货账户", "mark": "acct-demo"}  # type: ignore[index]
+    assert variables["execution"]["id"] == "exec-1"  # type: ignore[index]
+    assert variables["strategy"]["algorithm"]["params"] == {"pace": 2}  # type: ignore[index]
+    assert "account_config" not in variables
+
+
+def test_custom_feishu_card_is_sent_unchanged() -> None:
+    """自定义卡片不应执行占位符替换或包裹模板结构。"""
+    raw_card = {"header": {"title": {"tag": "plain_text", "content": "{{account.name}}"}}, "elements": []}
+    config = FeishuCardConfig(mode="custom", card=raw_card)
+
+    card = build_execute_results_feishu_card(_NotificationSource(), _minimal_output(), config)
+
+    assert card == raw_card
+
+
+def test_feishu_card_config_rejects_webhook_envelope() -> None:
+    """账户配置只接受卡片主体，避免重复包裹 webhook 信封。"""
+    try:
+        FeishuCardConfig(mode="custom", card={"msg_type": "interactive", "card": {}})
+    except ValueError as exc:
+        assert "卡片主体" in str(exc)
+    else:
+        raise AssertionError("webhook 信封应被拒绝")
 
 
 def _minimal_output() -> UnifiedStandardOutput:

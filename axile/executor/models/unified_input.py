@@ -11,6 +11,7 @@ from typing import override
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from axile.common.trade_channel import TradeChannel
+from axile.executor.models.feishu import FeishuCardConfig
 from axile.executor.models.unified_input_accounts import (
     AccountConfig,
     BaseAccountConfig,
@@ -118,6 +119,8 @@ class UnifiedStandardInput(BaseModel):
 
     # 通知配置
     feishu_key: str | None = Field(None, description="飞书通知key")
+    feishu_card_config: FeishuCardConfig | None = Field(None, description="飞书通知卡片配置；空值使用默认卡片")
+    feishu_account: dict[str, object] = Field(default={}, description="通知可使用的脱敏账户元数据")
 
     # 执行配置
     execution_timeout: int = Field(
@@ -291,6 +294,7 @@ class UnifiedStandardInput(BaseModel):
 
         # 创建实例
         feishu_key_obj = data.get("feishu_key")
+        feishu_card_config_obj = data.get("feishu_card_config")
         execution_timeout_obj = data.get("execution_timeout", DEFAULT_EXECUTION_TIMEOUT_SECONDS)
         extra = _collect_unified_input_extra(data)
 
@@ -305,6 +309,10 @@ class UnifiedStandardInput(BaseModel):
             forbidden_symbols=_as_str_list(data.get("forbidden_symbols", [])),
             risk_symbols=_as_str_list(data.get("risk_symbols", [])),
             feishu_key=feishu_key_obj if isinstance(feishu_key_obj, str) else None,
+            feishu_card_config=FeishuCardConfig.model_validate(feishu_card_config_obj)
+            if isinstance(feishu_card_config_obj, dict)
+            else None,
+            feishu_account=_as_dict(data.get("feishu_account", {})),
             execution_timeout=as_timeout_int(execution_timeout_obj, DEFAULT_EXECUTION_TIMEOUT_SECONDS),
             extra=extra,
         )
@@ -331,11 +339,14 @@ class UnifiedStandardInput(BaseModel):
             "forbidden_symbols": self.forbidden_symbols,
             "risk_symbols": self.risk_symbols,
             "execution_timeout": self.execution_timeout,
+            "feishu_account": self.feishu_account,
         }
 
         # 添加可选字段
         if self.feishu_key:
             result = {**result, "feishu_key": self.feishu_key}
+        if self.feishu_card_config:
+            result["feishu_card_config"] = self.feishu_card_config.model_dump(mode="json", exclude_none=True)
 
         # 添加额外字段
         if self.extra:

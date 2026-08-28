@@ -7,6 +7,7 @@ from axile.server.api.routes.account_control_audit_routes import router as accou
 from axile.server.api.routes.account_control_policy_routes import router as account_control_policy_router
 from axile.server.api.routes.account_crud import router as account_crud_router
 from axile.server.api.routes.account_execution import router as account_execution_router
+from axile.server.api.routes.account_feishu import router as account_feishu_router
 from axile.server.api.routes.account_schedule import router as account_schedule_router
 from axile.server.api.routes.account_support import (
     _build_empty_positions_algorithm,
@@ -18,6 +19,7 @@ router = APIRouter(prefix="/account", tags=["account"])
 router.include_router(account_crud_router)
 router.include_router(account_assets_router)
 router.include_router(account_execution_router)
+router.include_router(account_feishu_router)
 router.include_router(account_schedule_router)
 router.include_router(account_control_audit_router)
 router.include_router(account_control_policy_router)

@@ -13,6 +13,7 @@ from axile.executor.abstract_executor.support import _coerce_object_dict, _coerc
 from axile.executor.account_control.decorators import controlled_operation
 from axile.executor.feishu_notifications import FeishuNotificationSource, send_execute_results_to_feishu
 from axile.executor.models.execution_result import ExecutionStatus
+from axile.executor.models.feishu import FeishuCardConfig
 from axile.executor.models.unified_account_assets import Position, UnifiedAccountAssets
 from axile.executor.models.unified_callback import OrderUpdateCallback, PriceDataCallback, TradeRecordCallback
 from axile.executor.models.unified_input import DEFAULT_EXECUTION_TIMEOUT_SECONDS, UnifiedStandardInput
@@ -53,6 +54,8 @@ class _EmptyPositionsPlan:
     algorithm: dict[str, object]
     forbidden_symbols: list[str]
     feishu_key: str | None
+    feishu_card_config: FeishuCardConfig | None
+    feishu_account: dict[str, object]
     extra: dict[str, object]
     execution_timeout: int
 
@@ -464,7 +467,7 @@ class AbstractExecutorFacadeMixin:
             cleanup=cleanup,
             retain_runtime=retain_runtime,
         )
-        self._notify_empty_positions_result_if_needed(result, plan.feishu_key)
+        self._notify_empty_positions_result_if_needed(result, plan.feishu_key, plan.feishu_card_config)
         return result
 
     def _plan_empty_positions(
@@ -500,6 +503,7 @@ class AbstractExecutorFacadeMixin:
             else []
         )
         feishu_key_raw = kwargs.get("feishu_key")
+        feishu_card_config_raw = kwargs.get("feishu_card_config")
         timeout_raw = kwargs.get("execution_timeout")
         return _EmptyPositionsPlan(
             curr_target=curr_target,
@@ -508,6 +512,10 @@ class AbstractExecutorFacadeMixin:
             algorithm=_coerce_object_dict(kwargs.get("algorithm", executor._get_default_algorithm())),
             forbidden_symbols=forbidden_symbols,
             feishu_key=feishu_key_raw if isinstance(feishu_key_raw, str) else None,
+            feishu_card_config=FeishuCardConfig.model_validate(feishu_card_config_raw)
+            if isinstance(feishu_card_config_raw, dict)
+            else None,
+            feishu_account=_coerce_object_dict(kwargs.get("feishu_account", {})),
             extra=_coerce_object_dict(kwargs.get("extra", {})),
             execution_timeout=as_timeout_int(timeout_raw, DEFAULT_CLEAR_TIMEOUT),
         )
@@ -544,6 +552,8 @@ class AbstractExecutorFacadeMixin:
             curr_target=plan.curr_target,
             last_target=plan.last_target,
             feishu_key=plan.feishu_key,
+            feishu_card_config=plan.feishu_card_config,
+            feishu_account=plan.feishu_account,
             extra=plan.extra,
             execution_timeout=plan.execution_timeout,
         )
@@ -552,6 +562,7 @@ class AbstractExecutorFacadeMixin:
         self,
         result: UnifiedStandardOutput,
         feishu_key: str | None,
+        card_config: FeishuCardConfig | None,
     ) -> None:
         """
         在配置了飞书 key 时发送清仓结果通知.
@@ -564,7 +575,11 @@ class AbstractExecutorFacadeMixin:
             飞书 webhook key；为空时跳过通知。
         """
         if feishu_key and result:
-            send_execute_results_to_feishu(cast("FeishuNotificationSource", _executor(self)), result, feishu_key)
+            source = cast("FeishuNotificationSource", _executor(self))
+            if card_config is None:
+                send_execute_results_to_feishu(source, result, feishu_key)
+            else:
+                send_execute_results_to_feishu(source, result, feishu_key, card_config)
 
     def _build_empty_positions_curr_target(self, positions: list[Position]) -> dict[str, float]:
         """
