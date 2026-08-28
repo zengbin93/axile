@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import type { PythonValidationState } from '@/components/ui/PythonFunctionEditor'
 import type { SelectOption } from '@/components/ui/Select'
 import { channelLabel } from '@/features/dashboard/display'
@@ -18,7 +18,7 @@ export interface CustomCalcValidation {
   setAccountId: (id: number | null) => void
   contextOptions: SelectOption<number | null>[]
   canRun: boolean
-  run: () => Promise<void>
+  run: () => Promise<ValidateCustomCalcResult | null>
 }
 
 /**
@@ -33,15 +33,28 @@ export function useCustomCalcValidation(code: string): CustomCalcValidation {
   const [accountId, setAccountId] = useState<number | null>(null)
   const accounts = useDomainStore((state) => state.accounts) ?? []
   const stale = result != null && ranCode !== code
+  // 面板自动展开监听对象身份；只有真正的新试跑结果才生成新视图，避免手动收起后被普通重渲染顶开。
+  const editorResult = useMemo<PythonValidationState | null>(
+    () =>
+      result && {
+        valid: result.valid,
+        errorLine: result.error_line,
+        errorType: result.error_type,
+        errorMessage: result.error_message,
+        traceback: result.traceback,
+      },
+    [result],
+  )
 
   const run = async () => {
-    if (!code.trim() || validating) return
+    if (!code.trim() || validating) return null
     setValidating(true)
+    let nextResult: ValidateCustomCalcResult
     try {
-      setResult(await validateCustomCalc({ custom_calc_py_code: code, account_id: accountId }))
+      nextResult = await validateCustomCalc({ custom_calc_py_code: code, account_id: accountId })
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
-      setResult({
+      nextResult = {
         valid: false,
         target: null,
         error: message,
@@ -50,10 +63,12 @@ export function useCustomCalcValidation(code: string): CustomCalcValidation {
         error_offset: null,
         error_type: null,
         error_message: message,
-      })
+      }
     }
+    setResult(nextResult)
     setRanCode(code)
     setValidating(false)
+    return nextResult
   }
 
   // 选项自带说明：样例 = 安全沙箱（假数据、不连渠道）；账户 = 真实数据 + 真实副作用风险。
@@ -71,13 +86,7 @@ export function useCustomCalcValidation(code: string): CustomCalcValidation {
   return {
     validating,
     result,
-    editorResult: result && {
-      valid: result.valid,
-      errorLine: result.error_line,
-      errorType: result.error_type,
-      errorMessage: result.error_message,
-      traceback: result.traceback,
-    },
+    editorResult,
     stale,
     accountId,
     setAccountId,

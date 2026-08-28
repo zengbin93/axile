@@ -25,8 +25,12 @@ export function AppShell() {
         />
         {/* 内容列在导航栏右侧的余量里居中；不设全局最小宽，窄视口（高 zoom）下
             内容自然收缩，只留纵向滚动。 */}
-        <main className="app-workspace h-full min-w-0 flex-1 overflow-y-auto px-4 [scrollbar-gutter:stable] md:px-10">
-          <div className={`mx-auto h-full w-full max-w-[2176px] pt-5 ${fullBleed ? '' : 'pb-16'}`}>
+        <main
+          className={`app-workspace h-full min-w-0 flex-1 overflow-y-auto [scrollbar-gutter:stable] ${
+            fullBleed ? '' : 'px-4 md:px-10'
+          }`}
+        >
+          <div className={`mx-auto h-full w-full max-w-[2176px] ${fullBleed ? '' : 'pb-16 pt-5'}`}>
             <Outlet />
           </div>
         </main>

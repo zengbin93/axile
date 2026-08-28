@@ -1,18 +1,34 @@
 import { useEffect, useImperativeHandle, useRef, type ReactNode, type Ref } from 'react'
 import { python } from '@codemirror/lang-python'
+import { HighlightStyle, syntaxHighlighting } from '@codemirror/language'
 import { lintGutter, setDiagnostics, type Diagnostic } from '@codemirror/lint'
-import { oneDark } from '@codemirror/theme-one-dark'
 import { EditorView } from '@codemirror/view'
+import { tags } from '@lezer/highlight'
 import CodeMirror, { type ReactCodeMirrorRef } from '@uiw/react-codemirror'
 import { Check, Clipboard, Play, TriangleAlert } from 'lucide-react'
 import { InkRewrite } from '@/components/ui/InkRewrite'
 
 const editorTheme = EditorView.theme({
-  '&': { backgroundColor: 'transparent', fontSize: '14px' },
+  '&': { backgroundColor: 'var(--color-code-bg)', color: 'var(--color-code-fg)', fontSize: '14px' },
   '&.cm-focused': { outline: 'none' },
-  '.cm-gutters': { backgroundColor: 'transparent', border: 'none' },
+  '.cm-gutters': { backgroundColor: 'var(--color-code-bg)', color: 'var(--color-ink-3)', border: 'none' },
   '.cm-content': { fontFamily: 'var(--font-mono)' },
+  '.cm-cursor': { borderLeftColor: 'var(--color-code-fg)' },
+  '&.cm-focused .cm-selectionBackground, .cm-selectionBackground, ::selection': {
+    backgroundColor: 'var(--color-code-selection) !important',
+  },
 })
+
+const vscodeDarkHighlight = HighlightStyle.define([
+  { tag: [tags.keyword, tags.modifier, tags.controlKeyword, tags.operatorKeyword], color: 'var(--color-code-keyword)' },
+  { tag: [tags.variableName, tags.propertyName], color: 'var(--color-code-name)' },
+  { tag: [tags.function(tags.variableName), tags.definition(tags.variableName)], color: 'var(--color-code-function)' },
+  { tag: [tags.string, tags.special(tags.string)], color: 'var(--color-code-string)' },
+  { tag: [tags.number, tags.bool, tags.null], color: 'var(--color-code-number)' },
+  { tag: [tags.className, tags.typeName, tags.namespace], color: 'var(--color-code-type)' },
+  { tag: [tags.comment, tags.lineComment, tags.blockComment], color: 'var(--color-code-comment)', fontStyle: 'italic' },
+  { tag: [tags.operator, tags.punctuation], color: 'var(--color-code-fg)' },
+])
 
 export interface PythonValidationState {
   valid: boolean
@@ -25,6 +41,7 @@ export interface PythonValidationState {
 /** 暴露给外部控制的编辑器句柄（如「粘贴」按钮点击后把焦点还给代码区）。 */
 export interface PythonEditorHandle {
   focus: () => void
+  revealLine: (line: number) => void
 }
 
 export type PythonRunStatus = 'running' | 'idle' | 'stale' | 'pass' | 'fail'
@@ -137,7 +154,20 @@ export function PythonFunctionEditor({
   const onRunRef = useRef(onRun)
   onRunRef.current = onRun
 
-  useImperativeHandle(ref, () => ({ focus: () => cmRef.current?.view?.focus() }), [])
+  useImperativeHandle(
+    ref,
+    () => ({
+      focus: () => cmRef.current?.view?.focus(),
+      revealLine: (lineNo: number) => {
+        const view = cmRef.current?.view
+        if (!view) return
+        const line = view.state.doc.line(Math.min(Math.max(lineNo, 1), view.state.doc.lines))
+        view.dispatch({ selection: { anchor: line.from }, effects: EditorView.scrollIntoView(line.from, { y: 'center' }) })
+        view.focus()
+      },
+    }),
+    [],
+  )
 
   useEffect(() => {
     const view = cmRef.current?.view
@@ -182,8 +212,8 @@ export function PythonFunctionEditor({
     },
   })
   const extensions = [
-    oneDark,
     editorTheme,
+    syntaxHighlighting(vscodeDarkHighlight),
     python(),
     lintGutter(),
     EditorView.lineWrapping,
@@ -195,6 +225,11 @@ export function PythonFunctionEditor({
     <div className={`relative bg-code-bg ${fill ? 'min-h-0 flex-1' : ''}`}>
       <CodeMirror
         ref={cmRef}
+        className={
+          fill
+            ? 'h-full [&_.cm-editor]:h-full [&_.cm-editor]:!bg-code-bg [&_.cm-gutters]:!bg-code-bg [&_.cm-scroller]:h-full'
+            : '[&_.cm-editor]:!bg-code-bg [&_.cm-gutters]:!bg-code-bg'
+        }
         value={code}
         onChange={onChange}
         height={fill ? '100%' : height}
@@ -219,7 +254,7 @@ export function PythonFunctionEditor({
     // 工作台：纯代码区，吃满父容器；结果呈现由外部 PythonRunPanel 承担。
     return (
       <div className="flex h-full min-h-0 w-full flex-col">
-        <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-[8px]">{codeBlock}</div>
+        <div className="flex min-h-0 flex-1 flex-col overflow-hidden">{codeBlock}</div>
       </div>
     )
   }
