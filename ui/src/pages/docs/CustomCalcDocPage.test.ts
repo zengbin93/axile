@@ -1,28 +1,38 @@
 import { describe, expect, test } from 'bun:test'
-import { buildCustomCalcMarkdown, CUSTOM_CALC_NOTES } from './customCalcMarkdown'
+import { buildCustomCalcMarkdown } from './customCalcMarkdown'
 
 describe('customCalcMarkdown', () => {
-  test('serializes the complete document as Markdown', () => {
-    const markdown = buildCustomCalcMarkdown(
-      [{ name: 'account', type: 'UnifiedAccountAssets', desc: '账户资产快照' }],
-      'def calculate_portfolio(context):\n    return {}',
-      [{ key: 'tq', title: '读取 TQ 合约乘数', desc: '渠道示例。', code: 'multiplier = 10' }],
-      ['优先使用 `context` 的通用接口'],
-    )
+  test('serializes every documentation section', () => {
+    const markdown = buildCustomCalcMarkdown()
 
-    expect(markdown).toStartWith('# 开发自定义组合逻辑')
-    expect(markdown).toContain('| `account` | `UnifiedAccountAssets` |')
+    expect(markdown).toStartWith('# 自定义组合函数')
+    expect(markdown).toContain('## 何时执行')
+    expect(markdown).toContain('普通页面读取只显示最近一次成功保存的目标快照')
+    expect(markdown).toContain('## 样例上下文与真实账户')
+    expect(markdown).toContain('| 能力 | 样例上下文 | 真实账户 |')
+    expect(markdown).toContain('## 函数契约')
     expect(markdown).toContain('```python\ndef calculate_portfolio(context):')
-    expect(markdown).toContain('### 读取 TQ 合约乘数')
-    expect(markdown).toContain('- 优先使用 `context` 的通用接口')
+    expect(markdown).toContain('## Context 通用能力')
+    expect(markdown).toContain('| `get_quote(symbol)` | `UnifiedPriceData` |')
+    expect(markdown).toContain('## 完整 executor（高级）')
+    expect(markdown).toContain('### 读取 TQ 合约信息')
   })
 
-  test('documents the shared live executor and worker recovery boundary', () => {
-    const markdown = buildCustomCalcMarkdown([], '', [], CUSTOM_CALC_NOTES)
+  test('states the live executor and worker recovery boundary precisely', () => {
+    const markdown = buildCustomCalcMarkdown()
 
+    expect(markdown).toContain('不会自动执行函数返回的目标')
+    expect(markdown).toContain('主动调用 executor 的交易方法，仍会产生真实交易')
     expect(markdown).toContain('完整、共享且常驻的真实渠道执行器')
-    expect(markdown).toContain('直接调用交易方法会立即产生渠道副作用')
-    expect(markdown).toContain('系统会在下次调用时重建 worker')
-    expect(markdown).toContain('样例试跑使用一次性进程')
+    expect(markdown).toContain('系统会丢弃 worker，并在下次调用时重建')
+    expect(markdown).toContain('一次性子进程')
+  })
+
+  test('uses the unified quote for TQ contract metadata', () => {
+    const markdown = buildCustomCalcMarkdown()
+
+    expect(markdown).toContain('context.get_quote("KQ.m@SHFE.rb")')
+    expect(markdown).toContain('quote.extra["volume_multiple"]')
+    expect(markdown).toContain('quote.extra["price_tick"]')
   })
 })

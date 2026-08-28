@@ -776,7 +776,7 @@ export function AcctConfirm() {
 
           <div className="mt-5">
             <button disabled={previewState.status === 'loading'} className="cursor-pointer rounded-[11px] border-0 bg-ink-1 px-[22px] py-2.5 text-[15px] font-[550] text-surface disabled:cursor-not-allowed disabled:opacity-45" onClick={preview}>
-              {previewState.status === 'loading' ? '试跑中…' : '▶ 试跑（不下单）'}
+              {previewState.status === 'loading' ? '计算中…' : '▶ 计算目标'}
             </button>
             <div className="mt-[18px] max-w-[460px] rounded-[14px] border border-dashed border-line bg-surface p-5">
               {previewState.status === 'idle' && <div className="py-5 text-center text-[15px] text-ink-3">试跑看这套组合此刻会调成什么样</div>}

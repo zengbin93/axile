@@ -1,68 +1,119 @@
-interface ContextField {
-  name: string
-  type: string
-  desc: string
-}
+export interface ContextField { name: string; type: string; desc: string }
+export interface ContextMode { item: string; sample: string; real: string }
+export interface CalcExample { key: string; title: string; desc: string; code: string; advanced?: boolean }
 
-interface Example {
-  key: string
-  title: string
-  desc: string
-  code: string
-}
-
-export const CUSTOM_CALC_NOTES = [
-  '权重为小数（0.5 = 半仓）；正数为多头，负数为空头。',
-  '脚本在服务端的正常 Python 环境执行，可以导入已安装的包；依赖由部署环境统一提供。',
-  '优先使用 `context` 的通用接口；只有渠道专有能力才直接使用 `context.executor`。',
-  '`context.executor` 是完整、共享且常驻的真实渠道执行器；直接调用交易方法会立即产生渠道副作用。',
-  '成功执行后 executor、回调和模块全局状态可能继续复用；请勿无意修改属性、遗留回调或启动永久后台线程。',
-  '自定义资源应在 `finally` 中释放；脚本失败、超时或 worker 异常退出后，系统会在下次调用时重建 worker。',
-  '不选择真实账户的样例试跑使用一次性进程和样例 executor，不连接真实渠道。',
-  '发生异常时试跑会把错误标在出错的代码行上，据此定位问题后再重新试跑。',
+export const EXECUTION_TRIGGERS = [
+  '在组合编辑器中点击“试跑”',
+  '在组合详情中手动刷新目标',
+  '在账户设置流程中预览组合目标',
+  '真实调仓开始前计算本次目标',
 ]
 
-/** 生成与页面内容一致、可直接粘贴到 Markdown 文档的纯文本。 */
-export function buildCustomCalcMarkdown(
-  contextFields: ContextField[],
-  contractCode: string,
-  examplesData: Example[],
-  notesData: string[],
-): string {
-  const contextRows = contextFields.map((field) => `| \`${field.name}\` | \`${field.type}\` | ${field.desc} |`).join('\n')
-  const examples = examplesData.map(
-    (example) => `### ${example.title}\n\n${example.desc}\n\n\`\`\`python\n${example.code}\n\`\`\``,
-  ).join('\n\n')
-  const notes = notesData.map((note) => `- ${note}`).join('\n')
+export const CONTEXT_MODES: ContextMode[] = [
+  { item: '账户与行情', sample: '固定样例资产，任意标的价格均为 100', real: '当前账户、持仓、行情和订单' },
+  { item: 'executor', sample: '仅实现通用查询的样例 executor', real: '当前渠道完整的真实 executor' },
+  { item: '运行位置', sample: '一次性子进程', real: '账户的常驻 worker' },
+  { item: '渠道副作用', sample: '不连接真实渠道', real: '主动调用交易方法会立即作用于真实渠道' },
+]
 
-  return `# 开发自定义组合逻辑
+export const CONTEXT_FIELDS: ContextField[] = [
+  { name: 'account', type: 'UnifiedAccountAssets', desc: '本次计算内缓存的账户资产快照' },
+  { name: 'positions', type: 'list[Position]', desc: 'account.positions 的便捷入口' },
+  { name: 'get_positions(symbol=None, direction=None)', type: 'list[Position]', desc: '按标的和多空方向筛选持仓' },
+  { name: 'get_quote(symbol)', type: 'UnifiedPriceData', desc: '获取并在本次计算内缓存统一行情' },
+  { name: 'get_price(symbol)', type: 'float', desc: '获取统一行情中的最新成交价' },
+  { name: 'get_pending_orders(symbol=None)', type: 'list[UnifiedOrder]', desc: '查询全部或指定标的的未完成订单' },
+  { name: 'query_trades(symbol, order_id)', type: 'list[TradeRecord]', desc: '查询指定订单的成交明细' },
+  { name: 'executor', type: '渠道执行器', desc: '完整的当前账户渠道执行器，供高级代码直接使用' },
+]
 
-自定义逻辑让你用一段 Python 决定组合「交易什么」。在本地写好并调试后，把 \`calculate_portfolio\` 函数粘贴到组合编辑器，点「试跑」跑一次确认无误（默认空跑，也可切到某真实账户）。
+export const CONTRACT_CODE = `def calculate_portfolio(context):
+    # 权重是目标仓位，不是委托数量
+    return {"rb2610": 0.5, "ag2612": -0.25}`
+
+export const CALC_EXAMPLES: CalcExample[] = [
+  { key: 'fixed', title: '固定目标权重', desc: '不依赖账户状态；适合固定配置或作为最小模板。', code: `def calculate_portfolio(context):
+    return {"rb2610": 0.5, "ag2612": 0.5}` },
+  { key: 'position', title: '根据当前持仓调整目标', desc: '使用统一持仓模型，不依赖具体交易渠道。', code: `def calculate_portfolio(context):
+    rb_positions = context.get_positions("rb2610")
+    has_rb = any(position.volume > 0 for position in rb_positions)
+    return {"rb2610": 0.25 if has_rb else 0.5}` },
+  { key: 'price', title: '根据最新价格选择标的', desc: '同一标的的行情在一次计算内只查询一次。', code: `def calculate_portfolio(context):
+    rb_price = context.get_price("rb2610")
+    ag_price = context.get_price("ag2612")
+    return {"rb2610": 1.0} if rb_price < ag_price else {"ag2612": 1.0}` },
+  { key: 'tq-contract', title: '读取 TQ 合约信息', desc: 'TQ 会把最小变动价位和合约乘数放在统一行情的 extra 中。', code: `def calculate_portfolio(context):
+    quote = context.get_quote("KQ.m@SHFE.rb")
+    multiplier = float(quote.extra["volume_multiple"])
+    price_tick = float(quote.extra["price_tick"])
+    return {quote.symbol: min(1.0, 100.0 / (multiplier * price_tick))}` },
+  { key: 'executor', title: '直接使用渠道 executor', desc: '仅在通用 Context 无法表达渠道专有能力时使用；可用方法取决于当前渠道实现。', advanced: true, code: `def calculate_portfolio(context):
+    executor = context.executor
+    quote = executor.get_market_data(["600000.SH"])["600000.SH"]
+    return {quote.symbol: 0.5}` },
+]
+
+export const EXECUTOR_RULES = [
+  '`context.executor` 不是只读代理，而是当前账户完整、共享且常驻的真实渠道执行器。',
+  '计算目标不会自动执行返回的权重；但代码主动调用 `execute`、`empty_positions` 或渠道下单方法会立即产生真实交易副作用。',
+  '成功执行后 executor、回调和模块全局状态会继续复用；不要无意修改属性、遗留回调或启动永久后台线程。',
+  '自行创建的资源应在 `finally` 中释放。脚本失败、超时或 worker 异常后，系统会丢弃 worker，并在下次调用时重建。',
+]
+
+export const CONTRACT_RULES = [
+  '函数必须且只能接收一个 `context` 参数。',
+  '返回值必须是 `dict[str, float]`；键必须是字符串，值必须是有限数字，布尔值不算数字。',
+  '正数表示目标多头，负数表示目标空头，`0.5` 表示半仓；空字典 `{}` 表示目标空仓。',
+  '返回值是原始目标权重，不是委托数量。真实调仓还会按账户杠杆、精度和控制策略继续处理。',
+  '标的格式由渠道决定；使用组合创建时针对该市场生成的默认代码最稳妥。',
+]
+
+function table(headers: string[], rows: string[][]): string {
+  return [`| ${headers.join(' | ')} |`, `| ${headers.map(() => '---').join(' | ')} |`, ...rows.map((row) => `| ${row.join(' | ')} |`)].join('\n')
+}
+
+function bullets(items: string[]): string { return items.map((item) => `- ${item}`).join('\n') }
+
+export function buildCustomCalcMarkdown(): string {
+  const modes = table(['能力', '样例上下文', '真实账户'], CONTEXT_MODES.map((mode) => [mode.item, mode.sample, mode.real]))
+  const fields = table(['字段或方法', '类型', '含义'], CONTEXT_FIELDS.map((field) => [`\`${field.name}\``, `\`${field.type}\``, field.desc]))
+  const examples = CALC_EXAMPLES.map((example) => `### ${example.title}${example.advanced ? '（高级）' : ''}\n\n${example.desc}\n\n\`\`\`python\n${example.code}\n\`\`\``).join('\n\n')
+  return `# 自定义组合函数
+
+自定义组合函数在需要时计算一份“品种 → 原始目标权重”。Axile 随后才会根据账户配置处理杠杆、精度和调仓执行。
+
+## 何时执行
+
+${bullets(EXECUTION_TRIGGERS)}
+
+普通页面读取只显示最近一次成功保存的目标快照，不会执行用户函数。
+
+## 样例上下文与真实账户
+
+${modes}
+
+> 真实账户“试跑”只表示 Axile 不会自动执行函数返回的目标；如果函数主动调用 executor 的交易方法，仍会产生真实交易。
 
 ## 函数契约
 
-脚本必须定义一个恰好接收一个参数的函数 \`calculate_portfolio(context)\`，返回一个「品种 → 目标权重」的字典（\`dict[str, float]\`）。返回空字典 \`{}\` 表示空仓。
-
 \`\`\`python
-${contractCode}
+${CONTRACT_CODE}
 \`\`\`
 
-标的格式由交易渠道决定；新建组合时请以当前市场自动生成的示例为准。
+${bullets(CONTRACT_RULES)}
 
-## 可用的 context 能力
+## Context 通用能力
 
-\`context\` 基于统一模型提供账户、持仓、行情和订单查询。**空跑**使用固定样例账户和行情；切到某**真实账户**会准备该账户的真实渠道并执行实际查询，口径与真实调仓一致。
+优先使用通用能力。\`account\` 和行情缓存只在当前这一次函数调用中有效。
 
-| 字段 | 类型 | 含义 |
-| --- | --- | --- |
-${contextRows}
+${fields}
+
+## 完整 executor（高级）
+
+${bullets(EXECUTOR_RULES)}
 
 ## 示例
 
 ${examples}
-
-## 注意事项
-
-${notes}
 `
 }
