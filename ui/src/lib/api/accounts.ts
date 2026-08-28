@@ -19,7 +19,7 @@ export interface AccountFeishuTestResult {
   message: string
 }
 
-/** 使用当前页面草稿测试账户执行结果通知卡片。 */
+/** 使用当前页面草稿推送样例执行结果通知卡片（成交为样例，非真实执行）。 */
 export function testAccountFeishu(
   id: number,
   feishuKey: string,

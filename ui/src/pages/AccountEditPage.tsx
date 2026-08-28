@@ -482,7 +482,7 @@ export function AccountEditPage({ section = 'basic' }: { section?: EditSection }
                   {feishuTest.message}
                 </span>
               ) : (
-                <span className="text-ink-3">测试使用当前页面中的机器人 Key 和通知卡片草稿。</span>
+                <span className="text-ink-3">推送一张使用当前页面草稿的样例卡片，成交为样例、非真实执行。</span>
               )}
             </div>
           </Row>
