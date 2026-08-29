@@ -288,14 +288,16 @@ export function PortfolioEditPage() {
   // 坑（实测）：grid 里所有 fr 系数之和 < 1 时，fr 轨只吸收系数占比的剩余空间，余下的会被
   // auto 轨（Stretch auto Tracks 步）吃掉——所以单独成轨时必须用 1fr，只有双方都分高时才
   // 用 panelSplit / 1-panelSplit（两者恒和为 1）。
-  const resultContentful =
-    targetTab === 'effective'
-      ? (weights.loading && weights.data == null) ||
-        weights.error != null ||
-        weights.recalculateError != null ||
-        (weights.data?.calculated_at != null &&
-          targetWeightSummary(weights.data.weights).entries.length > 0)
-      : Boolean(calc.result?.valid && calc.result?.target)
+  // 生效 / 试跑是同一个结果槽的两个来源。任一来源有实质内容时都固定为分高轨，
+  // 避免切 tab 时外层 grid 在 auto ↔ fr 间切换，与正文替换叠加成一次高度回弹。
+  const effectiveContentful =
+    (weights.loading && weights.data == null) ||
+    weights.error != null ||
+    weights.recalculateError != null ||
+    (weights.data?.calculated_at != null &&
+      targetWeightSummary(weights.data.weights).entries.length > 0)
+  const trialContentful = Boolean(calc.result?.valid && calc.result?.target)
+  const resultContentful = effectiveContentful || trialContentful
   const resultFr = resultOpen && resultContentful
   const followersFr = followersOpen && followers.length > 0
   const inspectorRows = `auto minmax(0, ${resultFr || followersFr ? '0fr' : '1fr'}) 36px ${
