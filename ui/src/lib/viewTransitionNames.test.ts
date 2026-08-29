@@ -7,6 +7,7 @@ import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { join, relative } from 'node:path'
 
 import { editShellVtName } from '@/features/account/editUi'
+import { portfolioNameVtName } from '@/features/portfolio/viewTransition'
 
 const UI_SRC = join(import.meta.dir, '..')
 
@@ -58,6 +59,12 @@ describe('editShellVtName', () => {
     expect(editShellVtName(7, 'timer')).toBe('edit-shell-timer-7')
     expect(editShellVtName(12, 'algorithm')).toBe('edit-shell-algorithm-12')
     expect(editShellVtName(9, 'control')).toBe('edit-shell-control-9')
+  })
+})
+
+describe('portfolioNameVtName', () => {
+  it('为列表卡和详情标题生成同一个纯文字共享身份', () => {
+    expect(portfolioNameVtName(7)).toBe('portfolio-name-7')
   })
 })
 

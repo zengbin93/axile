@@ -59,8 +59,17 @@
   --color-warn-tint: #fdfaf2;
   --color-bad-tint: #fdf7f6;
   --color-scrim: rgba(15, 23, 32, 0.32);
-  --color-code-bg: #101820;
-  --color-code-fg: #d3dde6;
+  /* VS Code Light+：与下方 .dark 的 Dark+ 逐角色对应，编辑器随全局主题自然切换。 */
+  --color-code-bg: #ffffff;
+  --color-code-fg: #1f1f1f;
+  --color-code-keyword: #0000ff;
+  --color-code-name: #001080;
+  --color-code-function: #795e26;
+  --color-code-string: #a31515;
+  --color-code-number: #098658;
+  --color-code-comment: #008000;
+  --color-code-type: #267f99;
+  --color-code-selection: #add6ff;
 
   /* 仪器感：小圆角、克制的层次（面板靠 1px 分隔线，不靠投影堆叠）。 */
   --radius-card: 10px;
@@ -106,6 +115,14 @@
   --color-scrim: rgba(2, 5, 9, 0.62);
   --color-code-bg: #0a0f14;
   --color-code-fg: #d3dde6;
+  --color-code-keyword: #569cd6;
+  --color-code-name: #9cdcfe;
+  --color-code-function: #dcdcaa;
+  --color-code-string: #ce9178;
+  --color-code-number: #b5cea8;
+  --color-code-comment: #6a9955;
+  --color-code-type: #4ec9b0;
+  --color-code-selection: #264f78;
 
   --shadow-card: 0 1px 3px rgba(0, 0, 0, 0.35);
 }

@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, useState, type ReactElement } from 'react'
+import { useLayoutEffect, useRef, type ReactElement } from 'react'
 
 /** 分段控件的单个选项：值与显示文案分离。 */
 export interface SegmentedOption<T extends string> {
@@ -22,6 +22,12 @@ const SIZE_CLASS: Record<SegmentedSize, { track: string; thumb: string; button: 
  * 通过测量选中 button 的 offsetLeft / offsetWidth 定位滑块，配合 transform / width
  * 过渡实现动画。首帧直接就位、不做滑入；尊重系统「减少动态效果」。
  *
+ * 测量结果**直写 DOM style、不走 setState**：滑块位置是布局的纯函数，回流期间
+ * 布局值可能来回震荡（滚动条出现/消失、字体换宽），setState 会把每次测量都变成
+ * 一次同步重渲染，极端时序下自激成「layout effect → setState → 渲染 → 再测量」
+ * 的嵌套更新风暴（实测触达过 React 50 层上限）。直接改 style 则只触发 CSS 过渡、
+ * 不产生 React 更新，构造上杜绝该风暴。
+ *
  * @typeParam T - 选项值的字面量联合类型。
  */
 export function Segmented<T extends string>({
@@ -39,9 +45,9 @@ export function Segmented<T extends string>({
 }): ReactElement {
   const sz = SIZE_CLASS[size]
   const trackRef = useRef<HTMLDivElement>(null)
+  const thumbRef = useRef<HTMLSpanElement>(null)
   const btnRefs = useRef<(HTMLButtonElement | null)[]>([])
   const mountedRef = useRef(false)
-  const [thumb, setThumb] = useState({ x: 0, w: 0 })
 
   const activeIndex = Math.max(
     0,
@@ -51,8 +57,10 @@ export function Segmented<T extends string>({
   useLayoutEffect(() => {
     const measure = () => {
       const el = btnRefs.current[activeIndex]
-      if (!el) return
-      setThumb({ x: el.offsetLeft, w: el.offsetWidth })
+      const thumb = thumbRef.current
+      if (!el || !thumb) return
+      thumb.style.transform = `translateX(${el.offsetLeft}px)`
+      thumb.style.width = `${el.offsetWidth}px`
     }
     measure()
     mountedRef.current = true
@@ -62,7 +70,7 @@ export function Segmented<T extends string>({
     const ro = new ResizeObserver(measure)
     ro.observe(track)
     return () => ro.disconnect()
-  }, [activeIndex, options])
+  }, [activeIndex])
 
   return (
     <div
@@ -70,13 +78,13 @@ export function Segmented<T extends string>({
       className={`relative inline-flex bg-fill ${sz.track} ${className}`}
     >
       <span
+        ref={thumbRef}
         aria-hidden
         className={`absolute left-0 z-0 bg-surface shadow-sm ${sz.thumb} ${
           mountedRef.current
             ? 'transition-[transform,width] duration-200 ease-[cubic-bezier(.32,.72,0,1)] motion-reduce:transition-none'
             : ''
         }`}
-        style={{ transform: `translateX(${thumb.x}px)`, width: `${thumb.w}px` }}
       />
       {options.map((o, i) => (
         <button

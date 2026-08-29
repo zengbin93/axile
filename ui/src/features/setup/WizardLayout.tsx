@@ -3,7 +3,7 @@ import { Link } from '@/components/ui/nav'
 import { Toast } from '@/components/Toast'
 import { ThemeToggle } from '@/components/ThemeToggle'
 import { BrandWordmark } from '@/components/brand/BrandWordmark'
-import { flowOf, PF_STEPS, ACCT_STEPS, type Step } from '@/features/setup/steps'
+import { flowOf, ACCT_STEPS, type Step } from '@/features/setup/steps'
 
 function Rail({ steps, index, title }: { steps: Step[]; index: number; title: string }) {
   return (
@@ -50,9 +50,7 @@ export function WizardLayout() {
         <Link to="/" aria-label="axile 首页" className="text-ink-1">
           <BrandWordmark size={16.5} />
         </Link>
-        <span className="text-[15px] text-ink-2">
-          {flow === 'pf' ? '· 组合设置' : flow === 'acct' ? '· 账户设置' : ''}
-        </span>
+        <span className="text-[15px] text-ink-2">{flow === 'acct' ? '· 账户设置' : ''}</span>
         <span className="ml-auto" />
         <ThemeToggle />
         <Link to="/" className="rounded-[9px] border border-line px-3.5 py-1.5 text-[14px] text-ink-2">
@@ -61,7 +59,6 @@ export function WizardLayout() {
       </header>
 
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden sm:flex-row">
-        {flow === 'pf' && <Rail steps={PF_STEPS} index={index} title="组合设置" />}
         {flow === 'acct' && <Rail steps={ACCT_STEPS} index={index} title="账户设置" />}
         <div className="min-h-0 min-w-0 flex-1 overflow-y-auto">
           <Outlet />

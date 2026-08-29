@@ -1,13 +1,22 @@
-import { useCallback, useState } from 'react'
-import { useViewTransitionState } from 'react-router'
-import { Pencil, Trash2 } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { useSearchParams, useViewTransitionState } from 'react-router'
+import { Pencil, Plus, Trash2 } from 'lucide-react'
 import { Link, useNavigate } from '@/components/ui/nav'
 import { Card, Chip } from '@/components/ui/Card'
 import { Skeleton } from '@/components/ui/Skeleton'
 import { Tooltip } from '@/components/ui/Tooltip'
 import { ConfirmModal, type ConfirmSpec } from '@/components/ui/ConfirmModal'
 import { ErrorNotice } from '@/components/ui/ErrorNotice'
-import { deletePortfolio, getPortfolioTargetSnapshot } from '@/lib/api/portfolios'
+import { CreatePortfolioModal } from '@/features/portfolio/CreatePortfolioModal'
+import { TargetChips } from '@/features/portfolio/TargetChips'
+import { usePortfoliosTargets } from '@/features/portfolio/usePortfoliosTargets'
+import { portfolioNameVtName } from '@/features/portfolio/viewTransition'
+import {
+  portfolioRollup,
+  PORTFOLIO_ROLLUP_ICON,
+  PORTFOLIO_ROLLUP_TEXT_CLASS,
+} from '@/features/portfolio/portfolioRollup'
+import { deletePortfolio } from '@/lib/api/portfolios'
 import {
   formatTargetWeight,
   formatTargetUpdatedAt,
@@ -16,7 +25,6 @@ import {
   type PortfolioTargetState,
 } from '@/features/portfolio/portfolioCardSummary'
 import { channelLabel } from '@/features/dashboard/display'
-import { usePolling } from '@/lib/hooks/usePolling'
 import { useDomainStore } from '@/stores/domain'
 import { useToastStore } from '@/stores/ui'
 import type { AccountDashboardItem, PortfolioLite } from '@/types/api'
@@ -27,6 +35,16 @@ export function PortfoliosPage() {
   const toast = useToastStore((s) => s.toast)
   const [confirm, setConfirm] = useState<ConfirmSpec | null>(null)
   const [deleteError, setDeleteError] = useState<Error | null>(null)
+  const [searchParams, setSearchParams] = useSearchParams()
+  const [createOpen, setCreateOpen] = useState(false)
+
+  // 「新建组合」深链（侧栏 / 设置首页）：弹层打开后立即抹掉 ?new=1，不把弹层态留在历史里。
+  useEffect(() => {
+    if (searchParams.get('new') === '1') {
+      setCreateOpen(true)
+      setSearchParams({}, { replace: true })
+    }
+  }, [searchParams, setSearchParams])
 
   const portfolios = useDomainStore((s) => s.portfolios)
   const accounts = useDomainStore((s) => s.accounts)
@@ -70,29 +88,55 @@ export function PortfoliosPage() {
 
   const list = portfolios ?? []
 
+  // 目标快照页面层统一拉取：卡片目标态与页头判词同一份派生结果，不各自为政。
+  const targetFetches = usePortfoliosTargets(list.map((p) => p.id))
+  const targetStates = list.map((p): PortfolioTargetState =>
+    p.id == null
+      ? { kind: 'uncalculated' }
+      : portfolioTargetState(
+          targetFetches[p.id]?.snapshot ?? null,
+          targetFetches[p.id]?.loading ?? true,
+          targetFetches[p.id]?.error ?? null,
+          false,
+        ),
+  )
+  const targetsReady = list.every((p) => p.id == null || (targetFetches[p.id] !== undefined && !targetFetches[p.id].loading))
+  const unboundCount = accounts != null && !accountsError
+    ? list.filter((p) => followersOf(p.id).length === 0).length
+    : null
+  const rollup = portfolioRollup({ total: list.length, targetStates, unboundCount, targetsReady })
+
   return (
     <section>
-      <div className="mb-4 flex items-center justify-between">
-        <h1 className="text-[19px] font-[640]">组合</h1>
-        <Link
-          to="/setup/pf/name"
-          className="cursor-pointer rounded-[9px] border-0 bg-ink-1 px-4 py-2 text-[14.5px] font-[550] text-surface"
+      {/* 判词与创建入口是一个左簇：按钮贴着状态句回答「要加一个在这里」，与账户舰队页摘要行同构。 */}
+      <div className="mb-4 flex flex-wrap items-center gap-3">
+        <span className={`inline-flex items-center gap-1.5 text-[19px] font-[640] ${PORTFOLIO_ROLLUP_TEXT_CLASS[rollup.key]}`}>
+          {rollup.text === '组合' ? null : <span aria-hidden>{PORTFOLIO_ROLLUP_ICON[rollup.key]}</span>}
+          {rollup.text}
+        </span>
+        <button
+          type="button"
+          onClick={() => setCreateOpen(true)}
+          className="inline-flex cursor-pointer items-center gap-1.5 rounded-chip border border-line px-3 py-1.5 text-[13px] text-ink-2 transition-colors duration-150 hover:border-border-strong hover:text-ink-1 motion-reduce:transition-none"
         >
-          ＋ 新建组合
-        </Link>
+          <Plus size={14} aria-hidden />新建组合
+        </button>
       </div>
 
       {portfolios == null && !portfoliosError && (
-        <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,380px),1fr))] gap-3">
-          {Array.from({ length: 4 }, (_, index) => (
-            <Card key={index} className="min-h-[260px] px-5 py-5" aria-busy="true">
-              <div className="flex justify-between gap-4"><Skeleton className="h-5 w-32" /><Skeleton className="h-8 w-20" /></div>
-              <Skeleton className="mt-3 h-5 w-36" />
-              <div className="mt-4 grid grid-cols-3 gap-3 border-t border-line pt-4">
+        <div className="grid grid-cols-[repeat(auto-fill,minmax(360px,1fr))] gap-4">
+          {Array.from({ length: 2 }, (_, index) => (
+            <Card key={index} className="border px-6 py-4" aria-busy="true">
+              <div className="flex items-center gap-3">
+                <Skeleton className="h-5 w-32" />
+                <Skeleton className="h-5 w-16" />
+                <Skeleton className="ml-auto h-8 w-16" />
+              </div>
+              <div className="mt-3 grid grid-cols-3 gap-3 border-t border-line pt-3">
                 {Array.from({ length: 3 }, (_, metric) => <Skeleton key={metric} className="h-9 w-full" />)}
               </div>
-              <Skeleton className="mt-4 h-12 w-full" />
-              <Skeleton className="mt-4 h-8 w-2/3" />
+              <Skeleton className="mt-3 h-10 w-full" />
+              <div className="mt-3 border-t border-line pt-3"><Skeleton className="h-6 w-2/3" /></div>
             </Card>
           ))}
         </div>
@@ -109,76 +153,77 @@ export function PortfoliosPage() {
         <Card className="p-8 text-center">
           <p className="text-[16px] font-[620]">还没有组合</p>
           <p className="mt-2 text-[15px] text-ink-2">组合是「交易什么」的来源，可被多个账户复用。</p>
-          <Link to="/setup/pf/name" className="mt-4 inline-block text-[15px] font-semibold text-accent">
-            新建组合 →
-          </Link>
+          <button
+            type="button"
+            onClick={() => setCreateOpen(true)}
+            className="mt-6 inline-flex cursor-pointer items-center gap-1.5 rounded-chip bg-accent px-4 py-2 text-[14px] font-medium text-white transition-colors duration-150 hover:brightness-110 motion-reduce:transition-none"
+          >
+            <Plus size={14} aria-hidden />新建组合
+          </button>
         </Card>
       )}
 
       {list.length > 0 && (
-        <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,380px),1fr))] gap-3">
-          {list.map((p) => (
-            <PortfolioCard key={p.id} p={p} followers={followersOf(p.id)} accountsReady={accounts != null} accountsError={accountsError} onDelete={askDelete} />
+        <div className="grid grid-cols-[repeat(auto-fill,minmax(360px,1fr))] gap-4">
+          {list.map((p, index) => (
+            <PortfolioCard key={p.id} p={p} targetState={targetStates[index]} followers={followersOf(p.id)} accountsReady={accounts != null} accountsError={accountsError} onDelete={askDelete} />
           ))}
         </div>
       )}
 
+      <CreatePortfolioModal
+        open={createOpen}
+        onClose={() => setCreateOpen(false)}
+        onCreated={(created) => {
+          setCreateOpen(false)
+          if (created.id != null) navigate(`/portfolios/${created.id}/edit`)
+        }}
+      />
       <ConfirmModal spec={confirm} onClose={() => setConfirm(null)} />
     </section>
   )
 }
 
-/** 组合列表卡。抽成组件以便每卡独立用 useViewTransitionState 挂共享名（共享元素 FLIP）。 */
+/** 组合列表卡。抽成组件以便每卡独立用 useViewTransitionState 挂共享名（共享元素 FLIP）。目标态由页面层统一取数后传入。 */
 function PortfolioCard({
   p,
+  targetState,
   followers,
   accountsReady,
   accountsError,
   onDelete,
 }: {
   p: PortfolioLite
+  targetState: PortfolioTargetState
   followers: AccountDashboardItem[]
   accountsReady: boolean
   accountsError: Error | null
   onDelete: (p: PortfolioLite) => void
 }) {
   const navigate = useNavigate()
-  const to = `/portfolios/${p.id}`
-  const target = usePolling(
-    useCallback(
-      (signal: AbortSignal) => getPortfolioTargetSnapshot(p.id!, signal),
-      [p.id],
-    ),
-    { queryKey: `portfolio:${p.id}:target-snapshot`, intervalMs: 0, enabled: p.id != null },
-  )
-  const targetState = portfolioTargetState(target.data, target.loading, target.error, target.stale)
-  // 仅「正在跳去本组合详情」时给组合名挂共享名，与详情头配对做平移放大。
+  const to = `/portfolios/${p.id}/edit`
+  // 仅「正在跳去本组合工作台」时给组合名挂共享名，与工作台标题槽配对做平移放大。
   const nameVt = useViewTransitionState(to)
   return (
     <Card
-      className="flex min-h-[260px] min-w-0 flex-col px-5 py-5 transition-transform hover:-translate-y-px"
+      className="h-full border px-6 py-4 transition-transform hover:-translate-y-px"
       onClick={() => navigate(to)}
     >
-      <div className="flex min-w-0 items-start justify-between gap-4">
-        <div className="min-w-0">
-          <div
-            className="truncate text-[17px] font-[640]"
-            style={nameVt && p.id != null ? { viewTransitionName: `portfolio-name-${p.id}` } : undefined}
-          >
-            {p.name}
-          </div>
-          <div className="mt-2 flex flex-wrap items-center gap-2">
-            <Chip>{p.market}</Chip>
-            <Chip>自定义函数</Chip>
-          </div>
+      <div className="flex min-w-0 items-center gap-3">
+        <div
+          className="min-w-0 truncate text-[16px] font-[620]"
+          style={nameVt && p.id != null ? { viewTransitionName: portfolioNameVtName(p.id) } : undefined}
+        >
+          {p.name}
         </div>
-        <div className="flex flex-none items-center gap-2" onClick={(e) => e.stopPropagation()}>
+        <Chip className="flex-none">{p.market}</Chip>
+        <div className="ml-auto flex flex-none items-center gap-2" onClick={(e) => e.stopPropagation()}>
           <Tooltip content="编辑组合">
             <button
               type="button"
               aria-label="编辑组合"
               className="grid h-8 w-8 cursor-pointer place-items-center rounded-lg border border-line text-ink-2 hover:border-ink-3/40 hover:text-ink-1"
-              onClick={() => navigate(to + '/edit')}
+              onClick={() => navigate(to)}
             >
               <Pencil size={14} aria-hidden />
             </button>
@@ -199,7 +244,7 @@ function PortfolioCard({
 
       <TargetSummary state={targetState} />
 
-      <div className="mt-auto flex min-w-0 flex-wrap items-end justify-between gap-3 border-t border-line pt-3.5 text-[13.5px] text-ink-3">
+      <div className="mt-3 flex min-w-0 flex-wrap items-center justify-between gap-3 border-t border-line pt-3 text-[13.5px] text-ink-3">
         <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2">
           {accountsError ? (
             <span className="text-warn">绑定关系暂不可用</span>
@@ -220,11 +265,15 @@ function PortfolioCard({
 function TargetSummary({ state }: { state: PortfolioTargetState }) {
   if (state.kind === 'loading') {
     return (
-      <div className="mt-4 grid grid-cols-3 gap-5 border-t border-line pt-3.5" aria-busy="true" aria-label="正在读取组合目标">
+      <div className="mt-3 grid grid-cols-3 gap-5 border-t border-line pt-3" aria-busy="true" aria-label="正在读取组合目标">
         {Array.from({ length: 3 }, (_, index) => (
           <div key={index}><Skeleton className="h-3 w-14" /><Skeleton className="mt-2 h-4 w-20" /></div>
         ))}
-        <Skeleton className="col-span-3 h-3 w-2/3 max-w-[460px]" />
+        <div className="col-span-3 mt-1.5 flex gap-1.5" aria-hidden="true">
+          {Array.from({ length: 4 }, (_, index) => (
+            <Skeleton key={index} className="h-6 w-28" />
+          ))}
+        </div>
       </div>
     )
   }
@@ -236,7 +285,7 @@ function TargetSummary({ state }: { state: PortfolioTargetState }) {
         ? '尚无目标快照'
         : '目标为空仓'
     return (
-      <div className="mt-4 flex min-h-[62px] items-center border-t border-line pt-3.5">
+      <div className="mt-3 flex min-h-[62px] items-center border-t border-line pt-3">
         <span className={`text-[14px] ${state.kind === 'unavailable' ? 'text-warn' : 'text-ink-3'}`}>{text}</span>
       </div>
     )
@@ -244,21 +293,13 @@ function TargetSummary({ state }: { state: PortfolioTargetState }) {
 
   const { summary } = state
   return (
-    <div className="mt-4 border-t border-line pt-3.5">
+    <div className="mt-3 border-t border-line pt-3">
       <div className="grid grid-cols-3 gap-3">
         <Metric label="目标品种" value={`${summary.activeCount} 个`} quiet />
         <Metric label="总敞口" value={formatTargetWeight(summary.grossExposure, false)} />
         <Metric label="净敞口" value={formatTargetWeight(summary.netExposure)} valueClass={targetDirectionClass(summary.netExposure)} />
       </div>
-      <div className="mt-3 grid min-h-[42px] grid-cols-2 gap-x-4 gap-y-1.5 text-[13.5px] text-ink-2">
-        {summary.topEntries.map((entry) => (
-          <div key={entry.symbol} className="flex min-w-0 items-center justify-between gap-2">
-            <span className="truncate" title={entry.symbol}>{entry.symbol}</span>
-            <span className={`flex-none font-[550] ${targetDirectionClass(entry.weight)}`}>{formatTargetWeight(entry.weight)}</span>
-          </div>
-        ))}
-      </div>
-      {summary.hiddenCount > 0 && <div className="mt-1.5 text-[12.5px] text-ink-3">另有 {summary.hiddenCount} 个目标品种</div>}
+      <TargetChips entries={summary.entries} />
     </div>
   )
 }

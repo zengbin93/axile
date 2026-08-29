@@ -11,19 +11,6 @@ import {
   type TimerTab,
 } from '@/features/setup/cron'
 
-/** 组合流草稿。 */
-export interface PortfolioDraft {
-  name: string
-  market: string
-  customCode: string
-  /** 最近一次由系统写入模板时对应的 canonical market。 */
-  templateMarket: string | null
-  /** 当前函数的试跑结论；改动源码即清空，供「下一步」软拦截读取。 */
-  verified: { ok: boolean } | null
-  /** 保存后回填的组合 ID。 */
-  savedId: number | null
-}
-
 /** 账户流草稿。 */
 export interface AccountDraft {
   name: string
@@ -53,11 +40,8 @@ export interface AccountDraft {
 }
 
 interface WizardState {
-  pf: PortfolioDraft
   acct: AccountDraft
-  setPf: (patch: Partial<PortfolioDraft>) => void
   setAcct: (patch: Partial<AccountDraft>) => void
-  resetPf: () => void
   resetAcct: () => void
 }
 
@@ -68,15 +52,6 @@ export function defaultLeveragesForChannel(channel: TradeChannel) {
     longLeverage: String(defaults?.long_leverage ?? 1),
     shortLeverage: String(defaults?.short_leverage ?? 1),
   }
-}
-
-const initialPf: PortfolioDraft = {
-  name: '我的趋势组合',
-  market: '',
-  customCode: '',
-  templateMarket: null,
-  verified: null,
-  savedId: null,
 }
 
 export function initialTimerForSchedule(schedule: ScheduleKind) {
@@ -113,12 +88,9 @@ const initialAcct: AccountDraft = {
   selectedRuleId: '',
 }
 
-/** 建号/建组合向导的跨步骤草稿。 */
+/** 建号向导的跨步骤草稿。组合新建不走向导：列表页弹层创建后直接进编辑器。 */
 export const useWizardStore = create<WizardState>((set) => ({
-  pf: { ...initialPf },
   acct: { ...initialAcct },
-  setPf: (patch) => set((s) => ({ pf: { ...s.pf, ...patch } })),
   setAcct: (patch) => set((s) => ({ acct: { ...s.acct, ...patch } })),
-  resetPf: () => set({ pf: { ...initialPf } }),
   resetAcct: () => set({ acct: { ...initialAcct } }),
 }))

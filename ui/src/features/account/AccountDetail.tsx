@@ -540,7 +540,7 @@ export function AccountDetail({
                     {' · 组合 '}
                     {/* 组合名是自由文本、长度无界：槽位截断 + hover 原地播全名（OverflowText 既有模式）。 */}
                     <Link
-                      to={`/portfolios/${portfolioId}`}
+                      to={`/portfolios/${portfolioId}/edit`}
                       className="inline-flex min-w-0 max-w-60 align-middle font-semibold text-accent hover:underline"
                     >
                       <OverflowText className="min-w-0" text={portfolioName ?? `#${portfolioId}`} />

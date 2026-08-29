@@ -1,11 +1,7 @@
 import { describe, expect, it } from 'bun:test'
 
 import type { ChannelCapability } from '@/types/api'
-import {
-  portfolioMarketOptions,
-  portfolioTemplate,
-  selectPortfolioMarket,
-} from './portfolioMarkets'
+import { portfolioMarketOptions, portfolioTemplate } from './portfolioMarkets'
 
 function channel(
   market: string,
@@ -58,7 +54,6 @@ describe('portfolio market presets', () => {
   const stocksChannel = channel('ashare', 'A股', ['600000.SH', '000001.SZ'])
   const options = portfolioMarketOptions([futuresChannel, stocksChannel])
   const futures = options[0]!
-  const stocks = options[1]!
 
   it('deduplicates channels in stable market order', () => {
     const duplicate = channel('ctp', '另一个期货渠道', ['cu2610'])
@@ -88,65 +83,9 @@ describe('portfolio market presets', () => {
     ])
   })
 
-  it('replaces an untouched system template when the market changes', () => {
-    const current = portfolioTemplate(futures)
-    expect(
-      selectPortfolioMarket(
-        { market: 'ctp', customCode: current, templateMarket: 'ctp' },
-        stocks,
-        [futures, stocks],
-      ),
-    ).toEqual({
-      market: 'ashare',
-      customCode: portfolioTemplate(stocks),
-      templateMarket: 'ashare',
-    })
-  })
-
-  it('initializes an empty draft from the first registered market when its default is absent', () => {
-    expect(
-      selectPortfolioMarket(
-        { market: 'missing-default', customCode: '', templateMarket: null },
-        futures,
-        [futures, stocks],
-      ),
-    ).toEqual({
-      market: 'ctp',
-      customCode: portfolioTemplate(futures),
-      templateMarket: 'ctp',
-    })
-  })
-
-  it('preserves user code when the market changes', () => {
-    const customCode = 'def calculate_portfolio(context):\n    return {}'
-    expect(
-      selectPortfolioMarket(
-        { market: 'ctp', customCode, templateMarket: 'ctp' },
-        stocks,
-        [futures, stocks],
-      ),
-    ).toEqual({ market: 'ashare', customCode, templateMarket: 'ctp' })
-  })
-
-  it('supports explicitly replacing preserved code with the selected market template', () => {
-    const preserved = selectPortfolioMarket(
-      {
-        market: 'ctp',
-        customCode: 'def calculate_portfolio(context):\n    return {}',
-        templateMarket: 'ctp',
-      },
-      stocks,
-      [futures, stocks],
+  it('builds an equal-weight runnable template from example symbols', () => {
+    expect(portfolioTemplate(futures)).toBe(
+      'def calculate_portfolio(context):\n    # 返回 {品种: 目标权重}\n    return {"rb2610": 0.5, "ag2612": 0.5}',
     )
-
-    expect({
-      ...preserved,
-      customCode: portfolioTemplate(stocks),
-      templateMarket: stocks.value,
-    }).toEqual({
-      market: 'ashare',
-      customCode: portfolioTemplate(stocks),
-      templateMarket: 'ashare',
-    })
   })
 })

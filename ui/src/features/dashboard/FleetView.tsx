@@ -124,10 +124,17 @@ export function FleetView({
 
   return (
     <section>
-      <div className="mx-0.5 my-2 mb-6 flex flex-wrap items-center justify-between gap-3">
+      {/* 摘要与创建入口是一个左簇：按钮贴着状态句回答「要加一个在这里」，不甩到宽屏右缘。 */}
+      <div className="mx-0.5 my-2 mb-6 flex flex-wrap items-center gap-3">
         <span className={`inline-flex items-center gap-1.5 text-[17px] font-[640] ${INTEGRITY_TEXT_CLASS[rollup.key]}`}>
           {INTEGRITY_ICON[rollup.key]} {rollup.text}
         </span>
+        <Link
+          to="/setup/acct/channel"
+          className="inline-flex items-center gap-1.5 rounded-chip border border-line px-3 py-1.5 text-[13px] text-ink-2 transition-colors duration-150 hover:border-border-strong hover:text-ink-1 motion-reduce:transition-none"
+        >
+          <Plus size={14} aria-hidden />新建账户
+        </Link>
       </div>
       {sorted.map(({ item }) => (
         <FleetCard
@@ -136,13 +143,6 @@ export function FleetView({
           portfolioName={item.portfolio_id != null ? (portfolioNames.get(item.portfolio_id) ?? null) : null}
         />
       ))}
-      {/* 列表页主动作收尾：末位一张安静的新建入口，不与账户卡争层级。 */}
-      <Link
-        to="/setup/acct/channel"
-        className="flex items-center justify-center gap-1.5 rounded-card border border-dashed border-line py-3 text-[14px] text-ink-3 transition-colors duration-150 hover:border-border-strong hover:text-ink-1 motion-reduce:transition-none"
-      >
-        <Plus size={14} aria-hidden />新建账户
-      </Link>
     </section>
   )
 }

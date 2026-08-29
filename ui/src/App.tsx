@@ -19,13 +19,11 @@ import { ScratchHoldings } from '@/pages/_ScratchHoldings'
 import { AccountHistoryPage } from '@/pages/AccountHistoryPage'
 import { AccountExecutionsPage } from '@/pages/AccountExecutionsPage'
 import { PortfoliosPage } from '@/pages/PortfoliosPage'
-import { PortfolioDetailPage } from '@/pages/PortfolioDetailPage'
 import { PortfolioEditPage } from '@/pages/PortfolioEditPage'
 import { Placeholder } from '@/pages/Placeholder'
 import { SystemConfigPage } from '@/pages/SystemConfigPage'
 import { WizardLayout } from '@/features/setup/WizardLayout'
 import { SetupHub } from '@/pages/setup/SetupHub'
-import { PfName, PfDefine, PfDone } from '@/pages/setup/PortfolioSteps'
 import { CustomCalcDocPage } from '@/pages/docs/CustomCalcDocPage'
 import {
   AcctChannel,
@@ -110,8 +108,7 @@ const router = createBrowserRouter([
           { path: 'accounts/:id/executions', element: <AccountExecutionsPage /> },
           { path: 'accounts/:id/executions/:executionId', element: <ExecutionDetailPage /> },
           { path: 'portfolios', element: <PortfoliosPage /> },
-          { path: 'portfolios/:id', element: <PortfolioDetailPage /> },
-          { path: 'portfolios/:id/edit', element: <PortfolioEditPage /> },
+          { path: 'portfolios/:id/edit', element: <PortfolioEditPage />, handle: { fullBleed: true } },
           { path: 'settings', element: <SystemConfigPage /> },
           { path: 'settings/advanced', element: <SystemConfigPage section="advanced" /> },
           { path: '*', element: <Placeholder title="页面不存在" milestone="—" /> },
@@ -123,9 +120,6 @@ const router = createBrowserRouter([
         element: <WizardLayout />,
         children: [
           { index: true, element: <SetupHub /> },
-          { path: 'pf/name', element: <PfName /> },
-          { path: 'pf/define', element: <PfDefine /> },
-          { path: 'pf/done', element: <PfDone /> },
           { path: 'acct/channel', element: <AcctChannel /> },
           { path: 'acct/connect', element: <AcctConnect /> },
           { path: 'acct/portfolio', element: <AcctPortfolio /> },
