@@ -18,6 +18,7 @@ import { SnapshotResult } from '@/features/portfolio/SnapshotResult'
 import { targetSnapshotText } from '@/features/portfolio/targetSnapshotDisplay'
 import { targetWeightSummary } from '@/features/portfolio/portfolioCardSummary'
 import { useCustomCalcValidation } from '@/features/portfolio/useCustomCalcValidation'
+import { portfolioNameVtName } from '@/features/portfolio/viewTransition'
 import { usePolling } from '@/lib/hooks/usePolling'
 import { useTargetSnapshot } from '@/lib/hooks/useTargetSnapshot'
 import {
@@ -88,6 +89,7 @@ export function PortfolioEditPage() {
   const head = pf ?? lite
   const [ready, setReady] = useState(false)
   const [name, setName] = useState(() => lite?.name ?? '')
+  const [editingName, setEditingName] = useState(false)
   const [code, setCode] = useState(() => lite?.custom_calc_py_code ?? '')
   const [original, setOriginal] = useState(() => ({ name: lite?.name ?? '', code: lite?.custom_calc_py_code ?? '' }))
   const [saving, setSaving] = useState(false)
@@ -422,24 +424,37 @@ export function PortfolioEditPage() {
             className="flex min-h-0 w-full flex-col overflow-y-auto border-line bg-surface px-3 py-2.5 md:border-r"
           >
           <div className="group/name flex flex-none items-center gap-2">
-            <input
-              aria-label="组合名称"
-              title="编辑组合名称"
-              className="min-w-0 flex-1 border-b border-line/70 bg-transparent px-0 py-0.5 text-[15px] font-[640] leading-snug text-ink-1 outline-none transition-colors duration-200 hover:border-ink-3 focus:border-accent"
-              style={tDetail ? { viewTransitionName: `portfolio-name-${portfolioId}` } : undefined}
-              value={name}
-              placeholder="组合名称"
-              onChange={(event) => {
-                setName(event.target.value)
-                setSaveError(null)
-              }}
-            />
+            <div className="relative min-w-0 flex-1">
+              <span
+                aria-hidden
+                className={`pointer-events-none absolute inset-0 flex items-center ${editingName && !tDetail ? 'invisible' : ''}`}
+              >
+                <span
+                  className="max-w-full truncate text-[15px] font-[640] leading-snug text-ink-1"
+                  style={tDetail ? { viewTransitionName: portfolioNameVtName(portfolioId) } : undefined}
+                >
+                  {name}
+                </span>
+              </span>
+              <input
+                aria-label="组合名称"
+                title="编辑组合名称"
+                className={`w-full min-w-0 border-b border-line/70 bg-transparent px-0 py-0.5 text-[15px] font-[640] leading-snug outline-none transition-colors duration-200 hover:border-ink-3 focus:border-accent ${
+                  editingName && !tDetail ? 'text-ink-1' : 'text-transparent caret-transparent'
+                }`}
+                value={name}
+                placeholder="组合名称"
+                onFocus={() => setEditingName(true)}
+                onBlur={() => setEditingName(false)}
+                onChange={(event) => {
+                  setName(event.target.value)
+                  setSaveError(null)
+                }}
+              />
+            </div>
             {/* 市场是身份元数据：只读中性胶囊，与列表卡同位（不做编辑入口，依赖缺口是已知问题）。 */}
             {head?.market && (
-              <Chip
-                className="max-w-32 truncate"
-                style={tDetail ? { viewTransitionName: `portfolio-market-${portfolioId}` } : undefined}
-              >
+              <Chip className="max-w-32 truncate">
                 {head.market}
               </Chip>
             )}

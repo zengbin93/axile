@@ -10,6 +10,7 @@ import { ErrorNotice } from '@/components/ui/ErrorNotice'
 import { CreatePortfolioModal } from '@/features/portfolio/CreatePortfolioModal'
 import { TargetChips } from '@/features/portfolio/TargetChips'
 import { usePortfoliosTargets } from '@/features/portfolio/usePortfoliosTargets'
+import { portfolioNameVtName } from '@/features/portfolio/viewTransition'
 import {
   portfolioRollup,
   PORTFOLIO_ROLLUP_ICON,
@@ -211,7 +212,7 @@ function PortfolioCard({
       <div className="flex min-w-0 items-center gap-3">
         <div
           className="min-w-0 truncate text-[16px] font-[620]"
-          style={nameVt && p.id != null ? { viewTransitionName: `portfolio-name-${p.id}` } : undefined}
+          style={nameVt && p.id != null ? { viewTransitionName: portfolioNameVtName(p.id) } : undefined}
         >
           {p.name}
         </div>
