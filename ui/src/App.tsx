@@ -19,7 +19,6 @@ import { ScratchHoldings } from '@/pages/_ScratchHoldings'
 import { AccountHistoryPage } from '@/pages/AccountHistoryPage'
 import { AccountExecutionsPage } from '@/pages/AccountExecutionsPage'
 import { PortfoliosPage } from '@/pages/PortfoliosPage'
-import { PortfolioDetailPage } from '@/pages/PortfolioDetailPage'
 import { PortfolioEditPage } from '@/pages/PortfolioEditPage'
 import { Placeholder } from '@/pages/Placeholder'
 import { SystemConfigPage } from '@/pages/SystemConfigPage'
@@ -109,7 +108,6 @@ const router = createBrowserRouter([
           { path: 'accounts/:id/executions', element: <AccountExecutionsPage /> },
           { path: 'accounts/:id/executions/:executionId', element: <ExecutionDetailPage /> },
           { path: 'portfolios', element: <PortfoliosPage /> },
-          { path: 'portfolios/:id', element: <PortfolioDetailPage /> },
           { path: 'portfolios/:id/edit', element: <PortfolioEditPage />, handle: { fullBleed: true } },
           { path: 'settings', element: <SystemConfigPage /> },
           { path: 'settings/advanced', element: <SystemConfigPage section="advanced" /> },

@@ -1,21 +1,36 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { useParams, useViewTransitionState } from 'react-router'
-import { Clipboard, ChevronDown, Pencil, Play } from 'lucide-react'
+import { Clipboard, ChevronDown, Pencil, Play, RefreshCw, Zap } from 'lucide-react'
 import { Link } from '@/components/ui/nav'
 import { Chip } from '@/components/ui/Card'
 import { Skeleton } from '@/components/ui/Skeleton'
 import { ErrorNotice } from '@/components/ui/ErrorNotice'
 import { InkRewrite } from '@/components/ui/InkRewrite'
 import { Select } from '@/components/ui/Select'
+import { Segmented } from '@/components/ui/Segmented'
+import { Tooltip } from '@/components/ui/Tooltip'
+import { ConfirmModal, type ConfirmSpec } from '@/components/ui/ConfirmModal'
 import { PythonFunctionEditor, type PythonEditorHandle } from '@/components/ui/PythonFunctionEditor'
 import { PythonRunPanel } from '@/components/ui/PythonRunPanel'
 import { channelLabel } from '@/features/dashboard/display'
 import { WeightResult } from '@/features/portfolio/WeightResult'
+import { SnapshotResult } from '@/features/portfolio/SnapshotResult'
+import { targetSnapshotText } from '@/features/portfolio/targetSnapshotDisplay'
+import { targetWeightSummary } from '@/features/portfolio/portfolioCardSummary'
 import { useCustomCalcValidation } from '@/features/portfolio/useCustomCalcValidation'
 import { usePolling } from '@/lib/hooks/usePolling'
-import { getPortfolio, updatePortfolio } from '@/lib/api/portfolios'
+import { useTargetSnapshot } from '@/lib/hooks/useTargetSnapshot'
+import {
+  getPortfolio,
+  getPortfolioTargetSnapshot,
+  refreshPortfolioTargetSnapshot,
+  updatePortfolio,
+} from '@/lib/api/portfolios'
+import { triggerExecute } from '@/lib/api/executions'
 import { useDomainStore } from '@/stores/domain'
+import { useLiveExecStore } from '@/stores/liveExec'
 import { useToastStore } from '@/stores/ui'
+import type { ExecutionTrigger } from '@/types/api'
 
 const DEFAULT_INSPECTOR_WIDTH = 320
 const MIN_INSPECTOR_WIDTH = 260
@@ -65,13 +80,23 @@ export function PortfolioEditPage() {
   const accounts = useDomainStore((state) => state.accounts)
   const accountsError = useDomainStore((state) => state.accountsError)
   const refreshPortfolios = useDomainStore((state) => state.refreshPortfolios)
+  const portfolios = useDomainStore((state) => state.portfolios)
+  const pf = portfolio.data
+  // 组合列表已在共享 store 里：先用 lite 预填工作台（L1 消闪，标题槽即时挂上共享名），
+  // 详情到位后再对齐服务端真值。
+  const lite = portfolios?.find((p) => p.id === portfolioId) ?? null
+  const head = pf ?? lite
   const [ready, setReady] = useState(false)
-  const [name, setName] = useState('')
-  const [code, setCode] = useState('')
-  const [original, setOriginal] = useState({ name: '', code: '' })
+  const [name, setName] = useState(() => lite?.name ?? '')
+  const [code, setCode] = useState(() => lite?.custom_calc_py_code ?? '')
+  const [original, setOriginal] = useState(() => ({ name: lite?.name ?? '', code: lite?.custom_calc_py_code ?? '' }))
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<Error | null>(null)
-  const [resultOpen, setResultOpen] = useState(false)
+  const [confirm, setConfirm] = useState<ConfirmSpec | null>(null)
+  const [actionError, setActionError] = useState<Error | null>(null)
+  // 「目标」面板默认展开生效 tab：这是组合域的「当前事实」，多数进来是为看它或试跑。
+  const [resultOpen, setResultOpen] = useState(true)
+  const [targetTab, setTargetTab] = useState<'effective' | 'trial'>('effective')
   const [problemsOpen, setProblemsOpen] = useState(false)
   const [followersOpen, setFollowersOpen] = useState(true)
   const [inspectorWidth, setInspectorWidth] = useState(initialInspectorWidth)
@@ -84,29 +109,47 @@ export function PortfolioEditPage() {
   const editorPaneRef = useRef<HTMLDivElement>(null)
   const inspectorRef = useRef<HTMLDivElement>(null)
   const inspectorControlsRef = useRef<HTMLElement>(null)
-  const pf = portfolio.data
 
+  // 基线同步：lite 先预填，详情到位后再对齐服务端真值；用户已动过的输入不覆盖，
+  // 只把基线对齐，避免 dirty 误判。
   useEffect(() => {
-    if (!pf || ready) return
-    setName(pf.name)
-    setCode(pf.custom_calc_py_code)
-    setOriginal({ name: pf.name, code: pf.custom_calc_py_code })
-    setReady(true)
-  }, [pf, ready])
+    if (ready) return
+    const source = pf ?? lite
+    if (!source) return
+    const untouched = name === original.name && code === original.code
+    setOriginal({ name: source.name, code: source.custom_calc_py_code })
+    if (untouched) {
+      setName(source.name)
+      setCode(source.custom_calc_py_code)
+    }
+    if (pf) setReady(true)
+  }, [pf, lite, ready, name, code, original])
 
   const followers = useMemo(
     () => (accounts ?? []).filter((account) => account.portfolio_id === portfolioId),
     [accounts, portfolioId],
   )
+  const anyFollowerRunning = useLiveExecStore((state) =>
+    followers.some((follower) => state.running.has(follower.account_id)),
+  )
+
+  // 生效目标：持久快照（账户下次调仓实际使用的权重），与试跑结果分属两个来源，
+  // 由「目标」面板的 生效/试跑 分段显式命名。
+  const weights = useTargetSnapshot(
+    useCallback((s: AbortSignal) => getPortfolioTargetSnapshot(portfolioId, s), [portfolioId]),
+    useCallback(() => refreshPortfolioTargetSnapshot(portfolioId), [portfolioId]),
+    `portfolio:${portfolioId}:target-snapshot`,
+  )
 
   // 试跑状态机（与初始化向导共用）：上下文选择、结果、stale、Ctrl+Enter 的回调目标。
   const calc = useCustomCalcValidation(code)
 
-  // 成功只展开返回值（左列），失败只展开问题（右列贴代码）；两列是独立 split pane。
+  // 成功只展开返回值（左列）并切到试跑分段，失败只展开问题（右列贴代码）；两列是独立 split pane。
   useEffect(() => {
     if (!calc.editorResult) return
     if (calc.editorResult.valid) {
       setResultOpen(true)
+      setTargetTab('trial')
       setProblemsOpen(false)
     } else {
       setProblemsOpen(true)
@@ -114,8 +157,87 @@ export function PortfolioEditPage() {
     }
   }, [calc.editorResult])
 
-  // 组合名 + 市场 chip 共享元素：详情 hero ↔ 本页左栏标题槽（同账户域「详情头 ↔ 标题槽」协议）。
-  const tDetail = useViewTransitionState(`/portfolios/${portfolioId}`)
+  // 组合名 + 市场 chip 共享元素：列表卡 ↔ 本页左栏标题槽（匹配过渡的任一端，列表直达工作台）。
+  const tDetail = useViewTransitionState(`/portfolios/${portfolioId}/edit`)
+
+  // 通知全部跟随账户立即按最新目标调仓：逐个触发、结果汇总（与在途执行合并 / 失败计数）。
+  const runFanout = () => {
+    if (followers.length === 0) return
+    const names = followers.map((follower) => follower.name).join('、')
+    setConfirm({
+      title: '全部跟随账户立即执行',
+      body: `通知跟随本组合的账户（${names}）立即按最新目标调仓。若目标未变，多数会空跑、几乎不增成本。`,
+      okText: '通知执行',
+      onConfirm: async () => {
+        setActionError(null)
+        const results = await Promise.allSettled(followers.map((follower) => triggerExecute(follower.account_id)))
+        const failed = results.filter((result): result is PromiseRejectedResult => result.status === 'rejected')
+        const coalesced = results.filter(
+          (result): result is PromiseFulfilledResult<ExecutionTrigger> =>
+            result.status === 'fulfilled' && result.value.accepted === 'coalesced',
+        ).length
+        if (failed.length > 0) {
+          const queued = failed.every((result) => String(result.reason).includes('已有调仓'))
+          setActionError(
+            new Error(
+              queued ? '账户正在清仓或无法再排队，请稍后再试' : `${failed.length} 个账户通知失败，请稍后再试`,
+            ),
+          )
+          return
+        }
+        toast(
+          coalesced > 0
+            ? `已通知调仓，${coalesced} 个与等待中的执行合并`
+            : `已通知 ${followers.length} 个账户立即调仓`,
+        )
+      },
+    })
+  }
+
+  const snapshotContextName =
+    accounts?.find((account) => account.account_id === weights.data?.context_account_id)?.name
+    ?? (weights.data?.context_account_id != null ? `#${weights.data.context_account_id}` : null)
+  const snapshotStatusText = weights.data?.calculated_at
+    ? weights.error
+      ? '目标更新失败'
+      : `目标更新于 ${weights.data.calculated_at.slice(11, 16)}`
+    : weights.error
+      ? '目标不可用'
+      : weights.loading
+        ? '正在读取目标…'
+        : '目标未计算'
+  // 生效 tab 时头部状态行改述快照新旧（不是试跑的 pass/fail），重算入口贴着它影响的状态。
+  const snapshotStatus = (
+    <span className="ml-auto flex items-center gap-1 px-3.5 text-[12.5px]">
+      <span
+        title={targetSnapshotText(weights.data, snapshotContextName)}
+        className={weights.error ? 'text-warn' : 'text-ink-3'}
+      >
+        <InkRewrite text={snapshotStatusText} tone="label" />
+      </span>
+      <Tooltip
+        content={
+          anyFollowerRunning
+            ? '账户正在执行，结束后可重新计算'
+            : weights.recalculating
+              ? '正在重新计算目标权重'
+              : '重新计算当前目标权重'
+        }
+      >
+        <span className="inline-flex flex-none">
+          <button
+            type="button"
+            onClick={() => void weights.recalculate()}
+            disabled={anyFollowerRunning || weights.loading || weights.recalculating}
+            aria-label={weights.recalculating ? '正在重新计算目标权重' : '重新计算当前目标权重'}
+            className="grid h-6 w-6 cursor-pointer place-items-center rounded-md text-ink-3 hover:bg-fill hover:text-ink-1 disabled:cursor-default disabled:opacity-40 disabled:hover:bg-transparent"
+          >
+            <RefreshCw size={14} className={weights.recalculating ? 'animate-spin motion-reduce:animate-none' : undefined} />
+          </button>
+        </span>
+      </Tooltip>
+    </span>
+  )
 
   const dirty = name.trim() !== original.name || code !== original.code
   // 只让当前代码的语法错误阻止保存；继续编辑后，旧试跑结果已 stale，不应误锁。
@@ -158,14 +280,29 @@ export function PortfolioEditPage() {
   }
 
   // 七条轨道始终同构：控制区 / 弹性留白 / 结果标题 / 结果正文 / 分隔条 / 跟随账户标题 / 跟随账户正文。
-  // 标题的固定 36px 与正文 fr 分离，避免 minmax 在触及下限时切换算法造成高度回弹。
-  const inspectorRows = resultOpen && followersOpen
-    ? `auto minmax(0, 0fr) 36px minmax(0, ${panelSplit}fr) 5px 36px minmax(0, ${1 - panelSplit}fr)`
-    : resultOpen
-      ? 'auto minmax(0, 0fr) 36px minmax(0, 1fr) 0px 36px minmax(0, 0fr)'
-      : followersOpen
-        ? 'auto minmax(0, 0fr) 36px minmax(0, 0fr) 0px 36px minmax(0, 1fr)'
-        : 'auto minmax(0, 1fr) 36px minmax(0, 0fr) 0px 36px minmax(0, 0fr)'
+  // 正文高度由内容驱动：有真内容（权重列表 / 跟随账户）的轨道才 fr 分高，否则 auto 贴
+  // 内容一行、剩余空间沉底；弹性留白只在两侧都不分高时 1fr（把面板钉在列底，与双收起的
+  // 待遇一致），其余时间 0fr 让位。标题的固定 36px 与正文轨分离，避免 minmax 在触及下限
+  // 时切换算法造成高度回弹。
+  // 生效 tab 的加载骨架 / 错误提示属占位内容，同样占位分高；空仓与未试跑只有一行文案。
+  // 坑（实测）：grid 里所有 fr 系数之和 < 1 时，fr 轨只吸收系数占比的剩余空间，余下的会被
+  // auto 轨（Stretch auto Tracks 步）吃掉——所以单独成轨时必须用 1fr，只有双方都分高时才
+  // 用 panelSplit / 1-panelSplit（两者恒和为 1）。
+  const resultContentful =
+    targetTab === 'effective'
+      ? (weights.loading && weights.data == null) ||
+        weights.error != null ||
+        weights.recalculateError != null ||
+        (weights.data?.calculated_at != null &&
+          targetWeightSummary(weights.data.weights).entries.length > 0)
+      : Boolean(calc.result?.valid && calc.result?.target)
+  const resultFr = resultOpen && resultContentful
+  const followersFr = followersOpen && followers.length > 0
+  const inspectorRows = `auto minmax(0, ${resultFr || followersFr ? '0fr' : '1fr'}) 36px ${
+    !resultOpen ? 'minmax(0, 0fr)' : resultFr ? `minmax(0, ${followersFr ? panelSplit : 1}fr)` : 'auto'
+  } ${resultFr && followersFr ? '5px' : '0px'} 36px ${
+    !followersOpen ? 'minmax(0, 0fr)' : followersFr ? `minmax(0, ${resultFr ? 1 - panelSplit : 1}fr)` : 'auto'
+  }`
 
   // 右列轨道：代码区 / 分隔条 / 问题标题 / 问题正文；收起时正文归零、分隔条让位。
   const editorRows = problemsOpen
@@ -231,7 +368,8 @@ export function PortfolioEditPage() {
     editorRef.current?.focus()
   }
 
-  if (portfolio.loading || (!pf && !portfolio.error) || (pf && !ready)) {
+  // 有 lite 即可渲染工作台（标题槽即时挂共享名）；全空才骨架，加载失败且无 lite 才报错。
+  if (!pf && !lite && !portfolio.error) {
     return (
       <section className="mx-auto flex h-full w-full max-w-[1440px] flex-col">
         <div className="flex min-h-0 flex-1 flex-col gap-6 md:flex-row md:gap-8">
@@ -252,10 +390,10 @@ export function PortfolioEditPage() {
       </section>
     )
   }
-  if (portfolio.error || !pf) {
+  if (portfolio.error && !pf) {
     return (
       <section>
-        <ErrorNotice title="组合加载失败" error={portfolio.error ?? new Error('组合不存在')} onRetry={portfolio.refresh} />
+        <ErrorNotice title="组合加载失败" error={portfolio.error} onRetry={portfolio.refresh} />
       </section>
     )
   }
@@ -294,13 +432,13 @@ export function PortfolioEditPage() {
                 setSaveError(null)
               }}
             />
-            {/* 市场是身份元数据：只读中性胶囊，与详情 hero 同位（不做编辑入口，依赖缺口是已知问题）。 */}
-            {pf.market && (
+            {/* 市场是身份元数据：只读中性胶囊，与列表卡同位（不做编辑入口，依赖缺口是已知问题）。 */}
+            {head?.market && (
               <Chip
                 className="max-w-32 truncate"
                 style={tDetail ? { viewTransitionName: `portfolio-market-${portfolioId}` } : undefined}
               >
-                {pf.market}
+                {head.market}
               </Chip>
             )}
             {!dirty && (
@@ -311,6 +449,10 @@ export function PortfolioEditPage() {
               />
             )}
           </div>
+          {/* 描述是身份说明、不可编辑（接口只收名称与代码）：名称下一行小字，不占工作台的注意力预算。 */}
+          {head?.description && (
+            <p className="mt-1.5 text-[12.5px] leading-5 text-ink-3">{head.description}</p>
+          )}
 
           <div className="flex-none">
             <div className="mt-4 flex flex-col gap-1.5">
@@ -353,36 +495,54 @@ export function PortfolioEditPage() {
 
           <div aria-hidden />
 
+          {/* 「目标」面板：一个槽位、两个显式命名的来源——生效（持久快照，事实）/ 试跑（假设）。
+              头部状态行随分段切换语义；试跑成功自动切到试跑分段（对应当前的自动展开）。 */}
           <PythonRunPanel
             kind="result"
+            title="目标"
             open={resultOpen}
             onToggle={() => setResultOpen((open) => !open)}
             className="border-line border-t md:border-r"
             running={calc.validating}
             result={calc.editorResult}
-            stale={calc.stale}
+            stale={targetTab === 'trial' && calc.stale}
+            headerExtra={(
+              <div className="flex flex-none items-center px-2">
+                <Segmented
+                  size="sm"
+                  value={targetTab}
+                  options={[
+                    { value: 'effective', label: '生效' },
+                    { value: 'trial', label: '试跑' },
+                  ]}
+                  onChange={setTargetTab}
+                />
+              </div>
+            )}
+            statusOverride={targetTab === 'effective' ? snapshotStatus : undefined}
+            contentOverride={targetTab === 'effective' ? <SnapshotResult weights={weights} /> : undefined}
             resultContent={calc.result?.valid && calc.result.target ? <WeightResult target={calc.result.target} /> : null}
           />
 
           <div
             role="separator"
-            aria-label="调整试跑结果与跟随账户的高度"
+            aria-label="调整目标面板与跟随账户的高度"
             aria-orientation="horizontal"
             aria-valuemin={20}
             aria-valuemax={80}
             aria-valuenow={Math.round(panelSplit * 100)}
-            tabIndex={resultOpen && followersOpen ? 0 : -1}
-            inert={!(resultOpen && followersOpen)}
+            tabIndex={resultFr && followersFr ? 0 : -1}
+            inert={!(resultFr && followersFr)}
             title="拖动分配面板高度 · 双击平均分配"
             className={`group relative z-10 cursor-row-resize touch-none outline-none md:border-r md:border-line ${
-              resultOpen && followersOpen ? 'block' : 'invisible'
+              resultFr && followersFr ? 'block' : 'invisible'
             }`}
             onDoubleClick={() => {
               setPanelSplit(0.5)
               window.localStorage.setItem(PANEL_SPLIT_KEY, '0.5')
             }}
             onPointerDown={(event) => {
-              if (!(resultOpen && followersOpen)) return
+              if (!(resultFr && followersFr)) return
               event.preventDefault()
               event.currentTarget.setPointerCapture(event.pointerId)
               setResizingPanels(true)
@@ -441,8 +601,31 @@ export function PortfolioEditPage() {
                 />
                 跟随账户 · {followers.length}
               </button>
+              {/* 动作贴着它的作用对象：通知全部跟随账户立即调仓；有账户在途执行时禁用。 */}
+              {followers.length > 0 && (
+                <Tooltip
+                  content={
+                    anyFollowerRunning
+                      ? '账户正在执行，结束后可通知'
+                      : '通知全部跟随账户按最新目标立即调仓'
+                  }
+                >
+                  <span className="ml-auto inline-flex flex-none items-center pr-2">
+                    <button
+                      type="button"
+                      onClick={runFanout}
+                      disabled={anyFollowerRunning}
+                      className="flex cursor-pointer items-center gap-1 rounded-md px-2 py-1 text-[12px] font-semibold text-ink-2 hover:bg-fill hover:text-ink-1 disabled:cursor-default disabled:opacity-40 disabled:hover:bg-transparent"
+                    >
+                      <Zap size={12} aria-hidden />
+                      立即执行
+                    </button>
+                  </span>
+                </Tooltip>
+              )}
             </header>
             <div inert={!followersOpen} className="min-h-0 flex-1 overflow-auto px-1.5 py-1.5 [scrollbar-gutter:stable]">
+              <ErrorNotice title="触发执行失败" error={actionError} variant="mutation" onRetry={runFanout} />
               {followers.length > 0 ? (
                 <ul className="flex flex-col">
                   {followers.map((account) => (
@@ -702,6 +885,8 @@ export function PortfolioEditPage() {
           </button>
         </div>
       </footer>
+
+      <ConfirmModal spec={confirm} onClose={() => setConfirm(null)} />
     </section>
   )
 }

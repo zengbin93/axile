@@ -18,6 +18,10 @@ export function PythonRunPanel({
   resultContent,
   onRevealError,
   className,
+  title,
+  headerExtra,
+  statusOverride,
+  contentOverride,
 }: {
   kind: 'result' | 'problems'
   open: boolean
@@ -29,15 +33,23 @@ export function PythonRunPanel({
   resultContent?: ReactNode
   onRevealError?: (line: number) => void
   className?: string
+  /** 覆盖默认标题（「试跑结果」/「问题」）：双来源面板（如 生效/试跑 分段）改名用。 */
+  title?: string
+  /** 标题按钮与状态行之间的头部插槽（如 Segmented 分段）。 */
+  headerExtra?: ReactNode
+  /** 覆盖头部右侧状态行：内容语义不由试跑状态机描述时（如生效快照的新旧）。 */
+  statusOverride?: ReactNode
+  /** 整体覆盖正文：调用方自带内容结构时跳过内置的试跑结果/问题分支。 */
+  contentOverride?: ReactNode
 }) {
   const status = pythonRunStatus(running, result, stale)
   const style = PYTHON_RUN_STYLE[status]
   const failed = result != null && !result.valid
-  const title = kind === 'result' ? '试跑结果' : '问题'
+  const panelTitle = title ?? (kind === 'result' ? '试跑结果' : '问题')
 
   return (
     <section
-      aria-label={title}
+      aria-label={panelTitle}
       className={`row-span-2 grid min-h-0 overflow-hidden bg-surface [grid-template-rows:subgrid] ${className ?? ''}`}
     >
       <header className={`flex h-9 flex-none items-stretch ${open ? 'border-b border-line' : ''}`}>
@@ -54,8 +66,10 @@ export function PythonRunPanel({
             aria-hidden
             className={`text-ink-3 transition-transform duration-200 motion-reduce:transition-none ${open ? '' : '-rotate-90'}`}
           />
-          {title}
+          {panelTitle}
         </button>
+        {headerExtra}
+        {statusOverride ?? (
         <span className="ml-auto flex items-center gap-1.5 px-3.5 text-[12.5px]">
           {status === 'pass' && kind === 'result' ? (
             <Check size={13} className="text-accent" />
@@ -70,13 +84,15 @@ export function PythonRunPanel({
             textClassName={failed && kind === 'problems' ? 'text-warn' : style.text}
           />
         </span>
+        )}
       </header>
 
       <div
         inert={!open}
         className={`min-h-0 flex-1 overflow-auto px-3.5 py-3 [scrollbar-gutter:stable] ${stale ? 'opacity-55' : ''}`}
       >
-        {kind === 'result' ? (
+        {contentOverride ?? (
+        kind === 'result' ? (
           result?.valid ? (
             (resultContent ?? <p className="text-[13.5px] text-ink-2">函数执行成功。</p>)
           ) : failed ? (
@@ -111,6 +127,7 @@ export function PythonRunPanel({
           <p className="text-[13.5px] text-ink-3">
             {result?.valid ? '未发现执行问题。' : '语法错误和运行异常会显示在这里。'}
           </p>
+        )
         )}
       </div>
     </section>

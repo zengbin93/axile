@@ -200,8 +200,8 @@ function PortfolioCard({
   onDelete: (p: PortfolioLite) => void
 }) {
   const navigate = useNavigate()
-  const to = `/portfolios/${p.id}`
-  // 仅「正在跳去本组合详情」时给组合名挂共享名，与详情头配对做平移放大。
+  const to = `/portfolios/${p.id}/edit`
+  // 仅「正在跳去本组合工作台」时给组合名挂共享名，与工作台标题槽配对做平移放大。
   const nameVt = useViewTransitionState(to)
   return (
     <Card
@@ -222,7 +222,7 @@ function PortfolioCard({
               type="button"
               aria-label="编辑组合"
               className="grid h-8 w-8 cursor-pointer place-items-center rounded-lg border border-line text-ink-2 hover:border-ink-3/40 hover:text-ink-1"
-              onClick={() => navigate(to + '/edit')}
+              onClick={() => navigate(to)}
             >
               <Pencil size={14} aria-hidden />
             </button>
