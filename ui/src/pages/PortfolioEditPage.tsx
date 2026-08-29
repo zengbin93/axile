@@ -89,7 +89,6 @@ export function PortfolioEditPage() {
   const head = pf ?? lite
   const [ready, setReady] = useState(false)
   const [name, setName] = useState(() => lite?.name ?? '')
-  const [editingName, setEditingName] = useState(false)
   const [code, setCode] = useState(() => lite?.custom_calc_py_code ?? '')
   const [original, setOriginal] = useState(() => ({ name: lite?.name ?? '', code: lite?.custom_calc_py_code ?? '' }))
   const [saving, setSaving] = useState(false)
@@ -106,6 +105,7 @@ export function PortfolioEditPage() {
   const [panelSplit, setPanelSplit] = useState(initialPanelSplit)
   const [editorSplit, setEditorSplit] = useState(initialEditorSplit)
   const [resizingPanels, setResizingPanels] = useState(false)
+  const nameEditorRef = useRef<HTMLDivElement>(null)
   const editorRef = useRef<PythonEditorHandle>(null)
   const workbenchRef = useRef<HTMLDivElement>(null)
   const editorPaneRef = useRef<HTMLDivElement>(null)
@@ -424,33 +424,38 @@ export function PortfolioEditPage() {
             className="flex min-h-0 w-full flex-col overflow-y-auto border-line bg-surface px-3 py-2.5 md:border-r"
           >
           <div className="group/name flex flex-none items-center gap-2">
-            <div className="relative min-w-0 flex-1">
-              <span
-                aria-hidden
-                className={`pointer-events-none absolute inset-0 flex items-center ${editingName && !tDetail ? 'invisible' : ''}`}
-              >
-                <span
-                  className="max-w-full truncate text-[15px] font-[640] leading-snug text-ink-1"
-                  style={tDetail ? { viewTransitionName: portfolioNameVtName(portfolioId) } : undefined}
-                >
-                  {name}
-                </span>
-              </span>
-              <input
+            <div
+              className="min-w-0 flex-1 cursor-text border-b border-line/70 py-0.5 transition-colors duration-200 hover:border-ink-3 focus-within:border-accent"
+              onClick={() => nameEditorRef.current?.focus()}
+            >
+              <div
+                ref={nameEditorRef}
+                role="textbox"
                 aria-label="组合名称"
+                aria-multiline="false"
                 title="编辑组合名称"
-                className={`w-full min-w-0 border-b border-line/70 bg-transparent px-0 py-0.5 text-[15px] font-[640] leading-snug outline-none transition-colors duration-200 hover:border-ink-3 focus:border-accent ${
-                  editingName && !tDetail ? 'text-ink-1' : 'text-transparent caret-transparent'
-                }`}
-                value={name}
-                placeholder="组合名称"
-                onFocus={() => setEditingName(true)}
-                onBlur={() => setEditingName(false)}
-                onChange={(event) => {
-                  setName(event.target.value)
+                contentEditable="plaintext-only"
+                suppressContentEditableWarning
+                spellCheck={false}
+                className="w-fit max-w-full min-w-8 overflow-hidden whitespace-nowrap text-[15px] font-[640] leading-snug text-ink-1 outline-none"
+                style={tDetail ? { viewTransitionName: portfolioNameVtName(portfolioId) } : undefined}
+                onBeforeInput={(event) => {
+                  if (event.nativeEvent.inputType === 'insertParagraph' || event.nativeEvent.inputType === 'insertLineBreak') {
+                    event.preventDefault()
+                  }
+                }}
+                onInput={(event) => {
+                  setName(event.currentTarget.textContent ?? '')
                   setSaveError(null)
                 }}
-              />
+                onKeyDown={(event) => {
+                  if (event.key !== 'Enter') return
+                  event.preventDefault()
+                  event.currentTarget.blur()
+                }}
+              >
+                {name}
+              </div>
             </div>
             {/* 市场是身份元数据：只读中性胶囊，与列表卡同位（不做编辑入口，依赖缺口是已知问题）。 */}
             {head?.market && (
