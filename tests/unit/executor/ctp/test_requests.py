@@ -11,7 +11,7 @@ from openctp_ctp import thosttraderapi as td
 
 from axile.common.trade_channel import TradeChannel
 from axile.executor.account_control.exceptions import AccountControlBlockedError
-from axile.executor.ctp.ctp_execute import CTPExecutor, _PendingQuery, _Stage
+from axile.executor.ctp.ctp_execute import CTPExecutor, CtpRequestError, _PendingQuery, _Stage
 from axile.executor.ctp.requests import (
     build_order_cancel,
     build_order_insert,
@@ -387,3 +387,101 @@ def test_place_order_submits_when_session_open(config: CTPAccountConfig, monkeyp
 
     executor._trader_api.ReqOrderInsert.assert_called_once()
     assert len(executor._order_keys) == 1
+
+
+def test_place_order_retries_rate_limit_with_same_order_ref(
+    config: CTPAccountConfig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    executor = _submit_point_executor(config)
+    executor._trader_api.ReqOrderInsert.side_effect = [-3, -3, 0]
+    executor.logger = Mock()
+    _at_clock(monkeypatch, datetime(2026, 8, 24, 21, 29, tzinfo=_SHANGHAI))
+    monkeypatch.setattr("axile.executor.ctp.ctp_execute.time.sleep", Mock())
+
+    executor._place_order_impl("ag2612", OrderDirection.BUY, OrderType.LIMIT, 1, 9000)
+
+    refs = [call.args[0].OrderRef for call in executor._trader_api.ReqOrderInsert.call_args_list]
+    assert refs == ["1", "1", "1"]
+
+
+def test_send_with_retry_retries_flow_control_rejections(monkeypatch: pytest.MonkeyPatch) -> None:
+    executor = CTPExecutor.__new__(CTPExecutor)
+    executor.logger = Mock()
+    send = Mock(side_effect=[-3, -3, 0])
+    sleep = Mock()
+    monkeypatch.setattr("axile.executor.ctp.ctp_execute.time.sleep", sleep)
+
+    assert executor._send_with_retry(send, "查询") == 0
+    assert send.call_count == 3
+    assert sleep.call_args_list == [((0.1,),), ((0.2,),)]
+    assert executor.logger.warning.call_count == 2
+
+
+@pytest.mark.parametrize("code", [-2, -3])
+def test_send_with_retry_accepts_queue_and_rate_limit_retries(code: int, monkeypatch: pytest.MonkeyPatch) -> None:
+    executor = CTPExecutor.__new__(CTPExecutor)
+    executor.logger = Mock()
+    send = Mock(side_effect=[code, 0])
+    monkeypatch.setattr("axile.executor.ctp.ctp_execute.time.sleep", Mock())
+
+    assert executor._send_with_retry(send, "查询") == 0
+    assert send.call_count == 2
+
+
+def test_send_with_retry_does_not_retry_network_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    executor = CTPExecutor.__new__(CTPExecutor)
+    executor.logger = Mock()
+    send = Mock(return_value=-1)
+    sleep = Mock()
+    monkeypatch.setattr("axile.executor.ctp.ctp_execute.time.sleep", sleep)
+
+    with pytest.raises(CtpRequestError, match="return_code=-1"):
+        executor._send_with_retry(send, "报单")
+
+    send.assert_called_once()
+    sleep.assert_not_called()
+
+
+def test_send_with_retry_preserves_last_rate_limit_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    executor = CTPExecutor.__new__(CTPExecutor)
+    executor.logger = Mock()
+    send = Mock(return_value=-3)
+    monkeypatch.setattr("axile.executor.ctp.ctp_execute.time.sleep", Mock())
+
+    with pytest.raises(CtpRequestError, match="return_code=-3"):
+        executor._send_with_retry(send, "查询")
+
+    assert send.call_count == 3
+
+
+def test_query_retries_with_new_request_ids_without_stale_pending_entries(
+    config: CTPAccountConfig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    executor = CTPExecutor.__new__(CTPExecutor)
+    executor._trader_api = Mock()
+    executor._trader_api.ReqQryTradingAccount.side_effect = [-3, -3, 0]
+    executor._timeout = 0.1
+    executor._lock = threading.RLock()
+    executor._query_lock = threading.Lock()
+    executor._request_id = 0
+    executor._pending_queries = {}
+    executor.logger = Mock()
+    monkeypatch.setattr("axile.executor.ctp.ctp_execute.time.sleep", Mock())
+
+    def complete_query() -> None:
+        while executor._trader_api.ReqQryTradingAccount.call_count < 3:
+            threading.Event().wait(0.001)
+        request_id = executor._trader_api.ReqQryTradingAccount.call_args.args[1]
+        executor._query_response(SimpleNamespace(AccountID="100001"), None, request_id, True)
+
+    worker = threading.Thread(target=complete_query)
+    worker.start()
+    try:
+        rows = executor._query("ReqQryTradingAccount", object())
+    finally:
+        worker.join()
+
+    assert [row.AccountID for row in rows] == ["100001"]
+    request_ids = [call.args[1] for call in executor._trader_api.ReqQryTradingAccount.call_args_list]
+    assert request_ids == [1, 2, 3]
+    assert executor._pending_queries == {}
