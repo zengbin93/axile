@@ -6,6 +6,7 @@ import math
 import shutil
 import tempfile
 import threading
+import time
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
@@ -214,6 +215,19 @@ class CTPExecutor(AbstractExecutor, UnifiedCallbackClient):
         if code != 0:
             raise CtpRequestError(f"{name}同步拒绝: return_code={code}")
 
+    def _send_with_retry(self, send, name) -> int:
+        for attempt in range(1, 4):
+            code = send()
+            if code == 0:
+                return code
+            if code not in {-2, -3} or attempt == 3:
+                self._check(code, name)
+            self.logger.warning(
+                "{}同步拒绝: return_code={}，{} 秒后重试（第 {} 次）", name, code, attempt * 0.1, attempt
+            )
+            time.sleep(attempt * 0.1)
+        raise AssertionError("unreachable")
+
     def _wait(self, stage, name):
         if not stage.done.wait(self._timeout):
             raise TimeoutError(f"{name}超时")
@@ -337,18 +351,29 @@ class CTPExecutor(AbstractExecutor, UnifiedCallbackClient):
 
     def _query(self, name, req):
         with self._query_lock:
-            rid = self._next_id()
-            p = _PendingQuery([], threading.Event())
-            self._pending_queries[rid] = p
+            pending = None
+            pending_rid = None
+
+            def send():
+                nonlocal pending, pending_rid
+                pending_rid = self._next_id()
+                pending = _PendingQuery([], threading.Event())
+                self._pending_queries[pending_rid] = pending
+                code = getattr(self._trader_api, name)(req, pending_rid)
+                if code != 0:
+                    self._pending_queries.pop(pending_rid, None)
+                return code
+
+            self._send_with_retry(send, name)
+            assert pending is not None and pending_rid is not None
             try:
-                self._check(getattr(self._trader_api, name)(req, rid), name)
-                if not p.done.wait(self._timeout):
+                if not pending.done.wait(self._timeout):
                     raise TimeoutError(f"{name}超时")
-                if p.error:
-                    raise p.error
-                return list(p.rows)
+                if pending.error:
+                    raise pending.error
+                return list(pending.rows)
             finally:
-                self._pending_queries.pop(rid, None)
+                self._pending_queries.pop(pending_rid, None)
 
     def _query_response(self, row, info, rid, last):
         p = self._pending_queries.get(rid)
@@ -520,7 +545,7 @@ class CTPExecutor(AbstractExecutor, UnifiedCallbackClient):
         }
         self._order_keys[oid] = key
         try:
-            self._check(self._trader_api.ReqOrderInsert(r, self._next_id()), "报单")
+            self._send_with_retry(lambda: self._trader_api.ReqOrderInsert(r, self._next_id()), "报单")
         except Exception:
             self._order_keys.pop(oid, None)
             raise
@@ -564,7 +589,7 @@ class CTPExecutor(AbstractExecutor, UnifiedCallbackClient):
         if not key:
             raise ValueError(f"找不到订单撤单键: {order_id}")
         r = build_order_cancel(self._config(), symbol=symbol, key=key)
-        self._check(self._trader_api.ReqOrderAction(r, self._next_id()), "撤单")
+        self._send_with_retry(lambda: self._trader_api.ReqOrderAction(r, self._next_id()), "撤单")
         return True
 
     @override
@@ -775,7 +800,7 @@ class CTPExecutor(AbstractExecutor, UnifiedCallbackClient):
         )
         self._option_actions[ref] = record
         try:
-            self._check(getattr(self._trader_api, name)(req, self._next_id()), name)
+            self._send_with_retry(lambda: getattr(self._trader_api, name)(req, self._next_id()), name)
         except Exception:
             self._option_actions.pop(ref, None)
             raise
