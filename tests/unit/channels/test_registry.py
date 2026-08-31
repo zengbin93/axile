@@ -366,7 +366,7 @@ def test_system_parallel_limit_scales_with_available_cpu(
 ) -> None:
     from axile.executor.abstract_executor import capability
 
-    monkeypatch.setattr(capability.os, "sched_getaffinity", lambda _pid: set(range(cpu_count)))
+    monkeypatch.setattr(capability.os, "sched_getaffinity", lambda _pid: set(range(cpu_count)), raising=False)
 
     assert capability._system_max_parallel_symbol_workers() == expected
 
@@ -377,7 +377,7 @@ def test_system_parallel_limit_falls_back_to_cpu_count(monkeypatch: pytest.Monke
     def unavailable(_pid: int) -> set[int]:
         raise OSError("affinity unavailable")
 
-    monkeypatch.setattr(capability.os, "sched_getaffinity", unavailable)
+    monkeypatch.setattr(capability.os, "sched_getaffinity", unavailable, raising=False)
     monkeypatch.setattr(capability.os, "cpu_count", lambda: 4)
 
     assert capability._system_max_parallel_symbol_workers() == 16
