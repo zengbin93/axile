@@ -48,7 +48,7 @@ describe('portfolioTargetSummary', () => {
 
 describe('targetWeightSummary', () => {
   it('为编辑结果汇总品种数量、净敞口和总敞口', () => {
-    const summary = targetWeightSummary({ BTCUSDT: 0.8, ETHUSDT: 0.4, SOLUSDT: -0.2, zero: 0 })
+    const summary = targetWeightSummary({ large: 0.8, medium: 0.4, short: -0.2, zero: 0 })
     expect(summary.activeCount).toBe(3)
     expect(summary.netExposure).toBeCloseTo(1)
     expect(summary.grossExposure).toBeCloseTo(1.4)

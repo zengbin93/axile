@@ -10,7 +10,7 @@ from typing import Any, cast
 from fastapi import APIRouter, HTTPException, Request, Response, status
 from fastapi.responses import StreamingResponse
 from loguru import logger
-from sqlmodel import func, select
+from sqlmodel import col, func, select
 
 from axile.channels import get_channel
 from axile.domain.execution import ExecutionArtifactType, ExecutionTaskStatus
@@ -82,7 +82,7 @@ async def _account_target_public(
                 await session.execute(
                     select(ExecutionArtifact).where(
                         ExecutionArtifact.execution_id == snapshot.execution_id,
-                        ExecutionArtifact.artifact_type.in_(
+                        col(ExecutionArtifact.artifact_type).in_(
                             [ExecutionArtifactType.TARGET_SNAPSHOT, ExecutionArtifactType.EXECUTION_SUMMARY]
                         ),
                     )
