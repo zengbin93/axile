@@ -245,6 +245,168 @@ def test_execute_trade_worker_timeout_follows_standard_input(monkeypatch: pytest
     assert captured_timeouts == [60.0, 240.0]
 
 
+def test_execute_trade_drops_ctp_worker_after_session_recovery_without_replay(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manager = WorkerBackendManager()
+    account = build_account(id=2)
+    standard_input = type("StandardInput", (), {"execution_timeout": 180})()
+    commands: list[str] = []
+    dropped: list[int] = []
+
+    async def fake_prepare(*_args: object, **_kwargs: object) -> dict[str, object]:
+        return {"ready": True}
+
+    async def fake_to_thread(func: object, *args: object) -> WorkerBackendResponse:
+        del func
+        request = args[1]
+        assert isinstance(request, WorkerBackendRequest)
+        commands.append(request.command)
+        return WorkerBackendResponse(
+            request_id=request.request_id,
+            kind="error",
+            channel_type=TradeChannel.CTP,
+            error=WorkerBackendErrorPayload(
+                type="ctp_session_recovery_required",
+                message="ReqQryTradingAccount同步拒绝: return_code=-2",
+                retryable=True,
+            ),
+        )
+
+    async def fake_drop(account_id: int) -> None:
+        dropped.append(account_id)
+
+    monkeypatch.setattr(manager, "prepare_account", fake_prepare)
+    monkeypatch.setattr(asyncio, "to_thread", fake_to_thread)
+    monkeypatch.setattr(manager, "drop_account", fake_drop)
+
+    output, normalized = asyncio.run(
+        manager.execute_trade(
+            account=account,
+            standard_input=standard_input,  # type: ignore[arg-type]
+            standard_input_dict={},
+            audit_input={},
+            execution_id="exec-1",
+            trigger_source="manual",
+            cleanup=True,
+        )
+    )
+
+    assert commands == ["execute_trade"]
+    assert dropped == [2]
+    assert normalized is None
+    assert output.success is False
+    assert output.extra["worker_error"]["type"] == "ctp_session_recovery_required"
+
+
+def test_empty_positions_drops_ctp_worker_after_session_recovery(monkeypatch: pytest.MonkeyPatch) -> None:
+    manager = WorkerBackendManager()
+    account = build_account(id=2)
+    commands: list[str] = []
+    dropped: list[int] = []
+
+    async def fake_prepare(*_args: object, **_kwargs: object) -> dict[str, object]:
+        return {"ready": True}
+
+    async def fake_to_thread(func: object, *args: object) -> WorkerBackendResponse:
+        del func
+        request = args[1]
+        assert isinstance(request, WorkerBackendRequest)
+        commands.append(request.command)
+        return WorkerBackendResponse(
+            request_id=request.request_id,
+            kind="error",
+            channel_type=TradeChannel.CTP,
+            error=WorkerBackendErrorPayload(
+                type="ctp_session_recovery_required",
+                message="ReqQryTradingAccount同步拒绝: return_code=-2",
+                retryable=True,
+            ),
+        )
+
+    async def fake_drop(account_id: int) -> None:
+        dropped.append(account_id)
+
+    monkeypatch.setattr(manager, "prepare_account", fake_prepare)
+    monkeypatch.setattr(asyncio, "to_thread", fake_to_thread)
+    monkeypatch.setattr(manager, "drop_account", fake_drop)
+
+    result = asyncio.run(
+        manager.empty_positions(
+            account=account,
+            empty_kwargs={},
+            audit_input={},
+            execution_id="exec-clear-1",
+        )
+    )
+
+    assert commands == ["empty_positions"]
+    assert dropped == [2]
+    assert result.success is False
+
+
+def test_session_recovery_rebuilds_worker_only_for_the_next_request(monkeypatch: pytest.MonkeyPatch) -> None:
+    manager = WorkerBackendManager()
+    account = build_account(id=2)
+    stale = _FakeHandle()
+    replacement = _FakeHandle()
+    manager._workers[2] = stale
+    spawned: list[int] = []
+
+    def stale_response() -> WorkerBackendResponse:
+        if stale.connection.sent_commands[-1] == "get_account_assets":
+            return WorkerBackendResponse(
+                request_id=stale.connection.last_request_id,
+                kind="error",
+                channel_type=TradeChannel.CTP,
+                error=WorkerBackendErrorPayload(
+                    type="ctp_session_recovery_required",
+                    message="ReqQryTradingAccount同步拒绝: return_code=-2",
+                    retryable=True,
+                ),
+            )
+        return WorkerBackendResponse(
+            request_id=stale.connection.last_request_id,
+            kind="result",
+            output_payload={"shutdown": True},
+        )
+
+    def replacement_response() -> WorkerBackendResponse:
+        if replacement.connection.sent_commands[-1] == "get_account_assets":
+            return WorkerBackendResponse(
+                request_id=replacement.connection.last_request_id,
+                kind="result",
+                output_payload={
+                    "available_cash": 800.0,
+                    "total_asset": 1200.0,
+                    "market_value": 400.0,
+                    "positions": [],
+                },
+            )
+        return WorkerBackendResponse(
+            request_id=replacement.connection.last_request_id,
+            kind="result",
+            output_payload={"shutdown": True},
+        )
+
+    def spawn(account_id: int) -> _FakeHandle:
+        spawned.append(account_id)
+        return replacement
+
+    stale.connection.recv = stale_response  # type: ignore[method-assign]
+    replacement.connection.recv = replacement_response  # type: ignore[method-assign]
+    monkeypatch.setattr(manager, "_spawn_worker", spawn)
+
+    with pytest.raises(WorkerBackendExecutionError, match="return_code=-2"):
+        asyncio.run(manager.get_account_assets(account))
+    assets = asyncio.run(manager.get_account_assets(account))
+
+    assert stale.connection.sent_commands == ["get_account_assets", "shutdown"]
+    assert spawned == [2]
+    assert replacement.connection.sent_commands == ["get_account_assets"]
+    assert assets.total_asset == 1200.0
+
+
 def test_empty_positions_worker_timeout_follows_clear_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
     """清仓 worker 外层等待应使用清仓自己的执行超时并追加 IPC 余量。"""
     manager = WorkerBackendManager()

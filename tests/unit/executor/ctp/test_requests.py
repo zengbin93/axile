@@ -11,7 +11,13 @@ from openctp_ctp import thosttraderapi as td
 
 from axile.common.trade_channel import TradeChannel
 from axile.executor.account_control.exceptions import AccountControlBlockedError
-from axile.executor.ctp.ctp_execute import CTPExecutor, CtpRequestError, _PendingQuery, _Stage
+from axile.executor.ctp.ctp_execute import (
+    CTPExecutor,
+    CtpRequestError,
+    CtpSessionRecoveryRequired,
+    _PendingQuery,
+    _Stage,
+)
 from axile.executor.ctp.requests import (
     build_order_cancel,
     build_order_insert,
@@ -484,4 +490,64 @@ def test_query_retries_with_new_request_ids_without_stale_pending_entries(
     assert [row.AccountID for row in rows] == ["100001"]
     request_ids = [call.args[1] for call in executor._trader_api.ReqQryTradingAccount.call_args_list]
     assert request_ids == [1, 2, 3]
+    assert executor._pending_queries == {}
+
+
+def test_query_promotes_persistent_queue_limit_to_session_recovery(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    executor = CTPExecutor.__new__(CTPExecutor)
+    executor._trader_api = Mock()
+    executor._trader_api.ReqQryTradingAccount.return_value = -2
+    executor._lock = threading.RLock()
+    executor._query_lock = threading.Lock()
+    executor._request_id = 0
+    executor._pending_queries = {}
+    executor.logger = Mock()
+    monkeypatch.setattr("axile.executor.ctp.ctp_execute.time.sleep", Mock())
+
+    with pytest.raises(CtpSessionRecoveryRequired, match="return_code=-2") as error:
+        executor._query("ReqQryTradingAccount", object())
+
+    assert error.value.return_code == -2
+    request_ids = [call.args[1] for call in executor._trader_api.ReqQryTradingAccount.call_args_list]
+    assert request_ids == [1, 2, 3]
+    assert executor._pending_queries == {}
+
+
+def test_query_does_not_promote_mixed_flow_control_rejections_to_session_recovery(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    executor = CTPExecutor.__new__(CTPExecutor)
+    executor._trader_api = Mock()
+    executor._trader_api.ReqQryTradingAccount.side_effect = [-2, -3, -2]
+    executor._lock = threading.RLock()
+    executor._query_lock = threading.Lock()
+    executor._request_id = 0
+    executor._pending_queries = {}
+    executor.logger = Mock()
+    monkeypatch.setattr("axile.executor.ctp.ctp_execute.time.sleep", Mock())
+
+    with pytest.raises(CtpRequestError, match="return_code=-2"):
+        executor._query("ReqQryTradingAccount", object())
+
+    assert executor._pending_queries == {}
+
+
+def test_query_does_not_promote_persistent_rate_limit_to_session_recovery(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    executor = CTPExecutor.__new__(CTPExecutor)
+    executor._trader_api = Mock()
+    executor._trader_api.ReqQryTradingAccount.return_value = -3
+    executor._lock = threading.RLock()
+    executor._query_lock = threading.Lock()
+    executor._request_id = 0
+    executor._pending_queries = {}
+    executor.logger = Mock()
+    monkeypatch.setattr("axile.executor.ctp.ctp_execute.time.sleep", Mock())
+
+    with pytest.raises(CtpRequestError, match="return_code=-3"):
+        executor._query("ReqQryTradingAccount", object())
+
     assert executor._pending_queries == {}

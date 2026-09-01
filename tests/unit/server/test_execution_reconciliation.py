@@ -5,8 +5,10 @@
 
 import asyncio
 
+import pytest
 from loguru import logger
 
+from axile.executor.ctp.ctp_execute import CtpSessionRecoveryRequired
 from axile.executor.models.unified_account_assets import UnifiedAccountAssets
 from axile.server.execution.backend import _capture_before_account_snapshot as capture_before_inline
 from axile.server.execution.execution_summaries import build_symbol_reconciliation
@@ -27,6 +29,11 @@ class _AssetsExecutor:
 
     def get_account_assets(self) -> UnifiedAccountAssets:
         return UnifiedAccountAssets(available_cash=1.0, total_asset=1.0, market_value=0.0, positions=[])
+
+
+class _SessionRecoveryExecutor:
+    def get_account_assets(self) -> UnifiedAccountAssets:
+        raise CtpSessionRecoveryRequired("ReqQryTradingAccount同步拒绝: return_code=-2", return_code=-2)
 
 
 def _long(symbol: str, volume: float) -> dict[str, object]:
@@ -341,3 +348,8 @@ def test_worker_before_capture_variants() -> None:
     assert dump is not None
     assert dump["source"] == "real"
     assert dump["total_asset"] == 1.0
+
+
+def test_worker_before_capture_propagates_session_recovery() -> None:
+    with pytest.raises(CtpSessionRecoveryRequired, match="return_code=-2"):
+        capture_before_worker(_SessionRecoveryExecutor())

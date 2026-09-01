@@ -64,6 +64,8 @@ _DEFAULT_PREPARE_RECV_TIMEOUT_SECONDS = 60.0
 _ACCOUNT_ASSET_RECV_TIMEOUT_SECONDS = 30.0
 """人工账户资产查询的最大等待时限（秒）."""
 
+_CTP_SESSION_RECOVERY_ERROR_TYPE = "ctp_session_recovery_required"
+
 _TERMINATION_POLL_SECONDS = 0.1
 """等待 worker 响应时观察人工终止事件的最大间隔（秒）."""
 
@@ -420,6 +422,23 @@ class WorkerBackendManager:
         return create_termination_controller(execution_id, state.cancel_event)
 
     @staticmethod
+    def _requires_ctp_session_recovery(response: WorkerBackendResponse) -> bool:
+        return (
+            response.kind == "error"
+            and response.channel_type == TradeChannel.CTP
+            and response.error is not None
+            and response.error.type == _CTP_SESSION_RECOVERY_ERROR_TYPE
+        )
+
+    async def _drop_account_after_session_recovery(
+        self,
+        account: Account,
+        response: WorkerBackendResponse,
+    ) -> None:
+        if self._requires_ctp_session_recovery(response):
+            await self.drop_account(_require_account_id(account))
+
+    @staticmethod
     def _build_output(response: WorkerBackendResponse) -> UnifiedStandardOutput:
         if response.output_payload is None:
             raise WorkerBackendExecutionError("worker backend 未返回执行结果")
@@ -528,6 +547,7 @@ class WorkerBackendManager:
             _ACCOUNT_ASSET_RECV_TIMEOUT_SECONDS,
         )
         if response.kind != "result" or response.output_payload is None:
+            await self._drop_account_after_session_recovery(account, response)
             message = response.error.message if response.error is not None else "账户资产查询失败"
             raise WorkerBackendExecutionError(message)
         return UnifiedAccountAssets.model_validate(response.output_payload)
@@ -632,6 +652,7 @@ class WorkerBackendManager:
             ),
             termination_controller,
         )
+        await self._drop_account_after_session_recovery(account, response)
         return self._handle_response(response), response.normalized_symbol_fields
 
     async def empty_positions(
@@ -687,6 +708,7 @@ class WorkerBackendManager:
             ),
             termination_controller,
         )
+        await self._drop_account_after_session_recovery(account, response)
         result = self._handle_response(response)
         if not account.is_started:
             await self.drop_account(_require_account_id(account))
