@@ -283,6 +283,8 @@ class ExecutionSession:
         try:
             pending_orders = self.get_pending_orders()
         except Exception as exc:
+            if bool(getattr(exc, "requires_session_recovery", False)):
+                raise
             self.logger.warning(f"terminate 查询挂单失败: {exc}")
             return []
 
@@ -291,6 +293,8 @@ class ExecutionSession:
             try:
                 canceled = self.cancel_order(order.order_id)
             except Exception as exc:
+                if bool(getattr(exc, "requires_session_recovery", False)):
+                    raise
                 self.logger.warning(f"terminate 撤单失败: order_id={order.order_id}, error={exc}")
                 failed_order_ids.append(order.order_id)
                 continue

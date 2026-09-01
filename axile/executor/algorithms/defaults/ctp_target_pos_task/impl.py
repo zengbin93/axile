@@ -718,6 +718,8 @@ def ctp_target_pos_task_algorithm(executor: ExecutorProtocol, algorithm_input: A
         )
 
     except Exception as e:
+        if bool(getattr(e, "requires_session_recovery", False)):
+            raise
         error_msg = f"{algorithm_name}算法执行失败: {e}"
         executor.logger.error(f"{error_msg}")
         execution_memory["error"] = str(e)

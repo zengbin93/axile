@@ -13,6 +13,7 @@ from axile.executor.algorithms.defaults.ctp_target_pos_task.impl import (
     ctp_target_pos_task_algorithm,
 )
 from axile.executor.constants.order_status import OrderStatus
+from axile.executor.ctp.ctp_execute import CtpSessionRecoveryRequired
 from axile.executor.models.execution_result import ExecutionStatus
 from axile.executor.models.unified_account_assets import Position, PositionDirection, UnifiedAccountAssets
 from axile.executor.models.unified_order import OrderDirection, OrderType, TradeRecord, UnifiedOrder
@@ -264,3 +265,29 @@ def test_target_pos_task_trade_rule_overrides_algorithm_params() -> None:
     assert result.status == ExecutionStatus.SUCCEEDED
     assert [order.extra["offset_flag"] for order in executor.orders] == ["4", "3", "0"]
     assert [order.price for order in executor.orders] == [3199, 3199, 3199]
+
+
+def test_target_pos_task_propagates_session_recovery_from_final_account_query() -> None:
+    class _RecoveryExecutor(_FuturesExecutor):
+        def __init__(self) -> None:
+            super().__init__(TradeChannel.CTP)
+            self.account_asset_calls = 0
+
+        def get_account_assets(self) -> UnifiedAccountAssets:
+            self.account_asset_calls += 1
+            if self.account_asset_calls == 2:
+                raise CtpSessionRecoveryRequired("ReqQryTradingAccount同步拒绝: return_code=-2", return_code=-2)
+            return super().get_account_assets()
+
+    executor = _RecoveryExecutor()
+    algorithm_input = AlgorithmInput(
+        symbol="rb2610",
+        target_volume=-2,
+        trade_rule={},
+        params=CTPTargetPosTaskParams(max_wait_seconds=1),
+    )
+
+    with pytest.raises(CtpSessionRecoveryRequired, match="return_code=-2"):
+        ctp_target_pos_task_algorithm(cast("ExecutorProtocol", executor), algorithm_input)
+
+    assert executor.account_asset_calls == 2
