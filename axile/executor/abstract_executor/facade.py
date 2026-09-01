@@ -172,7 +172,9 @@ class AbstractExecutorFacadeMixin:
         for order in executor.get_pending_orders(None):
             try:
                 canceled = executor.cancel_order(order.symbol, order.order_id)
-            except Exception:
+            except Exception as exc:
+                if bool(getattr(exc, "requires_session_recovery", False)):
+                    raise
                 failed_order_ids.append(order.order_id)
                 continue
 

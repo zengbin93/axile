@@ -4,9 +4,12 @@ from __future__ import annotations
 
 from typing import Any
 
+import pytest
+
 from axile.common.trade_channel import TradeChannel
 from axile.executor.algorithms.utils.order_tracker import ChaseConfig, OrderTracker
 from axile.executor.constants.order_status import OrderStatus
+from axile.executor.ctp.ctp_execute import CtpSessionRecoveryRequired
 from axile.executor.models.order_channel_health import OrderChannelHealth
 from axile.executor.models.unified_account_assets import Position, PositionDirection, UnifiedAccountAssets
 from axile.executor.models.unified_order import OrderDirection, OrderType, UnifiedOrder
@@ -332,6 +335,27 @@ class _ReconcileExecutor(_ChaseExecutor):
     def reconcile_terminal_order(self, symbol: str, order_id: str) -> UnifiedOrder | None:
         self.reconcile_calls.append((symbol, order_id))
         return self.terminal_to_return
+
+
+def test_query_pending_orders_propagates_ctp_session_recovery() -> None:
+    executor = _FakeExecutor()
+    tracker = OrderTracker(executor=executor)
+    tracker.add_order(_build_pending_order("ctp-query-recovery"))
+    recovery = CtpSessionRecoveryRequired("ReqQryOrder同步拒绝: return_code=-2", return_code=-2)
+    executor.get_pending_orders = lambda: (_ for _ in ()).throw(recovery)  # type: ignore[method-assign]
+
+    with pytest.raises(CtpSessionRecoveryRequired, match="return_code=-2"):
+        tracker._query_pending_orders()
+
+
+def test_refresh_timeout_account_assets_propagates_ctp_session_recovery() -> None:
+    executor = _FakeExecutor()
+    tracker = OrderTracker(executor=executor)
+    recovery = CtpSessionRecoveryRequired("ReqQryTradingAccount同步拒绝: return_code=-2", return_code=-2)
+    executor.get_account_assets = lambda: (_ for _ in ()).throw(recovery)  # type: ignore[method-assign]
+
+    with pytest.raises(CtpSessionRecoveryRequired, match="return_code=-2"):
+        tracker._refresh_timeout_account_assets()
 
 
 def test_reconcile_missing_pending_converges_on_ws_frame_loss() -> None:
@@ -677,6 +701,27 @@ def test_chase_leaves_old_order_pending_when_cancel_unconfirmed() -> None:
     assert tracker._chasing_order_id is None, "残留的换单标记会永久压住 all_done 信号"
 
 
+def test_chase_cancel_propagates_ctp_session_recovery_without_fallback() -> None:
+    executor = _ChaseExecutor()
+    tracker = OrderTracker(
+        executor=executor,
+        chase_config=ChaseConfig(enabled=True, ticks=1, max_count=5, interval=0.0),
+    )
+    executor.tracker = tracker
+    order = _build_pending_order("ctp-chase-recovery")
+    tracker.add_order(order, direction=OrderDirection.BUY)
+    tracker.latest_prices[order.symbol] = _wide_spread_price(order.symbol)
+    recovery = CtpSessionRecoveryRequired("ReqQryOrder同步拒绝: return_code=-2", return_code=-2)
+    executor.cancel_order = lambda _order_id: (_ for _ in ()).throw(recovery)  # type: ignore[method-assign]
+
+    with pytest.raises(CtpSessionRecoveryRequired, match="return_code=-2"):
+        tracker._check_and_chase()
+
+    assert executor._placed == 0
+    assert tracker._chasing_order_id is None
+    assert not tracker._chase_info[order.order_id].get("market_order_fallback_pending_cancel", False)
+
+
 def test_chase_proceeds_when_cancel_confirmed() -> None:
     """同步确认撤单的渠道必须照常换单，不受本次改动影响。"""
     executor = _ChaseExecutor()
@@ -692,6 +737,41 @@ def test_chase_proceeds_when_cancel_confirmed() -> None:
     tracker._check_and_chase()
 
     assert executor._placed == 1, "撤单已确认却没有换单"
+
+
+def test_market_fallback_cancel_propagates_ctp_session_recovery_without_marking_failure() -> None:
+    executor = _ChaseExecutor()
+    tracker = OrderTracker(
+        executor=executor,
+        chase_config=ChaseConfig(enabled=True, ticks=1, max_count=0, interval=0.0),
+    )
+    order = _build_pending_order("ctp-fallback-recovery")
+    tracker.add_order(order, direction=OrderDirection.BUY)
+    recovery = CtpSessionRecoveryRequired("ReqQryOrder同步拒绝: return_code=-2", return_code=-2)
+    executor.cancel_order = lambda _order_id: (_ for _ in ()).throw(recovery)  # type: ignore[method-assign]
+
+    with pytest.raises(CtpSessionRecoveryRequired, match="return_code=-2"):
+        tracker._fallback_to_market_order()
+
+    assert executor._placed == 0
+    assert not tracker._chase_info[order.order_id].get("market_order_fallback_failed", False)
+    assert not tracker._chase_info[order.order_id].get("market_order_fallback_pending_cancel", False)
+
+
+def test_market_fallback_cancel_keeps_common_failure_behavior() -> None:
+    executor = _ChaseExecutor()
+    tracker = OrderTracker(
+        executor=executor,
+        chase_config=ChaseConfig(enabled=True, ticks=1, max_count=0, interval=0.0),
+    )
+    order = _build_pending_order("ordinary-fallback-failure")
+    tracker.add_order(order, direction=OrderDirection.BUY)
+    executor.cancel_order = lambda _order_id: (_ for _ in ()).throw(RuntimeError("cancel failed"))  # type: ignore[method-assign]
+
+    tracker._fallback_to_market_order()
+
+    assert tracker._chase_info[order.order_id]["market_order_fallback_failed"] is True
+    assert executor._placed == 0
 
 
 def test_chase_uses_post_cancel_fill_for_remaining_volume() -> None:

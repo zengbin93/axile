@@ -515,6 +515,33 @@ def test_query_promotes_persistent_queue_limit_to_session_recovery(
     assert executor._pending_queries == {}
 
 
+def test_cancel_with_missing_key_promotes_persistent_query_queue_limit_to_session_recovery(
+    config: CTPAccountConfig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    executor = CTPExecutor.__new__(CTPExecutor)
+    executor.account_config = config
+    executor._trader_api = Mock()
+    executor._trader_api.ReqQryOrder.return_value = -2
+    executor._lock = threading.RLock()
+    executor._query_lock = threading.Lock()
+    executor._request_id = 0
+    executor._pending_queries = {}
+    executor._order_keys = {}
+    executor._trading_day = "20260824"
+    executor._front_id = 1
+    executor._session_id = 2
+    executor.logger = Mock()
+    monkeypatch.setattr("axile.executor.ctp.ctp_execute.time.sleep", Mock())
+
+    with pytest.raises(CtpSessionRecoveryRequired, match="return_code=-2"):
+        executor._cancel_order_impl("rb2610", "missing-order")
+
+    request_ids = [call.args[1] for call in executor._trader_api.ReqQryOrder.call_args_list]
+    assert request_ids == [1, 2, 3]
+    assert executor._pending_queries == {}
+    executor._trader_api.ReqOrderAction.assert_not_called()
+
+
 def test_query_does_not_promote_mixed_flow_control_rejections_to_session_recovery(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

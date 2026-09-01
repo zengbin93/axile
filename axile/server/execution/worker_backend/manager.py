@@ -579,7 +579,8 @@ class WorkerBackendManager:
         )
         if response.kind != "result" or response.output_payload is None:
             message = response.error.message if response.error is not None else "自定义组合函数执行失败"
-            await self.drop_account(_require_account_id(account))
+            if not self._requires_ctp_session_recovery(response):
+                await self.drop_account(_require_account_id(account))
             raise WorkerBackendExecutionError(message)
         try:
             result = PortfolioFunctionResult.from_payload(response.output_payload)
@@ -710,7 +711,7 @@ class WorkerBackendManager:
             termination_controller,
         )
         result = self._handle_response(response)
-        if not account.is_started:
+        if not account.is_started and not self._requires_ctp_session_recovery(response):
             await self.drop_account(_require_account_id(account))
         return result
 

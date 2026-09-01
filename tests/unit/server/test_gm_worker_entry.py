@@ -632,6 +632,34 @@ def test_worker_loop_returns_structured_error_for_uncaught_base_exception(
     assert connection.sent[0].error.message == "KeyboardInterrupt()"
 
 
+def test_handle_calculate_portfolio_marks_context_account_ctp_recovery(monkeypatch: pytest.MonkeyPatch) -> None:
+    account = build_account(id=2)
+
+    class _SessionRecoveryExecutor(_FakeWorkerExecutor):
+        def get_account_assets(self) -> UnifiedAccountAssets:
+            raise CtpSessionRecoveryRequired("ReqQryTradingAccount同步拒绝: return_code=-2", return_code=-2)
+
+    monkeypatch.setattr(
+        worker_backend_entry, "_resolve_prepared_executor", lambda **_kwargs: _SessionRecoveryExecutor()
+    )
+    monkeypatch.setattr(worker_backend_entry, "_finalize_executor", lambda _executor: None)
+    request = WorkerBackendRequest(
+        request_id="req-portfolio-session-recovery",
+        command="calculate_portfolio",
+        account_payload=account.model_dump(mode="json"),
+        execution_id="exec-portfolio-session-recovery",
+        payload={"code": "def calculate_portfolio(context):\n    return {'cash': context.account.available_cash}\n"},
+    )
+
+    response = worker_backend_entry._handle_calculate_portfolio(request, worker_backend_entry._WorkerBackendState())
+
+    assert response.kind == "error"
+    assert response.channel_type == TradeChannel.CTP
+    assert response.error is not None
+    assert response.error.type == "ctp_session_recovery_required"
+    assert response.error.retryable is True
+
+
 def test_portfolio_watchdog_exits_stuck_worker(monkeypatch: pytest.MonkeyPatch) -> None:
     exit_codes: list[int] = []
     monkeypatch.setattr(worker_backend_entry.os, "_exit", exit_codes.append)
