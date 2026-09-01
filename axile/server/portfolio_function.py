@@ -123,6 +123,8 @@ def calculate_portfolio_target(code: str, context: Context) -> PortfolioFunction
             raise TypeError("calculate_portfolio 必须且只能接收一个 context 参数")
         return PortfolioFunctionResult(ok=True, target=_normalize_target(function(context)))
     except BaseException as exc:  # noqa: BLE001 - 用户函数错误需结构化返回
+        if bool(getattr(exc, "requires_session_recovery", False)):
+            raise
         return PortfolioFunctionResult(ok=False, error=_error_from_exception(exc))
 
 

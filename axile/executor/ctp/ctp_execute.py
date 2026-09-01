@@ -77,7 +77,15 @@ _ValueT = TypeVar("_ValueT")
 
 
 class CtpRequestError(RuntimeError):
-    pass
+    def __init__(self, message: str, *, return_code: int | None = None) -> None:
+        super().__init__(message)
+        self.return_code = return_code
+
+
+class CtpSessionRecoveryRequired(CtpRequestError):
+    """持续 ``-2`` 表明当前 CTP 会话应由 worker 重建。"""
+
+    requires_session_recovery = True
 
 
 @dataclass
@@ -213,7 +221,7 @@ class CTPExecutor(AbstractExecutor, UnifiedCallbackClient):
     @staticmethod
     def _check(code, name):
         if code != 0:
-            raise CtpRequestError(f"{name}同步拒绝: return_code={code}")
+            raise CtpRequestError(f"{name}同步拒绝: return_code={code}", return_code=code)
 
     def _send_with_retry(self, send, name) -> int:
         for attempt in range(1, 4):
@@ -353,6 +361,7 @@ class CTPExecutor(AbstractExecutor, UnifiedCallbackClient):
         with self._query_lock:
             pending = None
             pending_rid = None
+            return_codes: list[int] = []
 
             def send():
                 nonlocal pending, pending_rid
@@ -360,11 +369,17 @@ class CTPExecutor(AbstractExecutor, UnifiedCallbackClient):
                 pending = _PendingQuery([], threading.Event())
                 self._pending_queries[pending_rid] = pending
                 code = getattr(self._trader_api, name)(req, pending_rid)
+                return_codes.append(code)
                 if code != 0:
                     self._pending_queries.pop(pending_rid, None)
                 return code
 
-            self._send_with_retry(send, name)
+            try:
+                self._send_with_retry(send, name)
+            except CtpRequestError as exc:
+                if return_codes == [-2, -2, -2]:
+                    raise CtpSessionRecoveryRequired(str(exc), return_code=exc.return_code) from exc
+                raise
             assert pending is not None and pending_rid is not None
             try:
                 if not pending.done.wait(self._timeout):

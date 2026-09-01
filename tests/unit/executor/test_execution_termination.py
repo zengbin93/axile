@@ -10,6 +10,7 @@ from axile.common.trade_channel import TradeChannel
 from axile.executor.abstract_executor.base import AbstractExecutor
 from axile.executor.algorithms.utils.clock import get_default_clock, set_default_clock
 from axile.executor.constants.order_status import OrderStatus
+from axile.executor.ctp.ctp_execute import CtpSessionRecoveryRequired
 from axile.executor.execution_runtime import ExecutionRuntime, ExecutionRuntimeBindings
 from axile.executor.execution_session import ExecutionSession
 from axile.executor.models.unified_account_assets import UnifiedAccountAssets
@@ -192,6 +193,32 @@ def test_execution_session_termination_cancel_pending_queries_and_cancels_curren
     assert exc_info.value.cancel_failed_order_ids == ["order-fail"]
     assert exc_info.value.acked_at is not None
     assert executor.cancel_attempts == [("ag2612", "order-fail")]
+
+
+@pytest.mark.parametrize("operation", ["query", "cancel"])
+def test_execution_session_cancel_pending_propagates_session_recovery(operation: str) -> None:
+    executor = _TerminationTestExecutor(execution_orders=[_active_order("ag2612", "order-1")])
+    cancel_event = Event()
+    cancel_event.set()
+    executor.set_termination_controller(
+        ExecutionTerminationController(
+            cancel_event=cancel_event,
+            reason_provider=lambda: "manual stop",
+            mode_provider=lambda: "cancel_pending",
+        )
+    )
+    session = ExecutionSession(owner=executor, symbol="ag2612")
+    recovery = CtpSessionRecoveryRequired("ReqQryOrder同步拒绝: return_code=-2", return_code=-2)
+
+    if operation == "query":
+        session.get_pending_orders = lambda: (_ for _ in ()).throw(recovery)  # type: ignore[method-assign]
+    else:
+        session.cancel_order = lambda _order_id: (_ for _ in ()).throw(recovery)  # type: ignore[method-assign]
+
+    with pytest.raises(CtpSessionRecoveryRequired, match="return_code=-2"):
+        session.handle_termination_checkpoint()
+
+    assert executor.cancel_attempts == []
 
 
 def test_base_executor_handle_termination_checkpoint_only_acknowledges_and_raises() -> None:

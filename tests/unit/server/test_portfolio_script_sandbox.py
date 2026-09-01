@@ -6,8 +6,9 @@ import asyncio
 
 import pytest
 
+from axile.executor.ctp.ctp_execute import CtpSessionRecoveryRequired
 from axile.server import portfolio_targets
-from axile.server.context import build_sample_context
+from axile.server.context import Context, build_sample_context
 from axile.server.execution.worker_backend import manager as worker_manager_module
 from axile.server.portfolio_runner import calculate_sample_portfolio
 from axile.server.portfolio_targets import PortfolioFunctionResult, calculate_portfolio_target
@@ -64,6 +65,18 @@ def test_invalid_target_is_rejected(expression: str, error_type: str) -> None:
     assert not result.ok
     assert result.error is not None
     assert result.error.error_type == error_type
+
+
+def test_function_propagates_ctp_session_recovery_from_context_account() -> None:
+    class _RecoveryExecutor:
+        def get_account_assets(self):
+            raise CtpSessionRecoveryRequired("ReqQryTradingAccount同步拒绝: return_code=-2", return_code=-2)
+
+    with pytest.raises(CtpSessionRecoveryRequired, match="return_code=-2"):
+        calculate_portfolio_target(
+            "def calculate_portfolio(context):\n    return {'cash': context.account.available_cash}\n",
+            Context(_RecoveryExecutor()),  # type: ignore[arg-type]
+        )
 
 
 def test_result_payload_round_trip() -> None:

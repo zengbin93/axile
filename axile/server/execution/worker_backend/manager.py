@@ -64,6 +64,8 @@ _DEFAULT_PREPARE_RECV_TIMEOUT_SECONDS = 60.0
 _ACCOUNT_ASSET_RECV_TIMEOUT_SECONDS = 30.0
 """人工账户资产查询的最大等待时限（秒）."""
 
+_CTP_SESSION_RECOVERY_ERROR_TYPE = "ctp_session_recovery_required"
+
 _TERMINATION_POLL_SECONDS = 0.1
 """等待 worker 响应时观察人工终止事件的最大间隔（秒）."""
 
@@ -115,6 +117,7 @@ class _WorkerBackendHandle:
     connection: Connection
     control_connection: Connection
     request_lock: Lock = field(default_factory=Lock)
+    retired: bool = False
 
 
 class WorkerBackendManager:
@@ -274,6 +277,7 @@ class WorkerBackendManager:
         可在调用方仍持有该锁时安全执行。
         """
         with self._lock:
+            handle.retired = True
             if self._workers.get(account_id) is handle:
                 self._workers.pop(account_id, None)
         self._terminate_process(handle)
@@ -286,7 +290,7 @@ class WorkerBackendManager:
 
     @staticmethod
     def _is_handle_healthy(handle: _WorkerBackendHandle) -> bool:
-        return handle.process.is_alive() and not handle.connection.closed
+        return not handle.retired and handle.process.is_alive() and not handle.connection.closed
 
     def _get_or_create_worker(self, account_id: int) -> _WorkerBackendHandle:
         with self._lock:
@@ -331,48 +335,61 @@ class WorkerBackendManager:
         WorkerBackendExecutionError
             通信失败或响应类型/标识不合法。
         """
-        handle = self._get_or_create_worker(account_id)
-        response: object = None
-        failure: Exception | None = None
-        force_termination = False
-        with handle.request_lock:
-            try:
-                handle.connection.send(request)
-                if termination_controller is None:
-                    if not handle.connection.poll(timeout):
-                        raise WorkerBackendTimeoutError(f"worker backend 响应超时（{timeout}s）")
-                    response = handle.connection.recv()
-                else:
-                    response_deadline = time.monotonic() + timeout
-                    termination_deadline: float | None = None
-                    termination_sent = False
-                    while response is None:
-                        now = time.monotonic()
-                        remaining = response_deadline - now
-                        if remaining <= 0:
+        while True:
+            handle = self._get_or_create_worker(account_id)
+            response: object = None
+            failure: Exception | None = None
+            force_termination = False
+            with handle.request_lock:
+                if handle.retired:
+                    continue
+                try:
+                    handle.connection.send(request)
+                    if termination_controller is None:
+                        if not handle.connection.poll(timeout):
                             raise WorkerBackendTimeoutError(f"worker backend 响应超时（{timeout}s）")
-                        if termination_controller.is_requested() and not termination_sent:
-                            handle.control_connection.send(
-                                WorkerTerminationSignal(
-                                    execution_id=request.execution_id or "",
-                                    reason=termination_controller.reason(),
-                                    mode=termination_controller.mode(),
+                        response = handle.connection.recv()
+                    else:
+                        response_deadline = time.monotonic() + timeout
+                        termination_deadline: float | None = None
+                        termination_sent = False
+                        while response is None:
+                            now = time.monotonic()
+                            remaining = response_deadline - now
+                            if remaining <= 0:
+                                raise WorkerBackendTimeoutError(f"worker backend 响应超时（{timeout}s）")
+                            if termination_controller.is_requested() and not termination_sent:
+                                handle.control_connection.send(
+                                    WorkerTerminationSignal(
+                                        execution_id=request.execution_id or "",
+                                        reason=termination_controller.reason(),
+                                        mode=termination_controller.mode(),
+                                    )
                                 )
-                            )
-                            termination_sent = True
-                            termination_deadline = now + _TERMINATION_GRACE_SECONDS
-                        if termination_deadline is not None and now >= termination_deadline:
-                            force_termination = True
-                            break
-                        wait_for = min(_TERMINATION_POLL_SECONDS, remaining)
-                        if termination_deadline is not None:
-                            wait_for = min(wait_for, max(termination_deadline - now, 0.0))
-                        if handle.connection.poll(wait_for):
-                            response = handle.connection.recv()
-            except (BrokenPipeError, EOFError, OSError, WorkerBackendTimeoutError) as exc:
-                failure = exc
+                                termination_sent = True
+                                termination_deadline = now + _TERMINATION_GRACE_SECONDS
+                            if termination_deadline is not None and now >= termination_deadline:
+                                force_termination = True
+                                break
+                            wait_for = min(_TERMINATION_POLL_SECONDS, remaining)
+                            if termination_deadline is not None:
+                                wait_for = min(wait_for, max(termination_deadline - now, 0.0))
+                            if handle.connection.poll(wait_for):
+                                response = handle.connection.recv()
+                except (BrokenPipeError, EOFError, OSError, WorkerBackendTimeoutError) as exc:
+                    failure = exc
+
+                if failure is None and not force_termination:
+                    if not isinstance(response, WorkerBackendResponse):
+                        raise WorkerBackendExecutionError("worker backend 返回了未知响应类型")
+                    if response.request_id != request.request_id:
+                        raise WorkerBackendExecutionError("worker backend 返回了不匹配的 request_id")
+                    if self._requires_ctp_session_recovery(response):
+                        self._force_drop_worker(account_id, handle)
+            break
 
         if force_termination:
+            assert termination_controller is not None
             self._force_drop_worker(account_id, handle)
             termination_controller.acknowledge_if_requested()
             raise ExecutionTerminated(
@@ -401,11 +418,7 @@ class WorkerBackendManager:
                 f"request_id={request.request_id}; worker_exitcode={exitcode}"
             ) from failure
 
-        if not isinstance(response, WorkerBackendResponse):
-            raise WorkerBackendExecutionError("worker backend 返回了未知响应类型")
-        if response.request_id != request.request_id:
-            raise WorkerBackendExecutionError("worker backend 返回了不匹配的 request_id")
-        return response
+        return cast("WorkerBackendResponse", response)
 
     @staticmethod
     def _termination_controller(execution_id: str | None) -> ExecutionTerminationController | None:
@@ -418,6 +431,15 @@ class WorkerBackendManager:
         if state is None or state.cancel_event is None:
             return None
         return create_termination_controller(execution_id, state.cancel_event)
+
+    @staticmethod
+    def _requires_ctp_session_recovery(response: WorkerBackendResponse) -> bool:
+        return (
+            response.kind == "error"
+            and response.channel_type == TradeChannel.CTP
+            and response.error is not None
+            and response.error.type == _CTP_SESSION_RECOVERY_ERROR_TYPE
+        )
 
     @staticmethod
     def _build_output(response: WorkerBackendResponse) -> UnifiedStandardOutput:
@@ -557,7 +579,8 @@ class WorkerBackendManager:
         )
         if response.kind != "result" or response.output_payload is None:
             message = response.error.message if response.error is not None else "自定义组合函数执行失败"
-            await self.drop_account(_require_account_id(account))
+            if not self._requires_ctp_session_recovery(response):
+                await self.drop_account(_require_account_id(account))
             raise WorkerBackendExecutionError(message)
         try:
             result = PortfolioFunctionResult.from_payload(response.output_payload)
@@ -688,7 +711,7 @@ class WorkerBackendManager:
             termination_controller,
         )
         result = self._handle_response(response)
-        if not account.is_started:
+        if not account.is_started and not self._requires_ctp_session_recovery(response):
             await self.drop_account(_require_account_id(account))
         return result
 

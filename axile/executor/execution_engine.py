@@ -384,6 +384,8 @@ class ExecutionEngine:
                 sizing=task.sizing,
             )
         except Exception as exc:
+            if bool(getattr(exc, "requires_session_recovery", False)):
+                raise
             return self._build_failed_algorithm_result(
                 symbol=task.symbol,
                 algorithm_name=task.algorithm_name,

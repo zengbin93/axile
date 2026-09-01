@@ -9,6 +9,7 @@ import pytest
 from axile.common.trade_channel import TradeChannel
 from axile.executor.abstract_executor.base import AbstractExecutor
 from axile.executor.algorithms.core.base import AlgorithmInput
+from axile.executor.ctp.ctp_execute import CtpSessionRecoveryRequired
 from axile.executor.execution_engine import ExecutionEngine, _PreparedSymbolAlgorithm
 from axile.executor.models.execution_result import ExecutionStatus
 from axile.executor.models.unified_account_assets import UnifiedAccountAssets
@@ -297,6 +298,17 @@ def test_symbol_error_capture_propagates_termination_instead_of_marking_failed()
 
     assert exc_info.value.reason == "manual stop"
     assert exc_info.value.mode == "cancel_pending"
+
+
+def test_symbol_error_capture_propagates_session_recovery() -> None:
+    executor = _LifecycleRecorderExecutor()
+    engine = ExecutionEngine(executor)
+
+    def recovery_runner() -> object:
+        raise CtpSessionRecoveryRequired("ReqQryTradingAccount同步拒绝: return_code=-2", return_code=-2)
+
+    with pytest.raises(CtpSessionRecoveryRequired, match="return_code=-2"):
+        engine._run_symbol_algorithm_with_error_capture(_prepared_task(), runner=recovery_runner)
 
 
 def test_symbol_error_capture_still_converts_generic_error_to_failed_result() -> None:

@@ -17,6 +17,7 @@ from axile.executor.account_control.models import (
 )
 from axile.executor.account_control.presets import resolve_account_control_policy
 from axile.executor.account_control.snapshot import AccountControlCounterSnapshot
+from axile.executor.ctp.ctp_execute import CtpSessionRecoveryRequired
 from axile.executor.models.unified_account_assets import UnifiedAccountAssets
 from axile.executor.models.unified_order import OrderDirection, OrderType, TradeRecord, UnifiedOrder
 from axile.executor.models.unified_price import UnifiedPriceData
@@ -626,6 +627,25 @@ def test_cancel_all_orders_aggregates_false_and_exception_failures() -> None:
         {"order_id": "order-1"},
         {"order_id": "order-2"},
         {"order_id": "order-3"},
+    ]
+
+
+def test_cancel_all_orders_propagates_ctp_session_recovery_without_continuing() -> None:
+    executor = _WrapperExecutor(_build_guard({"query_order": {"per_day": 1}, "cancel_order": {"per_day": 2}}))
+    executor.pending_orders = [
+        _make_pending_order("SHSE.600000", "order-recovery"),
+        _make_pending_order("SZSE.000001", "order-not-attempted"),
+    ]
+    executor.cancel_results = {
+        "order-recovery": CtpSessionRecoveryRequired("ReqQryOrder同步拒绝: return_code=-2", return_code=-2)
+    }
+
+    with pytest.raises(CtpSessionRecoveryRequired, match="return_code=-2"):
+        executor.cancel_all_orders()
+
+    assert executor.raw_calls == [
+        ("pending", None),
+        ("cancel", "SHSE.600000:order-recovery"),
     ]
 
 

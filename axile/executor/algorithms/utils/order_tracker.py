@@ -572,6 +572,8 @@ class OrderTracker:
         try:
             pending_orders = self.executor.get_pending_orders()
         except Exception as exc:
+            if bool(getattr(exc, "requires_session_recovery", False)):
+                raise
             self._logger.warning(f"定时查询挂单状态失败: {format_exception_message(exc)}")
             return
 
@@ -630,6 +632,8 @@ class OrderTracker:
         try:
             return self.executor.get_account_assets()
         except Exception as exc:  # noqa: BLE001
+            if bool(getattr(exc, "requires_session_recovery", False)):
+                raise
             self._logger.warning(f"超时后刷新账户资产失败: {format_exception_message(exc)}")
             return None
 
@@ -799,10 +803,12 @@ class OrderTracker:
                 with self.lock:
                     self._chasing_order_id = None
                 raise
-            except RECOVERABLE_ALGORITHM_EXCEPTIONS as e:
-                self._logger.error(f"追单失败 {symbol}: {e}")
+            except RECOVERABLE_ALGORITHM_EXCEPTIONS as exc:
                 with self.lock:
                     self._chasing_order_id = None
+                if bool(getattr(exc, "requires_session_recovery", False)):
+                    raise
+                self._logger.error(f"追单失败 {symbol}: {exc}")
 
         self._fallback_to_market_order()
 
@@ -990,17 +996,19 @@ class OrderTracker:
                 self._logger.info(f"已请求撤销限价单，等待终态后再执行市价单兜底: {symbol} 订单ID {order_id}")
             except MemoryError:
                 raise
-            except RECOVERABLE_ALGORITHM_EXCEPTIONS as e:
-                self._logger.error(f"市价单兜底前撤单失败 {symbol}: {e}")
+            except RECOVERABLE_ALGORITHM_EXCEPTIONS as exc:
+                if bool(getattr(exc, "requires_session_recovery", False)):
+                    raise
+                self._logger.error(f"市价单兜底前撤单失败 {symbol}: {exc}")
                 self._mark_market_fallback_failed(
                     order_id,
                     reason_code="COMMON.MARKET_FALLBACK_CANCEL_FAILED",
-                    message=f"撤单失败，已停止自动市价兜底: {format_exception_message(e)}",
+                    message=f"撤单失败，已停止自动市价兜底: {format_exception_message(exc)}",
                     symbol=symbol,
                     details={
                         "direction": direction.value,
                         "remaining_volume": float(remaining_volume),
-                        "error": format_exception_message(e),
+                        "error": format_exception_message(exc),
                     },
                 )
 

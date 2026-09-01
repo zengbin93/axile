@@ -10,6 +10,7 @@ import pytest
 
 from axile.common.gm_symbols import normalize_gm_standard_input
 from axile.common.trade_channel import TradeChannel
+from axile.executor.ctp.ctp_execute import CtpSessionRecoveryRequired
 from axile.executor.models.execution_result import AlgorithmResult
 from axile.executor.models.unified_account_assets import UnifiedAccountAssets
 from axile.executor.models.unified_input import UnifiedStandardInput
@@ -477,6 +478,54 @@ def test_handle_execute_trade_exception_returns_structured_error_payload(
     assert getattr(error_payload, "message") == "boom"
 
 
+def test_handle_execute_trade_marks_persistent_ctp_queue_limit_for_session_recovery(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    account = build_account(id=2)
+
+    class _SessionRecoveryExecutor(_FakeWorkerExecutor):
+        def get_account_assets(self) -> UnifiedAccountAssets:
+            raise CtpSessionRecoveryRequired("ReqQryTradingAccount同步拒绝: return_code=-2", return_code=-2)
+
+    monkeypatch.setattr(
+        worker_backend_entry, "_resolve_prepared_executor", lambda **_kwargs: _SessionRecoveryExecutor()
+    )
+    monkeypatch.setattr(worker_backend_entry, "_finalize_executor", lambda _executor: None)
+    monkeypatch.setattr(worker_backend_entry, "_append_trade_pre_execute_audit", lambda **_kwargs: None)
+    monkeypatch.setattr(worker_responses.logger, "exception", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(worker_backend_entry, "_append_failed_audit", lambda **_kwargs: None)
+
+    standard_input = UnifiedStandardInput.from_dict(
+        {
+            "channel_type": TradeChannel.CTP.value,
+            "account_config": account.account_config,
+            "curr_target": {"ag2612": 0.12},
+            "last_target": {},
+            "algorithm": {"method": "SINGLE-MAKER", "params": {}},
+            "trade_rules": account.trade_rules,
+        }
+    )
+    request = WorkerBackendRequest(
+        request_id="req-session-recovery",
+        command="execute_trade",
+        account_payload=account.model_dump(mode="json"),
+        execution_id="exec-session-recovery",
+        payload={
+            "standard_input": standard_input.to_dict(),
+            "audit_input": {},
+            "trigger_source": "manual",
+            "cleanup": True,
+        },
+    )
+
+    response = worker_backend_entry._handle_execute_trade(request, worker_backend_entry._WorkerBackendState())
+
+    assert response.kind == "error"
+    assert response.error is not None
+    assert response.error.type == "ctp_session_recovery_required"
+    assert response.error.retryable is True
+
+
 def test_handle_execute_trade_preserves_original_error_when_failed_audit_raises(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -581,6 +630,34 @@ def test_worker_loop_returns_structured_error_for_uncaught_base_exception(
     assert connection.sent[0].error is not None
     assert connection.sent[0].error.type == "KeyboardInterrupt"
     assert connection.sent[0].error.message == "KeyboardInterrupt()"
+
+
+def test_handle_calculate_portfolio_marks_context_account_ctp_recovery(monkeypatch: pytest.MonkeyPatch) -> None:
+    account = build_account(id=2)
+
+    class _SessionRecoveryExecutor(_FakeWorkerExecutor):
+        def get_account_assets(self) -> UnifiedAccountAssets:
+            raise CtpSessionRecoveryRequired("ReqQryTradingAccount同步拒绝: return_code=-2", return_code=-2)
+
+    monkeypatch.setattr(
+        worker_backend_entry, "_resolve_prepared_executor", lambda **_kwargs: _SessionRecoveryExecutor()
+    )
+    monkeypatch.setattr(worker_backend_entry, "_finalize_executor", lambda _executor: None)
+    request = WorkerBackendRequest(
+        request_id="req-portfolio-session-recovery",
+        command="calculate_portfolio",
+        account_payload=account.model_dump(mode="json"),
+        execution_id="exec-portfolio-session-recovery",
+        payload={"code": "def calculate_portfolio(context):\n    return {'cash': context.account.available_cash}\n"},
+    )
+
+    response = worker_backend_entry._handle_calculate_portfolio(request, worker_backend_entry._WorkerBackendState())
+
+    assert response.kind == "error"
+    assert response.channel_type == TradeChannel.CTP
+    assert response.error is not None
+    assert response.error.type == "ctp_session_recovery_required"
+    assert response.error.retryable is True
 
 
 def test_portfolio_watchdog_exits_stuck_worker(monkeypatch: pytest.MonkeyPatch) -> None:

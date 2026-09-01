@@ -128,7 +128,9 @@ def cancel_pending_orders_via_query(executor: ExecutorProtocol) -> list[str]:
     for order in executor.get_pending_orders():
         try:
             canceled = executor.cancel_order(order.order_id)
-        except Exception:
+        except Exception as exc:
+            if bool(getattr(exc, "requires_session_recovery", False)):
+                raise
             failed_order_ids.append(order.order_id)
             continue
 

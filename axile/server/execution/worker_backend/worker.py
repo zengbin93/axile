@@ -113,6 +113,8 @@ def _capture_before_account_snapshot(executor: object) -> dict[str, object] | No
     try:
         assets = cast(UnifiedAccountAssets, get_account_assets())
     except Exception as exc:  # noqa: BLE001
+        if bool(getattr(exc, "requires_session_recovery", False)):
+            raise
         logger.warning(f"执行前账户快照读取失败，将标记为 unavailable: {exc}")
         return None
     return cast("dict[str, object]", assets.model_dump(mode="json"))
