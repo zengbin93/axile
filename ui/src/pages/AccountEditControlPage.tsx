@@ -1,10 +1,13 @@
 /** 账户流控结构化编辑页。界面只展示中文业务语义，内部键仅用于数据索引。 */
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import type { FocusEvent as ReactFocusEvent } from 'react'
 import { useParams } from 'react-router'
-import { useNavigate } from '@/components/ui/nav'
+import { Pencil } from 'lucide-react'
 import { ErrorNotice } from '@/components/ui/ErrorNotice'
+import { Segmented } from '@/components/ui/Segmented'
 import { Select } from '@/components/ui/Select'
+import { StepperNumberInput } from '@/components/ui/StepperNumberInput'
 import {
   EditError,
   EditLoading,
@@ -49,6 +52,42 @@ const RULES: { key: RuleKey; label: string; unit: string }[] = [
   { key: 'min_interval_ms', label: '最小间隔', unit: '毫秒' },
 ]
 
+/** 规则无值时开始编辑的起始草稿：取常见档位，避免从 1 起步。 */
+const RULE_DRAFT_DEFAULT: Record<RuleKey, number> = {
+  per_minute: 10,
+  per_day: 100,
+  min_interval_ms: 300,
+}
+
+/** 各规则的步进档位：按值域数量级分档（±1 对每日额度是酷刑）。 */
+const RULE_STEP: Record<RuleKey, number> = {
+  per_minute: 1,
+  per_day: 10,
+  min_interval_ms: 100,
+}
+
+/**
+ * 排队优先四档：与后端 priority 实际使用的值一一对应。
+ * 语义是「额度不足需要排队时谁先走」，不是连续谱。
+ */
+const PRIORITY_TIERS = [
+  { key: 'fastest', value: 0, label: '最优先' },
+  { key: 'high', value: 10, label: '高' },
+  { key: 'mid', value: 20, label: '中' },
+  { key: 'normal', value: 100, label: '普通' },
+] as const
+type PriorityTierKey = (typeof PRIORITY_TIERS)[number]['key']
+
+/** 把任意 priority 吸附到最近档位（并列时取更优先的一档）；仅用于显示，不改写原值。 */
+type PriorityTier = (typeof PRIORITY_TIERS)[number]
+function priorityTierOf(priority: number): PriorityTier {
+  let best: PriorityTier = PRIORITY_TIERS[0]
+  for (const tier of PRIORITY_TIERS) {
+    if (Math.abs(tier.value - priority) < Math.abs(best.value - priority)) best = tier
+  }
+  return best
+}
+
 const COMMON_KEYS = ['place_order', 'cancel_order', 'query_order']
 
 function cloneOverride(value: AccountControlOverride | null): AccountControlOverride {
@@ -69,10 +108,57 @@ function scopeSummary(scope: AccountControlScope | null | undefined): string {
 }
 
 function ruleError(key: RuleKey, rule: AccountControlRuleOverride | null | undefined): string | null {
-  if (!rule) return null
+  if (!rule || rule.unlimited) return null
   if (!Number.isInteger(rule.limit) || (rule.limit ?? -1) < 0) return '请输入不小于 0 的整数'
   if (key === 'min_interval_ms' && rule.limit === 0) return '最小间隔必须大于 0'
   return null
+}
+
+/** 「已改」行内标记：默认值提示 + 恢复。只在偏离时出现，正常态不加任何标签。 */
+function ChangedMark({
+  defaultText,
+  onRestore,
+  restoreLabel,
+}: {
+  defaultText: string
+  onRestore: () => void
+  restoreLabel: string
+}) {
+  return (
+    <span className="flex items-baseline gap-2 text-[12px]">
+      <span className="text-accent">已改</span>
+      <span className="text-ink-3">默认 {defaultText}</span>
+      <button
+        type="button"
+        className="cursor-pointer border-0 bg-transparent p-0 text-[12px] font-semibold text-accent"
+        onClick={onRestore}
+        aria-label={restoreLabel}
+      >
+        恢复
+      </button>
+    </span>
+  )
+}
+
+/**
+ * 可编辑行的公共骨架：标签是钉死的锚（不参与过渡）；值槽内查看/编辑两层
+ * 常挂叠放（grid 同格），切换只做 opacity 双向交叉——无空窗、无挂载跳变。
+ * 隐藏层 inert + aria-hidden，焦点与读屏不误入；行高恒定 min-h-10。
+ */
+const ROW_BASE = 'group -mx-2 flex min-h-10 items-center gap-x-2.5 rounded-[8px] px-2 py-1.5 transition-colors'
+const VALUE_BUTTON = 'flex cursor-pointer items-center gap-x-2.5 border-0 bg-transparent p-0 text-left'
+const PENCIL = 'h-3 w-3 text-ink-3 transition-colors group-hover:text-accent'
+const CELL = 'col-start-1 row-start-1 flex min-w-0 items-center gap-x-2.5 transition-opacity duration-200 motion-reduce:transition-none'
+const CELL_HIDDEN = 'pointer-events-none opacity-0'
+
+/** 达到额度后的行为：两选项平铺（分段控件）。 */
+const TRIGGER_CHOICES: { value: AccountControlTrigger; label: string }[] = [
+  { value: 'wait', label: '排队' },
+  { value: 'block', label: '阻断' },
+]
+
+function triggerText(trigger: AccountControlTrigger | undefined): string {
+  return trigger === 'block' ? '超了直接阻断' : '超了排队等待'
 }
 
 function ControlRuleField({
@@ -89,64 +175,135 @@ function ControlRuleField({
   const meta = RULES.find((item) => item.key === ruleKey)!
   const active = Boolean(custom)
   const effective = resolveAccountControlRule(preset, custom)
-  const error = ruleError(ruleKey, custom)
-  const zeroWarning = ruleKey !== 'min_interval_ms' && custom?.limit === 0
-  const begin = () => onChange({ limit: effective?.limit ?? 1, on_trigger: effective?.on_trigger ?? 'wait' })
+  /** min_interval_ms 是渠道硬保护，不允许显式不限制 */
+  const allowUnlimited = ruleKey !== 'min_interval_ms'
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState('')
+  const [trigger, setTrigger] = useState<AccountControlTrigger>('wait')
+  const [unlimited, setUnlimited] = useState(false)
+
+  const inputRef = useRef<HTMLInputElement>(null)
+  const editCellRef = useRef<HTMLDivElement>(null)
+  const viewButtonRef = useRef<HTMLButtonElement>(null)
+  const wasEditing = useRef(false)
+  const exitRefocus = useRef(false)
+
+  // 焦点随层切换：进编辑聚焦输入框（不预选数字，光标落在末尾）；「不限」模式下输入框
+  // 不渲染，焦点落在编辑层容器上（保住 Esc 与失焦提交）。键盘退出（Enter/Esc）焦点还给
+  // 值按钮，失焦退出（点了别处）不抢焦点。
+  useEffect(() => {
+    if (editing) {
+      if (unlimited) editCellRef.current?.focus()
+      else inputRef.current?.focus()
+    } else if (wasEditing.current && exitRefocus.current) {
+      viewButtonRef.current?.focus()
+    }
+    wasEditing.current = editing
+  }, [editing, unlimited])
+
+  const min = ruleKey === 'min_interval_ms' ? 1 : 0
+  const parsed = Number(draft)
+  const draftValid = draft.trim() !== '' && Number.isInteger(parsed) && parsed >= min
+  const draftError = editing && !unlimited && !draftValid ? `请输入不小于 ${min} 的整数` : null
+  const zeroWarning = editing && !unlimited && draftValid && ruleKey !== 'min_interval_ms' && parsed === 0
+
+  const begin = () => {
+    setUnlimited(allowUnlimited && Boolean(custom?.unlimited))
+    setDraft(String(effective?.limit ?? RULE_DRAFT_DEFAULT[ruleKey]))
+    setTrigger(effective?.on_trigger ?? 'wait')
+    setEditing(true)
+  }
+  /** 提交即落覆盖：用户语义里「改没改」由恢复表达，不做等值归净。 */
+  const commit = (refocus = false) => {
+    if (draftError) return
+    exitRefocus.current = refocus
+    onChange(unlimited && allowUnlimited ? { unlimited: true } : { limit: parsed, on_trigger: trigger })
+    setEditing(false)
+  }
+  const cancel = (refocus = false) => {
+    exitRefocus.current = refocus
+    setEditing(false)
+  }
+  /** 焦点离开编辑层：合法则提交，非法则放弃（不写脏数据）。 */
+  const blurCommit = (event: ReactFocusEvent<HTMLDivElement>) => {
+    if (event.currentTarget.contains(event.relatedTarget)) return
+    if (draftError) cancel()
+    else commit()
+  }
+  const valueText = effective ? `${effective.limit} ${meta.unit}` : '不限制'
+  const behaviorText = effective ? `· ${triggerText(effective.on_trigger)}` : null
 
   return (
-    <div className="border-t border-line/70 py-3 first:border-t-0">
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-        <span className="w-24 flex-none text-[14px] text-ink-2">{meta.label}</span>
-        <span className="num min-w-0 flex-1 text-[14px] text-ink-1">
-          {effective ? `${effective.limit} ${meta.unit}` : '不限制'}
-          {active && <span className="ml-2 text-[12px] text-ink-3">预设 {preset ? `${preset.limit} ${meta.unit}` : '不限制'}</span>}
-        </span>
-        <span className={`text-[12px] ${active ? 'text-accent' : 'text-ink-3'}`}>
-          {active ? '自定义' : '使用预设值'}
-        </span>
-        <button
-          type="button"
-          className="cursor-pointer border-0 bg-transparent text-[13px] font-semibold text-accent"
-          onClick={() => (active ? onChange(null) : begin())}
-        >
-          {active ? '恢复预设值' : preset ? '修改' : '设置限制'}
-        </button>
-      </div>
-      <div
-        inert={!active}
-        className={`grid transition-[grid-template-rows] duration-200 motion-reduce:transition-none ${active ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'}`}
-      >
-        <div className="min-h-0 overflow-hidden">
-          <div className="ml-0 mt-2 flex flex-col gap-2 rounded-[9px] bg-canvas/70 px-3 py-3 sm:ml-24 sm:flex-row sm:items-center">
-            <label className="flex items-center gap-2 text-[13px] text-ink-2">
-              <input
-                className="num w-24 rounded-[8px] border border-ink-3/25 bg-surface px-2.5 py-1.5 text-right text-[14px] outline-none focus:border-accent"
-                type="number"
-                min={ruleKey === 'min_interval_ms' ? 1 : 0}
-                step={1}
-                value={custom?.limit ?? ''}
-                onChange={(event) => onChange({ ...custom, limit: Number(event.target.value), on_trigger: custom?.on_trigger ?? 'wait' })}
+    <div className="border-t border-line/70 first:border-t-0">
+      <div className={`${ROW_BASE} ${editing ? '' : 'hover:bg-fill'}`}>
+        <span className="w-24 flex-none text-[13px] text-ink-2">{meta.label}</span>
+        <div className="grid min-w-0 flex-1">
+          {/* 查看层 */}
+          <div className={`${CELL} ${editing ? CELL_HIDDEN : 'opacity-100'}`} inert={editing} aria-hidden={editing}>
+            <button ref={viewButtonRef} type="button" className={VALUE_BUTTON} onClick={begin} aria-label={`调整${meta.label}`}>
+              <span className="num text-[14px] text-ink-1 transition-colors group-hover:text-accent">{valueText}</span>
+              {behaviorText && <span className="text-[12px] text-ink-3">{behaviorText}</span>}
+              <Pencil className={PENCIL} aria-hidden />
+            </button>
+            {active && (
+              <ChangedMark
+                defaultText={preset ? `${preset.limit} ${meta.unit}` : '不限制'}
+                onRestore={() => onChange(null)}
+                restoreLabel={`恢复${meta.label}默认值`}
               />
-              {meta.unit}
-            </label>
-            <span className="text-[13px] text-ink-3">达到额度后</span>
-            <Select<AccountControlTrigger>
-              ariaLabel={`${meta.label}达到额度后的动作`}
-              value={custom?.on_trigger ?? 'wait'}
-              onChange={(on_trigger) => onChange({ ...custom, limit: custom?.limit ?? effective?.limit ?? 1, on_trigger })}
-              options={[
-                { value: 'wait', label: '等待后继续', hint: '等待至下一可用时刻' },
-                { value: 'block', label: '立即阻断', hint: '本次请求不再等待' },
-              ]}
-            />
+            )}
           </div>
-          {(error || zeroWarning) && (
-            <p className="ml-0 mt-1 text-[12px] text-warn sm:ml-24">
-              {error ?? '0 次会阻断所有此类请求。'}
-            </p>
-          )}
+          {/* 编辑层 */}
+          <div
+            ref={editCellRef}
+            tabIndex={-1}
+            className={`${CELL} outline-none ${editing ? 'opacity-100' : CELL_HIDDEN}`}
+            inert={!editing}
+            aria-hidden={!editing}
+            onBlur={blurCommit}
+            onKeyDown={(event) => {
+              if (event.key === 'Escape') cancel(true)
+            }}
+          >
+            {allowUnlimited && unlimited ? (
+              <span className="text-[13px] text-ink-3">不限制{meta.label}</span>
+            ) : (
+              <>
+                <StepperNumberInput
+                  ref={inputRef}
+                  size="sm"
+                  ariaLabel={meta.label}
+                  invalid={Boolean(draftError)}
+                  value={draft}
+                  onChange={setDraft}
+                  step={RULE_STEP[ruleKey]}
+                  min={min}
+                  unit={meta.unit}
+                  displayValue={draftValid ? parsed : undefined}
+                  onEnter={() => commit(true)}
+                />
+                <span className="text-[13px] text-ink-3">· 超额后</span>
+                <Segmented<AccountControlTrigger> size="sm" value={trigger} onChange={setTrigger} options={TRIGGER_CHOICES} />
+              </>
+            )}
+            {/* 「不限」是极少切换的元决策：降为行尾小字切换，不占行首视觉首位。 */}
+            {allowUnlimited && (
+              <button
+                type="button"
+                className="ml-auto flex-none cursor-pointer border-0 bg-transparent p-0 text-[11px] text-ink-3 transition-colors hover:text-accent"
+                onClick={() => setUnlimited((value) => !value)}
+              >
+                {unlimited ? '设置限额' : '改为不限'}
+              </button>
+            )}
+          </div>
         </div>
       </div>
+      {editing && (draftError || zeroWarning) && (
+        <p className="mt-0.5 px-2 text-[12px] text-warn sm:ml-24 sm:px-0">
+          {draftError ?? '0 次会阻断所有此类请求。'}
+        </p>
+      )}
     </div>
   )
 }
@@ -167,45 +324,68 @@ function ControlPriorityField({
 }) {
   const active = custom != null
   const effective = custom ?? preset
-  const error = priorityError(custom)
+  const tier = priorityTierOf(effective)
+  const [editing, setEditing] = useState(false)
+  const editCellRef = useRef<HTMLDivElement>(null)
+  const viewButtonRef = useRef<HTMLButtonElement>(null)
+  const wasEditing = useRef(false)
+  const exitRefocus = useRef(false)
+
+  useEffect(() => {
+    if (editing) editCellRef.current?.focus()
+    else if (wasEditing.current && exitRefocus.current) viewButtonRef.current?.focus()
+    wasEditing.current = editing
+  }, [editing])
+
+  const choose = (key: PriorityTierKey) => {
+    exitRefocus.current = true
+    onChange(PRIORITY_TIERS.find((item) => item.key === key)!.value)
+    setEditing(false)
+  }
+  const dismiss = (refocus = false) => {
+    exitRefocus.current = refocus
+    setEditing(false)
+  }
 
   return (
-    <div className="py-3">
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-        <span className="w-24 flex-none text-[14px] text-ink-2">调度顺序</span>
-        <span className="num min-w-0 flex-1 text-[14px] text-ink-1">
-          {effective}
-          {active && <span className="ml-2 text-[12px] text-ink-3">预设 {preset}</span>}
-        </span>
-        <span className={`text-[12px] ${active ? 'text-accent' : 'text-ink-3'}`}>
-          {active ? '自定义' : '小值优先'}
-        </span>
-        <button
-          type="button"
-          className="cursor-pointer border-0 bg-transparent text-[13px] font-semibold text-accent"
-          onClick={() => onChange(active ? null : effective)}
-        >
-          {active ? '恢复预设值' : '修改'}
-        </button>
-      </div>
-      <div
-        inert={!active}
-        className={`grid transition-[grid-template-rows] duration-200 motion-reduce:transition-none ${active ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'}`}
-      >
-        <div className="min-h-0 overflow-hidden">
-          <div className="ml-0 mt-2 flex items-center gap-2 rounded-[9px] bg-canvas/70 px-3 py-3 sm:ml-24">
-            <input
-              aria-label="调度顺序"
-              aria-invalid={Boolean(error)}
-              className="num w-24 rounded-[8px] border border-ink-3/25 bg-surface px-2.5 py-1.5 text-right text-[14px] outline-none focus:border-accent"
-              type="number"
-              step={1}
-              value={custom ?? ''}
-              onChange={(event) => onChange(Number(event.target.value))}
+    <div className={`${ROW_BASE} ${editing ? '' : 'hover:bg-fill'}`}>
+      <span className="w-24 flex-none text-[13px] text-ink-2">排队优先</span>
+      <div className="grid min-w-0 flex-1">
+        {/* 查看层 */}
+        <div className={`${CELL} ${editing ? CELL_HIDDEN : 'opacity-100'}`} inert={editing} aria-hidden={editing}>
+          <button ref={viewButtonRef} type="button" className={VALUE_BUTTON} onClick={() => setEditing(true)} aria-label="调整排队优先">
+            <span className="text-[14px] text-ink-1 transition-colors group-hover:text-accent">{tier.label}</span>
+            <Pencil className={PENCIL} aria-hidden />
+          </button>
+          {active && (
+            <ChangedMark
+              defaultText={priorityTierOf(preset).label}
+              onRestore={() => onChange(null)}
+              restoreLabel="恢复排队优先默认值"
             />
-            <span className="text-[13px] text-ink-3">数值越小越先执行</span>
-          </div>
-          {error && <p className="ml-0 mt-1 text-[12px] text-warn sm:ml-24">{error}</p>}
+          )}
+        </div>
+        {/* 编辑层 */}
+        <div
+          ref={editCellRef}
+          tabIndex={-1}
+          className={`${CELL} outline-none ${editing ? 'opacity-100' : CELL_HIDDEN}`}
+          inert={!editing}
+          aria-hidden={!editing}
+          onBlur={(event) => {
+            if (!event.currentTarget.contains(event.relatedTarget)) dismiss()
+          }}
+          onKeyDown={(event) => {
+            if (event.key === 'Escape') dismiss(true)
+          }}
+        >
+          <Segmented<PriorityTierKey>
+            size="sm"
+            value={tier.key}
+            onChange={choose}
+            options={PRIORITY_TIERS.map((item) => ({ value: item.key, label: item.label }))}
+          />
+          <span className="text-[12px] text-ink-3">额度不足需要排队时，谁先走</span>
         </div>
       </div>
     </div>
@@ -229,7 +409,7 @@ function ControlScopeEditor({
     onChange(Object.values(next).some(Boolean) ? next : null)
   }
   return (
-    <div className="mt-4">
+    <div className="mt-3">
       <h3 className="text-[14px] font-semibold text-ink-1">{label}</h3>
       <div className="mt-1">
         {RULES.map(({ key }) => (
@@ -269,31 +449,43 @@ function ControlOperationRow({
     else next.priority = priority
     onChange(normalizedOperationOverride(next))
   }
+  const zoneText = open ? 'text-ink-3' : 'text-ink-2'
+  // 悬浮光晕：hover 判定挂在不动的外层（底部 2px 占位 + 负 margin 抵消，布局净零），
+  // 位移作用在内层卡片——否则卡片上移逃出光标 → hover 失效回落 → 再 hover，边缘自激抖动。
   return (
-    <div className="rounded-[12px] border border-line bg-surface">
-      <button type="button" className="w-full cursor-pointer border-0 bg-transparent px-4 py-3.5 text-left" onClick={onToggle} aria-expanded={open}>
-        <div className="flex items-center gap-3">
-          <span className="min-w-0 flex-1 text-[15px] font-semibold text-ink-1">{meta.display_name}</span>
-          <span className={`text-[12px] ${customCount ? 'text-accent' : 'text-ink-3'}`}>
-            {customCount ? `${customCount} 处自定义` : '全部使用预设值'}
+    <div className="group/card -mb-0.5 pb-0.5">
+    <div className="rounded-[12px] border border-line bg-surface transition-[transform,border-color] duration-150 group-hover/card:-translate-y-0.5 group-hover/card:border-border-strong motion-reduce:transition-none motion-reduce:group-hover/card:translate-y-0">
+      <button type="button" className="w-full cursor-pointer border-0 bg-transparent px-4 py-3 text-left" onClick={onToggle} aria-expanded={open}>
+        {/* 三区横排撑满卡宽，跨卡片列对齐成「隐形的表」；展开时摘要降级为 ink-3 实时图例，不收起 */}
+        <div className="flex flex-wrap items-baseline gap-x-6 gap-y-1">
+          <span className="w-20 flex-none text-[15px] font-semibold text-ink-1">{meta.display_name}</span>
+          <span className={`w-28 flex-none text-[13px] ${zoneText}`}>
+            <span className="mr-2 text-ink-3">排队优先</span>{priorityTierOf(effective.priority).label}
           </span>
-          <span className="text-[13px] text-ink-3" aria-hidden>{open ? '⌄' : '›'}</span>
-        </div>
-        <div className="mt-1.5 space-y-1 text-[13px] text-ink-2">
-          <div><span className="mr-2 text-ink-3">调度顺序</span>{effective.priority} · 小值优先</div>
-          <div><span className="mr-2 text-ink-3">账户合计</span>{scopeSummary(effective.account)}</div>
-          <div><span className="mr-2 text-ink-3">每个品种</span>{scopeSummary(effective.symbol)}</div>
+          <span className={`min-w-0 flex-1 basis-40 text-[13px] ${zoneText}`}>
+            <span className="mr-2 text-ink-3">账户合计</span>{scopeSummary(effective.account)}
+          </span>
+          <span className={`min-w-0 flex-1 basis-40 text-[13px] ${zoneText}`}>
+            <span className="mr-2 text-ink-3">每个品种</span>{scopeSummary(effective.symbol)}
+          </span>
+          <span className="flex flex-none items-baseline gap-2">
+            {customCount > 0 && <span className="text-[12px] text-accent">已改 {customCount} 处</span>}
+            <span className="text-[13px] text-ink-3" aria-hidden>{open ? '⌄' : '›'}</span>
+          </span>
         </div>
       </button>
       <div inert={!open} className={`grid transition-[grid-template-rows] duration-200 motion-reduce:transition-none ${open ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'}`}>
         <div className="min-h-0 overflow-hidden">
-          <div className="border-t border-line px-4 pb-4">
+          <div className="border-t border-line px-4 pb-3">
             <ControlPriorityField preset={preset.priority} custom={custom?.priority} onChange={setPriority} />
-            <ControlScopeEditor label="账户合计" preset={preset.account} custom={custom?.account} onChange={(scope) => setScope('account', scope)} />
-            <ControlScopeEditor label="每个品种" preset={preset.symbol} custom={custom?.symbol} onChange={(scope) => setScope('symbol', scope)} />
+            <div className="grid grid-cols-1 gap-x-10 md:grid-cols-2">
+              <ControlScopeEditor label="账户合计" preset={preset.account} custom={custom?.account} onChange={(scope) => setScope('account', scope)} />
+              <ControlScopeEditor label="每个品种" preset={preset.symbol} custom={custom?.symbol} onChange={(scope) => setScope('symbol', scope)} />
+            </div>
           </div>
         </div>
       </div>
+    </div>
     </div>
   )
 }
@@ -301,7 +493,6 @@ function ControlOperationRow({
 export function AccountEditControlPage() {
   const { id } = useParams()
   const accountId = Number(id)
-  const navigate = useNavigate()
   const toast = useToastStore((state) => state.toast)
   const accounts = useDomainStore((state) => state.accounts)
   const refreshAccounts = useDomainStore((state) => state.refreshAccounts)
@@ -336,6 +527,16 @@ export function AccountEditControlPage() {
   useEffect(() => {
     if (!model) loadPolicy()
   }, [loadPolicy, model])
+
+  /** 取消：放弃草稿（含预设切换预览与展开态），从服务端重新加载已保存的策略。 */
+  const cancelEdit = () => {
+    setOpenKey(null)
+    setOtherOpen(false)
+    setPreviewNote('')
+    setPreviewError(null)
+    setSaveError(null)
+    loadPolicy()
+  }
 
   const acc = account.data
   const cachedAccount = accounts?.find((item) => item.account_id === accountId) ?? null
@@ -393,7 +594,7 @@ export function AccountEditControlPage() {
     try {
       const preview = await getAccountControlPolicy(accountId, nextKey)
       setModel(preview)
-      setPreviewNote(`已按 ${preview.preset_display_name} 预设方案重新计算，${overrideCount} 处账户设置保持不变。`)
+      setPreviewNote(`已按「${preview.preset_display_name}」方案重新计算，你改过的 ${overrideCount} 处设置保持不变。`)
     } catch (error) {
       setPresetKey(previous)
       setPreviewError(error instanceof Error ? error : new Error(String(error)))
@@ -428,8 +629,8 @@ export function AccountEditControlPage() {
   )
 
   const changes = dirty ? [
-    ...(dirtyPreset ? [`预设方案改为${model.preset_display_name}`] : []),
-    ...(dirtyOverride ? [`流控自定义值 ${overrideCount} 处`] : []),
+    ...(dirtyPreset ? [`方案改为「${model.preset_display_name}」`] : []),
+    ...(dirtyOverride ? [`流控已改 ${overrideCount} 处`] : []),
   ] : []
 
   const save = async () => {
@@ -443,7 +644,10 @@ export function AccountEditControlPage() {
       })
       toast('流控已更新')
       void refreshAccounts()
-      navigate(`/accounts/${accountId}/edit`)
+      // 保存后留在本页：刷新 dirty 基线（acc 的 preset 与 model.override），
+      // 否则底栏不会收敛（此前靠跳页卸载掩盖）。
+      account.refresh()
+      loadPolicy()
     } catch (error) {
       setSaveError(error instanceof Error ? error : new Error(String(error)))
     } finally {
@@ -455,13 +659,13 @@ export function AccountEditControlPage() {
     <section>
       {title}
       <EditSynopsis note="控制交易请求的频率与间隔；保存后从下一次执行开始生效。">
-        {model.preset_display_name} · {overrideCount ? `${overrideCount} 处自定义` : '全部使用预设值'}
+        {model.preset_display_name}{overrideCount > 0 ? ` · 已改 ${overrideCount} 处` : ''}
       </EditSynopsis>
 
       <Section label="预设方案">
-        <div className="rounded-[12px] border border-line bg-surface px-4 py-3.5 md:col-span-2">
+        <div className="rounded-[12px] border border-line bg-surface px-4 py-3 md:col-span-2">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-            <div className="w-24 flex-none text-[14px] text-ink-2">当前方案</div>
+            <div className="w-24 flex-none text-[13px] text-ink-2">当前方案</div>
             <Select<string>
               ariaLabel="流控预设方案"
               disabled={previewing}
@@ -472,7 +676,7 @@ export function AccountEditControlPage() {
             />
             <span className="text-[13px] text-ink-3">{model.compatible_presets.find((item) => item.key === presetKey)?.description}</span>
           </div>
-          <div className="mt-3 flex gap-3 text-[14px]"><span className="w-24 flex-none text-ink-2">统计时区</span><span className="text-ink-1">{model.timezone_display_name}</span></div>
+          <div className="mt-2.5 flex gap-3 text-[13px]"><span className="w-24 flex-none text-ink-2">统计时区</span><span className="text-ink-1">{model.timezone_display_name}</span></div>
           {previewNote && <p className="mt-2 text-[13px] text-ink-2">{previewNote}</p>}
         </div>
       </Section>
@@ -500,12 +704,22 @@ export function AccountEditControlPage() {
               const preset = model.preset_policy.groups[group.key]
               const current = resolveAccountControlScope(preset, custom)
               return (
-                <div key={group.key} className="rounded-[12px] border border-line bg-surface">
-                  <button type="button" className="w-full cursor-pointer border-0 bg-transparent px-4 py-3.5 text-left" onClick={() => setOpenKey(open ? null : key)} aria-expanded={open}>
-                    <div className="flex items-center gap-3"><span className="min-w-0 flex-1 text-[15px] font-semibold text-ink-1">{group.display_name}</span><span className={`text-[12px] ${custom ? 'text-accent' : 'text-ink-3'}`}>{custom ? '已自定义' : '使用预设值'}</span><span className="text-ink-3">{open ? '⌄' : '›'}</span></div>
-                    <p className="mt-1 text-[13px] text-ink-3">{group.description}</p><p className="mt-1 text-[13px] text-ink-2">{scopeSummary(current)}</p>
+                <div key={group.key} className="group/card -mb-0.5 pb-0.5">
+                {/* 悬浮光晕：hover 判定在不动的外层，位移在内层卡片（防边缘自激抖动，同操作卡） */}
+                <div className="rounded-[12px] border border-line bg-surface transition-[transform,border-color] duration-150 group-hover/card:-translate-y-0.5 group-hover/card:border-border-strong motion-reduce:transition-none motion-reduce:group-hover/card:translate-y-0">
+                  <button type="button" className="w-full cursor-pointer border-0 bg-transparent px-4 py-3 text-left" onClick={() => setOpenKey(open ? null : key)} aria-expanded={open}>
+                    {/* 与操作卡同家族：标题 | 摘要 | 已改 ⌄ 单行横排；描述挪进展开区 */}
+                    <div className="flex flex-wrap items-baseline gap-x-6 gap-y-1">
+                      <span className="flex-none text-[15px] font-semibold text-ink-1">{group.display_name}</span>
+                      <span className={`min-w-0 flex-1 basis-40 text-[13px] ${open ? 'text-ink-3' : 'text-ink-2'}`}>{scopeSummary(current)}</span>
+                      <span className="flex flex-none items-baseline gap-2">
+                        {custom && <span className="text-[12px] text-accent">已改</span>}
+                        <span className="text-[13px] text-ink-3" aria-hidden>{open ? '⌄' : '›'}</span>
+                      </span>
+                    </div>
                   </button>
-                  <div inert={!open} className={`grid transition-[grid-template-rows] duration-200 motion-reduce:transition-none ${open ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'}`}><div className="min-h-0 overflow-hidden"><div className="border-t border-line px-4 pb-4"><ControlScopeEditor label="共同限制" preset={preset} custom={custom} onChange={(next) => setOverride((currentOverride) => { const groups = { ...currentOverride.groups }; if (next) groups[group.key] = next; else delete groups[group.key]; return { ...currentOverride, groups } })} /></div></div></div>
+                  <div inert={!open} className={`grid transition-[grid-template-rows] duration-200 motion-reduce:transition-none ${open ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'}`}><div className="min-h-0 overflow-hidden"><div className="border-t border-line px-4 pb-3"><p className="pt-3 text-[13px] text-ink-3">{group.description}</p><ControlScopeEditor label="共同限制" preset={preset} custom={custom} onChange={(next) => setOverride((currentOverride) => { const groups = { ...currentOverride.groups }; if (next) groups[group.key] = next; else delete groups[group.key]; return { ...currentOverride, groups } })} /></div></div></div>
+                </div>
                 </div>
               )
             })}
@@ -513,7 +727,7 @@ export function AccountEditControlPage() {
         </Section>
       )}
 
-      <EditSaveBar changes={changes} blocked={Boolean(errors.length || previewing)} cancelTo={`/accounts/${accountId}/edit`} onSave={() => void save()} saving={saving} error={saveError} />
+      <EditSaveBar changes={changes} blocked={Boolean(errors.length || previewing)} onCancel={cancelEdit} onSave={() => void save()} saving={saving} error={saveError} />
     </section>
   )
 }

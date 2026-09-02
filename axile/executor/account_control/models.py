@@ -13,7 +13,7 @@ from datetime import datetime
 from enum import Enum
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from pydantic import BaseModel, ConfigDict, Field, StrictInt, StrictStr, field_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, StrictStr, field_validator, model_validator
 
 from axile.common.trade_channel import TradeChannel
 from axile.executor.account_control.registry import ensure_default_account_control_registry_bootstrapped
@@ -144,10 +144,21 @@ class AccountControlRuleOverride(_AccountControlBaseModel):
         覆盖后的限制值；为空时沿用基线配置。
     on_trigger : AccountControlTriggerBehavior | None
         覆盖后的触发行为；为空时沿用基线配置。
+    unlimited : StrictBool
+        为真时显式解除该规则（解析为无限制），与 ``limit`` / ``on_trigger`` 互斥。
+        仅额度类规则（per_minute / per_day）允许；``min_interval_ms`` 是渠道硬保护，不可解除。
     """
 
     limit: StrictInt | None = Field(default=None, ge=0)
     on_trigger: AccountControlTriggerBehavior | None = None
+    unlimited: StrictBool = False
+
+    @model_validator(mode="after")
+    def validate_unlimited_exclusive(self) -> AccountControlRuleOverride:
+        """校验 Unlimited 与 limit/on_trigger 互斥."""
+        if self.unlimited and (self.limit is not None or self.on_trigger is not None):
+            raise ValueError("unlimited 与 limit/on_trigger 互斥，不能同时设置")
+        return self
 
 
 class AccountControlRule(_AccountControlBaseModel):
@@ -188,6 +199,8 @@ class AccountControlScopeOverride(_AccountControlBaseModel):
     @classmethod
     def validate_min_interval_ms(cls, value: AccountControlRuleOverride | None) -> AccountControlRuleOverride | None:
         """校验最小调用间隔覆盖规则的阈值合法性."""
+        if value is not None and value.unlimited:
+            raise ValueError("min_interval_ms 不允许设置为不限制（渠道硬保护不可解除）")
         if value is not None and value.limit is not None and value.limit <= 0:
             raise ValueError("min_interval_ms.limit 必须大于 0")
         return value

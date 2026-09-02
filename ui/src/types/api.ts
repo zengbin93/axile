@@ -194,6 +194,8 @@ export interface AccountControlRule {
 export interface AccountControlRuleOverride {
   limit?: number | null
   on_trigger?: AccountControlTrigger | null
+  /** 为真时显式解除该规则（解析为不限制），与 limit/on_trigger 互斥；min_interval_ms 不允许。 */
+  unlimited?: boolean
 }
 
 export interface AccountControlScope {

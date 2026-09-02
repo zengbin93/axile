@@ -13,7 +13,10 @@ type RuleKey = 'per_minute' | 'per_day' | 'min_interval_ms'
 const RULE_KEYS: RuleKey[] = ['per_minute', 'per_day', 'min_interval_ms']
 
 function normalizedRule(value: AccountControlRuleOverride | null | undefined): AccountControlRuleOverride | null {
-  if (!value || (value.limit == null && value.on_trigger == null)) return null
+  if (!value) return null
+  // 显式解除：与 limit/on_trigger 互斥，归一化只保留 unlimited 标记
+  if (value.unlimited) return { unlimited: true }
+  if (value.limit == null && value.on_trigger == null) return null
   return {
     ...(value.limit != null ? { limit: value.limit } : {}),
     ...(value.on_trigger != null ? { on_trigger: value.on_trigger } : {}),
@@ -110,6 +113,8 @@ export function resolveAccountControlRule(
   override: AccountControlRuleOverride | null | undefined,
 ): AccountControlRule | null {
   if (!override) return base ?? null
+  // 显式解除：无论基线为何都解析为无限制（与后端 _merge_rule 对齐）
+  if (override.unlimited) return null
   if (!base && override.limit == null) return null
   return {
     limit: override.limit ?? base?.limit ?? 1,

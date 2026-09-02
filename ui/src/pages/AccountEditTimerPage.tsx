@@ -1,12 +1,11 @@
 /**
  * 账户定时子页 /accounts/:id/edit/timer。
  *
- * 完整 :component:`TimerEditor`；保存只 PATCH ``cron_expr``，成功后回到编辑总览。
+ * 完整 :component:`TimerEditor`；保存只 PATCH ``cron_expr``，保存与取消都不离开本页。
  */
 
 import { useCallback, useEffect, useState } from 'react'
 import { useParams } from 'react-router'
-import { useNavigate } from '@/components/ui/nav'
 import { getAccount, updateAccount } from '@/lib/api/accounts'
 import { usePolling } from '@/lib/hooks/usePolling'
 import { useDomainStore } from '@/stores/domain'
@@ -31,7 +30,6 @@ import {
 export function AccountEditTimerPage() {
   const { id } = useParams()
   const accountId = Number(id)
-  const navigate = useNavigate()
   const toast = useToastStore((s) => s.toast)
   const accounts = useDomainStore((s) => s.accounts)
   const refreshAccounts = useDomainStore((s) => s.refreshAccounts)
@@ -59,11 +57,17 @@ export function AccountEditTimerPage() {
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<Error | null>(null)
 
-  useEffect(() => {
-    if (!acc || !descriptor || ready) return
+  /** 草稿重置为服务端当前节奏；数据未就绪时返回 false（供首帧初始化门控）。 */
+  const resetTimer = useCallback(() => {
+    if (!acc || !descriptor) return false
     setTimer(parseTimerIntent(descriptor.schedule.kind, acc.cron_expr ?? '', descriptor.schedule.night))
-    setReady(true)
-  }, [acc, descriptor, ready])
+    setSaveError(null)
+    return true
+  }, [acc, descriptor])
+
+  useEffect(() => {
+    if (!ready && resetTimer()) setReady(true)
+  }, [ready, resetTimer])
 
   if (account.error && !acc)
     return <EditError error={account.error} onRetry={account.refresh} />
@@ -98,7 +102,6 @@ export function AccountEditTimerPage() {
       toast(cronNext ? '节奏已更新' : '已关闭自动调仓节奏')
       void refreshAccounts()
       account.refresh()
-      navigate(`/accounts/${accountId}/edit`)
     } catch (e) {
       setSaveError(e instanceof Error ? e : new Error(String(e)))
     } finally {
@@ -131,7 +134,7 @@ export function AccountEditTimerPage() {
       <EditSaveBar
         changes={changes}
         blocked={Boolean(err)}
-        cancelTo={`/accounts/${accountId}/edit`}
+        onCancel={resetTimer}
         onSave={() => void save()}
         saving={saving}
         error={saveError}

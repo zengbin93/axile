@@ -344,6 +344,9 @@ def _merge_rule(
 ) -> AccountControlRule | None:
     if override_rule is None:
         return _copy_rule(base_rule)
+    if override_rule.unlimited:
+        # 显式解除该规则：无论基线为何都解析为无限制
+        return None
     if base_rule is None:
         if override_rule.limit is None:
             return None

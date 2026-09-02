@@ -2,13 +2,12 @@
  * 账户浅配置页 /accounts/:id/edit/*。
  *
  * 基本信息、杠杆、品种控制、组合执行各走可直达子路由；连接设置、定时、算法、流控
- * 仍由各自的完整编辑器承载。保存保持最小 PATCH + 底栏变更摘要。
+ * 仍由各自的完整编辑器承载。保存保持最小 PATCH + 底栏变更摘要；保存与取消都不离开本页。
  */
 
 import { useCallback, useEffect, useState, type CSSProperties } from 'react'
 import { Check, ChevronDown, Eye, EyeOff } from 'lucide-react'
 import { useParams, useViewTransitionState } from 'react-router'
-import { useNavigate } from '@/components/ui/nav'
 import { ErrorNotice } from '@/components/ui/ErrorNotice'
 import { Skeleton } from '@/components/ui/Skeleton'
 import { Select } from '@/components/ui/Select'
@@ -237,7 +236,6 @@ const SECTION_TITLE: Record<EditSection, string> = {
 export function AccountEditPage({ section = 'basic' }: { section?: EditSection }) {
   const { id } = useParams()
   const accountId = Number(id)
-  const navigate = useNavigate()
   const toast = useToastStore((s) => s.toast)
   const accounts = useDomainStore((s) => s.accounts)
   const portfolios = useDomainStore((s) => s.portfolios)
@@ -280,11 +278,18 @@ export function AccountEditPage({ section = 'basic' }: { section?: EditSection }
   const [showFeishuVariables, setShowFeishuVariables] = useState(false)
   const [feishuAdvancedOpen, setFeishuAdvancedOpen] = useState(false)
   const [saveError, setSaveError] = useState<Error | null>(null)
-  useEffect(() => {
-    if (!acc || ready) return
+
+  /** 草稿重置为服务端当前值；数据未就绪时返回 false（供首帧初始化门控）。 */
+  const resetDraft = useCallback(() => {
+    if (!acc) return false
     setDraft(draftOf(acc))
-    setReady(true)
-  }, [acc, ready])
+    setSaveError(null)
+    return true
+  }, [acc])
+
+  useEffect(() => {
+    if (!ready && resetDraft()) setReady(true)
+  }, [ready, resetDraft])
 
   /** 统一页头标题行（页名 · 账户名 + 渠道 chip）；账户名 FLIP 门控在原子内部。 */
   const titleName = (
@@ -416,7 +421,6 @@ export function AccountEditPage({ section = 'basic' }: { section?: EditSection }
       toast('账户已更新')
       void refreshAccounts()
       account.refresh()
-      navigate(`/accounts/${accountId}`)
     } catch (e) {
       setSaveError(e instanceof Error ? e : new Error(String(e)))
     }
@@ -756,7 +760,7 @@ export function AccountEditPage({ section = 'basic' }: { section?: EditSection }
       <EditSaveBar
         changes={changes}
         blocked={blocked}
-        cancelTo={`/accounts/${accountId}`}
+        onCancel={resetDraft}
         onSave={() => void save()}
         error={saveError}
       />

@@ -108,3 +108,52 @@ describe('account control priority', () => {
     expect(countAccountControlOverrides(override)).toBe(1)
   })
 })
+
+describe('unlimited 规则覆盖', () => {
+  const base: AccountControlPolicy = {
+    timezone: 'Asia/Shanghai',
+    operations: {
+      place_order: {
+        priority: 10,
+        account: {
+          per_minute: { limit: 30, on_trigger: 'wait' },
+          per_day: { limit: 500, on_trigger: 'block' },
+          min_interval_ms: { limit: 500, on_trigger: 'wait' },
+        },
+      },
+    },
+    groups: {},
+  }
+
+  it('unlimited 解析为无限制，且与后端一致不受基线影响', () => {
+    const override: AccountControlOverride = {
+      operations: {
+        place_order: { account: { per_day: { unlimited: true } } },
+      },
+      groups: {},
+    }
+    const resolved = resolveAccountControlPolicy(base, override).operations.place_order.account
+
+    expect(resolved.per_day).toBeNull()
+    expect(resolved.per_minute).toEqual({ limit: 30, on_trigger: 'wait' })
+  })
+
+  it('unlimited 归一化保留标记并参与计数与等价比较', () => {
+    const override: AccountControlOverride = {
+      operations: {
+        place_order: { account: { per_day: { unlimited: true } } },
+      },
+      groups: {},
+    }
+
+    expect(normalizedAccountControlOverride(override)).toEqual({
+      operations: { place_order: { account: { per_day: { unlimited: true } } } },
+      groups: {},
+    })
+    expect(countAccountControlOverrides(override)).toBe(1)
+    expect(sameAccountControlOverride(override, {
+      operations: { place_order: { account: { per_day: { unlimited: true } } } },
+      groups: {},
+    })).toBe(true)
+  })
+})

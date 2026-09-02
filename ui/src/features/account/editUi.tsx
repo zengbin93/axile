@@ -292,18 +292,21 @@ export function EditWorktopBar({
 
 /**
  * 子页底栏：常挂载；有改动时仅 opacity 到位（不 slide，方向 α）。
+ *
+ * 取消与保存都不离开本页：取消就地重置草稿，保存成功后 dirty 收敛、
+ * 底栏自行淡出（与 SettingsSaveBar 语义一致）。
  */
 export function EditSaveBar({
   changes,
   blocked,
-  cancelTo,
+  onCancel,
   onSave,
   saving,
   error = null,
 }: {
   changes: string[]
   blocked?: boolean
-  cancelTo: string
+  onCancel: () => void
   onSave: () => void
   saving?: boolean
   error?: unknown | null
@@ -340,9 +343,14 @@ export function EditSaveBar({
               </div>
               <OverflowText className="num text-[14px] text-ink-1" text={changes.join('  ·  ')} />
             </div>
-            <Link to={cancelTo} className="flex-none text-[14px] text-ink-2 hover:text-ink-1" tabIndex={open ? 0 : -1}>
+            <button
+              type="button"
+              className="flex-none cursor-pointer text-[14px] text-ink-2 hover:text-ink-1"
+              onClick={onCancel}
+              tabIndex={open ? 0 : -1}
+            >
               取消
-            </Link>
+            </button>
             <button
               type="button"
               className="flex-none cursor-pointer rounded-[9px] border-0 bg-ink-1 px-5 py-2 text-[14.5px] font-semibold text-surface disabled:opacity-45"

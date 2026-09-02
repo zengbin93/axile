@@ -296,3 +296,42 @@ def test_account_control_override_rejects_legacy_disable_switch() -> None:
     """账户控制不接受旧版 enabled 开关。"""
     with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
         AccountControlOverride.model_validate({"enabled": False})
+
+
+def test_account_control_rule_override_unlimited_resolves_to_no_rule() -> None:
+    """额度类规则允许显式 unlimited，解析后不启用该规则。"""
+    policy = resolve_account_control_policy(
+        "default",
+        AccountControlOverride.model_validate(
+            {
+                "operations": {
+                    "place_order": {
+                        "account": {
+                            "per_minute": {"unlimited": True},
+                            "per_day": {"unlimited": True},
+                        }
+                    }
+                }
+            }
+        ),
+    )
+
+    place_order_account = policy.operations["place_order"].account
+    assert place_order_account.per_minute is None
+    assert place_order_account.per_day is None
+    # 未覆盖的规则保持预设值
+    assert place_order_account.min_interval_ms is not None
+    assert place_order_account.min_interval_ms.limit == 300
+
+
+def test_account_control_rule_override_unlimited_rejects_mixed_and_interval() -> None:
+    """unlimited 与 limit/on_trigger 互斥，且 min_interval_ms 不允许解除。"""
+    with pytest.raises(ValidationError, match="互斥"):
+        AccountControlOverride.model_validate(
+            {"operations": {"place_order": {"account": {"per_minute": {"limit": 5, "unlimited": True}}}}}
+        )
+
+    with pytest.raises(ValidationError, match="不允许设置为不限制"):
+        AccountControlOverride.model_validate(
+            {"operations": {"place_order": {"account": {"min_interval_ms": {"unlimited": True}}}}}
+        )

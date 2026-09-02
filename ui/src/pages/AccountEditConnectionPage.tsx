@@ -90,6 +90,13 @@ export function AccountEditConnectionPage() {
     return Object.keys(nextErrors).length === 0
   }
 
+  /** 取消：草稿回到服务端当前配置，清掉字段校验错误。 */
+  const cancelEdit = () => {
+    setDraft(initialConnectionDraft(acc, fields))
+    setErrors({})
+    setSaveError(null)
+  }
+
   const save = async () => {
     if (!changed) return toast('没有改动')
     if (!validate()) return toast('请检查连接设置')
@@ -126,7 +133,7 @@ export function AccountEditConnectionPage() {
           </div></div>
         })}
       </Section>
-      <EditSaveBar changes={changed ? ['连接设置已改'] : []} blocked={Object.keys(errors).length > 0} cancelTo={`/accounts/${accountId}`} onSave={() => void save()} error={saveError} />
+      <EditSaveBar changes={changed ? ['连接设置已改'] : []} blocked={Object.keys(errors).length > 0} onCancel={cancelEdit} onSave={() => void save()} error={saveError} />
     </section>
   )
 }

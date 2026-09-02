@@ -1,12 +1,11 @@
 /**
  * 账户执行算法子页 /accounts/:id/edit/algorithm。
  *
- * 主交易 + 清仓算法完整编辑器；保存只 PATCH 算法相关字段，成功后回到编辑总览。
+ * 主交易 + 清仓算法完整编辑器；保存只 PATCH 算法相关字段，保存与取消都不离开本页。
  */
 
 import { useCallback, useEffect, useState, type CSSProperties } from 'react'
 import { useParams, useViewTransitionState } from 'react-router'
-import { useNavigate } from '@/components/ui/nav'
 import { getAccount, updateAccount } from '@/lib/api/accounts'
 import { usePolling } from '@/lib/hooks/usePolling'
 import { useDomainStore } from '@/stores/domain'
@@ -47,7 +46,6 @@ function algoParamError(algo: AlgorithmRef | null): string | null {
 export function AccountEditAlgorithmPage() {
   const { id } = useParams()
   const accountId = Number(id)
-  const navigate = useNavigate()
   const toast = useToastStore((s) => s.toast)
   const accounts = useDomainStore((s) => s.accounts)
   const refreshAccounts = useDomainStore((s) => s.refreshAccounts)
@@ -88,12 +86,18 @@ export function AccountEditAlgorithmPage() {
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<Error | null>(null)
 
-  useEffect(() => {
-    if (!acc || !descriptor || ready) return
+  /** 草稿重置为服务端当前算法引用；数据未就绪时返回 false（供首帧初始化门控）。 */
+  const resetAlgorithms = useCallback(() => {
+    if (!acc || !descriptor) return false
     setTrade(algorithmRefOf(acc.algorithm) ?? descriptor.defaults.trade_algorithm)
     setEmpty(algorithmRefOf(acc.empty_positions_algorithm))
-    setReady(true)
-  }, [acc, descriptor, ready])
+    setSaveError(null)
+    return true
+  }, [acc, descriptor])
+
+  useEffect(() => {
+    if (!ready && resetAlgorithms()) setReady(true)
+  }, [ready, resetAlgorithms])
 
   if (account.error && !acc)
     return <EditError error={account.error} onRetry={account.refresh} />
@@ -175,7 +179,6 @@ export function AccountEditAlgorithmPage() {
       toast('执行算法已更新')
       void refreshAccounts()
       account.refresh()
-      navigate(`/accounts/${accountId}/edit`)
     } catch (e) {
       setSaveError(e instanceof Error ? e : new Error(String(e)))
     } finally {
@@ -215,7 +218,7 @@ export function AccountEditAlgorithmPage() {
       <EditSaveBar
         changes={changes}
         blocked={Boolean(err)}
-        cancelTo={`/accounts/${accountId}/edit`}
+        onCancel={resetAlgorithms}
         onSave={() => void save()}
         saving={saving}
         error={saveError}
