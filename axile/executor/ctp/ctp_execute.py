@@ -223,42 +223,44 @@ class CTPExecutor(AbstractExecutor, UnifiedCallbackClient):
         if code != 0:
             raise CtpRequestError(f"{name}同步拒绝: return_code={code}", return_code=code)
 
+    def _call_trader_request(self, name, req, *, before_send=None) -> int:
+        """直接发送一次 TraderApi 请求，不附加账户控制或适配层重试。"""
+        guard = self.get_account_control_guard()
+        rid = self._next_id()
+        if before_send is not None:
+            before_send(rid)
+        code = int(getattr(self._trader_api, name)(req, rid))
+        if code == 0:
+            return rid
+        meanings = {
+            -1: "网络连接失败",
+            -2: "前置未处理请求队列超限",
+            -3: "每秒发送请求数超过柜台许可",
+        }
+        policy = getattr(guard, "policy", None)
+        preset = getattr(policy, "preset_key", "unknown")
+        waited_ms = guard.current_waited_ms() if guard is not None else 0
+        wait_hits = guard.current_wait_hits() if guard is not None else ()
+        meaning = meanings.get(code, "柜台返回未知同步拒绝")
+        message = (
+            f"{name}：{meaning}，返回码={code}，生效 preset={preset}，"
+            f"group=ctp_td_global，rule={','.join(wait_hits) or '当前有效规则'}，"
+            f"已等待={waited_ms}ms；请求未受理、未自动重试"
+        )
+        if code == -2:
+            raise CtpSessionRecoveryRequired(message, return_code=code)
+        raise CtpRequestError(message, return_code=code)
+
     def _send_trader_request(self, operation, name, req, *, symbol=None, before_send=None) -> int:
         """经通用账户控制发送一次 TraderApi 请求，不在适配层重试。"""
         guard = self.get_account_control_guard()
-
-        def send_once() -> int:
-            rid = self._next_id()
-            if before_send is not None:
-                before_send(rid)
-            code = int(getattr(self._trader_api, name)(req, rid))
-            if code == 0:
-                return rid
-            meanings = {
-                -1: "网络连接失败",
-                -2: "前置未处理请求队列超限",
-                -3: "每秒发送请求数超过柜台许可",
-            }
-            policy = getattr(guard, "policy", None)
-            preset = getattr(policy, "preset_key", "unknown")
-            waited_ms = guard.current_waited_ms() if guard is not None else 0
-            wait_hits = guard.current_wait_hits() if guard is not None else ()
-            meaning = meanings.get(code, "柜台返回未知同步拒绝")
-            message = (
-                f"{name}：{meaning}，返回码={code}，生效 preset={preset}，"
-                f"group=ctp_td_global，rule={','.join(wait_hits) or '当前有效规则'}，"
-                f"已等待={waited_ms}ms；请求未受理、未自动重试"
-            )
-            if code == -2:
-                raise CtpSessionRecoveryRequired(message, return_code=code)
-            raise CtpRequestError(message, return_code=code)
 
         return run_controlled_call(
             guard=guard,
             operation=operation,
             symbol=symbol,
             metadata={"request_name": name, "group": "ctp_td_global"},
-            call=send_once,
+            call=lambda: self._call_trader_request(name, req, before_send=before_send),
             success_outcome="accepted",
         )
 
@@ -587,7 +589,7 @@ class CTPExecutor(AbstractExecutor, UnifiedCallbackClient):
         }
         self._order_keys[oid] = key
         try:
-            self._send_trader_request("insert_order", "ReqOrderInsert", r, symbol=symbol)
+            self._call_trader_request("ReqOrderInsert", r)
         except Exception:
             self._order_keys.pop(oid, None)
             raise

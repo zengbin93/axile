@@ -10,41 +10,42 @@ from axile.executor.account_control.registry import (
     register_default_registry_bootstrap,
 )
 
-_GROUP = "ctp_td_global"
-_OPERATIONS = {
-    "authenticate",
-    "trader_login",
-    "query_settlement_status",
-    "confirm_settlement",
-    "insert_order",
-    "cancel_order_ctp",
-    "query_instruments",
-    "query_account",
-    "query_positions",
-    "query_orders",
-    "ctp_query_trades",
-    "query_settlement_info",
-    "option_exercise",
-    "option_abandon",
-    "option_self_close",
-    "cancel_option_exercise",
-    "cancel_option_abandon",
-    "cancel_option_self_close",
-}
+CTP_TRADER_API_THROTTLE_GROUP = "ctp_td_global"
+CTP_TRADER_API_OPERATIONS = frozenset(
+    {
+        "authenticate",
+        "trader_login",
+        "query_settlement_status",
+        "confirm_settlement",
+        "cancel_order_ctp",
+        "query_instruments",
+        "query_account",
+        "query_positions",
+        "query_orders",
+        "ctp_query_trades",
+        "query_settlement_info",
+        "option_exercise",
+        "option_abandon",
+        "option_self_close",
+        "cancel_option_exercise",
+        "cancel_option_abandon",
+        "cancel_option_self_close",
+    }
+)
 
 
 def _register_group() -> None:
     registry = get_default_account_control_registry()
-    if not registry.is_frozen and registry.get_group(_GROUP) is None:
-        registry.register_group(_GROUP)
+    if not registry.is_frozen and registry.get_group(CTP_TRADER_API_THROTTLE_GROUP) is None:
+        registry.register_group(CTP_TRADER_API_THROTTLE_GROUP)
 
 
 def register_ctp_account_control_operations() -> None:
     """登记 CTP 操作与共享柜台节流组。"""
     _register_group()
     register_default_registry_bootstrap(_register_group)
-    for key in _OPERATIONS:
-        operation = build_registered_operation(key, groups=(_GROUP,))
+    for key in CTP_TRADER_API_OPERATIONS:
+        operation = build_registered_operation(key, groups=())
         register_or_validate_operation(operation)
         register_default_registry_bootstrap(lambda value=operation: register_operation_bootstrap(value))
 

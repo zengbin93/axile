@@ -72,7 +72,6 @@ _OPERATION_META = {
     "cancel_order": ("撤单", "撤销尚未完成的交易委托", "常用操作"),
     "query_order": ("查询订单", "查询单个或当前未完成订单", "常用操作"),
     "query_trades": ("查询成交", "查询订单成交明细", "查询操作"),
-    "insert_order": ("报单", "向 CTP 交易前置提交报单", "交易操作"),
     "query_instruments": ("查询合约", "查询可交易合约信息", "查询操作"),
     "query_account": ("查询资金", "查询账户资金信息", "查询操作"),
     "query_positions": ("查询持仓", "查询账户持仓信息", "查询操作"),
@@ -137,7 +136,7 @@ async def get_account_control_policy(
                 display_name=name,
                 description=description,
                 category=category,
-                groups=sorted(operation.groups),
+                groups=sorted(set(operation.groups) | set(effective_policy.operation_groups.get(operation.key, ()))),
             )
         )
 
@@ -158,8 +157,12 @@ async def get_account_control_policy(
             "中国标准时间（UTC+8）" if effective_policy.timezone == "Asia/Shanghai" else "账户配置时区"
         ),
         override=account.account_control_override,
-        preset_policy=AccountControlPolicy.model_validate(preset_policy.model_dump(exclude={"preset_key"})),
-        effective_policy=AccountControlPolicy.model_validate(effective_policy.model_dump(exclude={"preset_key"})),
+        preset_policy=AccountControlPolicy.model_validate(
+            preset_policy.model_dump(exclude={"preset_key", "operation_groups"})
+        ),
+        effective_policy=AccountControlPolicy.model_validate(
+            effective_policy.model_dump(exclude={"preset_key", "operation_groups"})
+        ),
         operations=operations,
         groups=groups,
     )

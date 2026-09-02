@@ -234,13 +234,54 @@ def test_ctp_account_control_preset_uses_ctp_specific_limits() -> None:
     assert preset.policy.operations["cancel_order"].account.per_day.limit == 400
     assert preset.policy.operations["cancel_order"].account.min_interval_ms.limit == 200
     assert policy.operations["cancel_order"].priority == 0
-    assert policy.operations["insert_order"].priority == 10
+    assert "insert_order" not in policy.operations
+    assert policy.operation_groups["place_order"] == {"ctp_td_global"}
+    assert policy.operation_groups["query_account"] == {"ctp_td_global"}
     assert policy.operations["cancel_order_ctp"].priority == 0
     assert preset.policy.groups["ctp_td_global"].min_interval_ms.limit == 1500
 
     ensure_account_control_preset_compatible("ctp", TradeChannel.CTP)
     with pytest.raises(ValueError, match="不兼容"):
         ensure_account_control_preset_compatible("ctp", TradeChannel("external-demo"))
+
+
+def test_ctp_option_operation_keeps_account_override() -> None:
+    """CTP 期权操作仍允许账户覆盖业务限额。"""
+    policy = resolve_account_control_policy(
+        "ctp",
+        AccountControlOverride.model_validate(
+            {
+                "operations": {
+                    "option_self_close": {
+                        "account": {"per_day": {"limit": 10, "on_trigger": "block"}},
+                    }
+                }
+            }
+        ),
+    )
+
+    assert policy.operations["option_self_close"].account.per_day is not None
+    assert policy.operations["option_self_close"].account.per_day.limit == 10
+
+
+def test_default_query_operation_keeps_account_override() -> None:
+    """通用 preset 的查询操作不受 CTP 专属分组影响。"""
+    policy = resolve_account_control_policy(
+        "default",
+        AccountControlOverride.model_validate(
+            {
+                "operations": {
+                    "query_account": {
+                        "account": {"per_day": {"limit": 7, "on_trigger": "block"}},
+                    }
+                }
+            }
+        ),
+    )
+
+    assert policy.operations["query_account"].account.per_day is not None
+    assert policy.operations["query_account"].account.per_day.limit == 7
+    assert "query_account" not in policy.operation_groups
 
 
 def test_default_account_control_preset_uses_generic_min_intervals() -> None:

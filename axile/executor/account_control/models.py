@@ -367,9 +367,25 @@ class EffectiveAccountControlPolicy(AccountControlPolicy):
     ----------
     preset_key : StrictStr
         当前生效 preset 的键。
+    operation_groups : dict[StrictStr, frozenset[StrictStr]]
+        当前 preset 为 operation 追加的共享节流组；该映射不接受账户覆盖。
     """
 
     preset_key: StrictStr
+    operation_groups: dict[StrictStr, frozenset[StrictStr]] = Field(default_factory=dict)
+
+    @field_validator("operation_groups")
+    @classmethod
+    def validate_operation_groups(
+        cls,
+        value: dict[str, frozenset[str]],
+    ) -> dict[str, frozenset[str]]:
+        """校验 preset 专属 operation 与共享节流组键。"""
+        for operation_key, group_keys in value.items():
+            _validate_registered_operation_key(operation_key)
+            for group_key in group_keys:
+                _validate_registered_group_key(group_key)
+        return value
 
 
 class AccountControlPresetDefinition(_AccountControlBaseModel):
@@ -384,6 +400,8 @@ class AccountControlPresetDefinition(_AccountControlBaseModel):
         该 preset 兼容的交易渠道集合；``None`` 表示兼容所有已注册及未来渠道。
     policy : AccountControlOverride
         该 preset 自带的局部覆盖策略。
+    operation_groups : dict[StrictStr, frozenset[StrictStr]]
+        仅由 preset 声明的 operation 与共享节流组关系。
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
@@ -391,6 +409,20 @@ class AccountControlPresetDefinition(_AccountControlBaseModel):
     preset_key: StrictStr
     compatible_trade_channels: frozenset[TradeChannel] | None
     policy: AccountControlOverride
+    operation_groups: dict[StrictStr, frozenset[StrictStr]] = Field(default_factory=dict)
+
+    @field_validator("operation_groups")
+    @classmethod
+    def validate_operation_groups(
+        cls,
+        value: dict[str, frozenset[str]],
+    ) -> dict[str, frozenset[str]]:
+        """校验 preset 专属 operation 与共享节流组键。"""
+        for operation_key, group_keys in value.items():
+            _validate_registered_operation_key(operation_key)
+            for group_key in group_keys:
+                _validate_registered_group_key(group_key)
+        return value
 
 
 class AccountControlCounterDeltaWrite(_AccountControlBaseModel):

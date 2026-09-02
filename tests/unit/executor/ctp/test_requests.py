@@ -11,6 +11,10 @@ from openctp_ctp import thosttraderapi as td
 
 from axile.common.trade_channel import TradeChannel
 from axile.executor.account_control.exceptions import AccountControlBlockedError
+from axile.executor.account_control.guard import AccountControlGuard
+from axile.executor.account_control.models import AccountControlDecision
+from axile.executor.account_control.presets import resolve_account_control_policy
+from axile.executor.account_control.snapshot import AccountControlCounterSnapshot
 from axile.executor.ctp.ctp_execute import (
     CTPExecutor,
     CtpRequestError,
@@ -393,6 +397,35 @@ def test_place_order_submits_when_session_open(config: CTPAccountConfig, monkeyp
 
     executor._trader_api.ReqOrderInsert.assert_called_once()
     assert len(executor._order_keys) == 1
+
+
+def test_public_place_order_controls_ctp_submit_once(
+    config: CTPAccountConfig,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """CTP 报单复用公开下单控制，不再产生 insert_order 二次事件。"""
+    executor = _submit_point_executor(config)
+    guard = AccountControlGuard(
+        account_id=1,
+        execution_id="exec-ctp-order",
+        channel=TradeChannel.CTP,
+        policy=resolve_account_control_policy("ctp"),
+        baseline=AccountControlCounterSnapshot(),
+        clock=lambda: datetime(2026, 8, 24, 21, 29, tzinfo=_SHANGHAI),
+    )
+    executor.set_account_control_guard(guard)
+    executor._send_trader_request = Mock(side_effect=AssertionError("不应进入 insert_order guard"))
+    _at_clock(monkeypatch, datetime(2026, 8, 24, 21, 29, tzinfo=_SHANGHAI))
+
+    order = executor.place_order("ag2612", OrderDirection.BUY, OrderType.LIMIT, 1, 9000)
+
+    assert order.symbol == "ag2612"
+    executor._trader_api.ReqOrderInsert.assert_called_once()
+    executor._send_trader_request.assert_not_called()
+    _, events = guard.flush_records()
+    assert [event.operation for event in events] == ["place_order"]
+    assert events[0].decision == AccountControlDecision.ALLOWED
+    assert events[0].metadata["groups"] == ["ctp_td_global"]
 
 
 def test_place_order_does_not_retry_rate_limit(config: CTPAccountConfig, monkeypatch: pytest.MonkeyPatch) -> None:

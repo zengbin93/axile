@@ -359,10 +359,15 @@ def test_update_account_replaces_account_control_override_instead_of_merging(mon
     override = response.json()["account_control_override"]
     assert override["timezone"] is None
     assert set(override["operations"]) == {"cancel_order"}
-    assert override["operations"]["cancel_order"]["account"]["per_day"] == {"limit": 8, "on_trigger": "block"}
+    assert override["operations"]["cancel_order"]["account"]["per_day"] == {
+        "limit": 8,
+        "on_trigger": "block",
+        "unlimited": False,
+    }
     assert override["operations"]["cancel_order"]["account"]["min_interval_ms"] == {
         "limit": 900,
         "on_trigger": "wait",
+        "unlimited": False,
     }
     assert override["operations"]["cancel_order"]["symbol"] is None
     assert session.account is not None
@@ -402,3 +407,25 @@ def test_update_account_accepts_null_account_control_override_to_clear(monkeypat
     assert response.json()["account_control_override"] is None
     assert session.account is not None
     assert session.account.account_control_override is None
+
+
+def test_update_account_rejects_removed_insert_order_override(monkeypatch) -> None:
+    """已移除的 insert_order 不能再作为账户流控操作提交。"""
+    monkeypatch.setattr(account_routes, "_reconcile_account_job", _noop_async)
+    session = _RouteSession(_build_account(trade_channel=TradeChannel.CTP))
+
+    response = TestClient(_build_app(session)).patch(
+        "/account/1",
+        json={
+            "account_control_override": {
+                "operations": {
+                    "insert_order": {
+                        "account": {"per_minute": {"limit": 3, "on_trigger": "wait"}},
+                    }
+                }
+            }
+        },
+    )
+
+    assert response.status_code == 422
+    assert "未注册的 operation key" in str(response.json()["detail"])

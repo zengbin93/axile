@@ -36,10 +36,11 @@ def test_policy_route_returns_chinese_catalog_and_effective_override(monkeypatch
     assert result.effective_policy.operations["place_order"].account.per_day.limit == 12
     assert {item.display_name for item in result.operations} >= {"下单", "撤单", "查询订单"}
     operation_names = {item.key: item.display_name for item in result.operations}
-    assert operation_names["authenticate"] == "认证"
-    assert operation_names["cancel_order_ctp"] == "CTP 撤单"
-    assert operation_names["ctp_query_trades"] == "查询 CTP 成交"
-    assert operation_names["cancel_option_self_close"] == "撤销期权自对冲"
+    assert "insert_order" not in operation_names
+    assert operation_names["option_self_close"] == "期权自对冲"
+    assert operation_names["query_account"] == "查询资金"
+    assert "insert_order" not in result.preset_policy.operations
+    assert "insert_order" not in result.effective_policy.operations
 
 
 def test_policy_route_previews_ctp_without_mutating_account(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -55,6 +56,8 @@ def test_policy_route_previews_ctp_without_mutating_account(monkeypatch: pytest.
     assert result.preset_display_name == "CTP"
     assert result.effective_policy.operations["place_order"].account.per_day is not None
     assert result.effective_policy.operations["place_order"].account.per_day.limit == 12
+    place_order = next(item for item in result.operations if item.key == "place_order")
+    assert place_order.groups == ["ctp_td_global"]
     assert account.account_control_preset == "default"
 
 

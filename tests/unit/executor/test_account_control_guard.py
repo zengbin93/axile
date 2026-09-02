@@ -462,22 +462,60 @@ def test_guard_waits_until_next_minute_when_per_minute_quota_is_exhausted() -> N
     assert events[0].outcome == "queried"
 
 
-def test_guard_waits_on_shared_group_across_different_operations() -> None:
-    """同一共享节流组中的不同 operation 应共享等待。"""
+def test_ctp_order_waits_on_shared_group_after_query() -> None:
+    """CTP 查询后下单应共享 TraderApi 全局间隔。"""
     sleep_calls: list[float] = []
     guard = AccountControlGuard(
         account_id=66,
         execution_id="exec-shared-group",
         channel=TradeChannel.CTP,
+        policy=resolve_account_control_policy("ctp"),
+        baseline=AccountControlCounterSnapshot(),
+        clock=_clock_from(
+            datetime(2026, 3, 22, 9, 31, 15, 0),
+            datetime(2026, 3, 22, 9, 31, 15, 0),
+            datetime(2026, 3, 22, 9, 31, 15, 200000),
+            datetime(2026, 3, 22, 9, 31, 16, 500000),
+        ),
+        sleep=sleep_calls.append,
+        wait_poll_interval_ms=1500,
+    )
+
+    first_attempt = guard.begin_operation("query_account")
+    first_attempt.record_outcome("fetched")
+    second_attempt = guard.begin_operation("place_order", symbol="rb2610")
+    second_attempt.record_outcome("submitted")
+
+    counter_deltas, events = guard.flush_records()
+
+    assert sleep_calls == pytest.approx([1.3])
+    assert [event.operation for event in events] == ["query_account", "place_order"]
+    assert [delta.operation for delta in counter_deltas].count("query_account") == 2
+    assert [delta.operation for delta in counter_deltas].count("place_order") == 4
+
+
+def test_default_place_order_does_not_use_ctp_shared_group() -> None:
+    """default preset 下单不应被 CTP TraderApi 分组污染。"""
+    sleep_calls: list[float] = []
+    guard = AccountControlGuard(
+        account_id=69,
+        execution_id="exec-default-order",
+        channel=TradeChannel("external"),
         policy=resolve_account_control_policy(
             "default",
             AccountControlOverride.model_validate(
                 {
+                    "operations": {
+                        "place_order": {
+                            "account": {"min_interval_ms": {"limit": 1, "on_trigger": "wait"}},
+                            "symbol": {"min_interval_ms": {"limit": 1, "on_trigger": "wait"}},
+                        }
+                    },
                     "groups": {
                         "ctp_td_global": {
                             "min_interval_ms": {"limit": 500, "on_trigger": "wait"},
                         }
-                    }
+                    },
                 }
             ),
         ),
@@ -486,23 +524,20 @@ def test_guard_waits_on_shared_group_across_different_operations() -> None:
             datetime(2026, 3, 22, 9, 31, 15, 0),
             datetime(2026, 3, 22, 9, 31, 15, 0),
             datetime(2026, 3, 22, 9, 31, 15, 200000),
-            datetime(2026, 3, 22, 9, 31, 15, 500000),
         ),
         sleep=sleep_calls.append,
-        wait_poll_interval_ms=500,
     )
 
-    first_attempt = guard.begin_operation("query_account")
-    first_attempt.record_outcome("fetched")
-    second_attempt = guard.begin_operation("query_positions")
-    second_attempt.record_outcome("fetched")
+    first_attempt = guard.begin_operation("place_order", symbol="rb2610")
+    first_attempt.record_outcome("submitted")
+    second_attempt = guard.begin_operation("place_order", symbol="rb2610")
+    second_attempt.record_outcome("submitted")
 
-    counter_deltas, events = guard.flush_records()
+    _, events = guard.flush_records()
 
-    assert sleep_calls == pytest.approx([0.3])
-    assert [event.operation for event in events] == ["query_account", "query_positions"]
-    assert [delta.operation for delta in counter_deltas].count("query_account") == 2
-    assert [delta.operation for delta in counter_deltas].count("query_positions") == 2
+    assert sleep_calls == []
+    assert [event.operation for event in events] == ["place_order", "place_order"]
+    assert all(event.metadata.get("groups") is None for event in events)
 
 
 def test_guard_applies_group_per_minute_limit_across_baseline_operations() -> None:
@@ -520,7 +555,7 @@ def test_guard_applies_group_per_minute_limit_across_baseline_operations() -> No
         execution_id="exec-shared-group-baseline",
         channel=TradeChannel.CTP,
         policy=resolve_account_control_policy(
-            "default",
+            "ctp",
             AccountControlOverride.model_validate(
                 {
                     "groups": {
@@ -563,7 +598,7 @@ def test_guard_uses_recent_allowed_snapshot_for_shared_group_min_interval() -> N
         execution_id="exec-shared-group-recent",
         channel=TradeChannel.CTP,
         policy=resolve_account_control_policy(
-            "default",
+            "ctp",
             AccountControlOverride.model_validate(
                 {
                     "groups": {

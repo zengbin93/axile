@@ -1143,14 +1143,22 @@ class AccountControlGuard:
         self._recent_group_allowed_at[(group_key,)] = occurred_at_ms
 
     def _get_group_operation_keys(self, group_key: str) -> list[str]:
-        return [
+        operation_keys = {
             operation_key
             for operation_key, operation in self._registry.operations.items()
             if group_key in operation.groups
-        ]
+        }
+        if self.policy is not None:
+            operation_groups = getattr(self.policy, "operation_groups", {})
+            operation_keys.update(
+                operation_key for operation_key, group_keys in operation_groups.items() if group_key in group_keys
+            )
+        return sorted(operation_keys)
 
     def _get_operation_group_keys(self, operation: str) -> tuple[str, ...]:
         registered_operation = self._registry.get_operation(operation)
-        if registered_operation is None:
-            return ()
-        return tuple(sorted(registered_operation.groups))
+        group_keys = set() if registered_operation is None else set(registered_operation.groups)
+        if self.policy is not None:
+            operation_groups = getattr(self.policy, "operation_groups", {})
+            group_keys.update(operation_groups.get(operation, ()))
+        return tuple(sorted(group_keys))

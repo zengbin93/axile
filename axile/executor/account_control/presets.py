@@ -12,6 +12,10 @@ from __future__ import annotations
 import importlib
 
 from axile.common.trade_channel import TradeChannel
+from axile.executor.account_control.ctp_operations import (
+    CTP_TRADER_API_OPERATIONS,
+    CTP_TRADER_API_THROTTLE_GROUP,
+)
 from axile.executor.account_control.models import (
     AccountControlOperationOverride,
     AccountControlOperationPolicy,
@@ -144,6 +148,10 @@ ACCOUNT_CONTROL_PRESETS: dict[str, AccountControlPresetDefinition] = {
     "ctp": AccountControlPresetDefinition(
         preset_key="ctp",
         compatible_trade_channels=frozenset({TradeChannel.CTP}),
+        operation_groups={
+            operation: frozenset({CTP_TRADER_API_THROTTLE_GROUP})
+            for operation in {"place_order", *CTP_TRADER_API_OPERATIONS}
+        },
         policy=AccountControlOverride.model_validate(
             {
                 "timezone": "Asia/Shanghai",
@@ -233,13 +241,6 @@ ACCOUNT_CONTROL_PRESETS: dict[str, AccountControlPresetDefinition] = {
                         "account": {
                             "per_minute": _rule(20, "wait"),
                             "per_day": _rule(200, "block"),
-                        },
-                    },
-                    "insert_order": {
-                        "priority": 10,
-                        "account": {
-                            "per_minute": _rule(30, "wait"),
-                            "per_day": _rule(500, "block"),
                         },
                     },
                     # 期权行权 / 放弃 / 自对冲操作（ReqExecOrderInsert / ReqOptionSelfCloseInsert）
@@ -464,4 +465,5 @@ def resolve_account_control_policy(
         timezone=effective_policy.timezone,
         operations=effective_policy.operations,
         groups=effective_policy.groups,
+        operation_groups=preset.operation_groups,
     )
