@@ -12,18 +12,26 @@ import {
   EditSynopsis,
   Section,
 } from '@/features/account/editUi'
+import {
+  countAccountControlOverrides,
+  countOperationOverrides,
+  normalizedAccountControlOverride,
+  normalizedOperationOverride,
+  resolveAccountControlPolicy,
+  resolveAccountControlRule,
+  resolveAccountControlScope,
+  sameAccountControlOverride,
+} from '@/features/account/accountControlPolicy'
 import { AccountPageTitle } from '@/features/account/pageHead'
 import { getAccount, getAccountControlPolicy, updateAccount } from '@/lib/api/accounts'
 import { usePolling } from '@/lib/hooks/usePolling'
 import { useDomainStore } from '@/stores/domain'
 import { useToastStore } from '@/stores/ui'
 import type {
-  Account,
   AccountControlOperationMeta,
   AccountControlOperationOverride,
   AccountControlOperationPolicy,
   AccountControlOverride,
-  AccountControlPolicy,
   AccountControlPolicyEditorModel,
   AccountControlRule,
   AccountControlRuleOverride,
@@ -47,66 +55,6 @@ function cloneOverride(value: AccountControlOverride | null): AccountControlOver
   return value
     ? structuredClone(value)
     : { operations: {}, groups: {} }
-}
-
-function normalizedOverride(value: AccountControlOverride): AccountControlOverride | null {
-  const operations = Object.fromEntries(
-    Object.entries(value.operations ?? {}).filter(([, operation]) =>
-      Object.values(operation ?? {}).some((scope) => scope && Object.values(scope).some(Boolean)),
-    ),
-  )
-  const groups = Object.fromEntries(
-    Object.entries(value.groups ?? {}).filter(([, scope]) => scope && Object.values(scope).some(Boolean)),
-  )
-  if (!Object.keys(operations).length && !Object.keys(groups).length && !value.timezone) return null
-  return { ...(value.timezone ? { timezone: value.timezone } : {}), operations, groups }
-}
-
-function countOverrides(value: AccountControlOverride | null): number {
-  if (!value) return 0
-  const operationCount = Object.values(value.operations ?? {}).reduce(
-    (sum, operation) =>
-      sum + Object.values(operation ?? {}).reduce((scopeSum, scope) => scopeSum + Object.values(scope ?? {}).filter(Boolean).length, 0),
-    0,
-  )
-  const groupCount = Object.values(value.groups ?? {}).reduce(
-    (sum, scope) => sum + Object.values(scope ?? {}).filter(Boolean).length,
-    0,
-  )
-  return operationCount + groupCount
-}
-
-function resolveRule(base: AccountControlRule | null | undefined, override: AccountControlRuleOverride | null | undefined): AccountControlRule | null {
-  if (!override) return base ?? null
-  if (!base && override.limit == null) return null
-  return {
-    limit: override.limit ?? base?.limit ?? 1,
-    on_trigger: override.on_trigger ?? base?.on_trigger ?? 'wait',
-  }
-}
-
-function resolveScope(base: AccountControlScope | null | undefined, override: AccountControlScopeOverride | null | undefined): AccountControlScope {
-  return {
-    per_minute: resolveRule(base?.per_minute, override?.per_minute),
-    per_day: resolveRule(base?.per_day, override?.per_day),
-    min_interval_ms: resolveRule(base?.min_interval_ms, override?.min_interval_ms),
-  }
-}
-
-function resolvePolicy(base: AccountControlPolicy, override: AccountControlOverride): AccountControlPolicy {
-  const operations = { ...base.operations }
-  for (const [key, operationOverride] of Object.entries(override.operations ?? {})) {
-    const current = operations[key] ?? { account: {} }
-    operations[key] = {
-      account: resolveScope(current.account, operationOverride.account),
-      symbol: current.symbol || operationOverride.symbol ? resolveScope(current.symbol, operationOverride.symbol) : null,
-    }
-  }
-  const groups = { ...base.groups }
-  for (const [key, groupOverride] of Object.entries(override.groups ?? {})) {
-    groups[key] = resolveScope(groups[key], groupOverride)
-  }
-  return { timezone: override.timezone ?? base.timezone, operations, groups }
 }
 
 function ruleText(rule: AccountControlRule | null | undefined, key: RuleKey): string {
@@ -140,7 +88,7 @@ function ControlRuleField({
 }) {
   const meta = RULES.find((item) => item.key === ruleKey)!
   const active = Boolean(custom)
-  const effective = resolveRule(preset, custom)
+  const effective = resolveAccountControlRule(preset, custom)
   const error = ruleError(ruleKey, custom)
   const zeroWarning = ruleKey !== 'min_interval_ms' && custom?.limit === 0
   const begin = () => onChange({ limit: effective?.limit ?? 1, on_trigger: effective?.on_trigger ?? 'wait' })
@@ -203,6 +151,67 @@ function ControlRuleField({
   )
 }
 
+function priorityError(priority: number | null | undefined): string | null {
+  if (priority == null) return null
+  return Number.isInteger(priority) ? null : '请输入整数'
+}
+
+function ControlPriorityField({
+  preset,
+  custom,
+  onChange,
+}: {
+  preset: number
+  custom: number | null | undefined
+  onChange: (next: number | null) => void
+}) {
+  const active = custom != null
+  const effective = custom ?? preset
+  const error = priorityError(custom)
+
+  return (
+    <div className="py-3">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+        <span className="w-24 flex-none text-[14px] text-ink-2">调度顺序</span>
+        <span className="num min-w-0 flex-1 text-[14px] text-ink-1">
+          {effective}
+          {active && <span className="ml-2 text-[12px] text-ink-3">预设 {preset}</span>}
+        </span>
+        <span className={`text-[12px] ${active ? 'text-accent' : 'text-ink-3'}`}>
+          {active ? '自定义' : '小值优先'}
+        </span>
+        <button
+          type="button"
+          className="cursor-pointer border-0 bg-transparent text-[13px] font-semibold text-accent"
+          onClick={() => onChange(active ? null : effective)}
+        >
+          {active ? '恢复预设值' : '修改'}
+        </button>
+      </div>
+      <div
+        inert={!active}
+        className={`grid transition-[grid-template-rows] duration-200 motion-reduce:transition-none ${active ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'}`}
+      >
+        <div className="min-h-0 overflow-hidden">
+          <div className="ml-0 mt-2 flex items-center gap-2 rounded-[9px] bg-canvas/70 px-3 py-3 sm:ml-24">
+            <input
+              aria-label="调度顺序"
+              aria-invalid={Boolean(error)}
+              className="num w-24 rounded-[8px] border border-ink-3/25 bg-surface px-2.5 py-1.5 text-right text-[14px] outline-none focus:border-accent"
+              type="number"
+              step={1}
+              value={custom ?? ''}
+              onChange={(event) => onChange(Number(event.target.value))}
+            />
+            <span className="text-[13px] text-ink-3">数值越小越先执行</span>
+          </div>
+          {error && <p className="ml-0 mt-1 text-[12px] text-warn sm:ml-24">{error}</p>}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function ControlScopeEditor({
   label,
   preset,
@@ -248,11 +257,17 @@ function ControlOperationRow({
   onToggle: () => void
   onChange: (next: AccountControlOperationOverride | null) => void
 }) {
-  const customCount = Object.values(custom ?? {}).reduce((sum, scope) => sum + Object.values(scope ?? {}).filter(Boolean).length, 0)
+  const customCount = countOperationOverrides(custom)
   const setScope = (key: ScopeKey, scope: AccountControlScopeOverride | null) => {
     const next = { ...(custom ?? {}), [key]: scope }
     if (!scope) delete next[key]
-    onChange(Object.values(next).some(Boolean) ? next : null)
+    onChange(normalizedOperationOverride(next))
+  }
+  const setPriority = (priority: number | null) => {
+    const next: AccountControlOperationOverride = { ...(custom ?? {}) }
+    if (priority == null) delete next.priority
+    else next.priority = priority
+    onChange(normalizedOperationOverride(next))
   }
   return (
     <div className="rounded-[12px] border border-line bg-surface">
@@ -265,6 +280,7 @@ function ControlOperationRow({
           <span className="text-[13px] text-ink-3" aria-hidden>{open ? '⌄' : '›'}</span>
         </div>
         <div className="mt-1.5 space-y-1 text-[13px] text-ink-2">
+          <div><span className="mr-2 text-ink-3">调度顺序</span>{effective.priority} · 小值优先</div>
           <div><span className="mr-2 text-ink-3">账户合计</span>{scopeSummary(effective.account)}</div>
           <div><span className="mr-2 text-ink-3">每个品种</span>{scopeSummary(effective.symbol)}</div>
         </div>
@@ -272,6 +288,7 @@ function ControlOperationRow({
       <div inert={!open} className={`grid transition-[grid-template-rows] duration-200 motion-reduce:transition-none ${open ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'}`}>
         <div className="min-h-0 overflow-hidden">
           <div className="border-t border-line px-4 pb-4">
+            <ControlPriorityField preset={preset.priority} custom={custom?.priority} onChange={setPriority} />
             <ControlScopeEditor label="账户合计" preset={preset.account} custom={custom?.account} onChange={(scope) => setScope('account', scope)} />
             <ControlScopeEditor label="每个品种" preset={preset.symbol} custom={custom?.symbol} onChange={(scope) => setScope('symbol', scope)} />
           </div>
@@ -333,16 +350,23 @@ export function AccountEditControlPage() {
       />
     </div>
   )
-  const normalized = normalizedOverride(override)
-  const effective = useMemo(() => model ? resolvePolicy(model.preset_policy, override) : null, [model, override])
-  const overrideCount = countOverrides(normalized)
+  const normalized = normalizedAccountControlOverride(override)
+  const effective = useMemo(() => model ? resolveAccountControlPolicy(model.preset_policy, override) : null, [model, override])
+  const overrideCount = countAccountControlOverrides(normalized)
   const originalOverride = model?.override ?? null
   const dirtyPreset = Boolean(acc && presetKey !== acc.account_control_preset)
-  const dirtyOverride = JSON.stringify(normalized) !== JSON.stringify(originalOverride)
+  const dirtyOverride = !sameAccountControlOverride(normalized, originalOverride)
   const dirty = dirtyPreset || dirtyOverride
-  const errors = Object.values(override.operations ?? {}).flatMap((operation) =>
-    Object.values(operation ?? {}).flatMap((scope) => RULES.map(({ key }) => ruleError(key, scope?.[key])).filter(Boolean)),
-  ).concat(Object.values(override.groups ?? {}).flatMap((scope) => RULES.map(({ key }) => ruleError(key, scope?.[key])).filter(Boolean)))
+  const errors = Object.values(override.operations ?? {}).flatMap((operation) => [
+    priorityError(operation.priority),
+    ...[operation.account, operation.symbol].flatMap((scope) =>
+      RULES.map(({ key }) => ruleError(key, scope?.[key])).filter(Boolean),
+    ),
+  ]).filter(Boolean).concat(
+    Object.values(override.groups ?? {}).flatMap((scope) =>
+      RULES.map(({ key }) => ruleError(key, scope?.[key])).filter(Boolean),
+    ),
+  )
 
   if (account.error && !acc) return <EditError error={account.error} onRetry={account.refresh} />
   if (policyError && !model)
@@ -394,7 +418,7 @@ export function AccountEditControlPage() {
     <ControlOperationRow
       key={meta.key}
       meta={meta}
-      preset={model.preset_policy.operations[meta.key] ?? { account: {} }}
+      preset={model.preset_policy.operations[meta.key] ?? { priority: 100, account: {} }}
       effective={effective.operations[meta.key]}
       custom={override.operations[meta.key]}
       open={openKey === meta.key}
@@ -415,7 +439,7 @@ export function AccountEditControlPage() {
     try {
       await updateAccount(accountId, {
         account_control_preset: presetKey,
-        account_control_override: normalized as Account['account_control_override'],
+        account_control_override: normalized,
       })
       toast('流控已更新')
       void refreshAccounts()
@@ -474,7 +498,7 @@ export function AccountEditControlPage() {
               const open = openKey === key
               const custom = override.groups[group.key]
               const preset = model.preset_policy.groups[group.key]
-              const current = resolveScope(preset, custom)
+              const current = resolveAccountControlScope(preset, custom)
               return (
                 <div key={group.key} className="rounded-[12px] border border-line bg-surface">
                   <button type="button" className="w-full cursor-pointer border-0 bg-transparent px-4 py-3.5 text-left" onClick={() => setOpenKey(open ? null : key)} aria-expanded={open}>

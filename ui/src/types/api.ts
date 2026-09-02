@@ -155,7 +155,7 @@ export interface Account {
   market: string
   trade_channel: TradeChannel
   account_control_preset: string
-  account_control_override: Record<string, unknown> | null
+  account_control_override: AccountControlOverride | null
   /** 含明文密钥（P0 缺口）——前端不渲染敏感值。 */
   account_config: Record<string, unknown>
   is_started: boolean
@@ -209,11 +209,13 @@ export interface AccountControlScopeOverride {
 }
 
 export interface AccountControlOperationPolicy {
+  priority: number
   account: AccountControlScope
   symbol?: AccountControlScope | null
 }
 
 export interface AccountControlOperationOverride {
+  priority?: number | null
   account?: AccountControlScopeOverride | null
   symbol?: AccountControlScopeOverride | null
 }
