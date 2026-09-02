@@ -68,7 +68,9 @@ def _create_ctp_executor(config: BaseAccountConfig):
 
     if not isinstance(config, CTPAccountConfig):
         raise TypeError("CTP 渠道需要 CTPAccountConfig")
-    return CTPExecutor(TradeChannel.CTP, config)
+    executor = CTPExecutor(TradeChannel.CTP)
+    executor.account_config = config
+    return executor
 
 
 def _create_gm_executor(config: BaseAccountConfig):
@@ -107,6 +109,7 @@ def _ctp_plugin() -> ChannelPlugin:
             ),
             ui=ChannelUi(position_value_label="货值"),
             defaults=ChannelDefaults(
+                account_control_preset="ctp",
                 long_leverage=3,
                 short_leverage=3,
                 execution_timeout=180,
@@ -163,6 +166,7 @@ def _ctp_plugin() -> ChannelPlugin:
         max_parallel_symbols=None,
         canonicalize_symbol=canonicalize_cn_futures_symbol,
         quantize_target_quantity=quantize_cn_futures_quantity,
+        requires_pre_connect_guard=True,
     )
 
 
@@ -190,6 +194,7 @@ def _gm_plugin() -> ChannelPlugin:
                 position_value_label="市值",
             ),
             defaults=ChannelDefaults(
+                account_control_preset="default",
                 long_leverage=1,
                 short_leverage=0,
                 execution_timeout=180,
@@ -289,6 +294,7 @@ def _tq_plugin() -> ChannelPlugin:
                 position_value_label="货值",
             ),
             defaults=ChannelDefaults(
+                account_control_preset="default",
                 long_leverage=3,
                 short_leverage=3,
                 execution_timeout=180,

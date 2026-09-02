@@ -55,6 +55,7 @@ def _plugin() -> ChannelPlugin:
             schedule=ChannelSchedule(kind="continuous"),
             currency="USD",
             defaults=ChannelDefaults(
+                account_control_preset="default",
                 long_leverage=1,
                 short_leverage=1,
                 execution_timeout=60,

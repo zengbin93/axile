@@ -741,7 +741,7 @@ export function AcctConfirm() {
         name: acct.name,
         market: descriptor.portfolio.market_label,
         trade_channel: acct.channel,
-        account_control_preset: 'default',
+        account_control_preset: descriptor.defaults.account_control_preset,
         account_control_override: null,
         account_config: visibleChannelAccountConfig(accountFields(descriptor), acct.config),
         is_started: acct.autoOn,

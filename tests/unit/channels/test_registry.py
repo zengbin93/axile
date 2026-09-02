@@ -143,6 +143,12 @@ def test_builtin_channels_have_stable_order_and_descriptor_shape() -> None:
     ]
 
 
+def test_channel_defaults_keep_default_account_control_preset_for_external_plugins() -> None:
+    plugin = _plugin()
+
+    assert plugin.descriptor.defaults.account_control_preset == "default"
+
+
 def test_channel_descriptor_requires_schedule_kind() -> None:
     """插件必须显式声明调度类型，禁止未知渠道静默套用默认规则。"""
     payload = _plugin().descriptor.model_dump()

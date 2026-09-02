@@ -217,6 +217,7 @@ def test_registry_default_policy_only_keeps_shape_without_numeric_defaults() -> 
 def test_ctp_account_control_preset_uses_ctp_specific_limits() -> None:
     """CTP preset 应声明渠道兼容性与专属限流阈值。"""
     preset = get_account_control_preset("ctp")
+    policy = resolve_account_control_policy("ctp")
 
     assert preset.preset_key == "ctp"
     assert preset.compatible_trade_channels == {TradeChannel.CTP}
@@ -224,12 +225,17 @@ def test_ctp_account_control_preset_uses_ctp_specific_limits() -> None:
     assert preset.policy.operations["query_order"].account.per_minute.limit == 60
     assert preset.policy.operations["query_order"].account.per_day.limit == 2000
     assert preset.policy.operations["query_order"].account.min_interval_ms.limit == 1500
+    assert policy.operations["query_order"].priority == 100
     assert preset.policy.operations["place_order"].account.per_minute.limit == 30
     assert preset.policy.operations["place_order"].account.per_day.limit == 500
     assert preset.policy.operations["place_order"].account.min_interval_ms.limit == 500
+    assert policy.operations["place_order"].priority == 10
     assert preset.policy.operations["cancel_order"].account.per_minute.limit == 60
     assert preset.policy.operations["cancel_order"].account.per_day.limit == 400
     assert preset.policy.operations["cancel_order"].account.min_interval_ms.limit == 200
+    assert policy.operations["cancel_order"].priority == 0
+    assert policy.operations["insert_order"].priority == 10
+    assert policy.operations["cancel_order_ctp"].priority == 0
     assert preset.policy.groups["ctp_td_global"].min_interval_ms.limit == 1500
 
     ensure_account_control_preset_compatible("ctp", TradeChannel.CTP)

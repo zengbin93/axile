@@ -37,6 +37,7 @@ function channel(
       show_short_leverage: true,
     },
     defaults: {
+      account_control_preset: 'default',
       long_leverage: 1,
       short_leverage: 1,
       execution_timeout: 60,

@@ -63,7 +63,7 @@ def _option_action_limits(*, overrides: dict[str, dict[str, object]] | None = No
             "min_interval_ms": _rule(500, "wait"),
         },
     }
-    merged: dict[str, object] = {scope: dict(rules) for scope, rules in base.items()}
+    merged: dict[str, object] = {"priority": 10, **{scope: dict(rules) for scope, rules in base.items()}}
     for scope, scope_overrides in (overrides or {}).items():
         # 注：merged[scope] 可能不存在；这里允许 overrides 引入新 scope。
         scope_dict = merged.setdefault(scope, {})
@@ -148,7 +148,18 @@ ACCOUNT_CONTROL_PRESETS: dict[str, AccountControlPresetDefinition] = {
             {
                 "timezone": "Asia/Shanghai",
                 "operations": {
+                    "authenticate": {"priority": 20},
+                    "trader_login": {"priority": 20},
+                    "query_settlement_status": {
+                        "priority": 20,
+                        "account": {
+                            "per_minute": _rule(20, "wait"),
+                            "per_day": _rule(200, "block"),
+                        },
+                    },
+                    "confirm_settlement": {"priority": 20},
                     "place_order": {
+                        "priority": 10,
                         "account": {
                             "per_minute": _rule(30, "wait"),
                             "per_day": _rule(500, "block"),
@@ -160,6 +171,7 @@ ACCOUNT_CONTROL_PRESETS: dict[str, AccountControlPresetDefinition] = {
                         },
                     },
                     "cancel_order": {
+                        "priority": 0,
                         "account": {
                             "per_minute": _rule(60, "wait"),
                             "per_day": _rule(400, "block"),
@@ -182,46 +194,53 @@ ACCOUNT_CONTROL_PRESETS: dict[str, AccountControlPresetDefinition] = {
                         },
                     },
                     "query_instruments": {
+                        "priority": 100,
                         "account": {
                             "per_minute": _rule(60, "wait"),
                             "per_day": _rule(2000, "block"),
-                        }
+                        },
                     },
                     "query_account": {
+                        "priority": 100,
                         "account": {
                             "per_minute": _rule(60, "wait"),
                             "per_day": _rule(2000, "block"),
-                        }
+                        },
                     },
                     "query_positions": {
+                        "priority": 100,
                         "account": {
                             "per_minute": _rule(60, "wait"),
                             "per_day": _rule(2000, "block"),
-                        }
+                        },
                     },
                     "query_orders": {
+                        "priority": 100,
                         "account": {
                             "per_minute": _rule(60, "wait"),
                             "per_day": _rule(2000, "block"),
-                        }
+                        },
                     },
-                    "query_trades": {
+                    "ctp_query_trades": {
+                        "priority": 100,
                         "account": {
                             "per_minute": _rule(60, "wait"),
                             "per_day": _rule(2000, "block"),
-                        }
+                        },
                     },
                     "query_settlement_info": {
+                        "priority": 100,
                         "account": {
                             "per_minute": _rule(20, "wait"),
                             "per_day": _rule(200, "block"),
-                        }
+                        },
                     },
                     "insert_order": {
+                        "priority": 10,
                         "account": {
                             "per_minute": _rule(30, "wait"),
                             "per_day": _rule(500, "block"),
-                        }
+                        },
                     },
                     # 期权行权 / 放弃 / 自对冲操作（ReqExecOrderInsert / ReqOptionSelfCloseInsert）
                     # 风险高于普通下单，按更严格的频次限额配置；典型场景：到期日临近的批量行权。
@@ -229,6 +248,10 @@ ACCOUNT_CONTROL_PRESETS: dict[str, AccountControlPresetDefinition] = {
                     "option_exercise": _option_action_limits(),
                     "option_abandon": _option_action_limits(),
                     "option_self_close": _option_action_limits(overrides=_OPTION_SELF_CLOSE_OVERRIDES),
+                    "cancel_order_ctp": {"priority": 0},
+                    "cancel_option_exercise": {"priority": 0},
+                    "cancel_option_abandon": {"priority": 0},
+                    "cancel_option_self_close": {"priority": 0},
                 },
                 "groups": {
                     "ctp_td_global": {
@@ -354,6 +377,7 @@ def _merge_operation_policy(
     if override_operation is None:
         return _copy_operation_policy(base_operation)
     return AccountControlOperationPolicy(
+        priority=base_operation.priority if override_operation.priority is None else override_operation.priority,
         account=_merge_scope_policy(base_operation.account, override_operation.account),
         symbol=(
             None

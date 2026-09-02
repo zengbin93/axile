@@ -12,15 +12,24 @@ from axile.executor.account_control.registry import (
 
 _GROUP = "ctp_td_global"
 _OPERATIONS = {
+    "authenticate",
+    "trader_login",
+    "query_settlement_status",
+    "confirm_settlement",
     "insert_order",
+    "cancel_order_ctp",
     "query_instruments",
     "query_account",
     "query_positions",
     "query_orders",
+    "ctp_query_trades",
     "query_settlement_info",
     "option_exercise",
     "option_abandon",
     "option_self_close",
+    "cancel_option_exercise",
+    "cancel_option_abandon",
+    "cancel_option_self_close",
 }
 
 

@@ -1,11 +1,13 @@
 """执行生命周期与后台任务编排."""
 
 import asyncio
+import inspect
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
 import loguru
 
+from axile.channels import get_channel
 from axile.domain.execution import (
     ExecutionArtifactType,
     ExecutionEventStatus,
@@ -36,7 +38,7 @@ from axile.server.execution.execution_summaries import (
     build_symbol_reconciliation,
     count_orders_from_symbol_results,
 )
-from axile.server.execution.factory import create_executor_instance
+from axile.server.execution.factory import create_executor_instance, initialize_executor_instance
 from axile.server.execution.intents import (
     IntentNotRunnable,
     SubmitResult,
@@ -378,22 +380,39 @@ async def prepare_executor_runtime(
     object
         已完成 runtime 初始化的执行器实例。
     """
-    executor = create_executor_instance(account)
-    executor.set_audit_context(audit_context)
-    executor.set_audit_sink(build_server_execution_audit_sink())
-    executor.set_account_control_guard(await build_account_control_guard(account, execution_id))
+    if "initialize" in inspect.signature(create_executor_instance).parameters:
+        executor = create_executor_instance(account, initialize=False)
+    else:  # 兼容测试替身和旧版外部工厂
+        executor = create_executor_instance(account)
+    try:
+        executor.set_audit_context(audit_context)
+        executor.set_audit_sink(build_server_execution_audit_sink())
+        executor.set_account_control_guard(await build_account_control_guard(account, execution_id))
 
-    if execution_id:
-        execution_state = get_execution_task_state(execution_id)
-        if execution_state is not None and execution_state.cancel_event is not None:
-            executor.set_termination_controller(
-                create_termination_controller(execution_id, execution_state.cancel_event)
-            )
+        if execution_id:
+            execution_state = get_execution_task_state(execution_id)
+            if execution_state is not None and execution_state.cancel_event is not None:
+                executor.set_termination_controller(
+                    create_termination_controller(execution_id, execution_state.cancel_event)
+                )
 
-    prepare_execution_runtime = getattr(executor, "prepare_execution_runtime", None)
-    if callable(prepare_execution_runtime):
-        prepare_execution_runtime()
-    return executor
+        plugin = get_channel(account.trade_channel)
+        if plugin.requires_pre_connect_guard and bool(getattr(executor, "_requires_connection_initialization", False)):
+            initialize_executor_instance(executor)
+
+        prepare_execution_runtime = getattr(executor, "prepare_execution_runtime", None)
+        if callable(prepare_execution_runtime):
+            prepare_execution_runtime()
+        return executor
+    except Exception:
+        await flush_account_control_records(executor)
+        stop = getattr(executor, "stop", None)
+        close = getattr(executor, "close", None)
+        if callable(stop):
+            stop()
+        elif callable(close):
+            close()
+        raise
 
 
 async def cleanup_executor_runtime(executor: object | None) -> None:

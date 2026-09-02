@@ -64,6 +64,10 @@ _PRESET_META = {
 }
 
 _OPERATION_META = {
+    "authenticate": ("认证", "向 CTP 交易前置提交客户端认证", "连接操作"),
+    "trader_login": ("交易登录", "登录 CTP 交易前置", "连接操作"),
+    "query_settlement_status": ("查询结算确认", "查询当前交易日结算确认状态", "连接操作"),
+    "confirm_settlement": ("确认结算", "确认当前交易日结算信息", "连接操作"),
     "place_order": ("下单", "提交新的交易委托", "常用操作"),
     "cancel_order": ("撤单", "撤销尚未完成的交易委托", "常用操作"),
     "query_order": ("查询订单", "查询单个或当前未完成订单", "常用操作"),
@@ -73,14 +77,22 @@ _OPERATION_META = {
     "query_account": ("查询资金", "查询账户资金信息", "查询操作"),
     "query_positions": ("查询持仓", "查询账户持仓信息", "查询操作"),
     "query_orders": ("查询委托", "查询 CTP 委托记录", "查询操作"),
+    "ctp_query_trades": ("查询 CTP 成交", "查询 CTP 柜台成交记录", "查询操作"),
     "query_settlement_info": ("查询结算单", "查询账户结算信息", "查询操作"),
+    "cancel_order_ctp": ("CTP 撤单", "向 CTP 交易前置提交撤单", "交易操作"),
     "option_exercise": ("期权行权", "提交期权行权请求", "期权操作"),
     "option_abandon": ("期权放弃", "提交期权放弃请求", "期权操作"),
     "option_self_close": ("期权自对冲", "提交期权自对冲请求", "期权操作"),
+    "cancel_option_exercise": ("撤销期权行权", "撤销尚未完成的期权行权请求", "期权操作"),
+    "cancel_option_abandon": ("撤销期权放弃", "撤销尚未完成的期权放弃请求", "期权操作"),
+    "cancel_option_self_close": ("撤销期权自对冲", "撤销尚未完成的期权自对冲请求", "期权操作"),
 }
 
 _GROUP_META = {
-    "ctp_td_global": ("CTP 交易请求总间隔", "下单、撤单及查询共同受此限制"),
+    "ctp_td_global": (
+        "CTP TraderApi 请求总间隔",
+        "认证、登录、结算、下单、撤单、期权及查询的真实 TraderApi 请求共同受此限制",
+    ),
 }
 
 

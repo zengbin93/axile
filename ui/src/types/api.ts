@@ -110,6 +110,7 @@ export interface ChannelCapability {
     position_value_label?: string
   }
   defaults: {
+    account_control_preset: string
     long_leverage: number
     short_leverage: number
     execution_timeout: number

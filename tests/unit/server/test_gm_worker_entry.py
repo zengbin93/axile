@@ -271,11 +271,48 @@ def test_resolve_executor_does_not_require_ctp_trading_day_from_tq(monkeypatch: 
     assert worker_state._resolve_executor(state, account, "20260824") is executor
 
 
+def test_finalize_executor_flushes_before_clearing_request_bindings(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[object] = []
+
+    class _RequestBoundExecutor:
+        def set_account_control_guard(self, value: object) -> None:
+            calls.append(("guard", value))
+
+        def set_termination_controller(self, value: object) -> None:
+            calls.append(("termination", value))
+
+        def set_audit_sink(self, value: object) -> None:
+            calls.append(("audit_sink", value))
+
+        def set_audit_context(self, value: object) -> None:
+            calls.append(("audit_context", value))
+
+        def clear_execution_runtime(self) -> None:
+            calls.append("runtime")
+
+    async def fake_flush(_executor: object) -> None:
+        calls.append("flush")
+
+    monkeypatch.setattr(worker_state, "flush_account_control_records", fake_flush)
+
+    worker_state._finalize_executor(_RequestBoundExecutor())
+
+    assert calls == [
+        "flush",
+        ("guard", None),
+        ("termination", None),
+        ("audit_sink", None),
+        ("audit_context", {}),
+        "runtime",
+    ]
+
+
 def test_handle_prepare_returns_cached_trading_day(monkeypatch: pytest.MonkeyPatch) -> None:
     account = build_account()
     executor = _FakeWorkerExecutor()
     executor._trading_day = "20260824"  # type: ignore[attr-defined]
-    monkeypatch.setattr(worker_backend_entry, "_resolve_executor", lambda *_args: executor)
+    monkeypatch.setattr(worker_backend_entry, "_resolve_prepared_executor", lambda **_kwargs: executor)
+    monkeypatch.setattr(worker_backend_entry, "_finalize_executor", lambda _executor: None)
     request = WorkerBackendRequest(
         request_id="req-prepare",
         command="prepare",

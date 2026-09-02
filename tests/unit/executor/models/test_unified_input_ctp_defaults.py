@@ -195,6 +195,7 @@ def test_external_plugin_controls_unknown_channel_config_validation(monkeypatch:
                 schedule=ChannelSchedule(kind="continuous"),
                 currency="USD",
                 defaults=ChannelDefaults(
+                    account_control_preset="default",
                     long_leverage=1,
                     short_leverage=1,
                     execution_timeout=30,

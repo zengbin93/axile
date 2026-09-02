@@ -11,8 +11,10 @@ import asyncio
 import json
 import threading
 from dataclasses import dataclass, field
+from typing import cast
 
 from axile.common.trade_channel import TradeChannel
+from axile.executor.abstract_executor.base import AbstractExecutor
 from axile.executor.termination import ExecutionTerminationController
 from axile.server.db.models import Account
 from axile.server.execution.audit_sink import build_server_execution_audit_sink
@@ -20,7 +22,7 @@ from axile.server.execution.execution_account_control import (
     build_account_control_guard,
     flush_account_control_records,
 )
-from axile.server.execution.factory import create_executor_instance
+from axile.server.execution.factory import create_executor_instance, initialize_executor_instance
 from axile.server.execution.worker_backend.protocol import WorkerTerminationSignal
 
 
@@ -136,6 +138,8 @@ def _resolve_executor(
     state: _WorkerBackendState,
     account: Account,
     expected_trading_day: str | None = None,
+    *,
+    initialize: bool = True,
 ) -> object:
     """
     解析当前请求应复用的执行器实例。
@@ -169,7 +173,9 @@ def _resolve_executor(
     state.executor = None
     state.account_id = None
     state.config_signature = None
-    state.executor = create_executor_instance(account)
+    state.executor = (
+        create_executor_instance(account) if initialize else create_executor_instance(account, initialize=False)
+    )
     state.account_id = account.id
     state.config_signature = signature
     if expected_trading_day and requires_exact_trading_day:
@@ -260,7 +266,7 @@ def _resolve_prepared_executor(
     object
         已完成请求级准备的执行器实例。
     """
-    executor = _resolve_executor(state, account)
+    executor = _resolve_executor(state, account, initialize=False)
     _prepare_executor(
         executor=executor,
         account=account,
@@ -268,6 +274,17 @@ def _resolve_prepared_executor(
         audit_context=audit_context,
         termination_controller=termination_controller,
     )
+    verify = getattr(executor, "_verify_connection", None)
+    if callable(verify) and not bool(verify()):
+        try:
+            initialize_executor_instance(cast(AbstractExecutor, executor))
+        except Exception:
+            _finalize_executor(executor)
+            _close_executor(executor)
+            state.executor = None
+            state.account_id = None
+            state.config_signature = None
+            raise
     return executor
 
 
@@ -290,6 +307,16 @@ def _finalize_executor(executor: object | None) -> None:
 
     # flush 记录必须先于 clear runtime，否则 guard 上累积的事件会被直接丢掉。
     asyncio.run(flush_account_control_records(executor))
+    request_bindings = (
+        ("set_account_control_guard", None),
+        ("set_termination_controller", None),
+        ("set_audit_sink", None),
+        ("set_audit_context", {}),
+    )
+    for setter_name, value in request_bindings:
+        setter = getattr(executor, setter_name, None)
+        if callable(setter):
+            setter(value)
     clear_execution_runtime = getattr(executor, "clear_execution_runtime", None)
     if callable(clear_execution_runtime):
         clear_execution_runtime()

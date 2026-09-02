@@ -12,9 +12,11 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from threading import RLock
+from threading import RLock, local
 from typing import Callable
 from zoneinfo import ZoneInfo
+
+from loguru import logger
 
 from axile.common.trade_channel import TradeChannel
 from axile.executor.account_control.exceptions import AccountControlBlockedError
@@ -121,6 +123,8 @@ class AccountControlEnforcementDecision:
     wait_ms: int = 0
     message: str | None = None
     outcome: str | None = None
+    hit_scope: str | None = None
+    hit_rule: str | None = None
 
     @classmethod
     def allow(cls) -> "AccountControlEnforcementDecision":
@@ -135,7 +139,13 @@ class AccountControlEnforcementDecision:
         return cls(kind="allow")
 
     @classmethod
-    def wait(cls, wait_ms: int) -> "AccountControlEnforcementDecision":
+    def wait(
+        cls,
+        wait_ms: int,
+        *,
+        hit_scope: str | None = None,
+        hit_rule: str | None = None,
+    ) -> "AccountControlEnforcementDecision":
         """
         构造需要等待的决策.
 
@@ -149,7 +159,12 @@ class AccountControlEnforcementDecision:
         AccountControlEnforcementDecision
             ``kind`` 为 ``wait`` 的决策对象。
         """
-        return cls(kind="wait", wait_ms=max(wait_ms, 0))
+        return cls(
+            kind="wait",
+            wait_ms=max(wait_ms, 0),
+            hit_scope=hit_scope,
+            hit_rule=hit_rule,
+        )
 
     @classmethod
     def block(cls, message: str, outcome: str) -> "AccountControlEnforcementDecision":
@@ -186,6 +201,14 @@ class AccountControlResolvedAttempt:
 
     context: AccountControlEvaluationContext
     decision: AccountControlEnforcementDecision
+
+
+@dataclass(frozen=True)
+class _QueuedRequest:
+    """同一 guard 内等待调度的请求。"""
+
+    seq: int
+    priority: int
 
 
 def resolve_control_window(
@@ -327,6 +350,9 @@ class AccountControlGuard:
         self._termination_checkpoint = termination_checkpoint
         self._state_lock = RLock()
         self._event_seq = 0
+        self._queue_seq = 0
+        self._wait_queue: list[_QueuedRequest] = []
+        self._thread_state = local()
         self._events: list[AccountControlEventWrite] = []
         self._account_counters: dict[AccountCounterKey, int] = {}
         self._symbol_counters: dict[SymbolCounterKey, int] = {}
@@ -382,33 +408,79 @@ class AccountControlGuard:
             return AccountControlAttempt(None, None)
         assert self.account_id is not None
         assert self.execution_id is not None
+        assert self.policy is not None
+        with self._state_lock:
+            self._queue_seq += 1
+            operation_policy = self.policy.operations.get(operation, AccountControlOperationPolicy())
+            queued = _QueuedRequest(seq=self._queue_seq, priority=operation_policy.priority)
+            self._wait_queue.append(queued)
 
-        while True:
-            # 同一把锁覆盖“检查额度 → 预占额度 → 记录事件”，避免并发 symbol
-            # 同时看到旧快照后全部放行。等待必须在锁外进行，否则一个受限请求会
-            # 阻塞其他本可立即执行的 operation，也会拖慢终止检查。
+        waited_ms = 0
+        wait_hits: list[str] = []
+        try:
+            while True:
+                # 只有 policy 优先级最高且同级最早的请求可以评估并预占额度。
+                with self._state_lock:
+                    head = min(self._wait_queue, key=lambda item: (item.priority, item.seq))
+                    if head != queued:
+                        wait_ms = self._wait_poll_interval_ms
+                    else:
+                        resolved_attempt = self._resolve_operation_attempt(operation=operation, symbol=symbol)
+                        scheduling_metadata: dict[str, object] = {}
+                        groups = list(self._get_operation_group_keys(operation))
+                        if waited_ms or groups or queued.priority != 100:
+                            scheduling_metadata = {
+                                "waited_ms": waited_ms,
+                                "priority": queued.priority,
+                                "groups": groups,
+                                "rules": wait_hits,
+                            }
+                        event_metadata = _merge_metadata(metadata, scheduling_metadata)
+                        if resolved_attempt.decision.kind == "block":
+                            self._wait_queue.remove(queued)
+                            self._record_blocked_attempt(
+                                operation=operation,
+                                symbol=symbol,
+                                metadata=event_metadata,
+                                resolved_attempt=resolved_attempt,
+                            )
+                        if resolved_attempt.decision.kind == "allow":
+                            self._thread_state.last_waited_ms = waited_ms
+                            self._thread_state.last_wait_hits = tuple(wait_hits)
+                            if waited_ms:
+                                logger.debug(
+                                    "账户控制放行 operation={} waited_ms={} rules={}",
+                                    operation,
+                                    waited_ms,
+                                    wait_hits,
+                                )
+                            self._wait_queue.remove(queued)
+                            return self._record_allowed_attempt(
+                                operation=operation,
+                                symbol=symbol,
+                                metadata=event_metadata,
+                                resolved_attempt=resolved_attempt,
+                            )
+                        hit = resolved_attempt.decision
+                        if hit.hit_scope and hit.hit_rule:
+                            label = f"{hit.hit_scope}.{hit.hit_rule}"
+                            if label not in wait_hits:
+                                wait_hits.append(label)
+                        wait_ms = min(hit.wait_ms, self._wait_poll_interval_ms)
+                self._wait_for_quota(wait_ms, symbol)
+                waited_ms += wait_ms
+        finally:
             with self._state_lock:
-                resolved_attempt = self._resolve_operation_attempt(
-                    operation=operation,
-                    symbol=symbol,
-                )
-                if resolved_attempt.decision.kind == "block":
-                    self._record_blocked_attempt(
-                        operation=operation,
-                        symbol=symbol,
-                        metadata=metadata,
-                        resolved_attempt=resolved_attempt,
-                    )
-                if resolved_attempt.decision.kind == "allow":
-                    return self._record_allowed_attempt(
-                        operation=operation,
-                        symbol=symbol,
-                        metadata=metadata,
-                        resolved_attempt=resolved_attempt,
-                    )
+                if queued in self._wait_queue:
+                    self._wait_queue.remove(queued)
 
-                wait_ms = resolved_attempt.decision.wait_ms
-            self._wait_for_quota(wait_ms, symbol)
+    def current_waited_ms(self) -> int:
+        """返回当前线程最近一次获准请求的累计等待毫秒数。"""
+        return int(getattr(self._thread_state, "last_waited_ms", 0))
+
+    def current_wait_hits(self) -> tuple[str, ...]:
+        """返回当前线程最近一次获准请求命中的规则。"""
+        return tuple(getattr(self._thread_state, "last_wait_hits", ()))
 
     def update_event_outcome(
         self,
@@ -755,14 +827,15 @@ class AccountControlGuard:
         self,
         decisions: list[AccountControlEnforcementDecision],
     ) -> AccountControlEnforcementDecision:
-        max_wait_ms = 0
+        max_wait: AccountControlEnforcementDecision | None = None
         for decision in decisions:
             if decision.kind == "block":
                 return decision
             if decision.kind == "wait":
-                max_wait_ms = max(max_wait_ms, decision.wait_ms)
-        if max_wait_ms > 0:
-            return AccountControlEnforcementDecision.wait(max_wait_ms)
+                if max_wait is None or decision.wait_ms > max_wait.wait_ms:
+                    max_wait = decision
+        if max_wait is not None:
+            return max_wait
         return AccountControlEnforcementDecision.allow()
 
     def _get_effective_symbol_scope(
@@ -808,7 +881,7 @@ class AccountControlGuard:
                 if decision.kind != "allow":
                     return decision
 
-        max_wait_ms = 0
+        max_wait: AccountControlEnforcementDecision | None = None
         minute_rule = scope_policy.per_minute
         if minute_rule is not None:
             minute_count = self._get_count(
@@ -836,7 +909,8 @@ class AccountControlGuard:
                 if decision.kind == "block":
                     return decision
                 if decision.kind == "wait":
-                    max_wait_ms = max(max_wait_ms, decision.wait_ms)
+                    if max_wait is None or decision.wait_ms > max_wait.wait_ms:
+                        max_wait = decision
 
         interval_rule = scope_policy.min_interval_ms
         if interval_rule is not None:
@@ -858,10 +932,11 @@ class AccountControlGuard:
                     if decision.kind == "block":
                         return decision
                     if decision.kind == "wait":
-                        max_wait_ms = max(max_wait_ms, decision.wait_ms)
+                        if max_wait is None or decision.wait_ms > max_wait.wait_ms:
+                            max_wait = decision
 
-        if max_wait_ms > 0:
-            return AccountControlEnforcementDecision.wait(max_wait_ms)
+        if max_wait is not None:
+            return max_wait
         return AccountControlEnforcementDecision.allow()
 
     def _decision_for_trigger(
@@ -880,7 +955,11 @@ class AccountControlGuard:
             )
         if wait_ms <= 0:
             return AccountControlEnforcementDecision.allow()
-        return AccountControlEnforcementDecision.wait(wait_ms)
+        return AccountControlEnforcementDecision.wait(
+            wait_ms,
+            hit_scope=operation_or_group,
+            hit_rule=rule_kind,
+        )
 
     def _get_wait_ms_until_next_minute(self, local_now: datetime) -> int:
         next_minute = local_now.replace(second=0, microsecond=0) + timedelta(minutes=1)

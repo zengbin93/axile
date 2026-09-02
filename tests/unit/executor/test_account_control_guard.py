@@ -4,14 +4,18 @@ from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
-from threading import Barrier, BrokenBarrierError
+from threading import Barrier, BrokenBarrierError, Event, Lock
 from zoneinfo import ZoneInfo
 
 import pytest
 
 from axile.common.trade_channel import TradeChannel
 from axile.executor.account_control.exceptions import AccountControlBlockedError
-from axile.executor.account_control.guard import AccountControlGuard
+from axile.executor.account_control.guard import (
+    AccountControlEnforcementDecision,
+    AccountControlGuard,
+    AccountControlResolvedAttempt,
+)
 from axile.executor.account_control.models import (
     AccountControlBucketType,
     AccountControlDecision,
@@ -175,6 +179,84 @@ def test_guard_atomically_checks_and_reserves_concurrent_account_quota(
     assert len({event.event_uid for event in events}) == 2
 
 
+def test_guard_allows_high_priority_operation_ahead_of_queued_queries(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """高优先级撤单应越过已经排队但尚未获准的普通查询。"""
+    guard = AccountControlGuard(
+        account_id=12,
+        execution_id="exec-priority",
+        channel=TradeChannel.CTP,
+        policy=resolve_account_control_policy(
+            "default",
+            AccountControlOverride.model_validate(
+                {
+                    "operations": {
+                        "query_account": {"priority": 100},
+                        "cancel_order": {"priority": 0},
+                    }
+                }
+            ),
+        ),
+        baseline=AccountControlCounterSnapshot(),
+        clock=_clock,
+    )
+    original_resolve = guard._resolve_operation_attempt
+    delayed_first_query = False
+
+    def delay_first_query(*, operation: str, symbol: str | None) -> AccountControlResolvedAttempt:
+        nonlocal delayed_first_query
+        resolved = original_resolve(operation=operation, symbol=symbol)
+        if operation == "query_account" and not delayed_first_query:
+            delayed_first_query = True
+            return AccountControlResolvedAttempt(
+                context=resolved.context,
+                decision=AccountControlEnforcementDecision.wait(1),
+            )
+        return resolved
+
+    release_waiters = Event()
+    queries_waiting = Event()
+    waiter_lock = Lock()
+    waiter_count = 0
+
+    def block_waiters(_seconds: float) -> None:
+        nonlocal waiter_count
+        if release_waiters.is_set():
+            Event().wait(0.001)
+            return
+        with waiter_lock:
+            waiter_count += 1
+            if waiter_count == 2:
+                queries_waiting.set()
+        assert release_waiters.wait(timeout=1)
+
+    monkeypatch.setattr(guard, "_resolve_operation_attempt", delay_first_query)
+    monkeypatch.setattr(guard, "_sleep", block_waiters)
+    completion_order: list[str] = []
+
+    def begin(operation: str) -> None:
+        guard.begin_operation(operation).record_outcome("done")
+        completion_order.append(operation)
+
+    with ThreadPoolExecutor(max_workers=3) as pool:
+        first_query = pool.submit(begin, "query_account")
+        while not delayed_first_query:
+            Event().wait(0.001)
+        second_query = pool.submit(begin, "query_account")
+        cancel = pool.submit(begin, "cancel_order")
+        try:
+            cancel.result(timeout=1)
+            assert completion_order == ["cancel_order"]
+            assert queries_waiting.wait(timeout=1)
+        finally:
+            release_waiters.set()
+        first_query.result()
+        second_query.result()
+
+    assert completion_order == ["cancel_order", "query_account", "query_account"]
+
+
 def test_guard_records_account_execution_channel_symbol_and_operation() -> None:
     """防护层记录的事件应带上评估所需上下文。"""
     baseline = AccountControlCounterSnapshot()
@@ -272,7 +354,13 @@ def test_guard_waits_until_min_interval_ms_elapsed() -> None:
     ]
     assert events[0].occurred_at_ms == _to_ms(first_moment)
     assert events[1].occurred_at_ms == _to_ms(third_moment)
-    assert events[1].metadata == {"order_id": "oid-2"}
+    assert events[1].metadata == {
+        "order_id": "oid-2",
+        "waited_ms": 300,
+        "priority": 100,
+        "groups": [],
+        "rules": ["place_order.min_interval_ms"],
+    }
 
 
 def test_guard_uses_default_clock_for_waiting_when_no_sleep_or_clock_is_injected() -> None:

@@ -232,6 +232,7 @@ class AccountControlOperationOverride(_AccountControlBaseModel):
         标的级覆盖配置。
     """
 
+    priority: StrictInt | None = None
     account: AccountControlScopeOverride | None = None
     symbol: AccountControlScopeOverride | None = None
 
@@ -248,6 +249,7 @@ class AccountControlOperationPolicy(_AccountControlBaseModel):
         标的级规则；为空时表示不启用标的级限制。
     """
 
+    priority: StrictInt = 100
     account: AccountControlScopePolicy = Field(default_factory=AccountControlScopePolicy)
     symbol: AccountControlScopePolicy | None = None
 

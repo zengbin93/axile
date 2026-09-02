@@ -38,7 +38,8 @@ def test_worker_get_account_assets_command_returns_unified_payload(monkeypatch: 
         execution_id=None,
         payload={},
     )
-    monkeypatch.setattr(worker_entry, "_resolve_executor", lambda _state, _account: _Executor())
+    monkeypatch.setattr(worker_entry, "_resolve_prepared_executor", lambda **_kwargs: _Executor())
+    monkeypatch.setattr(worker_entry, "_finalize_executor", lambda _executor: None)
 
     response = worker_entry._handle_worker_request(request, _WorkerBackendState())
 

@@ -36,6 +36,7 @@ def test_migration_history_is_linear() -> None:
         "0006_drop_trading_calendar.py",
         "0007_execution_intent.py",
         "0008_feishu_card_config.py",
+        "0009_ctp_account_control_preset.py",
     ]
     initial = _load_migration(migration_paths[0])
     calendar = _load_migration(migration_paths[1])
@@ -45,7 +46,10 @@ def test_migration_history_is_linear() -> None:
     drop_trading_calendar = _load_migration(migration_paths[5])
     execution_intent = _load_migration(migration_paths[6])
     feishu_card_config = _load_migration(migration_paths[7])
+    ctp_account_control_preset = _load_migration(migration_paths[8])
     assert initial.revision == "0001"
+    assert ctp_account_control_preset.revision == "0009"
+    assert ctp_account_control_preset.down_revision == "0008"
     assert initial.down_revision is None
     assert calendar.revision == "0002"
     assert calendar.down_revision == "0001"
@@ -453,3 +457,70 @@ def test_plugin_network_migration_rewrites_account_config_and_downgrades() -> No
         assert downgraded[2] == {"is_testnet": False}
         assert downgraded[3] == {"is_testnet": False}
         assert downgraded[4] == {"is_testnet": True}
+
+
+def test_ctp_preset_migration_only_updates_ctp_default_and_preserves_override() -> None:
+    initial = _load_migration(_MIGRATIONS_DIR / "0001_initial.py")
+    migration = _load_migration(_MIGRATIONS_DIR / "0009_ctp_account_control_preset.py")
+    engine = sa.create_engine("sqlite://")
+    with engine.begin() as connection:
+        operations = Operations(MigrationContext.configure(connection))
+        initial.op = operations
+        initial.upgrade()
+        common = {
+            "market": "future",
+            "account_config": "{}",
+            "is_started": False,
+            "cron_expr": "",
+            "brokerage": "demo",
+            "weight_precision": 0.01,
+            "execution_timeout": 180,
+            "updated_at": "now",
+            "created_at": "now",
+        }
+        account = sa.table(
+            "account",
+            *[sa.column(name) for name in ("id", "name", "trade_channel", "account_control_preset")],
+            sa.column("account_control_override", sa.JSON()),
+            *[sa.column(name) for name in common],
+        )
+        override = {"groups": {"ctp_td_global": {"min_interval_ms": {"limit": 2000}}}}
+        connection.execute(
+            sa.insert(account),
+            [
+                {
+                    **common,
+                    "id": 1,
+                    "name": "ctp-default",
+                    "trade_channel": "ctp",
+                    "account_control_preset": "default",
+                    "account_control_override": override,
+                },
+                {
+                    **common,
+                    "id": 2,
+                    "name": "ctp-explicit",
+                    "trade_channel": "ctp",
+                    "account_control_preset": "custom",
+                    "account_control_override": None,
+                },
+                {
+                    **common,
+                    "id": 3,
+                    "name": "gm-default",
+                    "trade_channel": "gm",
+                    "account_control_preset": "default",
+                    "account_control_override": None,
+                },
+            ],
+        )
+
+        migration.op = operations
+        migration.upgrade()
+        rows = connection.execute(
+            sa.select(account.c.id, account.c.account_control_preset, account.c.account_control_override)
+        ).all()
+        assert rows == [(1, "ctp", override), (2, "custom", None), (3, "default", None)]
+
+        migration.downgrade()
+        assert connection.scalar(sa.select(account.c.account_control_preset).where(account.c.id == 1)) == "ctp"

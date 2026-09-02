@@ -50,7 +50,6 @@ from axile.server.execution.worker_backend.worker_state import (
     _close_executor,
     _finalize_executor,
     _request_worker_termination,
-    _resolve_executor,
     _resolve_prepared_executor,
     _WorkerBackendState,
 )
@@ -71,9 +70,20 @@ def _handle_prepare(request: WorkerBackendRequest, state: _WorkerBackendState) -
     """创建或复用账户执行器，并返回通道准备结果。"""
     account = Account.model_validate(request.account_payload)
     expected = str(request.payload.get("expected_trading_day", "") or "") or None
-    _activate_worker_termination(state, request.execution_id)
+    executor = None
+    termination_controller = _activate_worker_termination(state, request.execution_id)
     try:
-        executor = _resolve_executor(state, account, expected)
+        executor = _resolve_prepared_executor(
+            state=state,
+            account=account,
+            execution_id=request.execution_id or request.request_id,
+            audit_context={"request_id": request.request_id, "trigger_source": "prepare"},
+            termination_controller=termination_controller,
+        )
+        if expected and account.trade_channel.value == "ctp":
+            trading_day = str(getattr(executor, "_trading_day", "") or "")
+            if trading_day != expected:
+                raise RuntimeError(f"柜台交易日不匹配: expected={expected}, actual={trading_day or 'unknown'}")
         return WorkerBackendResponse(
             request_id=request.request_id,
             kind="result",
@@ -90,6 +100,7 @@ def _handle_prepare(request: WorkerBackendRequest, state: _WorkerBackendState) -
             error=_build_error_payload(exc),
         )
     finally:
+        _finalize_executor(executor)
         _clear_worker_termination(state, request.execution_id)
 
 
@@ -126,8 +137,14 @@ def _handle_get_account_assets(
 ) -> WorkerBackendResponse:
     """查询并返回账户当前资产，不进入交易执行生命周期."""
     account = Account.model_validate(request.account_payload)
+    executor = None
     try:
-        executor = _resolve_executor(state, account)
+        executor = _resolve_prepared_executor(
+            state=state,
+            account=account,
+            execution_id=request.execution_id or request.request_id,
+            audit_context={"request_id": request.request_id, "trigger_source": "account_assets"},
+        )
         assets = cast(UnifiedAccountAssets, executor.get_account_assets())
         return WorkerBackendResponse(
             request_id=request.request_id,
@@ -142,6 +159,8 @@ def _handle_get_account_assets(
             channel_type=account.trade_channel,
             error=_build_error_payload(exc),
         )
+    finally:
+        _finalize_executor(executor)
 
 
 def _handle_calculate_portfolio(

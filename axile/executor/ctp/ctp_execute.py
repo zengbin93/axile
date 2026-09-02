@@ -6,7 +6,6 @@ import math
 import shutil
 import tempfile
 import threading
-import time
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
@@ -22,6 +21,7 @@ from axile.channels.cn_futures import canonicalize_cn_futures_symbol, czce_is_op
 from axile.common.trade_channel import TradeChannel
 from axile.domain.execution import ExecutionReasonFamily
 from axile.executor.abstract_executor.base import AbstractExecutor
+from axile.executor.account_control.decorators import run_controlled_call
 from axile.executor.account_control.exceptions import AccountControlBlockedError
 from axile.executor.algorithms.utils import clock_now
 from axile.executor.china_futures_session import is_within_possible_china_futures_session
@@ -223,18 +223,44 @@ class CTPExecutor(AbstractExecutor, UnifiedCallbackClient):
         if code != 0:
             raise CtpRequestError(f"{name}同步拒绝: return_code={code}", return_code=code)
 
-    def _send_with_retry(self, send, name) -> int:
-        for attempt in range(1, 4):
-            code = send()
+    def _send_trader_request(self, operation, name, req, *, symbol=None, before_send=None) -> int:
+        """经通用账户控制发送一次 TraderApi 请求，不在适配层重试。"""
+        guard = self.get_account_control_guard()
+
+        def send_once() -> int:
+            rid = self._next_id()
+            if before_send is not None:
+                before_send(rid)
+            code = int(getattr(self._trader_api, name)(req, rid))
             if code == 0:
-                return code
-            if code not in {-2, -3} or attempt == 3:
-                self._check(code, name)
-            self.logger.warning(
-                "{}同步拒绝: return_code={}，{} 秒后重试（第 {} 次）", name, code, attempt * 0.1, attempt
+                return rid
+            meanings = {
+                -1: "网络连接失败",
+                -2: "前置未处理请求队列超限",
+                -3: "每秒发送请求数超过柜台许可",
+            }
+            policy = getattr(guard, "policy", None)
+            preset = getattr(policy, "preset_key", "unknown")
+            waited_ms = guard.current_waited_ms() if guard is not None else 0
+            wait_hits = guard.current_wait_hits() if guard is not None else ()
+            meaning = meanings.get(code, "柜台返回未知同步拒绝")
+            message = (
+                f"{name}：{meaning}，返回码={code}，生效 preset={preset}，"
+                f"group=ctp_td_global，rule={','.join(wait_hits) or '当前有效规则'}，"
+                f"已等待={waited_ms}ms；请求未受理、未自动重试"
             )
-            time.sleep(attempt * 0.1)
-        raise AssertionError("unreachable")
+            if code == -2:
+                raise CtpSessionRecoveryRequired(message, return_code=code)
+            raise CtpRequestError(message, return_code=code)
+
+        return run_controlled_call(
+            guard=guard,
+            operation=operation,
+            symbol=symbol,
+            metadata={"request_name": name, "group": "ctp_td_global"},
+            call=send_once,
+            success_outcome="accepted",
+        )
 
     def _wait(self, stage, name):
         if not stage.done.wait(self._timeout):
@@ -283,7 +309,7 @@ class CTPExecutor(AbstractExecutor, UnifiedCallbackClient):
         self._trader_connected = True
         req = build_authenticate(self._config())
         try:
-            self._check(self._trader_api.ReqAuthenticate(req, self._next_id()), "认证")
+            self._send_trader_request("authenticate", "ReqAuthenticate", req)
         except Exception as e:
             self._auth.error = e
             self._auth.done.set()
@@ -295,7 +321,7 @@ class CTPExecutor(AbstractExecutor, UnifiedCallbackClient):
             return
         req = build_trader_login(self._config())
         try:
-            self._check(self._trader_api.ReqUserLogin(req, self._next_id()), "登录")
+            self._send_trader_request("trader_login", "ReqUserLogin", req)
         except Exception as e:
             self._login.error = e
             self._login.done.set()
@@ -317,7 +343,7 @@ class CTPExecutor(AbstractExecutor, UnifiedCallbackClient):
             return
         req = build_settlement_confirm(self._config())
         try:
-            self._check(self._trader_api.ReqSettlementInfoConfirm(req, self._next_id()), "结算确认")
+            self._send_trader_request("confirm_settlement", "ReqSettlementInfoConfirm", req)
         except Exception as e:
             self._settlement.error = e
             self._settlement.done.set()
@@ -359,28 +385,29 @@ class CTPExecutor(AbstractExecutor, UnifiedCallbackClient):
 
     def _query(self, name, req):
         with self._query_lock:
-            pending = None
+            operation = {
+                "ReqQryInstrument": "query_instruments",
+                "ReqQryTradingAccount": "query_account",
+                "ReqQryInvestorPosition": "query_positions",
+                "ReqQryOrder": "query_orders",
+                "ReqQryTrade": "ctp_query_trades",
+                "ReqQrySettlementInfoConfirm": "query_settlement_status",
+            }[name]
+            pending = _PendingQuery([], threading.Event())
             pending_rid = None
-            return_codes: list[int] = []
 
-            def send():
-                nonlocal pending, pending_rid
-                pending_rid = self._next_id()
-                pending = _PendingQuery([], threading.Event())
-                self._pending_queries[pending_rid] = pending
-                code = getattr(self._trader_api, name)(req, pending_rid)
-                return_codes.append(code)
-                if code != 0:
-                    self._pending_queries.pop(pending_rid, None)
-                return code
+            def register_pending(rid):
+                nonlocal pending_rid
+                pending_rid = rid
+                self._pending_queries[rid] = pending
 
             try:
-                self._send_with_retry(send, name)
-            except CtpRequestError as exc:
-                if return_codes == [-2, -2, -2]:
-                    raise CtpSessionRecoveryRequired(str(exc), return_code=exc.return_code) from exc
+                self._send_trader_request(operation, name, req, before_send=register_pending)
+            except Exception:
+                if pending_rid is not None:
+                    self._pending_queries.pop(pending_rid, None)
                 raise
-            assert pending is not None and pending_rid is not None
+            assert pending_rid is not None
             try:
                 if not pending.done.wait(self._timeout):
                     raise TimeoutError(f"{name}超时")
@@ -560,7 +587,7 @@ class CTPExecutor(AbstractExecutor, UnifiedCallbackClient):
         }
         self._order_keys[oid] = key
         try:
-            self._send_with_retry(lambda: self._trader_api.ReqOrderInsert(r, self._next_id()), "报单")
+            self._send_trader_request("insert_order", "ReqOrderInsert", r, symbol=symbol)
         except Exception:
             self._order_keys.pop(oid, None)
             raise
@@ -604,7 +631,7 @@ class CTPExecutor(AbstractExecutor, UnifiedCallbackClient):
         if not key:
             raise ValueError(f"找不到订单撤单键: {order_id}")
         r = build_order_cancel(self._config(), symbol=symbol, key=key)
-        self._send_with_retry(lambda: self._trader_api.ReqOrderAction(r, self._next_id()), "撤单")
+        self._send_trader_request("cancel_order_ctp", "ReqOrderAction", r, symbol=symbol)
         return True
 
     @override
@@ -815,7 +842,12 @@ class CTPExecutor(AbstractExecutor, UnifiedCallbackClient):
         )
         self._option_actions[ref] = record
         try:
-            self._send_with_retry(lambda: getattr(self._trader_api, name)(req, self._next_id()), name)
+            operation = {
+                OptionActionType.EXERCISE: "option_exercise",
+                OptionActionType.ABANDON: "option_abandon",
+                OptionActionType.SELF_CLOSE: "option_self_close",
+            }[kind]
+            self._send_trader_request(operation, name, req, symbol=symbol)
         except Exception:
             self._option_actions.pop(ref, None)
             raise
@@ -828,7 +860,12 @@ class CTPExecutor(AbstractExecutor, UnifiedCallbackClient):
             raise KeyError(f"未知期权指令: {ref}")
         c = self._config()
         req, name = build_option_cancel(record, broker_id=c.broker_id, investor_id=c.investor_id)
-        self._check(getattr(self._trader_api, name)(req, self._next_id()), name)
+        operation = {
+            OptionActionType.EXERCISE: "cancel_option_exercise",
+            OptionActionType.ABANDON: "cancel_option_abandon",
+            OptionActionType.SELF_CLOSE: "cancel_option_self_close",
+        }[record.action]
+        self._send_trader_request(operation, name, req, symbol=record.instrument_id)
         record.status = OptionActionStatus.CANCELLING
         return True
 

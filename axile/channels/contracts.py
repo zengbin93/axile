@@ -56,6 +56,8 @@ class ChannelDefaults(_FrozenDescriptorModel):
 
     Attributes
     ----------
+    account_control_preset : str
+        新建账户默认使用的账户控制预设键。
     long_leverage : float
         默认多头杠杆。
     short_leverage : float
@@ -68,6 +70,7 @@ class ChannelDefaults(_FrozenDescriptorModel):
         默认清仓算法；为空时沿用执行器默认行为。
     """
 
+    account_control_preset: str = Field(default="default", min_length=1)
     long_leverage: float = Field(ge=0)
     short_leverage: float = Field(ge=0)
     execution_timeout: int = Field(ge=1)
@@ -399,6 +402,7 @@ class ChannelPlugin:
     max_parallel_symbols: int | None = 1
     canonicalize_symbol: CanonicalizeSymbol = _identity_symbol
     quantize_target_quantity: QuantizeTargetQuantity | None = None
+    requires_pre_connect_guard: bool = False
 
     def __post_init__(self) -> None:
         """校验插件运行时契约中的基本不变量."""

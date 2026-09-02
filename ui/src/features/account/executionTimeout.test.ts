@@ -20,6 +20,7 @@ describe('defaultExecutionTimeoutForChannel', () => {
           long_leverage_label: '做多杠杆', short_leverage_label: '做空杠杆', show_short_leverage: true,
         },
         defaults: {
+          account_control_preset: 'default',
           long_leverage: 1, short_leverage: 1, execution_timeout: 420,
           trade_algorithm: { method: 'SINGLE-MAKER', params: {} }, empty_positions_algorithm: null,
         },
