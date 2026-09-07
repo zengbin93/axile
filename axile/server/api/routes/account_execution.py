@@ -14,7 +14,7 @@ from sqlmodel import col, func, select
 
 from axile.channels import get_channel
 from axile.domain.execution import ExecutionArtifactType, ExecutionTaskStatus
-from axile.server.api.deps import SchedDep, SessionDep
+from axile.server.api.deps import HistoryPaginationDep, SchedDep, SessionDep
 from axile.server.api.routes.account_support import _get_account_or_404
 from axile.server.api.routes.portfolio import resolve_portfolio_target
 from axile.server.db.models import (
@@ -394,8 +394,7 @@ async def terminate_account_execution(
 async def execution_events(
     session: SessionDep,
     execution_id: str,
-    skip: int = 0,
-    limit: int = 200,
+    pagination: HistoryPaginationDep,
 ) -> ExecutionEventListPublic:
     """查询指定执行标识对应的事件流."""
     count_stmt = select(func.count()).select_from(ExecutionEvent).where(ExecutionEvent.execution_id == execution_id)
@@ -406,8 +405,8 @@ async def execution_events(
         # 按 id（自增=落库/发生顺序）排序，而非 seq：终止类事件 seq=0 会排到 started(seq=1) 之前，
         # 令接口原始序列读作「先终止后开始」。id 单调递增即真实时序，正常事件的 seq 顺序与之一致。
         .order_by(cast("Any", ExecutionEvent.id))
-        .offset(skip)
-        .limit(limit)
+        .offset(pagination.skip)
+        .limit(pagination.limit)
     )
     rows = (await session.execute(stmt)).scalars().all()
     return ExecutionEventListPublic(
@@ -420,8 +419,7 @@ async def execution_events(
 async def execution_artifacts(
     session: SessionDep,
     execution_id: str,
-    skip: int = 0,
-    limit: int = 100,
+    pagination: HistoryPaginationDep,
 ) -> ExecutionArtifactListPublic:
     """查询指定执行标识对应的执行附件."""
     count_stmt = (
@@ -432,8 +430,8 @@ async def execution_artifacts(
         select(ExecutionArtifact)
         .where(ExecutionArtifact.execution_id == execution_id)
         .order_by(cast("Any", ExecutionArtifact.id))
-        .offset(skip)
-        .limit(limit)
+        .offset(pagination.skip)
+        .limit(pagination.limit)
     )
     rows = (await session.execute(stmt)).scalars().all()
     return ExecutionArtifactListPublic(

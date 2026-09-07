@@ -13,7 +13,7 @@ from sqlmodel import and_, delete, desc, func, select
 from axile.channels import get_channel
 from axile.common.trade_channel import TradeChannel
 from axile.executor.account_control.models import AccountControlOverride
-from axile.server.api.deps import SchedDep, SessionDep
+from axile.server.api.deps import HistoryPaginationDep, SchedDep, SessionDep
 from axile.server.api.routes.account_support import _get_account_or_404
 from axile.server.cron import SCHEDULER_TIMEZONE, parse_cron_expr
 from axile.server.db.models import (
@@ -680,8 +680,7 @@ async def update_account(
 async def list_execute_records(
     session: SessionDep,
     account_id: int,
-    skip: int = 0,
-    limit: int = 100,
+    pagination: HistoryPaginationDep,
 ) -> ExecuteRecordListPublic:
     """获取账户的执行记录."""
     db_account = await _get_account_or_404(session, account_id)
@@ -694,8 +693,8 @@ async def list_execute_records(
         .where(ExecuteRecord.account_id == db_account.id)
         # execute_record 没有独立时间排序键时，按自增 id 倒序近似“最新在前”的时间线。
         .order_by(desc(ExecuteRecord.id))
-        .offset(skip)
-        .limit(limit)
+        .offset(pagination.skip)
+        .limit(pagination.limit)
     )
     records = (await session.execute(statement)).scalars().all()
 
@@ -709,8 +708,7 @@ async def list_execute_records(
 async def list_portfolio_records(
     session: SessionDep,
     account_id: int,
-    skip: int = 0,
-    limit: int = 100,
+    pagination: HistoryPaginationDep,
 ) -> PortfolioAccountListPublic:
     """获取账户的组合更换记录."""
     db_account = await _get_account_or_404(session, account_id)
@@ -721,7 +719,12 @@ async def list_portfolio_records(
     count = (await session.execute(count_statement)).scalar_one()
 
     # 组合绑定记录保持插入顺序返回，便于直接还原账户组合切换历史。
-    statement = select(PortfolioAccount).where(PortfolioAccount.account_id == db_account.id).offset(skip).limit(limit)
+    statement = (
+        select(PortfolioAccount)
+        .where(PortfolioAccount.account_id == db_account.id)
+        .offset(pagination.skip)
+        .limit(pagination.limit)
+    )
     records = (await session.execute(statement)).scalars().all()
 
     return PortfolioAccountListPublic(
