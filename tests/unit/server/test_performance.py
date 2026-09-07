@@ -213,6 +213,21 @@ def test_migration_roundtrip_defaults(tmp_path):
         migration.upgrade()
 
 
+def test_migration_reconciles_columns_created_before_revision(tmp_path):
+    """模型先建表时，0011 仍应补齐缺失字段并允许 Alembic 继续升级."""
+    engine = sa.create_engine(f"sqlite:///{tmp_path / 'partial-migration.db'}")
+    migration = _load_migration(_MIGRATIONS_DIR / "0011_account_performance.py")
+    with engine.begin() as conn:
+        conn.execute(
+            sa.text("CREATE TABLE account (id INTEGER PRIMARY KEY, backtest_weight_type TEXT NOT NULL DEFAULT 'ts')")
+        )
+        migration.op = Operations(MigrationContext.configure(conn))
+        migration.upgrade()
+
+        columns = {column["name"] for column in sa.inspect(conn).get_columns("account")}
+        assert columns >= {"id", "backtest_weight_type", "backtest_fee_rate"}
+
+
 def test_routes_persist_settings_across_sessions_without_scheduler(tmp_path):
     engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'account.db'}", poolclass=NullPool)
     sessions = async_sessionmaker(engine, expire_on_commit=False)

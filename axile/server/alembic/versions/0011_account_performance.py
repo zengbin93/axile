@@ -11,8 +11,17 @@ depends_on = None
 
 def upgrade() -> None:
     """为现有账户初始化时序、零费率."""
-    op.add_column("account", sa.Column("backtest_weight_type", sa.Text(), nullable=False, server_default="ts"))
-    op.add_column("account", sa.Column("backtest_fee_rate", sa.Float(), nullable=False, server_default="0"))
+    existing_columns = {column["name"] for column in sa.inspect(op.get_bind()).get_columns("account")}
+    if "backtest_weight_type" not in existing_columns:
+        op.add_column(
+            "account",
+            sa.Column("backtest_weight_type", sa.Text(), nullable=False, server_default="ts"),
+        )
+    if "backtest_fee_rate" not in existing_columns:
+        op.add_column(
+            "account",
+            sa.Column("backtest_fee_rate", sa.Float(), nullable=False, server_default="0"),
+        )
 
 
 def downgrade() -> None:
