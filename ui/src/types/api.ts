@@ -148,7 +148,7 @@ export interface AlgorithmInfo {
 
 /* ============================ 账户 ============================ */
 
-/** 账户完整信息，对应 `AccountPublic`（AccountBase + id/时间戳）。 */
+/** 账户读取信息；连接凭证只暴露已配置状态，绝不回传原文。 */
 export interface Account {
   id: number | null
   name: string
@@ -156,8 +156,7 @@ export interface Account {
   trade_channel: TradeChannel
   account_control_preset: string
   account_control_override: AccountControlOverride | null
-  /** 含明文密钥（P0 缺口）——前端不渲染敏感值。 */
-  account_config: Record<string, unknown>
+  account_configured: boolean
   is_started: boolean
   cron_expr: string
   remark: string | null
@@ -170,7 +169,7 @@ export interface Account {
   trade_rules: Record<string, unknown> | null
   forbidden_symbols: string[] | null
   risk_symbols: string[] | null
-  feishu_key: string | null
+  feishu_configured: boolean
   feishu_card_config: FeishuCardConfig | null
   portfolio_id: number | null
   write_empty_record: number | null

@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { createBrowserRouter, Navigate, Outlet, RouterProvider, ScrollRestoration } from 'react-router'
 import { AppShell } from '@/components/AppShell'
 import { InitWizard } from '@/features/init/InitWizard'
-import { initStatus, type InitValues } from '@/lib/api/init'
+import { initStatus, initValuesFromStatus, type InitValues } from '@/lib/api/init'
 import { useDomainSync } from '@/stores/domain'
 import { useChannelCatalogSync } from '@/stores/channels'
 import { useLiveExecSync } from '@/lib/api/executionStream'
@@ -69,7 +69,7 @@ function AppRoot() {
     initStatus()
       .then((s) => {
         if (!alive) return
-        setInitial(s.values)
+        setInitial(initValuesFromStatus(s.values))
         setPhase(s.configured ? 'ready' : 'setup')
       })
       .catch(() => {

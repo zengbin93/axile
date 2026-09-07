@@ -687,7 +687,13 @@ async def update_account(
         # 账户控制 binding 要按“更新后的目标状态”校验，不能只看当前库里的旧值。
         next_trade_channel, next_preset = _resolve_next_account_control_binding(db_account, account)
         account_routes._validate_account_control_binding(next_trade_channel, next_preset)
-        next_account_config = db_account.account_config if account.account_config is None else account.account_config
+        # PATCH 的连接配置是增量替换：未给出的密钥与其他字段保留原值，避免前端为
+        # 了编辑一个非敏感字段而重新取得或回传凭证。
+        next_account_config = (
+            db_account.account_config
+            if account.account_config is None
+            else {**db_account.account_config, **account.account_config}
+        )
         normalized_account_config = _validate_channel_account_config(next_trade_channel, next_account_config)
 
         data = _build_account_update_data(account)

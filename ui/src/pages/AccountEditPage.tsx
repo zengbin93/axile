@@ -26,7 +26,7 @@ import {
   readAccountConfigSummary,
   writeAccountConfigSummary,
 } from '@/features/account/configSummary'
-import { getAccount, testAccountFeishu, updateAccount, type AccountFeishuTestResult } from '@/lib/api/accounts'
+import { getAccount, testAccountFeishu, updateAccount, type AccountFeishuTestResult, type AccountUpdatePayload } from '@/lib/api/accounts'
 import { usePolling } from '@/lib/hooks/usePolling'
 import { useDomainStore } from '@/stores/domain'
 import { useChannelCatalogStore, useChannelDescriptor } from '@/stores/channels'
@@ -100,7 +100,7 @@ function draftOf(acc: Account): Draft {
   return {
     name: acc.name,
     remark: acc.remark ?? '',
-    feishu: acc.feishu_key ?? '',
+    feishu: '',
     feishuCardMode: cardConfig?.mode ?? 'default',
     feishuTemplateId: cardConfig?.mode === 'template' ? cardConfig.template_id : '',
     feishuCardText: cardConfig?.mode === 'custom' ? JSON.stringify(cardConfig.card, null, 2) : '',
@@ -153,13 +153,13 @@ function draftFeishuCardConfig(draft: Draft): FeishuCardConfig | null {
   return parseCustomCard(draft.feishuCardText).config
 }
 
-function buildPatch(draft: Draft, acc: Account, showShortLeverage: boolean): Partial<Account> {
-  const patch: Partial<Account> = {}
+function buildPatch(draft: Draft, acc: Account, showShortLeverage: boolean): AccountUpdatePayload {
+  const patch: AccountUpdatePayload = {}
   const name = draft.name.trim()
   if (name && name !== acc.name) patch.name = name
   if (draft.remark !== (acc.remark ?? '')) patch.remark = draft.remark || null
   const feishuKey = extractFeishuKey(draft.feishu)
-  if (feishuKey !== (acc.feishu_key ?? '')) patch.feishu_key = feishuKey || null
+  if (feishuKey) patch.feishu_key = feishuKey
   const feishuCardConfig = draftFeishuCardConfig(draft)
   if (JSON.stringify(feishuCardConfig) !== JSON.stringify(acc.feishu_card_config)) {
     patch.feishu_card_config = feishuCardConfig

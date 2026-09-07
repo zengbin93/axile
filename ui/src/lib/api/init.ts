@@ -1,7 +1,18 @@
 /** 首启初始化向导接口。 */
 import { apiGet, apiSend } from '@/lib/api/client'
 
-/** 向导各字段的预填值（对应后端 Settings 的向导字段）。 */
+/** 初始化状态中可安全返回给浏览器的配置摘要。 */
+export interface InitStatusValues {
+  sqlalchemy_database_configured: boolean
+  exe_err_feishu_configured: boolean
+  environment: string
+  app_log_dir: string
+  axile_log_rotation: string
+  algorithm_modules: string[]
+  algorithm_directories: string[]
+}
+
+/** 向导提交的写入载荷；凭证只存在于用户当前输入中。 */
 export interface InitValues {
   sqlalchemy_database_uri: string
   /** 执行错误告警飞书机器人 key（系统级，区别于账户各自的 `feishu_key`）；空串表示不推送。 */
@@ -17,7 +28,7 @@ export interface InitValues {
 export interface InitStatus {
   configured: boolean
   environment: string
-  values: InitValues
+  values: InitStatusValues
 }
 
 /** 连通性测试 / 保存操作结果。 */
@@ -34,10 +45,23 @@ export interface TestResult {
  */
 let cachedInitValues: InitValues | null = null
 
+/** 将安全状态摘要转换为可编辑草稿，凭证字段始终从空值开始。 */
+export function initValuesFromStatus(values: InitStatusValues): InitValues {
+  return {
+    sqlalchemy_database_uri: '',
+    exe_err_feishu_key: '',
+    environment: values.environment,
+    app_log_dir: values.app_log_dir,
+    axile_log_rotation: values.axile_log_rotation,
+    algorithm_modules: values.algorithm_modules,
+    algorithm_directories: values.algorithm_directories,
+  }
+}
+
 /** 查询初始化就绪状态与预填值。`signal` 用于配合轮询取消。 */
 export function initStatus(signal?: AbortSignal): Promise<InitStatus> {
   return apiGet<InitStatus>('/init/status', signal).then((status) => {
-    cachedInitValues = status.values
+    cachedInitValues = initValuesFromStatus(status.values)
     return status
   })
 }

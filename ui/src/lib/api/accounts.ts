@@ -15,6 +15,12 @@ import type {
   FeishuCardConfig,
 } from '@/types/api'
 
+/** 账户写入载荷；凭证只能从表单写入，绝不会存在于读取模型中。 */
+export type AccountUpdatePayload = Partial<Account> & {
+  account_config?: Record<string, unknown>
+  feishu_key?: string | null
+}
+
 export interface AccountFeishuTestResult {
   ok: boolean
   message: string
@@ -221,7 +227,7 @@ export function createAccount(body: Record<string, unknown>): Promise<Account> {
 }
 
 /** 更新账户（局部）。 */
-export function updateAccount(id: number, patch: Partial<Account>): Promise<Account> {
+export function updateAccount(id: number, patch: AccountUpdatePayload): Promise<Account> {
   return apiSend<Account>('PATCH', `/account/${id}`, patch)
 }
 

@@ -113,14 +113,11 @@ def _prefill_values() -> dict[str, Any]:
     dict[str, Any]
         取自当前有效配置（``config.toml`` / 默认值）。
 
-    Notes
-    -----
-    这里返回真实配置值而不做掩码：其运行前提是本机、单用户，用户也需看到
-    当前值以便确认或修改后保存。
+    数据库 URI 与 webhook key 均可能携带凭证；状态接口只公开其已配置状态。
     """
     return {
-        "sqlalchemy_database_uri": str(settings.sqlalchemy_database_uri),
-        "exe_err_feishu_key": settings.exe_err_feishu_key,
+        "sqlalchemy_database_configured": bool(settings.sqlalchemy_database_uri),
+        "exe_err_feishu_configured": bool(settings.exe_err_feishu_key),
         "environment": settings.environment,
         "app_log_dir": str(settings.app_log_dir),
         "axile_log_rotation": settings.axile_log_rotation,

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from '@/components/ui/nav'
 import { InitWizard } from '@/features/init/InitWizard'
-import { initStatus, peekInitValues, type InitValues } from '@/lib/api/init'
+import { initStatus, initValuesFromStatus, peekInitValues, type InitValues } from '@/lib/api/init'
 
 /**
  * 系统配置页（常驻应用导航内）。
@@ -20,7 +20,7 @@ export function SystemConfigPage({ section = 'alert' }: { section?: 'alert' | 'a
     let alive = true
     initStatus()
       .then((s) => {
-        if (alive) setValues(s.values)
+        if (alive) setValues(initValuesFromStatus(s.values))
       })
       .catch(() => {
         // 拉取失败（后端异常）时退回主页，由主应用的错误提示处理。

@@ -20,7 +20,7 @@ from axile.executor.algorithms.core.loader import load_algorithm_modules
 from axile.server.api.main import api_router
 from axile.server.core.scheduler import scheduler
 from axile.server.core.single_worker import ensure_single_worker
-from axile.server.execution.ctp_channels import prepare_china_channel_accounts, register_china_channel_jobs
+from axile.server.execution.ctp_channels import register_china_channel_jobs
 from axile.server.execution.dispatcher import recover_intents_on_startup, shutdown_dispatchers
 from axile.server.execution.live import live_hub
 from axile.server.execution.worker_backend.manager import shutdown_worker_backend_manager
@@ -222,7 +222,6 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     scheduler.start()
     await init_scheduler()
     await recover_intents_on_startup()
-    await prepare_china_channel_accounts("startup")
     logger.warning("axile已经成功运行!")
     yield
     scheduler.shutdown()
@@ -264,20 +263,23 @@ _app = FastAPI(
 _app.include_router(api_router, prefix=API_V1_STR)
 
 
+def _safe_validation_errors(exc: RequestValidationError) -> list[dict[str, object]]:
+    """提取可定位字段、但绝不携带用户输入的 422 错误。"""
+    return [{key: error[key] for key in ("type", "loc", "msg") if key in error} for error in exc.errors()]
+
+
 @_app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError) -> JSONResponse:
-    """记录请求校验错误，并返回默认的 422 载荷."""
+    """记录不含原始输入的请求校验错误，并返回安全的 422 载荷."""
+    errors = _safe_validation_errors(exc)
     logger.error(
-        "422 Unprocessable Entity\nURL: {}\nErrors: {}\nBody: {}",
+        "422 Unprocessable Entity\nURL: {}\nErrors: {}",
         request.url,
-        exc.errors(),
-        exc.body,
+        errors,
     )
-    # 经 jsonable_encoder 归一化：field_validator 抛 ValueError 时，errors() 的 ctx.error 会带上
-    # 不可 JSON 序列化的异常对象，直接塞进 JSONResponse 会二次抛错把 422 变 500（与 FastAPI 默认处理对齐）。
     return JSONResponse(
         status_code=422,
-        content=jsonable_encoder({"detail": exc.errors(), "body": exc.body}),
+        content=jsonable_encoder({"detail": errors}),
     )
 
 
