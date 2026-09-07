@@ -9,11 +9,13 @@ from sqlalchemy import Boolean, Column, Connection, Float, ForeignKey, Integer, 
 from sqlalchemy.ext.asyncio import AsyncAttrs
 from sqlalchemy.orm import Mapper, relationship
 from sqlmodel import Field, Relationship, SQLModel
+from sqlmodel._compat import SQLModelConfig
 
 from axile.common.trade_channel import TradeChannel
 from axile.executor.account_control.models import AccountControlOverride
 from axile.executor.models.feishu import FeishuCardConfig
 from axile.executor.models.unified_input import DEFAULT_EXECUTION_TIMEOUT_SECONDS
+from axile.server.db.models.account_runtime_sync import AccountRuntimeSyncPublic
 from axile.server.db.models.base import PydanticJSONType, now_str
 
 if TYPE_CHECKING:
@@ -23,6 +25,21 @@ if TYPE_CHECKING:
 
 # 账户级杠杆的通用粗粒度上限；更严格的渠道限制由渠道插件和执行器兜底。
 _MAX_LEVERAGE = 125.0
+
+
+def _validate_weight_precision(value: float | None) -> float | None:
+    """校验权重精度为正的 10 整数次幂。
+
+    创建、更新及持久化账户模型共用这一条约束，避免 API 输入校验和
+    执行期的除法前提发生漂移。
+    """
+    if value is None:
+        return value
+    if value <= 0:
+        raise ValueError("weight_precision 必须是正数")
+    if not math.log10(value).is_integer():
+        raise ValueError("weight_precision 必须是10的负整数次幂, 如 1, 0.1, 0.01, 0.001")
+    return value
 
 
 def _validate_leverage(value: Optional[float]) -> Optional[float]:
@@ -248,6 +265,8 @@ class AccountBase(SQLModel):
         description=f"执行层总超时（秒）, 必填, 取值 1..{_MAX_EXECUTION_TIMEOUT}, 默认 {DEFAULT_EXECUTION_TIMEOUT_SECONDS}; 到点直接中断本次执行, 不等撤单",
     )
 
+    _check_weight_precision = field_validator("weight_precision")(_validate_weight_precision)
+
     @field_validator("long_leverage", "short_leverage")
     def _check_leverage_fields(cls, value: Optional[float]) -> Optional[float]:
         """校验多空杠杆取值范围."""
@@ -274,6 +293,8 @@ class AccountBase(SQLModel):
 
 class AccountCreate(AccountBase):
     """创建账户时使用的载荷."""
+
+    model_config = SQLModelConfig(extra="forbid")
 
 
 class Account(AccountBase, AsyncAttrs, table=True):
@@ -305,25 +326,41 @@ class Account(AccountBase, AsyncAttrs, table=True):
         )
     )
 
-    @field_validator("weight_precision")
-    def check_weight_precision(cls, value: Optional[float]) -> Optional[float]:
-        """要求配置的权重精度必须是 10 的幂."""
-        if value is None:
-            return value
-        if value <= 0:
-            raise ValueError("weight_precision 必须是正数")
-        log10_value = math.log10(value)
-        if not log10_value.is_integer():
-            raise ValueError("weight_precision 必须是10的负整数次幂, 如 1, 0.1, 0.01, 0.001")
-        return value
 
+class AccountPublic(SQLModel):
+    """账户读取响应。
 
-class AccountPublic(AccountBase):
-    """账户信息."""
+    与持久化模型刻意分离。连接配置和 webhook 是可复用凭证，绝不能通过读取接口
+    返回；调用方只能获知其是否已经配置。
+    """
 
     id: Optional[int]
+    name: str
+    market: str
+    trade_channel: TradeChannel
+    account_control_preset: str
+    account_control_override: AccountControlOverride | None = None
+    account_configured: bool = False
+    is_started: bool
+    cron_expr: str
+    remark: Optional[str] = None
+    brokerage: str
+    weight_precision: float
+    long_leverage: Optional[float] = None
+    short_leverage: Optional[float] = None
+    algorithm: Dict[str, Any]
+    empty_positions_algorithm: Optional[Dict[str, Any]] = None
+    trade_rules: Optional[Dict[str, Any]] = None
+    forbidden_symbols: Optional[List[str]] = None
+    risk_symbols: Optional[List[str]] = None
+    feishu_configured: bool = False
+    feishu_card_config: FeishuCardConfig | None = None
+    portfolio_id: Optional[int] = None
+    write_empty_record: Optional[int] = None
+    execution_timeout: int
     updated_at: str
     created_at: str
+    runtime_sync: AccountRuntimeSyncPublic | None = None
 
 
 class AccountListPublic(SQLModel):
@@ -481,6 +518,8 @@ class AccountRebalancePlanPublic(SQLModel):
 class AccountUpdate(SQLModel):
     """账户变更时使用的局部更新载荷."""
 
+    model_config = SQLModelConfig(extra="forbid")
+
     name: Optional[str] = None
     market: Optional[str] = None
     trade_channel: Optional[TradeChannel] = None
@@ -499,11 +538,14 @@ class AccountUpdate(SQLModel):
     empty_positions_algorithm: Optional[Dict[str, Any]] = None
     trade_rules: Optional[Dict[str, Any]] = None
     forbidden_symbols: Optional[List[str]] = None
+    risk_symbols: Optional[List[str]] = None
     feishu_key: Optional[str] = None
     feishu_card_config: FeishuCardConfig | None = None
     portfolio_id: Optional[int] = None
     write_empty_record: Optional[int] = None
     execution_timeout: Optional[int] = Field(default=None, ge=1, le=_MAX_EXECUTION_TIMEOUT)
+
+    _check_weight_precision = field_validator("weight_precision")(_validate_weight_precision)
 
     @field_validator("long_leverage", "short_leverage")
     def _check_leverage_fields(cls, value: Optional[float]) -> Optional[float]:
