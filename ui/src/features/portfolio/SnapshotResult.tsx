@@ -39,8 +39,7 @@ export function SnapshotResult({ weights }: { weights: TargetSnapshotState }) {
       )}
       {entries.length > 0 && (
         <>
-          <div className="mb-2.5 flex flex-wrap items-center justify-between gap-x-5 gap-y-1.5 text-[14px]">
-            <span className="font-[550] text-ink-1">生效目标</span>
+          <div className="mb-2.5 flex flex-wrap items-center justify-end gap-x-5 gap-y-1.5 text-[14px]">
             <dl className="flex flex-wrap items-baseline justify-end gap-x-4 gap-y-1 text-ink-3">
               <div className="flex items-baseline gap-1.5">
                 <dt>品种数量</dt>
