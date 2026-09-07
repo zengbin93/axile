@@ -15,7 +15,6 @@ from axile.server.db.models import Account, ScheduleSkip
 from axile.server.repositories import get_latest_portfolio_id_by_account_id
 from axile.server.trading_calendar import (
     CalendarDecisionStatus,
-    CalendarUnavailableReason,
     evaluate_channel_calendar_moment,
 )
 
@@ -31,8 +30,8 @@ async def execute_scheduled_rebalance(account_id: int) -> None:
 
     try:
         decision = evaluate_channel_calendar_moment(channel, triggered_at)
-    except Exception:  # noqa: BLE001 - 调度层日历故障沿用旧版 fail-open
-        loguru.logger.bind(account_id=account_id, channel=str(channel)).exception("交易日历判断失败，按排程执行")
+    except Exception:  # noqa: BLE001 - 调度层日历故障必须 fail-closed
+        loguru.logger.bind(account_id=account_id, channel=str(channel)).exception("交易日历判断失败，跳过排程")
         decision = None
 
     context = {
@@ -42,7 +41,18 @@ async def execute_scheduled_rebalance(account_id: int) -> None:
         "calendar_day": (decision.day if decision else triggered_at.date()).isoformat(),
     }
     account_logger = loguru.logger.bind(**context)
-    if decision is not None and decision.status is CalendarDecisionStatus.AVAILABLE_CLOSED:
+    if decision is None or decision.status in {
+        CalendarDecisionStatus.AVAILABLE_CLOSED,
+        CalendarDecisionStatus.UNAVAILABLE,
+    }:
+        reason_code = (
+            decision.reason_code or "CALENDAR.CLOSED"
+            if decision is not None and decision.status is CalendarDecisionStatus.AVAILABLE_CLOSED
+            else "CALENDAR.UNAVAILABLE"
+        )
+        calendar_id = decision.calendar_id if decision is not None else ""
+        calendar_day = decision.day if decision is not None else triggered_at.date()
+        calendar_label = decision.label if decision is not None and decision.label else ""
         try:
             async with SessionLocal() as session:
                 session.add(
@@ -50,24 +60,17 @@ async def execute_scheduled_rebalance(account_id: int) -> None:
                         account_id=account_id,
                         channel=str(channel),
                         triggered_at=triggered_at.isoformat(),
-                        calendar_id=decision.calendar_id or "",
-                        calendar_day=decision.day,
-                        calendar_label=decision.label or "",
-                        reason_code=decision.reason_code or "CALENDAR.CLOSED",
+                        calendar_id=calendar_id,
+                        calendar_day=calendar_day,
+                        calendar_label=calendar_label,
+                        reason_code=reason_code,
                     )
                 )
                 await session.commit()
         except Exception:  # noqa: BLE001 - 审计写入失败不能改变休市决策
             account_logger.exception("休市跳过记录写入失败")
-        account_logger.info("排程因明确休市跳过")
+        account_logger.info("排程跳过", reason_code=reason_code)
         return
-
-    if decision is not None and decision.status is CalendarDecisionStatus.UNAVAILABLE:
-        reason = decision.unavailable_reason or CalendarUnavailableReason.READ_FAILED
-        account_logger.bind(
-            unavailable_reason=reason.value,
-            action="execute_without_calendar",
-        ).warning("交易日历不可用，按排程执行")
 
     from axile.domain.execution import ExecutionKind
     from axile.server.execution.intents import submit_intent

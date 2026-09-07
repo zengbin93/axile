@@ -166,7 +166,11 @@ async def schedule_preview(payload: SchedulePreviewRequest) -> SchedulePreviewRe
                 scheduled_at=local_time,
                 calendar_day=decision.day,
                 calendar_status=decision.status,
-                action="skip" if decision.status is CalendarDecisionStatus.AVAILABLE_CLOSED else "execute",
+                action=(
+                    "skip"
+                    if decision.status in {CalendarDecisionStatus.AVAILABLE_CLOSED, CalendarDecisionStatus.UNAVAILABLE}
+                    else "execute"
+                ),
                 unavailable_reason=decision.unavailable_reason,
                 calendar_id=decision.calendar_id,
                 label=decision.label,
