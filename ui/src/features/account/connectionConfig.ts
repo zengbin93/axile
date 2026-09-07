@@ -3,29 +3,26 @@ import type { Account, ChannelAccountField } from '@/types/api'
 
 /** 初始化连接编辑草稿；敏感值绝不带入输入框。 */
 export function initialConnectionDraft(
-  account: Pick<Account, 'account_config'>,
+  account: Pick<Account, 'account_configured' | 'connection_values'>,
   fields: ChannelAccountField[],
 ): Record<string, unknown> {
   return Object.fromEntries(fields.map((field) => [
     field.name,
-    field.kind === 'secret' ? '' : (account.account_config[field.name] ?? field.default ?? ''),
+    field.kind === 'secret' ? '' : (account.connection_values?.[field.name] ?? field.default ?? ''),
   ]))
 }
 
-/** 将草稿合并回完整渠道配置，留空的敏感字段保留旧值。 */
+/** 将连接草稿转换为更新载荷；密钥留空时由服务端保留现有值。 */
 export function mergedConnectionConfig(
-  account: Pick<Account, 'account_config'>,
+  _account: Pick<Account, 'account_configured'>,
   fields: ChannelAccountField[],
   draft: Record<string, unknown>,
 ) {
-  const next = { ...account.account_config }
-  for (const field of fields) delete next[field.name]
+  const next: Record<string, unknown> = {}
   for (const field of fields) {
     if (!channelAccountFieldVisible(field, draft)) continue
     const drafted = draft[field.name]
-    const value = field.kind === 'secret' && String(drafted ?? '').trim() === ''
-      ? account.account_config[field.name]
-      : drafted
+    const value = drafted
     if (value !== undefined && value !== null && value !== '') next[field.name] = value
   }
   return next

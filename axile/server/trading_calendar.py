@@ -33,7 +33,9 @@ class CalendarUnavailableReason(StrEnum):
     READ_FAILED = "read_failed"
 
 
-type CalendarSkipReason = Literal["CALENDAR.CLOSED", "CALENDAR.NO_NIGHT_SESSION", "CALENDAR.SESSION_CLOSED"]
+type CalendarSkipReason = Literal[
+    "CALENDAR.CLOSED", "CALENDAR.NO_NIGHT_SESSION", "CALENDAR.SESSION_CLOSED", "CALENDAR.UNAVAILABLE"
+]
 
 
 class CalendarDayDecision(BaseModel):

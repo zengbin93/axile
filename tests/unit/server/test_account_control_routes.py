@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import AsyncGenerator
+from pathlib import Path
 
 import pytest
 from fastapi import FastAPI
@@ -16,7 +18,7 @@ from axile.executor.account_control.registry import (
 from axile.server.api.deps import get_db, get_scheduler
 from axile.server.api.routes import account as account_routes
 from axile.server.api.routes import account_crud as account_crud_routes
-from axile.server.db.models import Account
+from axile.server.db.models import Account, AccountRuntimeSync, AccountUpdate
 
 
 @pytest.fixture(autouse=True)
@@ -98,6 +100,31 @@ def _build_account(
     )
 
 
+def test_account_public_does_not_serialize_credentials() -> None:
+    account = _build_account()
+    account.account_config["password"] = "unique-account-password"
+    account.feishu_key = "unique-feishu-webhook-key"
+
+    payload = account_crud_routes._account_public(account).model_dump_json()
+
+    assert "unique-account-password" not in payload
+    assert "unique-feishu-webhook-key" not in payload
+    assert '"account_config"' not in payload
+    assert '"feishu_key"' not in payload
+    assert '"account_configured":true' in payload
+    assert '"feishu_configured":true' in payload
+
+
+def test_account_update_credential_contract_is_explicit() -> None:
+    """未提交凭证保持原值；提交值替换；显式 null 清除 webhook。"""
+    assert account_crud_routes._build_account_update_data(AccountUpdate()) == {}
+    assert (
+        account_crud_routes._build_account_update_data(AccountUpdate(feishu_key="replacement"))["feishu_key"]
+        == "replacement"
+    )
+    assert account_crud_routes._build_account_update_data(AccountUpdate(feishu_key=None))["feishu_key"] is None
+
+
 def _account_payload() -> dict[str, object]:
     return {
         "name": "ctp-testnet-sim",
@@ -159,6 +186,11 @@ async def _noop_async(*_args: object, **_kwargs: object) -> None:
     return None
 
 
+async def _synchronized_runtime_sync(*_args: object, **_kwargs: object) -> AccountRuntimeSync:
+    """隔离账户 PATCH 契约测试，不让运行态同步影响 DTO 断言。"""
+    return AccountRuntimeSync(account_id=1, status="synchronized")
+
+
 def test_create_account_requires_explicit_account_control_preset() -> None:
     """创建账户时必须显式提供 account_control_preset。"""
     session = _RouteSession()
@@ -175,7 +207,6 @@ def test_create_account_rejects_unknown_account_control_preset(monkeypatch) -> N
     """创建账户时未知 preset 应返回 422。"""
     monkeypatch.setattr(account_crud_routes, "parse_cron_expr", lambda _expr: ["fake-trigger"])
     monkeypatch.setattr(account_crud_routes, "add_record_portfolio_account", _noop_async)
-    monkeypatch.setattr(account_crud_routes, "create_job", _noop_async)
     session = _RouteSession()
     payload = _account_payload()
     payload["account_control_preset"] = "missing"
@@ -191,7 +222,6 @@ def test_create_account_rejects_incompatible_account_control_preset(monkeypatch)
     """创建账户时 preset 与渠道不兼容应返回 422。"""
     monkeypatch.setattr(account_crud_routes, "parse_cron_expr", lambda _expr: ["fake-trigger"])
     monkeypatch.setattr(account_crud_routes, "add_record_portfolio_account", _noop_async)
-    monkeypatch.setattr(account_crud_routes, "create_job", _noop_async)
     session = _RouteSession()
     payload = _account_payload()
     payload["trade_channel"] = "gm"
@@ -243,8 +273,8 @@ def test_create_account_persists_normalized_channel_config(monkeypatch: pytest.M
     """创建账户只持久化当前模式字段，并写入渠道模型默认值。"""
     monkeypatch.setattr(account_crud_routes, "parse_cron_expr", lambda _expr: ["fake-trigger"])
     monkeypatch.setattr(account_crud_routes, "add_record_portfolio_account", _noop_async)
-    monkeypatch.setattr(account_crud_routes, "create_job", _noop_async)
-    monkeypatch.setattr(account_crud_routes, "reconcile_china_channel_account", _noop_async)
+    monkeypatch.setattr(account_crud_routes, "enqueue_account_runtime_sync", _noop_async)
+    monkeypatch.setattr(account_crud_routes, "reconcile_account_runtime", _synchronized_runtime_sync)
     session = _RouteSession()
     payload = _account_payload()
     payload["trade_channel"] = "tq"
@@ -262,21 +292,20 @@ def test_create_account_persists_normalized_channel_config(monkeypatch: pytest.M
     response = TestClient(_build_app(session)).post("/account/", json=payload)
 
     assert response.status_code == 201
-    expected = {
+    assert "account_config" not in response.json()
+    assert session.account is not None
+    assert session.account.account_config == {
         "account_mode": "sim",
         "tq_username": "user",
         "tq_password": "secret",
         "initial_balance": 10_000_000.0,
     }
-    assert response.json()["account_config"] == expected
-    assert session.account is not None
-    assert session.account.account_config == expected
 
 
 def test_update_account_persists_normalized_channel_config(monkeypatch: pytest.MonkeyPatch) -> None:
     """更新账户与创建使用同一规范化落库路径。"""
-    monkeypatch.setattr(account_routes, "_reconcile_account_job", _noop_async)
-    monkeypatch.setattr(account_crud_routes, "reconcile_china_channel_account", _noop_async)
+    monkeypatch.setattr(account_crud_routes, "enqueue_account_runtime_sync", _noop_async)
+    monkeypatch.setattr(account_crud_routes, "reconcile_account_runtime", _synchronized_runtime_sync)
     session = _RouteSession(_build_account())
 
     response = TestClient(_build_app(session)).patch(
@@ -297,15 +326,15 @@ def test_update_account_persists_normalized_channel_config(monkeypatch: pytest.M
     )
 
     assert response.status_code == 200
-    expected = {"account_mode": "kq", "tq_username": "user", "tq_password": "secret"}
-    assert response.json()["account_config"] == expected
+    assert "account_config" not in response.json()
     assert session.account is not None
-    assert session.account.account_config == expected
+    assert session.account.account_config == {"account_mode": "kq", "tq_username": "user", "tq_password": "secret"}
 
 
 def test_update_account_can_switch_account_control_preset(monkeypatch) -> None:
     """CTP 账户应允许显式切换到 ctp preset。"""
-    monkeypatch.setattr(account_routes, "_reconcile_account_job", _noop_async)
+    monkeypatch.setattr(account_crud_routes, "enqueue_account_runtime_sync", _noop_async)
+    monkeypatch.setattr(account_crud_routes, "reconcile_account_runtime", _synchronized_runtime_sync)
     session = _RouteSession(_build_account(trade_channel=TradeChannel.CTP))
 
     response = TestClient(_build_app(session)).patch(
@@ -321,7 +350,8 @@ def test_update_account_can_switch_account_control_preset(monkeypatch) -> None:
 
 def test_update_account_replaces_account_control_override_instead_of_merging(monkeypatch) -> None:
     """PATCH 中 account_control_override 应整字段替换，而不是深度合并。"""
-    monkeypatch.setattr(account_routes, "_reconcile_account_job", _noop_async)
+    monkeypatch.setattr(account_crud_routes, "enqueue_account_runtime_sync", _noop_async)
+    monkeypatch.setattr(account_crud_routes, "reconcile_account_runtime", _synchronized_runtime_sync)
     session = _RouteSession(
         _build_account(
             override={
@@ -381,7 +411,8 @@ def test_update_account_replaces_account_control_override_instead_of_merging(mon
 
 def test_update_account_accepts_null_account_control_override_to_clear(monkeypatch) -> None:
     """PATCH 传 null 应明确清空 override。"""
-    monkeypatch.setattr(account_routes, "_reconcile_account_job", _noop_async)
+    monkeypatch.setattr(account_crud_routes, "enqueue_account_runtime_sync", _noop_async)
+    monkeypatch.setattr(account_crud_routes, "reconcile_account_runtime", _synchronized_runtime_sync)
     session = _RouteSession(
         _build_account(
             override={
@@ -429,3 +460,88 @@ def test_update_account_rejects_removed_insert_order_override(monkeypatch) -> No
 
     assert response.status_code == 422
     assert "未注册的 operation key" in str(response.json()["detail"])
+
+
+def test_update_account_persists_and_clears_risk_symbols(monkeypatch: pytest.MonkeyPatch) -> None:
+    """风险品种是 PATCH 的显式字段，列表与 null 清空语义都应落库并回显。"""
+    monkeypatch.setattr(account_crud_routes, "enqueue_account_runtime_sync", _noop_async)
+    monkeypatch.setattr(account_crud_routes, "reconcile_account_runtime", _synchronized_runtime_sync)
+    session = _RouteSession(_build_account())
+    client = TestClient(_build_app(session))
+
+    updated = client.patch("/account/1", json={"risk_symbols": ["rb2610"]})
+
+    assert updated.status_code == 200
+    assert updated.json()["risk_symbols"] == ["rb2610"]
+    assert session.account is not None
+    assert session.account.risk_symbols == ["rb2610"]
+
+    cleared = client.patch("/account/1", json={"risk_symbols": None})
+
+    assert cleared.status_code == 200
+    assert cleared.json()["risk_symbols"] is None
+    assert session.account.risk_symbols is None
+
+
+@pytest.mark.parametrize("weight_precision", [0, -0.01, 0.03])
+def test_update_account_rejects_invalid_weight_precision_without_mutation(weight_precision: float) -> None:
+    """创建和更新都必须在请求边界拒绝非法精度，不能进入除法路径。"""
+    session = _RouteSession(_build_account())
+
+    response = TestClient(_build_app(session)).patch("/account/1", json={"weight_precision": weight_precision})
+
+    assert response.status_code == 422
+    assert session.account is not None
+    assert session.account.weight_precision == 0.001
+
+    create_session = _RouteSession()
+    create_payload = _account_payload()
+    create_payload["weight_precision"] = weight_precision
+    create_response = TestClient(_build_app(create_session)).post("/account/", json=create_payload)
+    assert create_response.status_code == 422
+    assert create_session.account is None
+
+
+def test_account_write_dtos_forbid_unknown_fields_and_publish_edit_contract() -> None:
+    """创建、更新与账户编辑页的每个可写字段必须处于同一 OpenAPI 契约。"""
+    schema = _build_app(_RouteSession()).openapi()
+    components = schema["components"]["schemas"]
+    update_schema = components["AccountUpdate"]
+    update_fields = set(update_schema["properties"])
+    editor_source = (Path(__file__).parents[3] / "ui/src/pages/AccountEditPage.tsx").read_text()
+    editor_fields = set(re.findall(r"patch\\.(\\w+)\\s*=", editor_source))
+
+    assert editor_fields <= update_fields
+    assert components["AccountCreate"]["additionalProperties"] is False
+    assert update_schema["additionalProperties"] is False
+
+    unknown_create = TestClient(_build_app(_RouteSession())).post("/account/", json={"unknown": True})
+    unknown_update = TestClient(_build_app(_RouteSession(_build_account()))).patch("/account/1", json={"unknown": True})
+    assert unknown_create.status_code == 422
+    assert unknown_update.status_code == 422
+    assert any(error["loc"][-1] == "unknown" for error in unknown_create.json()["detail"])
+    assert any(error["loc"][-1] == "unknown" for error in unknown_update.json()["detail"])
+
+
+def test_account_connection_values_only_expose_declared_non_secret_fields() -> None:
+    """连接编辑只回显声明的非密钥字段，未知扩展也不泄露。"""
+    account = _build_account()
+    account.account_config["private_extension"] = "hidden"
+    public = account_crud_routes._account_public(account)
+    assert public.connection_values["investor_id"] == "test"
+    assert public.connection_values["td_front"] == "tcp://td:1"
+    assert "password" not in public.connection_values
+    assert "auth_code" not in public.connection_values
+    assert "private_extension" not in public.connection_values
+
+
+def test_update_same_channel_preserves_omitted_credentials(monkeypatch: pytest.MonkeyPatch) -> None:
+    """同渠道只改连接地址时，原凭证仍保留。"""
+    monkeypatch.setattr(account_crud_routes, "enqueue_account_runtime_sync", _noop_async)
+    monkeypatch.setattr(account_crud_routes, "reconcile_account_runtime", _synchronized_runtime_sync)
+    session = _RouteSession(_build_account())
+    response = TestClient(_build_app(session)).patch("/account/1", json={"account_config": {"td_front": "tcp://new:1"}})
+    assert response.status_code == 200
+    assert session.account is not None
+    assert session.account.account_config["td_front"] == "tcp://new:1"
+    assert session.account.account_config["password"] == "test"

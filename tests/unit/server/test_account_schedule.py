@@ -124,7 +124,7 @@ def test_scheduled_rebalance_skips_session_gap(monkeypatch: pytest.MonkeyPatch) 
     assert getattr(session.added[0], "reason_code") == "CALENDAR.SESSION_CLOSED"
 
 
-def test_scheduled_rebalance_is_fail_open_when_calendar_is_unavailable(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_scheduled_rebalance_is_fail_closed_when_calendar_is_unavailable(monkeypatch: pytest.MonkeyPatch) -> None:
     session = _SessionContext(_account())
     monkeypatch.setattr(execution_scheduler, "SessionLocal", lambda: session)
     monkeypatch.setattr(
@@ -132,16 +132,35 @@ def test_scheduled_rebalance_is_fail_open_when_calendar_is_unavailable(monkeypat
         "evaluate_channel_calendar_moment",
         lambda *_args: _decision(CalendarDecisionStatus.UNAVAILABLE),
     )
-    submitted: list[tuple[object, ...]] = []
-
-    async def fake_submit(account_id: object, kind: object, trigger_source: object, **kwargs: object) -> object:
-        submitted.append((account_id, kind, trigger_source, kwargs.get("on_conflict")))
-        return SimpleNamespace(outcome="created", execution_id="exec-1", account_id=account_id)
-
-    monkeypatch.setattr("axile.server.execution.intents.submit_intent", fake_submit)
     asyncio.run(execution_scheduler.execute_scheduled_rebalance(7))
-    assert submitted == [(7, ExecutionKind.REBALANCE, "scheduler", "skip")]
-    assert session.added == []
+    assert session.added[0].reason_code == "CALENDAR.UNAVAILABLE"
+
+
+def test_scheduled_rebalance_records_calendar_evaluator_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    session = _SessionContext(_account())
+    monkeypatch.setattr(execution_scheduler, "SessionLocal", lambda: session)
+
+    def fail(*_args: object) -> None:
+        raise RuntimeError("calendar unavailable")
+
+    monkeypatch.setattr(execution_scheduler, "evaluate_channel_calendar_moment", fail)
+    asyncio.run(execution_scheduler.execute_scheduled_rebalance(7))
+
+    assert session.added[0].reason_code == "CALENDAR.UNAVAILABLE"
+    assert session.added[0].calendar_id == ""
+
+
+def test_closed_day_without_reason_uses_closed_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
+    session = _SessionContext(_account())
+    monkeypatch.setattr(execution_scheduler, "SessionLocal", lambda: session)
+    monkeypatch.setattr(
+        execution_scheduler,
+        "evaluate_channel_calendar_moment",
+        lambda *_args: _decision(CalendarDecisionStatus.AVAILABLE_CLOSED).model_copy(update={"reason_code": None}),
+    )
+    asyncio.run(execution_scheduler.execute_scheduled_rebalance(7))
+
+    assert session.added[0].reason_code == "CALENDAR.CLOSED"
 
 
 def test_closed_day_stays_skipped_when_audit_write_fails(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -157,6 +176,28 @@ def test_closed_day_stays_skipped_when_audit_write_fails(monkeypatch: pytest.Mon
     monkeypatch.setattr(rebalance_execution, "execute_trade", execute_trade)
     asyncio.run(execution_scheduler.execute_scheduled_rebalance(7))
     execute_trade.assert_not_called()
+
+
+def test_closed_day_stays_skipped_when_audit_session_cannot_open(monkeypatch: pytest.MonkeyPatch) -> None:
+    session = _SessionContext(_account())
+    calls = 0
+
+    def session_local() -> _SessionContext:
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            raise RuntimeError("database unavailable")
+        return session
+
+    monkeypatch.setattr(execution_scheduler, "SessionLocal", session_local)
+    monkeypatch.setattr(
+        execution_scheduler,
+        "evaluate_channel_calendar_moment",
+        lambda *_args: _decision(CalendarDecisionStatus.AVAILABLE_CLOSED),
+    )
+
+    asyncio.run(execution_scheduler.execute_scheduled_rebalance(7))
+    assert calls == 2
 
 
 def test_scheduled_rebalance_ignores_stale_job_for_stopped_account(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -337,7 +378,7 @@ def test_schedule_preview_marks_unsupported_year_fail_open(monkeypatch: pytest.M
     assert response.calendar.availability == "unavailable"
     assert response.calendar.unavailable_reason is CalendarUnavailableReason.UNCOVERED
     assert response.items[0].calendar_status is CalendarDecisionStatus.UNAVAILABLE
-    assert response.items[0].action == "execute"
+    assert response.items[0].action == "skip"
 
 
 def test_schedule_preview_models_enforce_limits_and_timezone() -> None:

@@ -3,6 +3,7 @@ import { apiGet, apiSend } from '@/lib/api/client'
 import type {
   Account,
   AccountDashboard,
+  AccountRebalancePlan,
   AccountNextRun,
   AccountControlPolicyEditorModel,
   AccountAssetSnapshot,
@@ -13,6 +14,12 @@ import type {
   TargetWeightSnapshot,
   FeishuCardConfig,
 } from '@/types/api'
+
+/** 账户写入载荷；凭证只能从表单写入，绝不会存在于读取模型中。 */
+export type AccountUpdatePayload = Partial<Account> & {
+  account_config?: Record<string, unknown>
+  feishu_key?: string | null
+}
 
 export interface AccountFeishuTestResult {
   ok: boolean
@@ -84,6 +91,11 @@ export interface AccountActivityList {
 /** 仪表盘聚合：一次拿到所有账户的舰队卡数据。 */
 export function getDashboard(signal?: AbortSignal): Promise<AccountDashboard> {
   return apiGet<AccountDashboard>('/account/dashboard', signal)
+}
+
+/** 当前资产与目标快照下、由服务端按渠道规则计算的可执行持仓对照。 */
+export function getAccountRebalancePlan(id: number, signal?: AbortSignal): Promise<AccountRebalancePlan> {
+  return apiGet<AccountRebalancePlan>(`/account/${id}/rebalance_plan`, signal)
 }
 
 /** 从交易渠道主动查询并保存最新账户资产。 */
@@ -215,7 +227,7 @@ export function createAccount(body: Record<string, unknown>): Promise<Account> {
 }
 
 /** 更新账户（局部）。 */
-export function updateAccount(id: number, patch: Partial<Account>): Promise<Account> {
+export function updateAccount(id: number, patch: AccountUpdatePayload): Promise<Account> {
   return apiSend<Account>('PATCH', `/account/${id}`, patch)
 }
 

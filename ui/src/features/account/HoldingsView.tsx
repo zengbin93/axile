@@ -6,9 +6,9 @@ import {
   sizingAvailabilityText,
   weightText,
 } from '@/features/account/sizingEvidenceModel'
-import { rebalancePlan, type RebalanceRow } from '@/lib/derive'
+import { rebalancePlanOfServer, type RebalanceRow } from '@/lib/derive'
 import { displayCurrencyUnit, fmtMoney, signedPct } from '@/lib/format'
-import type { LatestWeights, Position, TargetSizing } from '@/types/api'
+import type { AccountRebalancePlan, LatestWeights, Position, TargetSizing } from '@/types/api'
 
 const QTY_EPS = 1e-9
 
@@ -110,24 +110,24 @@ function currentQuantities(positions: Position[]): Map<string, number> {
 /** 安静的逐只目标链：策略/账户/可执行/实际四层事实按需展开。 */
 export function HoldingsView({
   positions,
+  executablePlan,
   target,
   equity,
   currency = '',
   assetLabel,
-  quantities = null,
   sizing = null,
   quantityLabel = '',
 }: {
   positions: Position[]
+  executablePlan: AccountRebalancePlan | null
   target: LatestWeights
   equity: number
   currency?: string
   assetLabel: string
-  quantities?: LatestWeights | null
   sizing?: TargetSizing | null
   quantityLabel?: string
 }) {
-  const plan = rebalancePlan(positions, target, equity, quantities)
+  const plan = rebalancePlanOfServer(executablePlan)
   const scale = plan.rows.reduce((max, row) => Math.max(max, Math.abs(row.cur), Math.abs(row.tgt)), 0)
   const actual = currentQuantities(positions)
   const available = sizing?.status === 'available'
@@ -148,7 +148,6 @@ export function HoldingsView({
         {plan.rows.length} 只
         {ordinaryAligned > 0 && <span> · {ordinaryAligned} 到位</span>}
         {quantizedAligned > 0 && <span className="text-ink-3"> · {quantizedAligned} 量化为0</span>}
-        {plan.off > 0 && <span className="font-medium text-warn"> · {plan.off} 待调整</span>}
       </div>
       <div className="num mt-1 mb-3 text-[12.5px] text-ink-3">
         当前 {heldCount === 0 ? '空仓' : `持有 ${heldCount} 只`}

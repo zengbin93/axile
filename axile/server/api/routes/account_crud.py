@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 from datetime import datetime, time, timedelta
-from typing import Any, cast
+from typing import Annotated, Any, cast
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, Header, HTTPException, Response, status
 from loguru import logger
 from pydantic import ValidationError
 from sqlmodel import and_, delete, desc, func, select
@@ -13,7 +13,7 @@ from sqlmodel import and_, delete, desc, func, select
 from axile.channels import get_channel
 from axile.common.trade_channel import TradeChannel
 from axile.executor.account_control.models import AccountControlOverride
-from axile.server.api.deps import SchedDep, SessionDep
+from axile.server.api.deps import HistoryPaginationDep, SchedDep, SessionDep
 from axile.server.api.routes.account_support import _get_account_or_404
 from axile.server.cron import SCHEDULER_TIMEZONE, parse_cron_expr
 from axile.server.db.models import (
@@ -25,6 +25,8 @@ from axile.server.db.models import (
     AccountListPublic,
     AccountNextRunPublic,
     AccountPublic,
+    AccountRuntimeSync,
+    AccountRuntimeSyncPublic,
     AccountUpdate,
     ExecuteRecord,
     ExecuteRecordListPublic,
@@ -35,7 +37,8 @@ from axile.server.db.models import (
     PortfolioAccountPublic,
     now_str,
 )
-from axile.server.execution.ctp_channels import drop_account_worker, reconcile_china_channel_account
+from axile.server.execution.account_runtime_sync import enqueue_account_runtime_sync, reconcile_account_runtime
+from axile.server.execution.ctp_channels import drop_account_worker
 from axile.server.execution.live import live_hub
 from axile.server.execution.registry import (
     execution_record_output_status,
@@ -43,7 +46,7 @@ from axile.server.execution.registry import (
     get_queued_execution_id,
     get_running_execution_id,
 )
-from axile.server.execution.scheduler import create_job, delete_job
+from axile.server.execution.scheduler import delete_job
 from axile.server.integrity import plan_executable_target
 from axile.server.repositories import (
     add_record_portfolio_account,
@@ -57,6 +60,29 @@ from axile.server.target_weight_snapshots import get_latest_account_target_snaps
 from axile.server.trading_calendar import CalendarDecisionStatus, evaluate_channel_calendar_moment
 
 router = APIRouter()
+
+
+def _account_public(account: Account) -> AccountPublic:
+    """将持久化账户转换为不含凭证的读取 DTO。"""
+    # ``AccountPublic`` 有从凭证派生的摘要字段，并不属于 ORM 模型；先补全输入
+    # 再校验，避免 Pydantic 在响应构造阶段把已提交的更新误报为 500。
+    return AccountPublic.model_validate(
+        account.model_dump()
+        | {
+            "account_configured": bool(account.account_config),
+            "connection_values": {
+                field.name: account.account_config[field.name]
+                for field in get_channel(str(account.trade_channel)).descriptor.account_form.fields
+                if field.kind != "secret" and field.name in account.account_config
+            },
+            "feishu_configured": bool(account.feishu_key),
+        }
+    )
+
+
+def _account_public_with_runtime_sync(account: Account, sync: AccountRuntimeSync) -> AccountPublic:
+    """将账户与持久化的运行态对齐状态组装为 API 响应。"""
+    return _account_public(account).model_copy(update={"runtime_sync": AccountRuntimeSyncPublic.model_validate(sync)})
 
 
 def _validate_channel_account_config(channel: TradeChannel | str, config: dict[str, object]) -> dict[str, object]:
@@ -259,18 +285,33 @@ async def create_account(
     session: SessionDep,
     sched: SchedDep,
     account: AccountCreate,
-) -> Account:
+    response: Response,
+    idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
+) -> AccountPublic:
     """创建账户."""
     account_routes = _account_route_module()
     try:
+        if idempotency_key:
+            existing_sync = await session.scalar(
+                select(AccountRuntimeSync).where(AccountRuntimeSync.create_request_key == idempotency_key)
+            )
+            if existing_sync is not None:
+                existing_account = await _get_account_or_404(session, existing_sync.account_id)
+                if existing_sync.status != "synchronized":
+                    response.status_code = status.HTTP_202_ACCEPTED
+                return _account_public_with_runtime_sync(existing_account, existing_sync)
         account_routes._validate_account_control_binding(account.trade_channel, account.account_control_preset)
         account_config = _validate_channel_account_config(account.trade_channel, account.account_config)
-        cron_expr = parse_cron_expr(account.cron_expr)
+        parse_cron_expr(account.cron_expr)
         db_account = await _create_account_record(session, account, account_config)
+        await enqueue_account_runtime_sync(
+            session,
+            cast("int", db_account.id),
+            reset_worker=False,
+            create_request_key=idempotency_key,
+        )
         await session.commit()
         await session.refresh(db_account)
-        await create_job(sched, db_account, cron_expr)  # type: ignore[misc]
-        await reconcile_china_channel_account(db_account)
     except ValueError as exc:
         await session.rollback()
         logger.exception(f"创建账户失败: {exc}")
@@ -283,14 +324,17 @@ async def create_account(
             detail=f"服务器错误: {str(exc)}",
         ) from exc
 
-    return db_account
+    sync = await reconcile_account_runtime(session, sched, db_account)
+    if sync.status != "synchronized":
+        response.status_code = status.HTTP_202_ACCEPTED
+    return _account_public_with_runtime_sync(db_account, sync)
 
 
 @router.get("/", response_model=AccountListPublic)
 async def list_accounts(session: SessionDep) -> AccountListPublic:
     """获取所有账户列表."""
     accounts = (await session.execute(select(Account))).scalars().all()
-    return AccountListPublic(data=[AccountPublic.model_validate(account) for account in accounts])
+    return AccountListPublic(data=[_account_public(account) for account in accounts])
 
 
 # 权益迷你线的取数窗口与降采样目标。窗口取近端 N 条资产快照（本账户 ≈ 全历史，活跃账户 ≈ 近数日），
@@ -575,9 +619,9 @@ async def delete_account(session: SessionDep, sched: SchedDep, account_id: int) 
     "/{account_id}",
     response_model=AccountPublic,
 )
-async def account_info(session: SessionDep, account_id: int) -> Account:
+async def account_info(session: SessionDep, account_id: int) -> AccountPublic:
     """获取账户详情."""
-    return await _get_account_or_404(session, account_id)
+    return _account_public(await _get_account_or_404(session, account_id))
 
 
 @router.get(
@@ -638,7 +682,8 @@ async def update_account(
     sched: SchedDep,
     account_id: int,
     account: AccountUpdate,
-) -> Account:
+    response: Response,
+) -> AccountPublic:
     """更新账户."""
     db_account = await _get_account_or_404(session, account_id)
     account_routes = _account_route_module()
@@ -647,7 +692,15 @@ async def update_account(
         # 账户控制 binding 要按“更新后的目标状态”校验，不能只看当前库里的旧值。
         next_trade_channel, next_preset = _resolve_next_account_control_binding(db_account, account)
         account_routes._validate_account_control_binding(next_trade_channel, next_preset)
-        next_account_config = db_account.account_config if account.account_config is None else account.account_config
+        # 同渠道 PATCH 保留未提交的凭证；切换渠道则以新配置替换，避免旧渠道
+        # 专属字段混入新模型校验。
+        next_account_config = (
+            db_account.account_config
+            if account.account_config is None
+            else account.account_config
+            if next_trade_channel != db_account.trade_channel
+            else {**db_account.account_config, **account.account_config}
+        )
         normalized_account_config = _validate_channel_account_config(next_trade_channel, next_account_config)
 
         data = _build_account_update_data(account)
@@ -658,11 +711,9 @@ async def update_account(
         db_account.sqlmodel_update(data)
 
         session.add(db_account)
+        await enqueue_account_runtime_sync(session, account_id, reset_worker=runtime_changed)
         await session.commit()
         await session.refresh(db_account)
-        await account_routes._reconcile_account_job(session, sched, db_account)
-        if runtime_changed:
-            await reconcile_china_channel_account(db_account, reset=True)
     except ValueError as exc:
         await session.rollback()
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
@@ -673,15 +724,42 @@ async def update_account(
             detail=f"服务器错误: {str(exc)}",
         ) from exc
 
-    return db_account
+    sync = await reconcile_account_runtime(session, sched, db_account)
+    if sync.status != "synchronized":
+        response.status_code = status.HTTP_202_ACCEPTED
+    return _account_public_with_runtime_sync(db_account, sync)
+
+
+@router.get("/{account_id}/runtime-sync", response_model=AccountRuntimeSyncPublic)
+async def account_runtime_sync_status(session: SessionDep, account_id: int) -> AccountRuntimeSyncPublic:
+    """查询账户运行态对齐的失败原因与重试计数。"""
+    await _get_account_or_404(session, account_id)
+    sync = await session.scalar(select(AccountRuntimeSync).where(AccountRuntimeSync.account_id == account_id))
+    if sync is None:
+        raise HTTPException(status_code=status.HTTP_202_ACCEPTED, detail="账户运行态尚待首次同步")
+    return AccountRuntimeSyncPublic.model_validate(sync)
+
+
+@router.post("/{account_id}/runtime-sync/retry", response_model=AccountRuntimeSyncPublic)
+async def retry_account_runtime_sync(
+    session: SessionDep,
+    sched: SchedDep,
+    account_id: int,
+    response: Response,
+) -> AccountRuntimeSyncPublic:
+    """显式重试账户 scheduler 和渠道 worker 的运行态对齐。"""
+    account = await _get_account_or_404(session, account_id)
+    sync = await reconcile_account_runtime(session, sched, account)
+    if sync.status != "synchronized":
+        response.status_code = status.HTTP_202_ACCEPTED
+    return AccountRuntimeSyncPublic.model_validate(sync)
 
 
 @router.get("/execute_records/{account_id}", response_model=ExecuteRecordListPublic)
 async def list_execute_records(
     session: SessionDep,
     account_id: int,
-    skip: int = 0,
-    limit: int = 100,
+    pagination: HistoryPaginationDep,
 ) -> ExecuteRecordListPublic:
     """获取账户的执行记录."""
     db_account = await _get_account_or_404(session, account_id)
@@ -694,8 +772,8 @@ async def list_execute_records(
         .where(ExecuteRecord.account_id == db_account.id)
         # execute_record 没有独立时间排序键时，按自增 id 倒序近似“最新在前”的时间线。
         .order_by(desc(ExecuteRecord.id))
-        .offset(skip)
-        .limit(limit)
+        .offset(pagination.skip)
+        .limit(pagination.limit)
     )
     records = (await session.execute(statement)).scalars().all()
 
@@ -709,8 +787,7 @@ async def list_execute_records(
 async def list_portfolio_records(
     session: SessionDep,
     account_id: int,
-    skip: int = 0,
-    limit: int = 100,
+    pagination: HistoryPaginationDep,
 ) -> PortfolioAccountListPublic:
     """获取账户的组合更换记录."""
     db_account = await _get_account_or_404(session, account_id)
@@ -721,7 +798,12 @@ async def list_portfolio_records(
     count = (await session.execute(count_statement)).scalar_one()
 
     # 组合绑定记录保持插入顺序返回，便于直接还原账户组合切换历史。
-    statement = select(PortfolioAccount).where(PortfolioAccount.account_id == db_account.id).offset(skip).limit(limit)
+    statement = (
+        select(PortfolioAccount)
+        .where(PortfolioAccount.account_id == db_account.id)
+        .offset(pagination.skip)
+        .limit(pagination.limit)
+    )
     records = (await session.execute(statement)).scalars().all()
 
     return PortfolioAccountListPublic(

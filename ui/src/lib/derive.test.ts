@@ -99,6 +99,8 @@ test('暂停 + 偏离 → 需手动（加重，最坏格）', () => {
   const v = stateVerdict(item({ is_started: false, off_symbol_count: 5, last_exec_at: '2026-07-21T12:53:25' }))
   expect(v.text).toBe('5 只待调整 · 自动纠偏已关，需手动')
   expect(v.loud).toBe(true)
+  expect(stateVerdict(item({ is_started: false, off_symbol_count: 5, last_exec_at: '2026-07-21T12:53:25' }), false).text)
+    .toBe('自动纠偏已关，需手动')
 })
 
 test('自动 + 偏离 + BLOCKED → 下次排程，不说失败、不加重', () => {
@@ -112,7 +114,7 @@ test('自动 + 偏离 + BLOCKED → 下次排程，不说失败、不加重', ()
     position_weights: [200],
   }))
   expect(v.text).toContain('5 只待调整')
-  expect(v.text).toContain('下次')
+  expect(v.text).toContain('等待下次')
   expect(v.text).toContain('21:15')
   expect(v.loud).toBe(false)
 })

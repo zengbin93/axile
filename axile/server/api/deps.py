@@ -3,6 +3,7 @@
 from typing import Annotated, AsyncGenerator
 
 from fastapi import Depends
+from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from axile.server.core.db import SessionLocal
@@ -22,3 +23,13 @@ def get_scheduler() -> Scheduler:
 
 SessionDep = Annotated[AsyncSession, Depends(get_db)]
 SchedDep = Annotated[Scheduler, Depends(get_scheduler)]
+
+
+class HistoryPagination(BaseModel):
+    """历史列表接口共用的偏移分页参数。"""
+
+    skip: int = Field(default=0, ge=0)
+    limit: int = Field(default=100, ge=1, le=500)
+
+
+HistoryPaginationDep = Annotated[HistoryPagination, Depends()]

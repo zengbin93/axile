@@ -72,10 +72,7 @@ async def reconcile_china_channel_account(account: Account, *, reset: bool = Fal
         await manager.drop_account(int(account.id))
     if account.trade_channel not in {TradeChannel.CTP, TradeChannel.TQ} or not account.is_started:
         return
-    try:
-        await manager.prepare_account(account)
-    except Exception as exc:  # noqa: BLE001 - 落库成功不应因外部渠道失败而回滚
-        logger.error("{} 账户通道准备失败 account_id={}: {}", account.trade_channel, account.id, exc)
+    await manager.prepare_account(account)
 
 
 async def drop_account_worker(account_id: int) -> None:

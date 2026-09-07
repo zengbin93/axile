@@ -7,7 +7,7 @@ import { HoldingsView } from '@/features/account/HoldingsView'
 import { AccountPageTitle } from '@/features/account/pageHead'
 import { accountAssetTerms } from '@/features/dashboard/display'
 import { TargetSnapshotControl } from '@/features/portfolio/TargetSnapshotControl'
-import { getAccount, getAccountAssetSnapshots, getAccountTargetSnapshot, refreshAccountTargetSnapshot } from '@/lib/api/accounts'
+import { getAccount, getAccountAssetSnapshots, getAccountRebalancePlan, getAccountTargetSnapshot, refreshAccountTargetSnapshot } from '@/lib/api/accounts'
 import { usePolling } from '@/lib/hooks/usePolling'
 import { useTargetSnapshot } from '@/lib/hooks/useTargetSnapshot'
 import { currencyOf, observedTotalAsset, positionsOfAssets } from '@/lib/derive'
@@ -46,6 +46,10 @@ export function AccountHoldingsPage() {
     useCallback(() => refreshAccountTargetSnapshot(accountId), [accountId]),
     `account:${accountId}:target-snapshot`,
   )
+  const comparison = usePolling(
+    useCallback((s: AbortSignal) => getAccountRebalancePlan(accountId, s), [accountId]),
+    { queryKey: `account:${accountId}:rebalance-plan`, intervalMs: 10000 },
+  )
 
   const latestAssets = snapshots.data?.data[0]?.assets
   const positions = positionsOfAssets(latestAssets)
@@ -54,14 +58,16 @@ export function AccountHoldingsPage() {
   const previousLiveRef = useRef(running)
   const refreshSnapshots = snapshots.refresh
   const reloadTargetSnapshot = weights.reloadSnapshot
+  const refreshComparison = comparison.refresh
   useEffect(() => {
     if (executionJustSettled(previousLiveRef.current, running)) {
       void refreshSnapshots()
       void reloadTargetSnapshot()
+      void refreshComparison()
       void refreshAccounts()
     }
     previousLiveRef.current = running
-  }, [running, refreshSnapshots, reloadTargetSnapshot, refreshAccounts])
+  }, [running, refreshSnapshots, reloadTargetSnapshot, refreshComparison, refreshAccounts])
   const tradeChannel = item?.trade_channel ?? account.data?.trade_channel
   const portfolioId = item?.portfolio_id ?? account.data?.portfolio_id ?? null
   // 快照缺失但实时口径（dashboard.holdings_count）显示有持仓：资产观测未返回有效持仓明细，
@@ -94,7 +100,7 @@ export function AccountHoldingsPage() {
             onRecalculate={() => void weights.recalculate()}
           />
         </div>
-        {(!snapshots.data || !weights.data) && (snapshots.loading || weights.loading) ? (
+        {(!snapshots.data || !weights.data || !comparison.data) && (snapshots.loading || weights.loading || comparison.loading) ? (
           <div aria-label="正在加载持仓与目标" aria-busy="true">
             <div className="flex items-center justify-between border-b border-line pb-3">
               <Skeleton className="h-4 w-28" />
@@ -102,7 +108,7 @@ export function AccountHoldingsPage() {
             </div>
             <SkeletonLines rows={6} className="mt-3" />
           </div>
-        ) : snapshots.error || weights.error ? null : !weights.data?.calculated_at ? (
+        ) : snapshots.error || weights.error || comparison.error ? null : !weights.data?.calculated_at ? (
           <div className="text-[15px] text-ink-3">尚无目标权重，点击刷新按钮计算后再查看持仓对照。</div>
         ) : holdingsStale ? (
           <div className="text-[15px] leading-relaxed text-warn">
@@ -114,11 +120,11 @@ export function AccountHoldingsPage() {
         ) : (
           <HoldingsView
             positions={positions}
+            executablePlan={comparison.data}
             target={target}
             equity={equity}
             currency={currencyOf(item?.currency)}
             assetLabel={assetTerms.shortLabel}
-            quantities={weights.data?.quantities ?? null}
             sizing={weights.data?.sizing ?? null}
             quantityLabel={descriptor?.units.quantity_label ?? ''}
           />

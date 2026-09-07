@@ -13,6 +13,8 @@ from axile.server.db.models.account import (
     AccountListPublic,
     AccountNextRunPublic,
     AccountPublic,
+    AccountRebalancePlanPublic,
+    AccountRebalancePlanRowPublic,
     AccountUpdate,
     PortfolioAccount,
     PortfolioAccountBase,
@@ -35,6 +37,11 @@ from axile.server.db.models.account_control import (
     AccountControlEventBase,
     AccountControlEventListPublic,
     AccountControlEventPublic,
+)
+from axile.server.db.models.account_runtime_sync import (
+    AccountRuntimeSync,
+    AccountRuntimeSyncAttempt,
+    AccountRuntimeSyncPublic,
 )
 from axile.server.db.models.base import PydanticJSONType, new_execution_id, now_ms, now_str
 from axile.server.db.models.execution import (
@@ -120,7 +127,12 @@ __all__ = [
     "AccountNextRunPublic",
     "AccountDashboardItemPublic",
     "AccountDashboardPublic",
+    "AccountRebalancePlanPublic",
+    "AccountRebalancePlanRowPublic",
     "AccountUpdate",
+    "AccountRuntimeSync",
+    "AccountRuntimeSyncAttempt",
+    "AccountRuntimeSyncPublic",
     "AccountAssetSnapshot",
     "AccountAssetSnapshotPublic",
     "AccountAssetSnapshotListPublic",

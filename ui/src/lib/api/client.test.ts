@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'bun:test'
 
-import { ApiError, apiErrorFromBody } from './client'
+import { ApiError, apiErrorFromBody, apiGet, apiUpload } from './client'
+
+const LEGACY_PASSWORD_HEADER = ['x', 'api', 'password'].join('-')
 
 describe('apiErrorFromBody', () => {
   it('preserves safe structured diagnostics', () => {
@@ -26,5 +28,41 @@ describe('apiErrorFromBody', () => {
 
   it('falls back to an HTTP label when the response is not JSON', () => {
     expect(apiErrorFromBody(503, '', null).message).toBe('HTTP 503')
+  })
+})
+
+describe('API requests', () => {
+  it('does not send a password header for JSON requests', async () => {
+    const originalFetch = globalThis.fetch
+    let request: RequestInit | undefined
+    globalThis.fetch = ((_input: string, init?: RequestInit) => {
+      request = init
+      return Promise.resolve(new Response('{}'))
+    }) as typeof fetch
+
+    try {
+      await apiGet('/status')
+    } finally {
+      globalThis.fetch = originalFetch
+    }
+
+    expect(new Headers(request?.headers).has(LEGACY_PASSWORD_HEADER)).toBe(false)
+  })
+
+  it('does not send a password header for multipart uploads', async () => {
+    const originalFetch = globalThis.fetch
+    let request: RequestInit | undefined
+    globalThis.fetch = ((_input: string, init?: RequestInit) => {
+      request = init
+      return Promise.resolve(new Response('{}'))
+    }) as typeof fetch
+
+    try {
+      await apiUpload('/upload', new File(['test'], 'test.txt'))
+    } finally {
+      globalThis.fetch = originalFetch
+    }
+
+    expect(new Headers(request?.headers).has(LEGACY_PASSWORD_HEADER)).toBe(false)
   })
 })

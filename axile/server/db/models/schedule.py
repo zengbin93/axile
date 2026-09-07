@@ -15,6 +15,7 @@ type ScheduleSkipReason = Literal[
     "CALENDAR.CLOSED",
     "CALENDAR.NO_NIGHT_SESSION",
     "CALENDAR.SESSION_CLOSED",
+    "CALENDAR.UNAVAILABLE",
     "BUSY",
 ]
 

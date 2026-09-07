@@ -17,7 +17,7 @@ from sqlmodel import SQLModel
 
 from axile.server.api.deps import get_db
 from axile.server.api.routes.account_performance import router
-from axile.server.db.models import AccountCreate, AccountUpdate, ExecuteRecord, PortfolioAccount
+from axile.server.db.models import AccountCreate, AccountPublic, AccountUpdate, ExecuteRecord, PortfolioAccount
 from axile.server.db.models.performance import PerformanceSettings
 from axile.server.performance import Observation, build_wbt_input, calculate_performance, observation
 from tests.unit.server._execution_test_support import build_account
@@ -160,7 +160,9 @@ def test_empty_and_single_observation():
 
 
 def test_account_creation_defaults_and_ordinary_updates_preserve_settings():
-    payload = build_account().model_dump(exclude={"backtest_weight_type", "backtest_fee_rate"})
+    payload = build_account().model_dump(
+        exclude={"id", "created_at", "updated_at", "backtest_weight_type", "backtest_fee_rate"}
+    )
     created = AccountCreate.model_validate(payload)
     assert created.backtest_weight_type == "ts"
     assert created.backtest_fee_rate == 0
@@ -168,6 +170,10 @@ def test_account_creation_defaults_and_ordinary_updates_preserve_settings():
     account.sqlmodel_update(AccountUpdate(name="renamed").model_dump(exclude_unset=True))
     assert account.backtest_weight_type == "cs"
     assert account.backtest_fee_rate == 0.0002
+    public = AccountPublic.model_validate(account).model_dump()
+    assert public["backtest_weight_type"] == "cs"
+    assert public["backtest_fee_rate"] == 0.0002
+    assert "account_config" not in public
 
 
 def test_two_intraday_observations_are_not_an_empty_chart():
@@ -195,7 +201,7 @@ def test_only_explicit_degraded_asset_sources_are_excluded(source, expected):
 
 def test_migration_roundtrip_defaults(tmp_path):
     engine = sa.create_engine(f"sqlite:///{tmp_path / 'migration.db'}")
-    migration = _load_migration(_MIGRATIONS_DIR / "0010_account_performance.py")
+    migration = _load_migration(_MIGRATIONS_DIR / "0011_account_performance.py")
     with engine.begin() as conn:
         conn.execute(sa.text("CREATE TABLE account (id INTEGER PRIMARY KEY)"))
         conn.execute(sa.text("INSERT INTO account VALUES (2)"))

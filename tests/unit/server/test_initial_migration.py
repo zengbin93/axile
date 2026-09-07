@@ -37,7 +37,8 @@ def test_migration_history_is_linear() -> None:
         "0007_execution_intent.py",
         "0008_feishu_card_config.py",
         "0009_ctp_account_control_preset.py",
-        "0010_account_performance.py",
+        "0010_account_runtime_sync.py",
+        "0011_account_performance.py",
     ]
     initial = _load_migration(migration_paths[0])
     calendar = _load_migration(migration_paths[1])
@@ -48,12 +49,15 @@ def test_migration_history_is_linear() -> None:
     execution_intent = _load_migration(migration_paths[6])
     feishu_card_config = _load_migration(migration_paths[7])
     ctp_account_control_preset = _load_migration(migration_paths[8])
+    account_runtime_sync = _load_migration(migration_paths[9])
     assert initial.revision == "0001"
-    performance = _load_migration(migration_paths[9])
-    assert performance.revision == "0010"
-    assert performance.down_revision == "0009"
+    performance = _load_migration(migration_paths[10])
+    assert performance.revision == "0011"
+    assert performance.down_revision == "0010"
     assert ctp_account_control_preset.revision == "0009"
     assert ctp_account_control_preset.down_revision == "0008"
+    assert account_runtime_sync.revision == "0010"
+    assert account_runtime_sync.down_revision == "0009"
     assert initial.down_revision is None
     assert calendar.revision == "0002"
     assert calendar.down_revision == "0001"

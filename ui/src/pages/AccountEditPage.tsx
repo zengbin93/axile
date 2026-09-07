@@ -5,6 +5,8 @@
  * 仍由各自的完整编辑器承载。保存保持最小 PATCH + 底栏变更摘要；保存与取消都不离开本页。
  */
 
+import { feishuKeyPatch } from '@/features/account/feishuUpdate'
+import { InkRewrite } from '@/components/ui/InkRewrite'
 import { useCallback, useEffect, useState, type CSSProperties } from 'react'
 import { Check, ChevronDown, Eye, EyeOff } from 'lucide-react'
 import { useParams, useViewTransitionState } from 'react-router'
@@ -26,7 +28,7 @@ import {
   readAccountConfigSummary,
   writeAccountConfigSummary,
 } from '@/features/account/configSummary'
-import { getAccount, testAccountFeishu, updateAccount, type AccountFeishuTestResult } from '@/lib/api/accounts'
+import { getAccount, testAccountFeishu, updateAccount, type AccountFeishuTestResult, type AccountUpdatePayload } from '@/lib/api/accounts'
 import { usePolling } from '@/lib/hooks/usePolling'
 import { useDomainStore } from '@/stores/domain'
 import { useChannelCatalogStore, useChannelDescriptor } from '@/stores/channels'
@@ -65,6 +67,7 @@ const FEISHU_CARD_MODE_ORDER: FeishuCardMode[] = ['default', 'template', 'custom
 interface Draft {
   name: string
   remark: string
+  clearFeishu: boolean
   feishu: string
   feishuCardMode: FeishuCardMode
   feishuTemplateId: string
@@ -100,7 +103,8 @@ function draftOf(acc: Account): Draft {
   return {
     name: acc.name,
     remark: acc.remark ?? '',
-    feishu: acc.feishu_key ?? '',
+    clearFeishu: false,
+    feishu: '',
     feishuCardMode: cardConfig?.mode ?? 'default',
     feishuTemplateId: cardConfig?.mode === 'template' ? cardConfig.template_id : '',
     feishuCardText: cardConfig?.mode === 'custom' ? JSON.stringify(cardConfig.card, null, 2) : '',
@@ -153,13 +157,13 @@ function draftFeishuCardConfig(draft: Draft): FeishuCardConfig | null {
   return parseCustomCard(draft.feishuCardText).config
 }
 
-function buildPatch(draft: Draft, acc: Account, showShortLeverage: boolean): Partial<Account> {
-  const patch: Partial<Account> = {}
+function buildPatch(draft: Draft, acc: Account, showShortLeverage: boolean): AccountUpdatePayload {
+  const patch: AccountUpdatePayload = {}
   const name = draft.name.trim()
   if (name && name !== acc.name) patch.name = name
   if (draft.remark !== (acc.remark ?? '')) patch.remark = draft.remark || null
   const feishuKey = extractFeishuKey(draft.feishu)
-  if (feishuKey !== (acc.feishu_key ?? '')) patch.feishu_key = feishuKey || null
+  Object.assign(patch, feishuKeyPatch(feishuKey, draft.clearFeishu))
   const feishuCardConfig = draftFeishuCardConfig(draft)
   if (JSON.stringify(feishuCardConfig) !== JSON.stringify(acc.feishu_card_config)) {
     patch.feishu_card_config = feishuCardConfig
@@ -441,18 +445,18 @@ export function AccountEditPage({ section = 'basic' }: { section?: EditSection }
           </Row>
         </Section>
         <Section label="飞书通知">
-          <Row label="机器人 Key" hint={feishuKey ? '已配置' : '未配置'} top span>
+          <Row label="机器人 Key" hint={d.clearFeishu ? '保存后关闭' : (feishuKey || acc.feishu_configured ? '已配置' : '未配置')} top span>
             <div className="flex items-center gap-2">
               <div className="relative min-w-0 flex-1">
                 <input
                   type={feishuKeyRevealed ? 'text' : 'password'}
                   className={`${TEXT} pr-10`}
                   value={d.feishu}
-                  placeholder="留空则不推送 · 可粘贴整条 webhook 链接"
+                  placeholder={acc.feishu_configured ? '已配置 · 留空保持不变' : '可粘贴整条 webhook 链接'}
                   spellCheck={false}
                   autoComplete="off"
                   onChange={(e) => {
-                    set({ feishu: e.target.value })
+                    set({ feishu: e.target.value, clearFeishu: false })
                     if (feishuTest) setFeishuTest(null)
                   }}
                   onBlur={() => {
@@ -470,6 +474,17 @@ export function AccountEditPage({ section = 'basic' }: { section?: EditSection }
                   {feishuKeyRevealed ? <EyeOff size={16} /> : <Eye size={16} />}
                 </button>
               </div>
+              <button
+                type="button"
+                className="flex-none cursor-pointer text-[13px] text-ink-2 disabled:opacity-45"
+                disabled={!acc.feishu_configured}
+                onClick={() => {
+                  set({ clearFeishu: !d.clearFeishu, feishu: '' })
+                  setFeishuTest(null)
+                }}
+              >
+                <InkRewrite text={d.clearFeishu ? '撤销清除' : '清除通知'} tone="label" />
+              </button>
               <button
                 type="button"
                 className="flex-none cursor-pointer rounded-[9px] border border-line bg-surface px-4 py-2 text-[15px] text-ink-2 transition-[border-color] hover:border-ink-3/40 disabled:opacity-45"

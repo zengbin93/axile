@@ -72,7 +72,7 @@ export function AccountEditConnectionPage() {
     })
   }
   const nextConfig = mergedConnectionConfig(acc, fields, draft)
-  const changed = !sameConnectionConfig(nextConfig, acc.account_config)
+  const changed = !sameConnectionConfig(draft, initialConnectionDraft(acc, fields))
 
   const validate = () => {
     const nextErrors: Record<string, string> = {}
@@ -82,6 +82,7 @@ export function AccountEditConnectionPage() {
       if (field.kind === 'select') {
         if (field.required && !field.options?.some((option) => option.value === value)) nextErrors[field.name] = `请选择${field.label}`
       } else if (field.kind !== 'boolean') {
+        if (field.kind === 'secret' && acc.account_configured && !String(value ?? '').trim()) continue
         const error = connectionValueError({ kind: field.kind, value: String(value ?? ''), required: field.required, label: field.label, placeholder: field.placeholder, constraints: field.constraints })
         if (error) nextErrors[field.name] = error
       }
@@ -102,11 +103,11 @@ export function AccountEditConnectionPage() {
     if (!validate()) return toast('请检查连接设置')
     setSaveError(null)
     try {
-      await updateAccount(accountId, { account_config: nextConfig })
+      const updated = await updateAccount(accountId, { account_config: nextConfig })
       toast('连接设置已更新')
       void refreshAccounts()
       account.refresh()
-      setDraft(initialConnectionDraft({ ...acc, account_config: nextConfig }, fields))
+      setDraft(initialConnectionDraft(updated, fields))
     } catch (caught) {
       setSaveError(caught instanceof Error ? caught : new Error(String(caught)))
     }
@@ -116,7 +117,7 @@ export function AccountEditConnectionPage() {
     const raw = draft[field.name] ?? field.default ?? ''
     if (field.kind === 'boolean') return <Segmented value={raw === true ? 'true' : 'false'} options={[{ value: 'false', label: '关闭' }, { value: 'true', label: '启用' }]} onChange={(value) => setField(field, value === 'true')} />
     if (field.kind === 'select') return <Segmented value={String(raw)} options={field.options ?? []} onChange={(value) => setField(field, value)} />
-    const configuredSecret = field.kind === 'secret' && Boolean(acc.account_config[field.name])
+    const configuredSecret = field.kind === 'secret' && acc.account_configured
     return <ConnectionField label={field.label} kind={field.kind} value={String(raw)} required={field.required} placeholder={configuredSecret ? '已配置 · 留空保持不变' : field.placeholder} help={configuredSecret ? '密钥不回显；只有填入新值才会替换。' : field.help} error={errors[field.name]} constraints={field.constraints} clipboard={field.clipboard} onChange={(value) => setField(field, value)} />
   }
 

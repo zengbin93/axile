@@ -1,14 +1,11 @@
 /**
- * 薄 API 客户端 —— 统一 baseURL、鉴权头与错误归一。
+ * 薄 API 客户端 —— 统一 baseURL 与错误归一。
  *
- * 后端绑定 loopback、无应用级鉴权；仅当设置了 `x-api-password` 时附带。
+ * 后端仅绑定 loopback，不提供应用级鉴权；不得通过反向代理或端口转发暴露服务。
  * dev 下 `/api` 由 Vite 代理到 127.0.0.1:1419（见 vite.config.ts）。
  */
 
 const BASE = '/api/v1'
-
-/** 可选的 API 口令；生产由部署方注入，dev 一般为空。 */
-const API_PASSWORD = import.meta.env.VITE_API_PASSWORD as string | undefined
 
 /** API 调用失败时抛出的统一错误，仅保留可安全展示的诊断标识。 */
 export class ApiError extends Error {
@@ -59,9 +56,7 @@ export function apiErrorFromBody(status: number, statusText: string, body: unkno
 }
 
 function headers(extra?: HeadersInit): HeadersInit {
-  const h: Record<string, string> = { 'Content-Type': 'application/json' }
-  if (API_PASSWORD) h['x-api-password'] = API_PASSWORD
-  return { ...h, ...(extra as Record<string, string>) }
+  return { 'Content-Type': 'application/json', ...(extra as Record<string, string>) }
 }
 
 async function parse<T>(res: Response): Promise<T> {
@@ -104,8 +99,6 @@ export async function apiSend<T>(
 export async function apiUpload<T>(path: string, file: File): Promise<T> {
   const body = new FormData()
   body.append('file', file)
-  const uploadHeaders: Record<string, string> = {}
-  if (API_PASSWORD) uploadHeaders['x-api-password'] = API_PASSWORD
-  const res = await fetch(BASE + path, { method: 'POST', headers: uploadHeaders, body })
+  const res = await fetch(BASE + path, { method: 'POST', body })
   return parse<T>(res)
 }

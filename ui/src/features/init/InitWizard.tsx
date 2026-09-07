@@ -21,6 +21,7 @@ import { WizardPage } from '@/features/setup/WizardNav'
 import { ApiError } from '@/lib/api/client'
 import {
   initStatus,
+  initSavePayload,
   saveExecutionAlert,
   saveInit,
   testDb,
@@ -93,9 +94,9 @@ interface Draft {
 }
 
 /** 把后端配置归一成可直接比较的表单草稿。 */
-function draftFromInitial(initial: InitValues): Draft {
+function draftFromInitial(initial: InitValues, isEdit = false): Draft {
   return {
-    sqlalchemy_database_uri: initial.sqlalchemy_database_uri || DEFAULT_DB_URI,
+    sqlalchemy_database_uri: initial.sqlalchemy_database_uri || (isEdit ? '' : DEFAULT_DB_URI),
     exe_err_feishu_key: initial.exe_err_feishu_key ?? '',
     environment: initial.environment || 'local',
     app_log_dir: initial.app_log_dir || './logs',
@@ -263,8 +264,8 @@ export function InitWizard({
   const [savedAlertKey, setSavedAlertKey] = useState(
     initial.exe_err_feishu_key ?? '',
   )
-  const [draft, setDraft] = useState<Draft>(() => draftFromInitial(initial))
-  const initialDraft = draftFromInitial(initial)
+  const [draft, setDraft] = useState<Draft>(() => draftFromInitial(initial, isEdit))
+  const initialDraft = draftFromInitial(initial, isEdit)
   const currentAdvancedValues = advancedValues(draft, initial)
   const advancedChanges = advancedConfigChanges(initial, currentAdvancedValues)
   const alertDirty = draft.exe_err_feishu_key !== savedAlertKey
@@ -318,11 +319,11 @@ export function InitWizard({
         setSaving(false)
         return
       }
-      await saveInit({
+      await saveInit(initSavePayload({
         ...draft,
         algorithm_modules: splitLines(draft.algorithm_modules),
         algorithm_directories: splitLines(draft.algorithm_directories),
-      })
+      }, isEdit))
       toast(copy.savedToast)
       await waitReadyAndReload()
     } catch (e) {
@@ -349,8 +350,8 @@ export function InitWizard({
   const confirmStep = steps.length - 1
   const alertStep = 0
   const nextDisabled =
-    step === confirmStep && !draft.sqlalchemy_database_uri.trim()
-  const saveDisabled = saving || !draft.sqlalchemy_database_uri.trim()
+    step === confirmStep && !isEdit && !draft.sqlalchemy_database_uri.trim()
+  const saveDisabled = saving || (!isEdit && !draft.sqlalchemy_database_uri.trim())
 
   const resetAdvancedDraft = () => {
     setDraft(initialDraft)
@@ -490,11 +491,11 @@ export function InitWizard({
                     <label className={labelCls}>数据库地址</label>
                     <input
                       className={inputCls}
+                      placeholder={isEdit ? '已配置 · 留空保持不变' : DEFAULT_DB_URI}
                       value={draft.sqlalchemy_database_uri}
                       onChange={(e) =>
                         set({ sqlalchemy_database_uri: e.target.value })
                       }
-                      placeholder={DEFAULT_DB_URI}
                     />
                     <TestRow state={dbTest} onTest={runDbTest} />
                     <label className={labelCls}>运行环境</label>
@@ -574,12 +575,12 @@ export function InitWizard({
                     <div className="flex items-center gap-2">
                       <input
                         className={`${TEXT} min-w-0 flex-1 font-mono`}
+                        placeholder={isEdit ? '已配置 · 留空保持不变' : DEFAULT_DB_URI}
                         value={draft.sqlalchemy_database_uri}
                         onChange={(event) => {
                           setDbTest(null)
                           set({ sqlalchemy_database_uri: event.target.value })
                         }}
-                        placeholder={DEFAULT_DB_URI}
                       />
                       <button
                         type="button"

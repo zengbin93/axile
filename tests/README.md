@@ -6,18 +6,22 @@
 - `tests/integration/`：跨模块集成测试。
 - `tests/live/`：需要显式开关及真实环境的联机测试。
 
-安装开发依赖：
+安装开发依赖和 CTP 测试依赖：
 
 ```bash
-uv sync --group dev
+uv sync --group dev --extra ctp
 ```
+
+离线测试套件包含 CTP 渠道用例；`openctp-ctp` 是 CTP 的可选运行时依赖，
+因此执行完整测试套件时必须安装 `ctp` extra。未安装该 extra 的环境仅适合
+不运行 CTP 测试的开发工作。
 
 运行离线测试与覆盖率门禁：
 
 ```bash
 uv run pytest tests/ -v \
   --ignore=tests/live \
-  --cov=axile --cov-report=term-missing --cov-fail-under=69
+  --cov=axile --cov-report=xml --cov-report=term-missing --cov-fail-under=69
 ```
 
 运行单个文件或测试：
