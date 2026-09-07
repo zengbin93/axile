@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import math
+
 from axile.executor.constants.order_status import OrderStatus
 from axile.executor.models.unified_account_assets import PositionDirection
-from axile.executor.tq.converters import account_to_unified, order_to_unified, quote_to_unified
+from axile.executor.tq.converters import account_to_unified, order_to_unified, quote_to_unified, trade_to_unified
 from axile.executor.tq.symbols import TQInstrument, TQSymbolResolver
 
 
@@ -44,6 +46,51 @@ def test_quote_and_order_return_to_common_symbol() -> None:
     assert quote.symbol == "rb2610"
     assert order.symbol == "rb2610"
     assert order.status == OrderStatus.FILLED
+
+
+def test_trade_reads_tqsdk_trade_entity_fields() -> None:
+    trade = trade_to_unified(
+        {
+            "trade_id": "t1",
+            "order_id": "o1",
+            "exchange_id": "SHFE",
+            "instrument_id": "rb2610",
+            "direction": "SELL",
+            "offset": "CLOSE",
+            "price": 3092.0,
+            "volume": 4,
+            "trade_date_time": 1_700_000_000_000_000_000,
+        },
+        _resolver(),
+    )
+
+    assert trade.symbol == "rb2610"
+    assert trade.order_id == "o1"
+    assert trade.trade_volume == 4.0
+    assert trade.trade_price == 3092.0
+    assert trade.trade_value == 4.0 * 3092.0
+    assert trade.extra["offset"] == "CLOSE"
+
+
+def test_trade_price_nan_falls_back_to_zero() -> None:
+    trade = trade_to_unified(
+        {
+            "trade_id": "t2",
+            "order_id": "o1",
+            "exchange_id": "SHFE",
+            "instrument_id": "rb2610",
+            "direction": "BUY",
+            "offset": "OPEN",
+            "price": float("nan"),
+            "volume": 1,
+            "trade_date_time": 1_700_000_000_000_000_000,
+        },
+        _resolver(),
+    )
+
+    assert math.isfinite(trade.trade_price)
+    assert trade.trade_price == 0.0
+    assert trade.trade_value == 0.0
 
 
 def test_positions_expose_complete_today_yesterday_breakdown() -> None:

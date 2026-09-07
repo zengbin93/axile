@@ -45,8 +45,8 @@ class FakeApi:
             "instrument_id": "rb2610",
             "direction": "BUY",
             "offset": "OPEN",
-            "trade_volume": 1,
-            "trade_price": 3200,
+            "volume": 1,
+            "price": 3200,
             "trade_date_time": 1_700_000_000_000_000_000,
         }
         self.insert_args: dict[str, object] = {}
