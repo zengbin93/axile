@@ -10,6 +10,8 @@ from collections.abc import Callable
 from typing import Protocol, cast
 
 import loguru
+from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 
 from axile.domain.execution import ExecutionKind, ExecutionTaskStatus, ExecutionTerminateMode
 from axile.executor.termination import TERMINATION_TRIGGER_OPERATOR
@@ -31,6 +33,12 @@ class _WriteSessionProtocol(Protocol):
 
     async def commit(self) -> None:
         """提交当前事务."""
+
+    async def rollback(self) -> None:
+        """回滚当前事务."""
+
+    async def scalar(self, statement: object) -> object | None:
+        """执行语句并返回首行首列值."""
 
     async def refresh(self, obj: object) -> None:
         """刷新指定对象."""
@@ -76,7 +84,27 @@ async def _persist_execute_record(
                     created_at=record.created_at,
                 )
             )
-        await session.commit()
+        try:
+            await session.commit()
+        except IntegrityError:
+            # 同一执行的两条收尾路径（如终止确认与脚本失败）可能并发落库，
+            # ``execution_id`` 唯一约束下以首条为准；否则冲突会把终止接口
+            # 之类的调用方打穿成 IntegrityError。
+            await session.rollback()
+            if execution_id is None:
+                raise
+            existing = cast(
+                "ExecuteRecord | None",
+                await session.scalar(select(ExecuteRecord).where(ExecuteRecord.execution_id == execution_id)),
+            )
+            if existing is None:
+                raise
+            loguru.logger.warning(
+                "执行记录已存在，保留首条 | execution_id={} record_id={}",
+                execution_id,
+                existing.id,
+            )
+            return existing
         await session.refresh(record)
         return record
 
