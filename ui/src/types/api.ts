@@ -313,6 +313,25 @@ export interface AccountDashboard {
   data: AccountDashboardItem[]
 }
 
+/** 服务端按渠道可执行规则计算的账户持仓对照。 */
+export interface AccountRebalancePlanRow {
+  symbol: string
+  current_weight: number
+  target_weight: number
+  current_quantity: number | null
+  target_quantity: number | null
+  action: 'aligned' | 'increase' | 'reduce' | 'open' | 'close' | 'flip'
+  side: 'buy' | 'sell' | 'none'
+  aligned: boolean
+}
+
+export interface AccountRebalancePlan {
+  rows: AccountRebalancePlanRow[]
+  off_symbol_count: number | null
+  observed_at: string | null
+  target_calculated_at: string | null
+}
+
 /** `GET /account/{id}/next_run_time`，对应 `AccountNextRunPublic`。 */
 export interface AccountNextRun {
   account_id: number

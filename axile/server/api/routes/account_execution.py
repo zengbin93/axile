@@ -18,6 +18,9 @@ from axile.server.api.deps import SchedDep, SessionDep
 from axile.server.api.routes.account_support import _get_account_or_404
 from axile.server.api.routes.portfolio import resolve_portfolio_target
 from axile.server.db.models import (
+    AccountAssetSnapshot,
+    AccountRebalancePlanPublic,
+    AccountRebalancePlanRowPublic,
     ExecutionArtifact,
     ExecutionArtifactListPublic,
     ExecutionArtifactPublic,
@@ -47,6 +50,7 @@ from axile.server.execution.registry import (
     try_register_target_refresh,
 )
 from axile.server.execution.scheduler import delete_job
+from axile.server.integrity import plan_executable_target
 from axile.server.repositories import get_latest_portfolio_id_by_account_id
 from axile.server.target_weight_snapshots import (
     append_target_weight_snapshot,
@@ -55,6 +59,58 @@ from axile.server.target_weight_snapshots import (
 )
 
 router = APIRouter()
+
+
+@router.get("/{account_id}/rebalance_plan", response_model=AccountRebalancePlanPublic)
+async def account_rebalance_plan(session: SessionDep, account_id: int) -> AccountRebalancePlanPublic:
+    """按当前渠道可执行规则返回账户持仓对照，不在前端重算偏离."""
+    account = await _get_account_or_404(session, account_id)
+    portfolio_id = await get_latest_portfolio_id_by_account_id(session, account_id)
+    if portfolio_id is None:
+        return AccountRebalancePlanPublic()
+    snapshot = await get_latest_account_target_snapshot(session, account_id, portfolio_id)
+    assets_snapshot = (
+        await session.execute(
+            select(AccountAssetSnapshot)
+            .where(AccountAssetSnapshot.account_id == account_id)
+            .order_by(AccountAssetSnapshot.id.desc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    if snapshot is None or assets_snapshot is None or not isinstance(snapshot.normalized_weights, dict):
+        return AccountRebalancePlanPublic(
+            observed_at=None if assets_snapshot is None else assets_snapshot.created_at,
+            target_calculated_at=None if snapshot is None else snapshot.calculated_at,
+        )
+    assets = assets_snapshot.assets
+    raw_positions = assets.get("positions")
+    positions = raw_positions if isinstance(raw_positions, list) else []
+    plugin = get_channel(account.trade_channel)
+    plan = plan_executable_target(
+        positions,
+        snapshot.normalized_weights,
+        float(assets.get("total_asset") or 0.0),
+        canonicalize_symbol=plugin.canonicalize_symbol,
+        quantize_target_quantity=plugin.quantize_target_quantity,
+    )
+    return AccountRebalancePlanPublic(
+        rows=[
+            AccountRebalancePlanRowPublic(
+                symbol=row.symbol,
+                current_weight=row.current_weight,
+                target_weight=row.target_weight,
+                current_quantity=row.current_quantity,
+                target_quantity=row.target_quantity,
+                action=row.action,
+                side=row.side,
+                aligned=row.aligned,
+            )
+            for row in plan.rows
+        ],
+        off_symbol_count=plan.off_symbol_count,
+        observed_at=assets_snapshot.created_at,
+        target_calculated_at=snapshot.calculated_at,
+    )
 
 
 async def _account_target_public(

@@ -49,6 +49,7 @@ import {
   getAccount,
   getAccountAssetSnapshots,
   getAccountActivity,
+  getAccountRebalancePlan,
   getAccountTargetSnapshot,
   getNextRun,
   prefetchExecuteRecords,
@@ -59,7 +60,7 @@ import {
 } from '@/lib/api/accounts'
 import { usePolling } from '@/lib/hooks/usePolling'
 import { useTargetSnapshot } from '@/lib/hooks/useTargetSnapshot'
-import { stateVerdict, gateOf, observedTotalAsset, rebalancePlan, positionsOf, positionsOfAssets, type StatusLevel } from '@/lib/derive'
+import { stateVerdict, gateOf, observedTotalAsset, rebalancePlanOfServer, positionsOf, positionsOfAssets, type StatusLevel } from '@/lib/derive'
 import { shortErrorReason } from '@/lib/errorInfo'
 import { displayCurrencyUnit, fmtMoney, withCurrency } from '@/lib/format'
 import { describeCron } from '@/features/setup/cron'
@@ -139,21 +140,21 @@ export function AccountDetail({
     useCallback(() => refreshAccountTargetSnapshot(accountId), [accountId]),
     `account:${accountId}:target-snapshot`,
   )
+  const comparison = usePolling(
+    useCallback((s: AbortSignal) => getAccountRebalancePlan(accountId, s), [accountId]),
+    { queryKey: `account:${accountId}:rebalance-plan`, intervalMs: 10000 },
+  )
 
   const accountFreshness = { error: account.error, stale: account.stale, updatedAt: account.updatedAt }
   const activityFreshness = { error: activity.error, stale: activity.stale, updatedAt: activity.updatedAt }
   const nextRunFreshness = { error: nextRun.error, stale: nextRun.stale, updatedAt: nextRun.updatedAt }
-  const assetFreshness = {
-    error: assetSnapshots.error,
-    stale: assetSnapshots.stale,
-    updatedAt: assetSnapshots.updatedAt,
-  }
-  const targetFreshness = { error: weights.error, stale: weights.stale, updatedAt: weights.updatedAt }
+  const comparisonFreshness = { error: comparison.error, stale: comparison.stale, updatedAt: comparison.updatedAt }
   const automaticStaleAt = connectionStaleAt(connectionUnavailable, [accountFreshness, nextRunFreshness])
   const activityStaleAt = connectionStaleAt(connectionUnavailable, [activityFreshness])
-  const comparisonStaleAt = connectionStaleAt(connectionUnavailable, [assetFreshness, targetFreshness])
+  const comparisonStaleAt = connectionStaleAt(connectionUnavailable, [comparisonFreshness])
 
   const reloadTargetSnapshot = weights.reloadSnapshot
+  const refreshComparison = comparison.refresh
   const refreshAccount = account.refresh
   const refreshActivity = activity.refresh
   const refreshNextRun = nextRun.refresh
@@ -163,8 +164,9 @@ export function AccountDetail({
     refreshActivity()
     void reloadTargetSnapshot()
     void refreshAssetSnapshots()
+    void refreshComparison()
     onDashboardRefresh?.()
-  }, [refreshActivity, reloadTargetSnapshot, refreshAssetSnapshots, onDashboardRefresh])
+  }, [refreshActivity, reloadTargetSnapshot, refreshAssetSnapshots, refreshComparison, onDashboardRefresh])
   const runner = useExecutionRunner(accountId, refreshObservedState)
   // 服务端真源的在途执行（SSE/轮询汇入 liveExec store）：任何来源发起的执行都可见。
   const live = useRunning(accountId)
@@ -185,6 +187,7 @@ export function AccountDetail({
       refreshNextRun(),
       refreshAssetSnapshots(),
       reloadTargetSnapshot(),
+      refreshComparison(),
     ])
   }, [
     connectionUnavailable,
@@ -192,6 +195,7 @@ export function AccountDetail({
     refreshActivity,
     refreshNextRun,
     refreshAssetSnapshots,
+    refreshComparison,
     reloadTargetSnapshot,
   ])
   // 当前在途执行 id：优先服务端真源，退回本地 runner（首帧前）。用于「一行可点跳详情」。
@@ -203,19 +207,11 @@ export function AccountDetail({
   const positions = latestAssets ? snapshotPositions : positionsOf(recordList)
   const equity = observedTotalAsset(latestAssets, item.total_asset)
   const holdingsCount = latestAssets ? snapshotPositions.length : item.holdings_count
-  const target = weights.data?.weights ?? {}
-  const positionsLoading = latestAssets === undefined && activity.data === null
-    && (assetSnapshots.loading || activity.loading)
-  const positionsError = latestAssets === undefined && activity.data === null && !positionsLoading
-    ? (assetSnapshots.error ?? activity.error)
-    : null
-  const comparisonLoading = (weights.data === null && weights.loading) || positionsLoading
-  const comparisonError = weights.data === null ? (weights.error ?? positionsError) : positionsError
-  const comparisonReady = weights.data?.calculated_at != null && !positionsLoading && !positionsError
-  // 背离摘要：与明细抽屉同口径（均出自 rebalancePlan）。文案讲「几只要动 · 卖几买几」，
-  // 条画各品种的要成交幅度；到位/空仓退成静态一句。
-  const quantities = weights.data?.quantities ?? null
-  const plan = rebalancePlan(positions, target, equity, quantities)
+  const comparisonLoading = comparison.data === null && comparison.loading
+  const comparisonError = comparison.error
+  const comparisonReady = comparison.data?.off_symbol_count != null
+  // 账户级偏离与逐品种动作均取服务端同一份可执行计划。
+  const plan = rebalancePlanOfServer(comparison.data)
   const driftLevel: StatusLevel = plan.off > 0 ? 'warn' : 'ok'
   const driftHeadline =
     plan.rows.length === 0
@@ -223,15 +219,10 @@ export function AccountDetail({
       : plan.off === 0
         ? '已调仓到位'
         : `${plan.off} 只待调整`
-  const targetCount = Object.values(target).filter((weight) => Math.abs(weight) > 1e-9).length
+  const targetCount = comparison.data?.rows.filter((row) => Math.abs(row.target_weight) > 1e-9).length ?? 0
   const turnover = rebalanceTurnover(plan)
   const currentHoldings = currentHoldingPreview(positions, equity)
-  // 有服务端 quantities 时现场计划即在位性；否则不拿权重尺子盖掉仪表盘 off_symbol_count。
-  const state = stateVerdict({
-    ...item,
-    is_started: isStarted,
-    off_symbol_count: comparisonReady && quantities != null ? plan.off : item.off_symbol_count,
-  })
+  const state = stateVerdict({ ...item, is_started: isStarted }, false)
   const gate = gateOf({ ...item, is_started: isStarted })
   // 执行态：服务端 live 优先，runner 仅首帧前乐观。queued ≠ 正在下单。
   const isBusy = !!(live || runner.running)
@@ -332,7 +323,7 @@ export function AccountDetail({
     setRefreshingAssets(true)
     try {
       await refreshAccountAssets(accountId)
-      await Promise.all([assetSnapshots.refresh(), onDashboardRefresh?.()])
+      await Promise.all([assetSnapshots.refresh(), refreshComparison(), onDashboardRefresh?.()])
       toast('账户权益已刷新')
     } catch (e) {
       toast(shortErrorReason(e))
@@ -617,7 +608,7 @@ export function AccountDetail({
               disabled={isExecuting || portfolioId == null}
               disabledReason={isExecuting ? '账户正在执行，结束后可重新计算' : portfolioId == null ? '账户未绑定组合' : undefined}
               variant="compact"
-              onRecalculate={() => void weights.recalculate()}
+              onRecalculate={() => weights.recalculate().then(() => refreshComparison())}
             />
             <Link
               to={`/accounts/${accountId}/holdings`}
@@ -676,8 +667,8 @@ export function AccountDetail({
             title="持仓与目标对照加载失败"
             error={comparisonError}
             variant={positions.length > 0 || weights.data != null ? 'stale' : 'section'}
-            updatedAt={assetSnapshots.updatedAt ?? weights.updatedAt}
-            onRetry={() => Promise.all([assetSnapshots.refresh(), activity.refresh(), weights.reloadSnapshot()]).then(() => undefined)}
+            updatedAt={comparison.updatedAt}
+            onRetry={() => Promise.all([refreshComparison(), weights.reloadSnapshot()]).then(() => undefined)}
           />
         </Card>
 

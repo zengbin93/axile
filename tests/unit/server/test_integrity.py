@@ -106,6 +106,10 @@ def test_one_tradable_lot_delta_is_off() -> None:
     plan = _futures_plan(positions, {"rb2610": 0.13}, TONIGHT_EQUITY)
     assert plan.quantities == {"rb2610": 4.0}
     assert plan.off_symbol_count == 1
+    assert plan.rows[0].symbol == "rb2610"
+    assert plan.rows[0].action == "increase"
+    assert plan.rows[0].side == "buy"
+    assert not plan.rows[0].aligned
 
 
 def test_count_off_symbols_weight_fallback_still_splits_alias() -> None:

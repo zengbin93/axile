@@ -66,6 +66,38 @@ class ExecutableTarget:
     weights: dict[str, float]
     quantities: dict[str, float] | None
     off_symbol_count: int
+    rows: tuple["ExecutableTargetRow", ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class ExecutableTargetRow:
+    """一个规范化品种的当前仓位、可执行目标及对账结论."""
+
+    symbol: str
+    current_weight: float
+    target_weight: float
+    current_quantity: float | None
+    target_quantity: float | None
+    action: str
+    side: str
+    aligned: bool
+
+
+def _action(current: float, target: float, aligned: bool) -> tuple[str, str]:
+    """按带符号仓位给出账户展示所需的调仓动作与方向."""
+    if aligned:
+        return "aligned", "none"
+    if abs(current) < _ZERO:
+        action = "open"
+    elif abs(target) < _ZERO:
+        action = "close"
+    elif current * target < 0:
+        action = "flip"
+    elif abs(current) < abs(target):
+        action = "increase"
+    else:
+        action = "reduce"
+    return action, "buy" if current < target else "sell"
 
 
 def count_off_symbols(
@@ -176,22 +208,38 @@ def plan_executable_target(
             continue
         weights[canonicalize_symbol(key)] = float(value or 0.0)
 
+    symbols = set(weights) | set(cur_lots) | set(cur_mv)
+    base = equity if equity > 0 else 0.0
     if quantize_target_quantity is None:
+        rows = []
+        for symbol in symbols:
+            current_weight = cur_mv.get(symbol, 0.0) / base if base > 0 else 0.0
+            target_weight = weights.get(symbol, 0.0)
+            aligned = abs(_round2((current_weight - target_weight) * 100.0)) <= REBALANCE_THRESHOLD
+            if abs(current_weight) < _ZERO and abs(target_weight) < _ZERO:
+                continue
+            action, side = _action(current_weight, target_weight, aligned)
+            rows.append(
+                ExecutableTargetRow(
+                    symbol, current_weight, target_weight, cur_lots.get(symbol), None, action, side, aligned
+                )
+            )
         return ExecutableTarget(
             weights=weights,
             quantities=None,
-            off_symbol_count=_count_off_by_weight(cur_mv, weights, equity),
+            off_symbol_count=sum(not row.aligned for row in rows),
+            rows=tuple(sorted(rows, key=lambda row: abs(row.current_weight - row.target_weight), reverse=True)),
         )
 
     quantities: dict[str, float] = {}
-    off = 0
-    symbols = set(weights) | set(cur_lots) | set(cur_mv)
+    rows = []
     for symbol in symbols:
         weight = weights.get(symbol, 0.0)
         current = cur_lots.get(symbol)
         booked = has_book.get(symbol, False)
         if abs(weight) < _ZERO and current is None and not booked:
             continue
+        target_qty: float | None
         if abs(weight) < _ZERO:
             target_qty = 0.0
             quantities[symbol] = 0.0
@@ -199,20 +247,29 @@ def plan_executable_target(
             target_qty = float(quantize_target_quantity(weight, equity, notional_per_unit[symbol]))
             quantities[symbol] = target_qty
         else:
-            off += 1
-            continue
-        if current is None:
-            if booked or abs(target_qty) > _QTY_EPS:
-                off += 1
-            continue
-        if abs(current - target_qty) > _QTY_EPS:
-            off += 1
-    return ExecutableTarget(weights=weights, quantities=quantities, off_symbol_count=off)
+            target_qty = None
+        current_weight = cur_mv.get(symbol, 0.0) / base if base > 0 else 0.0
+        if target_qty is None:
+            aligned = False
+        elif current is None:
+            aligned = not booked and abs(target_qty) <= _QTY_EPS
+        else:
+            aligned = abs(current - target_qty) <= _QTY_EPS
+        action, side = _action(current_weight, weight, aligned)
+        rows.append(ExecutableTargetRow(symbol, current_weight, weight, current, target_qty, action, side, aligned))
+    rows.sort(key=lambda row: abs(row.current_weight - row.target_weight), reverse=True)
+    return ExecutableTarget(
+        weights=weights,
+        quantities=quantities,
+        off_symbol_count=sum(not row.aligned for row in rows),
+        rows=tuple(rows),
+    )
 
 
 __all__ = [
     "REBALANCE_THRESHOLD",
     "ExecutableTarget",
+    "ExecutableTargetRow",
     "count_off_symbols",
     "plan_executable_target",
 ]

@@ -5,7 +5,7 @@
  * 现有字段做诚实的粗粒度派生：能确定的说确定，不能确定的不编。
  */
 import { formatPlannedAt } from '@/lib/scheduleTime'
-import type { AccountAssets, AccountDashboardItem, ExecuteRecord, LatestWeights, Position } from '@/types/api'
+import type { AccountAssets, AccountDashboardItem, AccountRebalancePlan, ExecuteRecord, LatestWeights, Position } from '@/types/api'
 
 /**
  * 规整后端返回的账户计价货币.
@@ -106,24 +106,24 @@ function lastAttemptFailed(item: AccountDashboardItem): boolean {
 /**
  * 由在位性 × 档位 × 上次尝试性质合成判词与音量.
  *
- * 偏离本身来自仓位差。暂停+偏离最重（不会自愈）；自动+盘中失败才说「未到位将重试」；
- * 自动+闭市拒绝说「N 只待调整 · 下次 …」，不把约束写成故障。
+ * 偏离本身来自仓位差。暂停+偏离最重（不会自愈）；自动+盘中失败才说「未到位将重试」。
+ * 详情 Hero 不展示账户级数量，舰队卡可保留该上下文。
  */
-export function stateVerdict(item: AccountDashboardItem): StateVerdict {
+export function stateVerdict(item: AccountDashboardItem, showOffCount = true): StateVerdict {
   const { integrity, text } = integrityOf(item)
   if (integrity !== 'off') return { integrity, text, loud: false }
-  const countText = item.off_symbol_count != null ? `${item.off_symbol_count} 只待调整` : text
-  if (gateOf(item).gate === 'paused') return { integrity, text: `${countText} · 自动纠偏已关，需手动`, loud: true }
+  const countText = showOffCount && item.off_symbol_count != null ? `${item.off_symbol_count} 只待调整 · ` : ''
+  if (gateOf(item).gate === 'paused') return { integrity, text: `${countText}自动纠偏已关，需手动`, loud: true }
   if (item.last_output_status === 'BLOCKED') {
     const next = item.next_run_time ? formatPlannedAt(item.next_run_time) : null
-    return { integrity, text: next ? `${countText} · 下次 ${next}` : countText, loud: false }
+    return { integrity, text: next ? `${countText}等待下次 ${next}` : `${countText}等待下次自动执行`, loud: false }
   }
   if (lastAttemptFailed(item)) {
     if (grossExposure(item) > 1) return { integrity, text: '上次未到位 · 将自动重试 · 敞口偏高', loud: true }
     return { integrity, text: '上次未到位 · 将自动重试', loud: false }
   }
-  if (grossExposure(item) > 1) return { integrity, text: `${countText} · 将自动重试 · 敞口偏高`, loud: true }
-  return { integrity, text: `${countText} · 将自动重试`, loud: false }
+  if (grossExposure(item) > 1) return { integrity, text: `${countText}将自动重试 · 敞口偏高`, loud: true }
+  return { integrity, text: `${countText}将自动重试`, loud: false }
 }
 
 /** 敞口条分段颜色：按序渐隐的品牌蓝。 */
@@ -354,6 +354,33 @@ export function rebalancePlan(
     netExposure: rows.reduce((sum, r) => sum + r.cur, 0),
     grossExposure: rows.reduce((sum, r) => sum + Math.abs(r.cur), 0),
     targetNet: rows.reduce((sum, r) => sum + r.tgt, 0),
+  }
+}
+
+/** 将服务端唯一真源的可执行计划适配为详情图表使用的百分比行。 */
+export function rebalancePlanOfServer(plan: AccountRebalancePlan | null): RebalancePlan {
+  const rows: RebalanceRow[] = (plan?.rows ?? []).map((row) => {
+    const cur = row.current_weight * 100
+    const tgt = row.target_weight * 100
+    return {
+      symbol: row.symbol,
+      cur,
+      tgt,
+      delta: +(cur - tgt).toFixed(2),
+      amount: Math.abs(cur - tgt),
+      side: row.side,
+      action: row.action,
+    }
+  })
+  return {
+    rows,
+    off: plan?.off_symbol_count ?? 0,
+    buys: rows.filter((row) => row.side === 'buy').length,
+    sells: rows.filter((row) => row.side === 'sell').length,
+    flips: rows.filter((row) => row.action === 'flip').length,
+    netExposure: rows.reduce((sum, row) => sum + row.cur, 0),
+    grossExposure: rows.reduce((sum, row) => sum + Math.abs(row.cur), 0),
+    targetNet: rows.reduce((sum, row) => sum + row.tgt, 0),
   }
 }
 

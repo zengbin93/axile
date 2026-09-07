@@ -3,6 +3,7 @@ import { apiGet, apiSend } from '@/lib/api/client'
 import type {
   Account,
   AccountDashboard,
+  AccountRebalancePlan,
   AccountNextRun,
   AccountControlPolicyEditorModel,
   AccountAssetSnapshot,
@@ -84,6 +85,11 @@ export interface AccountActivityList {
 /** 仪表盘聚合：一次拿到所有账户的舰队卡数据。 */
 export function getDashboard(signal?: AbortSignal): Promise<AccountDashboard> {
   return apiGet<AccountDashboard>('/account/dashboard', signal)
+}
+
+/** 当前资产与目标快照下、由服务端按渠道规则计算的可执行持仓对照。 */
+export function getAccountRebalancePlan(id: number, signal?: AbortSignal): Promise<AccountRebalancePlan> {
+  return apiGet<AccountRebalancePlan>(`/account/${id}/rebalance_plan`, signal)
 }
 
 /** 从交易渠道主动查询并保存最新账户资产。 */

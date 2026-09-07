@@ -26,7 +26,7 @@ export function ScratchHoldings() {
       <div className="mt-3 text-[14px] text-ink-3">持仓明细</div>
       <div className="text-[19px] font-[640]">testnet</div>
       <Card className="mt-4 px-6 py-5">
-        <HoldingsView positions={positions} target={target} equity={EQUITY} currency="CNY" assetLabel="权益" />
+        <HoldingsView positions={positions} executablePlan={null} target={target} equity={EQUITY} currency="CNY" assetLabel="权益" />
       </Card>
     </section>
   )

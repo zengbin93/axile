@@ -456,6 +456,28 @@ class AccountDashboardPublic(SQLModel):
     data: List[AccountDashboardItemPublic]
 
 
+class AccountRebalancePlanRowPublic(SQLModel):
+    """账户可执行持仓对照中的一个规范化品种."""
+
+    symbol: str
+    current_weight: float
+    target_weight: float
+    current_quantity: Optional[float] = None
+    target_quantity: Optional[float] = None
+    action: str
+    side: str
+    aligned: bool
+
+
+class AccountRebalancePlanPublic(SQLModel):
+    """同一资产与目标快照下的可执行持仓对照."""
+
+    rows: List[AccountRebalancePlanRowPublic] = Field(default_factory=list)
+    off_symbol_count: Optional[int] = None
+    observed_at: Optional[str] = None
+    target_calculated_at: Optional[str] = None
+
+
 class AccountUpdate(SQLModel):
     """账户变更时使用的局部更新载荷."""
 
