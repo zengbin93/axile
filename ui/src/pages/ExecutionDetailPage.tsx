@@ -268,7 +268,6 @@ function OrderTree({ orders, currency, units }: { orders: ExecOrder[]; currency:
             {o.trades.map((t, i) => (
               <div key={i} className="pl-3 text-ink-3">
                 成交 {fmtQty(t.volume ?? 0, units)} @{fmtPrice(t.price ?? 0, units, currency)}
-                {t.fee > 0 && <span> · 费 {withCurrency(fmtMoney(t.fee), t.fee_asset ?? currency)}</span>}
                 {t.time && <span> · {t.time.slice(11, 19)}</span>}
               </div>
             ))}
@@ -348,7 +347,7 @@ function SymbolChainRow({
         </div>
       )}
 
-      {/* 执行质量（TCA）：主/被动 · 滑点 · 费用 · 单/成交笔数 */}
+      {/* 执行质量（TCA）：主/被动 · 滑点 · 单/成交笔数 */}
       {hasQuality && (
         <div className="num mt-0.5 text-[13px]">
           {tca.liquidity && <span className="text-ink-2">{LIQUIDITY_LABEL[tca.liquidity] ?? tca.liquidity}</span>}
@@ -357,11 +356,8 @@ function SymbolChainRow({
               {tca.liquidity ? ' · ' : ''}滑点 {fmtBps(tca.slippage_bps)}
             </span>
           )}
-          {tca.fee > 0 && (
-            <span className="text-ink-3"> · 费 {withCurrency(fmtMoney(tca.fee), tca.fee_asset ?? currency)}</span>
-          )}
           <span className="text-ink-3">
-            {' · '}
+            {tca.liquidity || tca.slippage_bps != null ? ' · ' : ''}
             {formatOrderTradeCounts(tca.n_orders, tca.n_trades, s.filled !== 0)}
             {tca.fill_ratio != null && tca.fill_ratio < 0.999 && (
               <span className="text-warn"> · 成交率 {(tca.fill_ratio * 100).toFixed(0)}%</span>

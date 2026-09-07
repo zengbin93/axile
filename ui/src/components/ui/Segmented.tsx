@@ -1,9 +1,11 @@
-import { useLayoutEffect, useRef, type ReactElement } from 'react'
+import { useLayoutEffect, useRef, type ReactElement, type ReactNode } from 'react'
 
 /** 分段控件的单个选项：值与显示文案分离。 */
 export interface SegmentedOption<T extends string> {
   value: T
   label: string
+  icon?: ReactNode
+  disabled?: boolean
 }
 
 /** 尺寸档：`md` 用于表单/配置页，`sm` 用于卡片角落等紧凑处。 */
@@ -93,12 +95,14 @@ export function Segmented<T extends string>({
             btnRefs.current[i] = el
           }}
           type="button"
-          className={`relative z-10 cursor-pointer transition-colors ${sz.button} ${
+          disabled={o.disabled}
+          aria-pressed={o.value === value}
+          className={`relative z-10 inline-flex items-center justify-center gap-1.5 cursor-pointer transition-colors disabled:cursor-default disabled:opacity-40 ${sz.button} ${
             o.value === value ? 'font-semibold text-ink-1' : 'text-ink-2'
           }`}
           onClick={() => onChange(o.value)}
         >
-          {o.label}
+          {o.icon}{o.label}
         </button>
       ))}
     </div>

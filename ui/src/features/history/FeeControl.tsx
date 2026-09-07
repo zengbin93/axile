@@ -20,14 +20,14 @@ export function FeeControl({ fee, onChange, onEditingChange }: { fee: string; on
   }, [])
   return <div role="group" aria-label="单边费率 BP" className="flex min-w-0 flex-wrap items-center gap-2">
     <span className="shrink-0 text-xs text-ink-3">单边费率</span>
-    <div className="relative flex h-8 w-36 shrink-0 items-center rounded border border-line bg-surface text-xs text-ink-3 focus-within:border-accent">
+    <div className="relative flex h-9 shrink-0 items-center rounded border border-line bg-surface text-xs text-ink-3 focus-within:border-accent">
         <input ref={inputRef} aria-label="单边费率（BP）" type="text" inputMode="decimal" autoComplete="off" value={fee}
           onFocus={() => onEditingChange(true)} onBlur={() => onEditingChange(false)}
           onChange={event => onChange(event.target.value)}
-          className="num h-full min-w-0 flex-1 bg-transparent px-2 text-sm text-ink-1 outline-none" />
+          className="num h-full w-[calc(2ch+1rem)] min-w-0 shrink-0 bg-transparent px-2 text-sm text-ink-1 outline-none" />
         <span>BP</span>
         <button type="button" popoverTarget={id} aria-label="常用费率" title="常用费率" aria-haspopup="menu"
-          className="flex h-full w-8 shrink-0 items-center justify-center rounded-r text-ink-3 hover:text-ink-1 focus-visible:outline-accent"
+          className="flex h-full w-9 shrink-0 items-center justify-center rounded-r text-ink-3 hover:text-ink-1 focus-visible:outline-accent"
           onClick={event => {
             const box = event.currentTarget.parentElement!.getBoundingClientRect()
             const menu = menuRef.current!
@@ -38,7 +38,7 @@ export function FeeControl({ fee, onChange, onEditingChange }: { fee: string; on
           <ChevronDown size={14} />
         </button>
         <div ref={menuRef} id={id} popover="auto" role="menu" aria-label="常用费率"
-          className="fixed m-0 rounded-lg border border-line bg-surface p-1 text-sm text-ink-2 shadow-card"
+          className="fixed m-0 min-w-24 rounded-lg border border-line bg-surface p-1 text-sm text-ink-2 shadow-card"
           onToggle={event => {
             if (event.newState === 'open') {
               const menu = menuRef.current
@@ -57,14 +57,14 @@ export function FeeControl({ fee, onChange, onEditingChange }: { fee: string; on
             if (event.key === 'Tab') menuRef.current?.hidePopover()
           }}>
           {PRESETS.map(option => <button key={option.value} type="button" role="menuitemradio" aria-checked={selected === option.value}
-            className="flex w-full items-center justify-between gap-3 rounded px-2 py-2 text-left hover:bg-fill focus:bg-fill focus:outline-none"
+            className="flex w-full items-center justify-between gap-2 whitespace-nowrap rounded px-2 py-2 text-left hover:bg-fill focus:bg-fill focus:outline-none"
             onClick={() => {
               onChange(option.value)
               menuRef.current?.hidePopover()
               inputRef.current?.focus()
             }}>
             <span className="num">{option.label} BP</span>
-            <Check size={14} className={selected === option.value ? 'text-ink-1' : 'invisible'} />
+            <Check size={14} className={`shrink-0 ${selected === option.value ? 'text-ink-1' : 'invisible'}`} />
           </button>)}
         </div>
     </div>

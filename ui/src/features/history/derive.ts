@@ -3,7 +3,6 @@
  *
  * 全部基于真实执行记录与绑定记录：
  * - 权益序列取各成功记录 `raw_result.account_assets.total_asset`。
- * - 手续费聚合 `raw_result.orders[].extra.commission`（这是后端唯一的费用来源）。
  * - 分段按 `portfolio_records` 的绑定边界切。
  *
  * 口径说明（估值 vs 真盈亏）
@@ -29,18 +28,6 @@ const OUTLIER_DEV_RATIO = 0.4
 function totalAsset(snapshot: AccountAssetSnapshot): number | null {
   const v = snapshot.assets?.total_asset
   return typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : null
-}
-
-/** 单条记录的手续费合计（各 order 的 commission 求和）。 */
-function recordFee(r: ExecuteRecord): number {
-  const orders = r.raw_result?.orders
-  if (!Array.isArray(orders)) return 0
-  let sum = 0
-  for (const o of orders) {
-    const c = (o as { extra?: { commission?: unknown } })?.extra?.commission
-    if (typeof c === 'number' && Number.isFinite(c)) sum += c
-  }
-  return sum
 }
 
 /** 判断记录是否空跑（目标未变）。 */
@@ -135,7 +122,6 @@ export interface HistoryStats {
   fails: number
   /** 被终止的执行次数（graceful/cancel）；不计入 fails，语义是「提前收尾」而非「失败」。 */
   terminated: number
-  fee: number
   currency: string
   pnl: number | null
   eqFirst: number | null
@@ -154,7 +140,6 @@ export function aggregateStats(
   let noops = 0
   let fails = 0
   let terminated = 0
-  let fee = 0
   let currency = ''
   for (const r of records) {
     if (r.raw_result?.task_status === 'TERMINATED') {
@@ -167,7 +152,6 @@ export function aggregateStats(
     } else {
       fails++
     }
-    fee += recordFee(r)
     const c = r.raw_result?.account_assets?.currency
     if (typeof c === 'string' && c) currency = c
   }
@@ -179,7 +163,6 @@ export function aggregateStats(
     noops,
     fails,
     terminated,
-    fee,
     currency: currency || snapshotCurrency,
     pnl,
     eqFirst,

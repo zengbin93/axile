@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { axisPercent, chartTime, feeOption, returnPaths, returnText, settingsFromDraft, timeTicks, WEIGHT_MODES } from './performance'
+import { axisPercent, chartTime, feeOption, niceReturnAxis, returnPaths, returnText, settingsFromDraft, timeTicks, WEIGHT_MODES } from './performance'
 import type { PerformancePoint } from '@/types/api'
 
 test('模式使用中文标签，费率从 BP 转为账户小数配置', () => {
@@ -39,4 +39,14 @@ test('同日基准与日末不重复，过密中间日期被省略', () => {
   expect(timeTicks(points, i => i * 200).map(t => t.label)).toEqual(['10:30', '日末'])
   const days = ['2026-09-07', '2026-09-08', '2026-09-09'].map(date => ({ date }) as PerformancePoint)
   expect(timeTicks(days, i => i * 80).map(t => t.index)).toEqual([0, 2])
+})
+
+test('规整纵轴覆盖正负收益并保留顶部空间，纯上涨不浪费负轴', () => {
+  const axis = niceReturnAxis([0, 0.198])
+  expect(axis.min).toBe(0)
+  expect(axis.max).toBeGreaterThan(0.198)
+  expect(axis.step).toBe(0.05)
+  const negative = niceReturnAxis([-0.123, 0.012])
+  expect(negative.min).toBeLessThanOrEqual(-0.123)
+  expect(negative.max).toBeGreaterThan(0.012)
 })

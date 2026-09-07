@@ -189,6 +189,7 @@ export interface PerformanceSettings {
 
 export interface PerformancePoint {
   date: string
+  observed_at?: string
   account_return: number | null
   portfolio_return: number | null
   account_daily_return: number | null

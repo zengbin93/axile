@@ -219,6 +219,7 @@ def _merge_daily(
         points.append(
             PerformancePoint(
                 date=day,
+                observed_at=last.time.isoformat(),
                 account_return=account,
                 portfolio_return=portfolio,
                 account_daily_return=account_daily,
@@ -231,6 +232,7 @@ def _merge_daily(
         0,
         PerformancePoint(
             date=base.time.isoformat(),
+            observed_at=base.time.isoformat(),
             account_return=0.0,
             portfolio_return=0.0 if daily is not None and _is_baseline(base) else None,
             difference=0.0 if daily is not None and _is_baseline(base) else None,

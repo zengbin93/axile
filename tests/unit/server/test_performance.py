@@ -51,11 +51,31 @@ def test_real_wbt_and_account_compound_returns():
     assert result.points[-1].difference == pytest.approx(0)
 
 
-@pytest.mark.parametrize("mode,expected", [("ts", 0.025), ("cs", 0.05)])
-def test_native_weight_mode_and_long_short(mode, expected):
+@pytest.mark.parametrize("include_backtest", [True, False])
+def test_points_expose_actual_observation_times(include_backtest):
+    items = [obs(1), obs(1, asset=105), obs(2, asset=110)]
+    items[0].time = datetime(2026, 1, 1, 9, 30)
+    items[1].time = datetime(2026, 1, 1, 17, 15)
+    items[2].time = datetime(2026, 1, 2, 14, 20)
+    items[1].id = 2
+    items[2].id = 3
+    result = calculate_performance(
+        items,
+        PerformanceSettings(backtest_weight_type="cs", backtest_fee_rate=0),
+        "all",
+        include_backtest=include_backtest,
+    )
+    assert [p.date for p in result.points] == ["2026-01-01T09:30:00", "2026-01-01", "2026-01-02"]
+    assert [p.observed_at for p in result.points] == [item.time.isoformat() for item in items]
+    assert result.model_dump(mode="json")["points"][-1]["observed_at"] == "2026-01-02T14:20:00"
+
+
+@pytest.mark.parametrize("mode", ["ts", "cs"])
+def test_account_weights_are_summed_including_legacy_mode(mode):
     weights = {"A": 1.0, "B": -0.5}
     result = run([obs(1, {"A": 100.0, "B": 100.0}, weights), obs(2, {"A": 110.0, "B": 110.0}, weights)], mode)
-    assert result.points[-1].portfolio_return == pytest.approx(expected)
+    assert result.points[-1].portfolio_return == pytest.approx(0.05)
+    assert result.settings.backtest_weight_type == "cs"
 
 
 def test_exit_row_accounts_for_last_holding_return_and_fee():
@@ -220,8 +240,8 @@ def test_account_only_matches_full_without_building_or_running_wbt(monkeypatch, 
     assert quick.end == full.end
     assert quick.invalid_asset_count == full.invalid_asset_count
     assert quick.observation_count == full.observation_count
-    assert [(p.date, p.account_return, p.account_daily_return) for p in quick.points] == [
-        (p.date, p.account_return, p.account_daily_return) for p in full.points
+    assert [(p.date, p.observed_at, p.account_return, p.account_daily_return) for p in quick.points] == [
+        (p.date, p.observed_at, p.account_return, p.account_daily_return) for p in full.points
     ]
     assert all(
         p.portfolio_return is None and p.portfolio_daily_return is None and p.difference is None for p in quick.points
@@ -324,7 +344,7 @@ def test_routes_persist_settings_across_sessions_without_scheduler(tmp_path, mon
             with pytest.raises(RuntimeError, match="backtest unavailable"):
                 client.get("/account/performance/2")
             assert client.get("/account/performance/2?include_backtest=false").json() == quick
-        assert initial["settings"] == {"backtest_weight_type": "ts", "backtest_fee_rate": 0}
+        assert initial["settings"] == {"backtest_weight_type": "cs", "backtest_fee_rate": 0}
         assert initial["bindings"][0]["portfolio_id"] is None
         settings = {"backtest_weight_type": "cs", "backtest_fee_rate": 0.0002}
         response = client.patch("/account/performance-settings/2", json=settings)
@@ -332,7 +352,7 @@ def test_routes_persist_settings_across_sessions_without_scheduler(tmp_path, mon
         assert response.json() == settings
     with TestClient(app) as client:
         assert client.get("/account/performance/2").json()["settings"] == settings
-        assert client.get("/account/performance/3").json()["settings"]["backtest_weight_type"] == "ts"
+        assert client.get("/account/performance/3").json()["settings"]["backtest_weight_type"] == "cs"
         assert client.get("/account/performance/999").status_code == 404
         assert client.get("/account/performance/2?range=bad").status_code == 422
         assert (

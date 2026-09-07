@@ -71,6 +71,7 @@ export function Select<T>({
   const triggerRef = useRef<HTMLButtonElement>(null)
   const menuRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
+  const scrollIntentRef = useRef<ScrollLogicalPosition | null>(null)
 
   // open=意图（决定 pop-in / pop-out），mounted=是否在 DOM。
   // 收起先播退场再卸载，故两态分离，与 AccountActions ⋯ 菜单同范式。
@@ -120,6 +121,7 @@ export function Select<T>({
   const openMenu = useCallback(() => {
     if (disabled) return
     place()
+    scrollIntentRef.current = 'center'
     setHighlight(Math.max(0, options.findIndex((o) => o.value === value)))
     setMounted(true)
     setOpen(true)
@@ -138,13 +140,10 @@ export function Select<T>({
     }
   }, [open, place])
 
-  // 搜索态：打开即聚焦输入框。查询变化时高亮回到首项。
+  // 搜索态：打开即聚焦输入框；仅用户修改查询时重置高亮，保留打开时的已选项。
   useEffect(() => {
     if (open && searchable) inputRef.current?.focus()
   }, [open, searchable])
-  useEffect(() => {
-    if (open) setHighlight(0)
-  }, [query, open])
 
   // 外部点击关闭（触发器与菜单内部不算外部）。
   useEffect(() => {
@@ -158,11 +157,13 @@ export function Select<T>({
     return () => document.removeEventListener('mousedown', onDown)
   }, [open, close])
 
-  // 高亮项滚动进可视区。
-  useEffect(() => {
-    if (!open) return
-    document.getElementById(`${listId}-opt-${highlight}`)?.scrollIntoView({ block: 'nearest' })
-  }, [open, highlight, listId])
+  // 打开时居中，键盘和搜索仅确保可见；鼠标悬停不驱动滚动。
+  useLayoutEffect(() => {
+    const block = scrollIntentRef.current
+    if (!open || !block) return
+    scrollIntentRef.current = null
+    document.getElementById(`${listId}-opt-${highlight}`)?.scrollIntoView({ block, behavior: 'instant' })
+  }, [open, highlight, query, listId])
 
   const choose = (opt: SelectOption<T>) => {
     onChange(opt.value)
@@ -171,6 +172,9 @@ export function Select<T>({
 
   /** 打开态的键盘导航；触发器（非搜索）与搜索输入框共用。 */
   const onNavKey = (e: ReactKeyboardEvent) => {
+    if (['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(e.key)) {
+      scrollIntentRef.current = 'nearest'
+    }
     if (e.key === 'ArrowDown') {
       e.preventDefault()
       setHighlight((h) => Math.min(filtered.length - 1, h + 1))
@@ -268,7 +272,11 @@ export function Select<T>({
                 <input
                   ref={inputRef}
                   value={query}
-                  onChange={(e) => setQuery(e.target.value)}
+                  onChange={(e) => {
+                    scrollIntentRef.current = 'nearest'
+                    setQuery(e.target.value)
+                    setHighlight(0)
+                  }}
                   onKeyDown={onNavKey}
                   placeholder="搜索…"
                   aria-label="搜索选项"
@@ -290,7 +298,10 @@ export function Select<T>({
                     id={`${listId}-opt-${i}`}
                     role="option"
                     aria-selected={isSelected}
-                    onMouseEnter={() => setHighlight(i)}
+                    onMouseEnter={() => {
+                      scrollIntentRef.current = null
+                      setHighlight(i)
+                    }}
                     onClick={() => choose(o)}
                     className={`flex cursor-pointer items-start gap-2 rounded-[7px] px-2.5 py-2 text-[14px] ${
                       isActive ? 'bg-bg-subtle' : ''

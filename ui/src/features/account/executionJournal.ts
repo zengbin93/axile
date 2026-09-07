@@ -41,16 +41,16 @@ export interface JournalSymbol extends Quality {
 export function journalAmount(value: number): string { return value.toLocaleString('zh-CN', { maximumFractionDigits: 2 }) }
 export function journalTime(value: string): string { return value.replace('T', ' ').slice(0, 16) }
 
-function dict(value: unknown): Dict {
+export function dict(value: unknown): Dict {
   return value && typeof value === 'object' && !Array.isArray(value) ? value as Dict : {}
 }
-function number(value: unknown): number | null {
+export function number(value: unknown): number | null {
   if (typeof value !== 'number' && (typeof value !== 'string' || !value.trim())) return null
   const n = Number(value)
   return Number.isFinite(n) ? n : null
 }
 function string(value: unknown): string { return typeof value === 'string' ? value : '' }
-function sideOf(value: unknown): JournalTrade['side'] {
+export function sideOf(value: unknown): JournalTrade['side'] {
   const side = string(value).toLowerCase()
   return side === 'buy' || side === 'sell' ? side : 'none'
 }
@@ -70,6 +70,7 @@ export async function loadJournal(
   window: TimeWindow,
   signal: AbortSignal,
   fetchPage: (skip: number) => Promise<AccountActivityList> = (skip) => getAccountActivity(accountId, { skip, limit: 500 }, signal),
+  parseTime: (value: string) => number = value => +new Date(value),
 ): Promise<AccountActivity[]> {
   const result: AccountActivity[] = []
   const seen = new Set<string>()
@@ -85,12 +86,12 @@ export async function loadJournal(
       const key = activity.kind === 'execution' ? `execution:${activity.record.id ?? activity.record.execution_id}` : `skip:${activity.id}`
       if (seen.has(key)) throw new Error('执行记录分页发生重叠，请刷新重试')
       seen.add(key)
-      const time = +new Date(activity.occurred_at)
+      const time = parseTime(activity.occurred_at)
       if (!Number.isFinite(time)) throw new Error('执行记录时间无效，无法确认统计范围')
       if (time >= window.start && time < window.end) result.push(activity)
     }
     skip += page.data.length
-    if (skip >= count || page.data.some((a) => +new Date(a.occurred_at) < window.start)) return result
+    if (skip >= count || page.data.some((a) => parseTime(a.occurred_at) < window.start)) return result
   }
 }
 

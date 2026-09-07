@@ -1,4 +1,5 @@
 import type { PerformancePoint, PerformanceSettings } from '@/types/api'
+import { shanghaiTime } from './costs'
 
 export const WEIGHT_MODES: Array<{ value: 'ts' | 'cs'; label: string }> = [
   { value: 'ts', label: '时序' }, { value: 'cs', label: '截面' },
@@ -25,8 +26,14 @@ export function timeTicks(points: PerformancePoint[], x: (i: number) => number) 
   if (!points.length) return []
   const last = points.length - 1
   const sameDay = points[0].date.slice(0, 10) === points[last].date.slice(0, 10)
-  const candidates = [...new Set([0, Math.floor(last / 2), last])]
-  const chosen = candidates.filter((i, index) => index === 0 || (x(i) - x(0) >= 100 && (i === last || x(last) - x(i) >= 100)))
+  const monthly = chartTime(points[last].date) - chartTime(points[0].date) > 90 * 864e5
+  const candidates = sameDay ? [0, last] : [0, ...points.flatMap((p, i) => i > 0 && (monthly ? p.date.slice(0, 7) !== points[i - 1].date.slice(0, 7) : new Date(`${p.date.slice(0, 10)}T12:00:00Z`).getUTCDay() === 1) ? [i] : []), last]
+  let previous = -Infinity
+  const chosen = [...new Set(candidates)].filter(i => {
+    if (i !== last && (x(i) - previous < 140 || (i !== 0 && x(last) - x(i) < 140))) return false
+    previous = x(i)
+    return true
+  })
   return chosen.map(i => ({
     index: i,
     label: sameDay ? (points[i].date.includes('T') ? points[i].date.slice(11, 16) : '日末') : points[i].date.slice(0, 10),
@@ -46,7 +53,19 @@ export function returnText(value: number | null | undefined, unit = '%'): string
 
 export function chartTime(date: string): number {
   // 日收益点放在上海日末，共同基准保留实际执行时间。
-  return new Date(`${date.includes('T') ? date : `${date}T23:59:59`}+08:00`).getTime()
+  return shanghaiTime(date.includes('T') || date.includes(' ') ? date : `${date}T23:59:59`)
+}
+
+export function niceReturnAxis(values: number[]) {
+  const low = Math.min(0, ...values), high = Math.max(0, ...values)
+  const span = high - low || 0.01
+  const rough = span * 1.2 / 5
+  const power = 10 ** Math.floor(Math.log10(rough))
+  const step = ([1, 2, 2.5, 5, 10].find(n => n * power >= rough) ?? 10) * power
+  const min = low === 0 ? 0 : Math.floor((low - span * 0.05) / step) * step
+  const max = Math.ceil((high + span * 0.12) / step) * step
+  const ticks = Array.from({ length: Math.round((max - min) / step) + 1 }, (_, i) => min + i * step)
+  return { min, max, step, ticks }
 }
 
 export function returnPaths(points: PerformancePoint[], key: keyof PerformancePoint, x: (i: number) => number, y: (v: number) => number): string {
