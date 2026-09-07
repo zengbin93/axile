@@ -1,6 +1,6 @@
 import { useLayoutEffect, useRef, useState, type PointerEvent } from 'react'
 import type { AccountPerformance, PerformancePoint } from '@/types/api'
-import { chartTime, returnPaths } from '@/features/history/performance'
+import { axisPercent, chartTime, returnPaths, timeTicks } from '@/features/history/performance'
 
 const HEIGHT = 300
 const LEFT = 65
@@ -59,7 +59,7 @@ export function PerformanceChart({ data, daily, hoverIndex, onHover }: {
       {[0, 0.25, 0.5, 0.75, 1].map(f => {
         const value = min + span * f
         return <g key={f}><line x1={LEFT} x2={WIDTH - RIGHT} y1={Y(value)} y2={Y(value)} stroke="var(--color-line)" />
-          <text x={LEFT - 8} y={Y(value) + 4} textAnchor="end" fontSize={12} fill="var(--color-ink-3)">{(value * 100).toFixed(1)}%</text></g>
+          <text x={LEFT - 8} y={Y(value) + 4} textAnchor="end" fontSize={12} fill="var(--color-ink-3)">{axisPercent(value, span / 4)}</text></g>
       })}
       {data.bindings.map((binding, i) => <g key={i}><title>{binding.time} · {binding.portfolio_id == null ? '解绑' : `组合 #${binding.portfolio_id}`}</title>
         <line x1={XTime(chartTime(binding.time))} x2={XTime(chartTime(binding.time))} y1={TOP} y2={HEIGHT - BOTTOM} stroke="var(--color-ink-3)" strokeDasharray="3 5" />
@@ -69,7 +69,7 @@ export function PerformanceChart({ data, daily, hoverIndex, onHover }: {
         return typeof value === 'number' ? <rect key={i} x={X(i) + (series - 1) * barWidth} y={Math.min(Y(0), Y(value))}
           width={barWidth} height={Math.max(0.5, Math.abs(Y(value) - Y(0)))} fill={colors[series]} opacity={0.8} /> : null
       })}</g> : <path key={key} data-series={key} d={returnPaths(points, key, X, Y)} fill="none" stroke={colors[series]} strokeWidth={2} />)}
-      {[0, Math.floor((points.length - 1) / 2), points.length - 1].map((i, label) => <text key={label} x={X(i)} y={HEIGHT - 8} textAnchor={label === 0 ? 'start' : label === 2 ? 'end' : 'middle'} fontSize={12} fill="var(--color-ink-3)">{points[i].date.slice(0, 10)}</text>)}
+      {timeTicks(points, X).map(({ index, label }) => <text key={index} x={X(index)} y={HEIGHT - 8} textAnchor={index === 0 ? 'start' : index === points.length - 1 ? 'end' : 'middle'} fontSize={12} fill="var(--color-ink-3)">{label}</text>)}
       {hoverIndex != null && points[hoverIndex] && <line x1={X(hoverIndex)} x2={X(hoverIndex)} y1={TOP} y2={HEIGHT - BOTTOM} stroke="var(--color-ink-3)" strokeDasharray="4 3" />}
     </svg>}
   </div>

@@ -159,7 +159,11 @@ def test_empty_and_single_observation():
     assert run([obs(1)]).observation_count == 1
 
 
-def test_account_creation_defaults_and_ordinary_updates_preserve_settings():
+def test_account_creation_defaults_and_ordinary_updates_preserve_settings(monkeypatch):
+    # 配置默认值测试不需要加载交易渠道的原生 SDK。
+    monkeypatch.setattr(
+        "axile.executor.algorithms.core.base.get_algorithm_metadata", lambda method: SimpleNamespace(params_class=None)
+    )
     payload = build_account().model_dump(
         exclude={"id", "created_at", "updated_at", "backtest_weight_type", "backtest_fee_rate"}
     )
@@ -183,6 +187,45 @@ def test_two_intraday_observations_are_not_an_empty_chart():
     assert result.observation_count == 2
     assert len(result.points) == 2
     assert result.points[-1].portfolio_return == pytest.approx(0.1)
+
+
+@pytest.mark.parametrize("range_key", ["all", "30", "90"])
+@pytest.mark.parametrize("scenario", ["normal", "intraday", "duplicate", "missing_asset", "no_baseline", "empty"])
+def test_account_only_matches_full_without_building_or_running_wbt(monkeypatch, range_key, scenario):
+    items = [obs(i + 1, asset=100 + i) for i in range(95)]
+    if scenario == "intraday":
+        items = [obs(1), obs(2, asset=110)]
+        items[1].time = items[0].time + timedelta(hours=1)
+    elif scenario == "duplicate":
+        items.append(obs(95, asset=110))
+        items[-1].id = 100
+    elif scenario == "missing_asset":
+        items[-1].asset = None
+    elif scenario == "no_baseline":
+        for item in items:
+            item.target = None
+    elif scenario == "empty":
+        items = []
+    settings = PerformanceSettings(backtest_weight_type="ts", backtest_fee_rate=0)
+    full = calculate_performance(items, settings, range_key)
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("账户快速路径不应构建或运行回测")
+
+    monkeypatch.setattr("axile.server.performance.build_wbt_input", forbidden)
+    monkeypatch.setattr("axile.server.performance._portfolio_daily", forbidden)
+    quick = calculate_performance(items, settings, range_key, include_backtest=False)
+    assert not quick.backtest_included
+    assert quick.baseline == full.baseline
+    assert quick.end == full.end
+    assert quick.invalid_asset_count == full.invalid_asset_count
+    assert quick.observation_count == full.observation_count
+    assert [(p.date, p.account_return, p.account_daily_return) for p in quick.points] == [
+        (p.date, p.account_return, p.account_daily_return) for p in full.points
+    ]
+    assert all(
+        p.portfolio_return is None and p.portfolio_daily_return is None and p.difference is None for p in quick.points
+    )
 
 
 @pytest.mark.parametrize(
@@ -228,7 +271,7 @@ def test_migration_reconciles_columns_created_before_revision(tmp_path):
         assert columns >= {"id", "backtest_weight_type", "backtest_fee_rate"}
 
 
-def test_routes_persist_settings_across_sessions_without_scheduler(tmp_path):
+def test_routes_persist_settings_across_sessions_without_scheduler(tmp_path, monkeypatch):
     engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'account.db'}", poolclass=NullPool)
     sessions = async_sessionmaker(engine, expire_on_commit=False)
 
@@ -265,6 +308,22 @@ def test_routes_persist_settings_across_sessions_without_scheduler(tmp_path):
     app.dependency_overrides[get_db] = db
     with TestClient(app) as client:
         initial = client.get("/account/performance/2").json()
+        assert initial["backtest_included"] is True
+        quick = client.get("/account/performance/2?include_backtest=false").json()
+        assert quick["backtest_included"] is False
+        assert quick["baseline"] == initial["baseline"]
+        assert quick["bindings"] == initial["bindings"]
+        assert quick["points"][-1]["account_return"] == initial["points"][-1]["account_return"]
+        assert quick["points"][-1]["portfolio_return"] is None
+        with monkeypatch.context() as patch:
+
+            def fail_backtest(*args):
+                raise RuntimeError("backtest unavailable")
+
+            patch.setattr("axile.server.performance._portfolio_daily", fail_backtest)
+            with pytest.raises(RuntimeError, match="backtest unavailable"):
+                client.get("/account/performance/2")
+            assert client.get("/account/performance/2?include_backtest=false").json() == quick
         assert initial["settings"] == {"backtest_weight_type": "ts", "backtest_fee_rate": 0}
         assert initial["bindings"][0]["portfolio_id"] is None
         settings = {"backtest_weight_type": "cs", "backtest_fee_rate": 0.0002}

@@ -5,14 +5,16 @@ import { useNavigate } from '@/components/ui/nav'
 import { SectionLabel } from '@/components/ui/Card'
 import { Segmented } from '@/components/ui/Segmented'
 import { ErrorNotice } from '@/components/ui/ErrorNotice'
+import { InkRewrite } from '@/components/ui/InkRewrite'
 import { PerformanceChart } from '@/components/viz/PerformanceChart'
 import { AccountPageTitle } from '@/features/account/pageHead'
+import { FeeControl } from '@/features/history/FeeControl'
 import { getAccount, getAccountActivity, getPortfolioRecords } from '@/lib/api/accounts'
 import { getPerformance, savePerformanceSettings } from '@/lib/api/performance'
 import { usePolling } from '@/lib/hooks/usePolling'
 import { withViewTransition } from '@/lib/viewTransition'
 import { aggregateStats, buildEvents, filterRecords, filterScheduleSkips, type RangeKey } from '@/features/history/derive'
-import { returnText, settingsFromDraft, WEIGHT_MODES } from '@/features/history/performance'
+import { returnColor, returnText, settingsFromDraft, WEIGHT_MODES } from '@/features/history/performance'
 import type { PerformanceSettings } from '@/types/api'
 
 const RANGES: Array<{ value: RangeKey; label: string }> = [
@@ -35,21 +37,25 @@ function AccountHistory({ accountId }: { accountId: number }) {
   const [draft, setDraft] = useState<{ mode: 'ts' | 'cs'; fee: string } | null>(null)
   const [saved, setSaved] = useState<PerformanceSettings | null>(null)
   const [saving, setSaving] = useState(false)
+  const [editingFee, setEditingFee] = useState(false)
   const [saveError, setSaveError] = useState<Error | null>(null)
   const mounted = useRef(true)
   const saveLock = useRef(false)
   useEffect(() => { mounted.current = true; return () => { mounted.current = false } }, [])
   const account = usePolling(useCallback((s: AbortSignal) => getAccount(accountId, s), [accountId]), { queryKey: `account:${accountId}`, intervalMs: 0 })
   const performance = usePolling(useCallback((s: AbortSignal) => getPerformance(accountId, range, s), [accountId, range]), {
-    queryKey: `performance:${accountId}:${range}`, intervalMs: 0,
+    queryKey: `performance:${accountId}:${range}:full`, intervalMs: 0,
+  })
+  const accountPerformance = usePolling(useCallback((s: AbortSignal) => getPerformance(accountId, range, s, false), [accountId, range]), {
+    queryKey: `performance:${accountId}:${range}:account`, intervalMs: 0,
   })
   const refreshPerformance = useRef(performance.refresh)
   useEffect(() => { refreshPerformance.current = performance.refresh }, [performance.refresh])
   const activity = usePolling(useCallback((s: AbortSignal) => getAccountActivity(accountId, { limit: 500 }, s), [accountId]), { queryKey: `account:${accountId}:activity:500`, intervalMs: 0 })
   const bindings = usePolling(useCallback((s: AbortSignal) => getPortfolioRecords(accountId, s), [accountId]), { queryKey: `account:${accountId}:portfolio-records`, intervalMs: 0 })
-  const settings = saved ?? account.data ?? performance.data?.settings
+  const settings = saved ?? account.data ?? performance.data?.settings ?? accountPerformance.data?.settings
   const mode = draft?.mode ?? settings?.backtest_weight_type ?? 'ts'
-  const fee = draft?.fee ?? String((settings?.backtest_fee_rate ?? 0) * 10000)
+  const fee = draft?.fee ?? String(Number(((settings?.backtest_fee_rate ?? 0) * 10000).toFixed(8)))
   const parsed = settingsFromDraft(mode, fee)
   const dirty = parsed != null && (parsed.backtest_weight_type !== settings?.backtest_weight_type || parsed.backtest_fee_rate !== settings?.backtest_fee_rate)
 
@@ -64,8 +70,8 @@ function AccountHistory({ accountId }: { accountId: number }) {
       setSaved(next)
       setDraft(null)
       setHover(null)
-      await account.refresh()
-      if (mounted.current) await refreshPerformance.current()
+      void account.refresh()
+      void refreshPerformance.current()
     } catch (error) {
       if (mounted.current) setSaveError(error instanceof Error ? error : new Error(String(error)))
     } finally {
@@ -74,7 +80,8 @@ function AccountHistory({ accountId }: { accountId: number }) {
     }
   }
 
-  const data = performance.data
+  const data = performance.data ?? accountPerformance.data
+  const backtestBusy = performance.loading || performance.refreshing
   const active = data?.points[hover ?? data.points.length - 1]
   const daily = view === 'daily'
   const accountReturn = daily ? active?.account_daily_return : active?.account_return
@@ -88,44 +95,56 @@ function AccountHistory({ accountId }: { accountId: number }) {
 
   return <section>
     <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
-      <AccountPageTitle accountId={accountId} page="实盘绩效" name={account.data?.name} channel={account.data?.trade_channel} market={account.data?.market} />
+      <div className="flex min-w-0 flex-wrap items-baseline gap-x-3 gap-y-1"><AccountPageTitle accountId={accountId} page="实盘绩效" name={account.data?.name} channel={account.data?.trade_channel} market={account.data?.market} /></div>
       <Segmented size="sm" value={range} options={RANGES} onChange={value => withViewTransition(() => { setHover(null); setRange(value) })} />
     </div>
     <div className="border-y border-line py-4">
-      <div className="flex flex-wrap items-end gap-4">
-        <fieldset disabled={saving || !settings} className="flex flex-wrap items-end gap-4 disabled:opacity-60">
-          <div><div className="mb-2 text-xs text-ink-3">回测模式</div><Segmented size="sm" value={mode} options={WEIGHT_MODES} onChange={value => setDraft({ mode: value, fee })} /></div>
-          <label className="block text-xs text-ink-3">单边费率（BP）<input aria-label="单边费率（BP）" type="number" min="0" max="9999.99" step="any" value={fee}
-            onChange={event => setDraft({ mode, fee: event.target.value })} className="num mt-2 block h-8 w-32 rounded border border-line bg-surface px-2 text-sm text-ink-1" /></label>
+      <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
+        <fieldset disabled={saving || !settings} className="flex min-w-0 flex-wrap items-center gap-x-6 gap-y-3 disabled:opacity-60">
+          <div role="group" aria-label="回测模式" className="flex items-center gap-2"><span className="shrink-0 text-xs text-ink-3">回测模式</span><Segmented size="sm" value={mode} options={WEIGHT_MODES} onChange={value => setDraft({ mode: value, fee })} /></div>
+          <FeeControl fee={fee} onChange={value => setDraft({ mode, fee: value })} onEditingChange={setEditingFee} />
         </fieldset>
-        <button type="button" disabled={!dirty || saving || !settings} onClick={() => void save()} className="flex h-8 items-center gap-2 rounded border border-line px-3 text-sm disabled:opacity-40"><Save size={14} />{saving ? '保存并计算中' : '保存并计算'}</button>
-        <button type="button" aria-label="重新计算" title="重新计算" disabled={saving || performance.loading || performance.refreshing} onClick={() => { setHover(null); void performance.refresh() }} className="flex h-8 w-8 items-center justify-center rounded border border-line disabled:opacity-40"><RefreshCw size={14} /></button>
+        <div className="flex items-center gap-3">
+          <button type="button" disabled={!dirty || saving || !settings} onClick={() => void save()} className="flex h-8 w-32 items-center justify-center gap-2 rounded border border-line text-sm disabled:opacity-40"><Save size={14} /><InkRewrite text={saving ? '保存中' : '保存并计算'} tone="label" /></button>
+          <button type="button" aria-label="重新计算" title="重新计算" disabled={saving || backtestBusy} onClick={() => { setHover(null); void performance.refresh() }} className="flex h-8 w-8 items-center justify-center rounded border border-line disabled:opacity-40"><RefreshCw size={14} className={backtestBusy ? 'animate-spin motion-reduce:animate-none' : ''} /></button>
+          <span role="status" className="w-12 shrink-0 text-xs text-ink-3"><InkRewrite text={dirty && !saving ? '待计算' : ''} tone="label" /></span>
+        </div>
       </div>
-      {!parsed && <p role="alert" className="mt-2 text-xs text-warn">费率须大于等于 0 且小于 10000 BP</p>}
-      {draft && dirty && <p className="mt-2 text-xs text-ink-3">参数尚未保存</p>}
+      {!parsed && !editingFee && <p role="alert" className="mt-2 text-xs text-warn">费率须大于等于 0 且小于 10000 BP</p>}
       <ErrorNotice title="参数保存失败" error={saveError} />
       <ErrorNotice title="账户设置读取失败" error={account.error} onRetry={account.refresh} />
     </div>
-    <ErrorNotice title={saved ? '参数已保存，收益计算失败' : '收益计算失败'} error={performance.error} variant={data ? 'stale' : 'section'} onRetry={performance.refresh} />
-    {performance.loading && <div className="flex h-[380px] items-center justify-center text-sm text-ink-3">正在计算收益</div>}
-    {data && <div className="py-5" aria-busy={performance.refreshing}>
-      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-        <div className="text-xs text-ink-3">{data.settings.backtest_weight_type === 'ts' ? '时序' : '截面'} · 单边费率 {Number((data.settings.backtest_fee_rate * 10000).toFixed(8))} BP · 未调整出入金{performance.refreshing ? ' · 计算中' : ''}</div>
+    <ErrorNotice title="账户收益读取失败" error={performance.data ? null : accountPerformance.error} variant="compact" onRetry={accountPerformance.refresh} />
+    {data && <div className="py-4">
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-x-6 gap-y-3">
+        <div className="flex min-w-0 flex-wrap items-center gap-x-6 gap-y-2">
+          {([['账户收益', accountReturn, '%'], ['组合回测收益', portfolioReturn, '%'], ['收益差额', difference, ' 个百分点']] as const).map(([label, value, unit], index) =>
+            <div key={label} className="flex flex-wrap items-baseline gap-2">
+              <span className="flex items-center gap-1.5 text-xs text-ink-2">{index < 2 && <span aria-hidden className={`inline-block h-0.5 w-3 ${index === 0 ? 'bg-accent' : 'bg-ink-2'}`} />}{label}</span>
+              <span className={`num inline-flex items-baseline gap-1 text-lg font-semibold ${index === 2 ? 'min-w-[14ch]' : 'min-w-[8ch]'} ${returnColor(value)}`}>
+                {returnText(value, index === 2 ? '' : unit)}
+                {index === 2 && <span className={`text-xs font-normal ${value == null ? 'invisible' : ''}`}>个百分点</span>}
+              </span>
+              {index === 1 && <span role="status" className="inline-block w-12 text-xs text-ink-3">{backtestBusy ? '计算中' : ''}</span>}
+            </div>)}
+        </div>
         <Segmented size="sm" value={view} options={VIEWS} onChange={value => withViewTransition(() => { setHover(null); setView(value) })} />
       </div>
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-        {[['账户收益', accountReturn, '%', 'text-accent'], ['组合回测收益', portfolioReturn, '%', 'text-ink-2'], ['收益差额', difference, ' 个百分点', 'text-ink-1']].map(([label, value, unit, color]) =>
-          <div key={String(label)} className={label === '收益差额' ? 'col-span-2 sm:col-span-1' : ''}><div className={`text-xs ${color}`}>{label}</div><div className="num mt-1 text-2xl font-semibold">{returnText(value as number | null | undefined, String(unit))}</div></div>)}
+      <div className="flex min-h-5 flex-wrap gap-x-2 text-xs text-ink-3">
+        <span>{active?.date.replace('T', ' ') ?? '暂无收益数据'}</span>
+        <span>· {data.settings.backtest_weight_type === 'ts' ? '时序' : '截面'} · 单边费率 {Number((data.settings.backtest_fee_rate * 10000).toFixed(8))} BP</span>
+        <span>· 未调整出入金</span>
       </div>
-      <div className="mt-3 h-5 text-xs text-ink-3">{active?.date.replace('T', ' ') ?? '暂无收益数据'}</div>
+      <ErrorNotice title={saved ? '参数已保存，组合回测失败' : '组合回测失败'} error={performance.error} variant="compact" onRetry={performance.refresh} />
       <PerformanceChart data={data} daily={daily} hoverIndex={hover} onHover={setHover} />
       <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-ink-3">
-        <span>基准 {data.baseline?.replace('T', ' ') ?? '—'}</span><span>截止 {data.end?.replace('T', ' ') ?? '—'}</span><span>有效回测记录 {data.used_record_count} / 历史记录 {data.record_count}</span>
+        <span>基准 {data.baseline?.replace('T', ' ') ?? '—'}</span><span>截止 {data.end?.replace('T', ' ') ?? '—'}</span><span>{data.backtest_included ? `有效回测记录 ${data.used_record_count} / ` : ''}历史记录 {data.record_count}</span>
       </div>
       {data.gap && <p role="status" className="mt-3 break-words text-sm text-warn">组合收益自 {data.gap.time.replace('T', ' ')} 中断：{data.gap.reason}{data.gap.symbols.length ? `（${data.gap.symbols.join('、')}）` : ''}</p>}
       {data.invalid_asset_count > 0 && <p className="mt-2 text-xs text-warn">{data.invalid_asset_count} 条账户资产快照不可用</p>}
       {data.bindings.length > 0 && <div className="mt-3 flex flex-wrap gap-3 text-xs text-ink-3">{data.bindings.map((b, i) => <span key={i}>{b.time.replace('T', ' ')} · {b.portfolio_id == null ? '解绑' : `组合 #${b.portfolio_id}`}</span>)}</div>}
     </div>}
+    {!data && <ErrorNotice title="组合回测失败" error={performance.error} variant="compact" onRetry={performance.refresh} />}
     <div className="border-t border-line py-4">
       <SectionLabel>近期执行</SectionLabel>
       <ErrorNotice title="执行记录读取失败" error={activity.error} onRetry={activity.refresh} />

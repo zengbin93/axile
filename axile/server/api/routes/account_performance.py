@@ -32,8 +32,10 @@ async def save_performance_settings(
 
 
 @router.get("/performance/{account_id}", response_model=AccountPerformance)
-async def get_performance(session: SessionDep, account_id: int, range: RangeKey = "all") -> AccountPerformance:
-    """完整读取历史，以账户保存的参数生成收益曲线."""
+async def get_performance(
+    session: SessionDep, account_id: int, range: RangeKey = "all", include_backtest: bool = True
+) -> AccountPerformance:
+    """完整读取历史；可跳过 WBT，独立返回同口径账户收益."""
     account = await _get_account_or_404(session, account_id)
     settings = PerformanceSettings.model_validate(account, from_attributes=True)
     records = (
@@ -53,7 +55,7 @@ async def get_performance(session: SessionDep, account_id: int, range: RangeKey 
         .scalars()
         .all()
     )
-    result = await run_in_threadpool(calculate_performance, items, settings, range)
+    result = await run_in_threadpool(calculate_performance, items, settings, range, include_backtest)
     if result.baseline and result.end:
         start, end = local_time(result.baseline), local_time(result.end)
         result.bindings = [

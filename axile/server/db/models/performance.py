@@ -48,6 +48,7 @@ class AccountPerformance(BaseModel):
     """账户收益与组合回测的只读结果."""
 
     settings: PerformanceSettings
+    backtest_included: bool = True
     engine_version: str
     range: RangeKey
     baseline: str | None = None

@@ -189,7 +189,7 @@ def _portfolio_daily(frame: pd.DataFrame, settings: PerformanceSettings) -> dict
 
 def _merge_daily(
     items: list[Observation],
-    daily: dict[str, float],
+    daily: dict[str, float] | None,
     gap: PerformanceGap | None,
 ) -> list[PerformancePoint]:
     base = next((item for item in items if item.asset is not None and item.asset > 0), None)
@@ -212,7 +212,7 @@ def _merge_daily(
             else None
         )
         previous_asset = last.asset
-        portfolio_daily = daily.get(day, 0.0) if gap_day is None or day < gap_day else None
+        portfolio_daily = daily.get(day, 0.0) if daily is not None and (gap_day is None or day < gap_day) else None
         if portfolio_daily is not None:
             nav *= 1 + portfolio_daily
         portfolio = nav - 1 if portfolio_daily is not None else None
@@ -232,8 +232,8 @@ def _merge_daily(
         PerformancePoint(
             date=base.time.isoformat(),
             account_return=0.0,
-            portfolio_return=0.0 if _is_baseline(base) else None,
-            difference=0.0 if _is_baseline(base) else None,
+            portfolio_return=0.0 if daily is not None and _is_baseline(base) else None,
+            difference=0.0 if daily is not None and _is_baseline(base) else None,
         ),
     )
     return points
@@ -243,17 +243,24 @@ def calculate_performance(
     observations: list[Observation],
     settings: PerformanceSettings,
     range_key: RangeKey,
+    include_backtest: bool = True,
 ) -> AccountPerformance:
     """使用 WBT 原生费后日收益与资产比值生成收益对比."""
     items = select_range(observations, range_key)
     result = AccountPerformance(
-        settings=settings, engine_version=version("wbt"), range=range_key, record_count=len(observations)
+        settings=settings,
+        backtest_included=include_backtest,
+        engine_version=version("wbt"),
+        range=range_key,
+        record_count=len(observations),
     )
     if not items:
         return result
     result.observation_count = len(items)
-    frame, result.gap, result.used_record_count = build_wbt_input(items)
-    daily = _portfolio_daily(frame, settings)
+    daily = None
+    if include_backtest:
+        frame, result.gap, result.used_record_count = build_wbt_input(items)
+        daily = _portfolio_daily(frame, settings)
     result.points = _merge_daily(items, daily, result.gap)
     result.baseline = result.points[0].date if result.points else None
     result.end = items[-1].time.isoformat()

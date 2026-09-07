@@ -197,6 +197,7 @@ export interface PerformancePoint {
 }
 
 export interface AccountPerformance {
+  backtest_included: boolean
   settings: PerformanceSettings
   engine_version: string
   range: '30' | '90' | 'all'
