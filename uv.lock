@@ -343,6 +343,7 @@ dependencies = [
     { name = "streamlit" },
     { name = "tomlkit" },
     { name = "typer" },
+    { name = "wbt" },
 ]
 
 [package.optional-dependencies]
@@ -404,6 +405,7 @@ requires-dist = [
     { name = "tomlkit", specifier = ">=0.15.0" },
     { name = "tqsdk", marker = "extra == 'tqsdk'", specifier = ">=3.10.2,<3.11" },
     { name = "typer", specifier = ">=0.20.1" },
+    { name = "wbt", specifier = "==0.8.2", index = "https://pypi.org/simple/" },
 ]
 provides-extras = ["ctp", "gm", "tqsdk", "all"]
 
@@ -2567,6 +2569,19 @@ wheels = [
 ]
 
 [[package]]
+name = "plotly"
+version = "7.0.0"
+source = { registry = "https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple" }
+dependencies = [
+    { name = "narwhals" },
+    { name = "packaging" },
+]
+sdist = { url = "https://mirrors.tuna.tsinghua.edu.cn/pypi/web/packages/ec/9e/8894e8eae20a5b2a44aa568b1d2d80291e8eea6ce7bc75cdc7a152aef0ac/plotly-7.0.0.tar.gz", hash = "sha256:08b21f1244a97e7a1a699833c4bb2678475aa108b3f1989886ed0b038ebfd849", size = 6218668, upload-time = "2026-08-25T17:47:29.088Z" }
+wheels = [
+    { url = "https://mirrors.tuna.tsinghua.edu.cn/pypi/web/packages/e0/2f/6f492108d9955bac97979d9949c1b35eab30fc630b1f22bbdd2c7cacbab4/plotly-7.0.0-py3-none-any.whl", hash = "sha256:78cbf7bd06d1b05bb3b8ec1b709864695229b55151b6f7530fbf55517ead6fdd", size = 9052859, upload-time = "2026-08-25T17:47:24.689Z" },
+]
+
+[[package]]
 name = "pluggy"
 version = "1.6.0"
 source = { registry = "https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple" }
@@ -4233,6 +4248,28 @@ wheels = [
     { url = "https://mirrors.tuna.tsinghua.edu.cn/pypi/web/packages/56/fe/cb8ef3d6f929d14158fdaaad9925985b7310abc9384dcd4d82dd0016fb59/watchfiles-1.2.0-cp315-cp315-manylinux_2_31_riscv64.whl", hash = "sha256:cee9d5efd929efdac5f7e58f72b3376f676b64050a91c5b99a7094c5b2317488", size = 465096, upload-time = "2026-05-18T04:31:30.384Z" },
     { url = "https://mirrors.tuna.tsinghua.edu.cn/pypi/web/packages/25/91/80908e835e100527a9267147b08c0eee1fa6ab0ffec15edc04d1d44885f7/watchfiles-1.2.0-cp315-cp315-musllinux_1_1_aarch64.whl", hash = "sha256:b718bf356bbc15e559bd8ef41782b573b8ae0e3f177ab244b440568d7ea02cfb", size = 630638, upload-time = "2026-05-18T04:30:49.89Z" },
     { url = "https://mirrors.tuna.tsinghua.edu.cn/pypi/web/packages/46/4b/95ab2f256bb4af3cb2eb23b9317bda984ee6e0f11733a5c004a6c95b06e3/watchfiles-1.2.0-cp315-cp315-musllinux_1_1_x86_64.whl", hash = "sha256:922c0e019fe68b3ae392965a766b02a71ba1168c932cebc3733cd52c5fe5b377", size = 657684, upload-time = "2026-05-18T04:31:32.027Z" },
+]
+
+[[package]]
+name = "wbt"
+version = "0.8.2"
+source = { registry = "https://pypi.org/simple/" }
+dependencies = [
+    { name = "loguru" },
+    { name = "numpy" },
+    { name = "pandas", version = "2.3.3", source = { registry = "https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple" }, marker = "python_full_version >= '3.14'" },
+    { name = "pandas", version = "3.0.5", source = { registry = "https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple" }, marker = "python_full_version < '3.14'" },
+    { name = "plotly" },
+    { name = "polars" },
+    { name = "pyarrow" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/be/ef/b570d65da8153e5cc0d6aafea77a2d9c599c830f8b2f18c65456f70e3604/wbt-0.8.2.tar.gz", hash = "sha256:c431e7b1365d52da4c2f27043515b76e6e28b4049d9db59e35608641297f75af", size = 2348361, upload-time = "2026-09-01T03:36:52.39Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/01/87/5d845ed1d87644d51467ae96817c5c66f212b15f96e648c522acc4a25613/wbt-0.8.2-cp310-abi3-macosx_10_12_x86_64.whl", hash = "sha256:eb3bcfa7723c02012252d5b131875b9bfb5c10af4bb59287cec9679e12fd145c", size = 18547475, upload-time = "2026-09-01T03:36:34.492Z" },
+    { url = "https://files.pythonhosted.org/packages/11/ac/fbefa69818b368f270836d9f4cac449c20f9d77911c991a6eb6b849e30cc/wbt-0.8.2-cp310-abi3-macosx_11_0_arm64.whl", hash = "sha256:55982508a3621237d11f735fa25800bf48772377ac5153f44d4c9ce8fcaf57b8", size = 16844748, upload-time = "2026-09-01T03:36:38.332Z" },
+    { url = "https://files.pythonhosted.org/packages/b0/56/c3329830e519e416206dfff89aeda21f435aea85ad9a67b4de604de38d4a/wbt-0.8.2-cp310-abi3-manylinux_2_28_aarch64.whl", hash = "sha256:1052b0e00075a08e34b760700b48c2ff6bd2551ddc44807caa2837d204a0a5e1", size = 17469658, upload-time = "2026-09-01T03:36:42.472Z" },
+    { url = "https://files.pythonhosted.org/packages/b5/e8/88777f661f81db272e4642bc054ce9d67137f7f57e6f9c24447ca4b89f2e/wbt-0.8.2-cp310-abi3-manylinux_2_28_x86_64.whl", hash = "sha256:642f831a0290eba04bd1644e648f74c6c0ac6fc0358530ea7a24ff4f8ec5b374", size = 19065113, upload-time = "2026-09-01T03:36:46.106Z" },
+    { url = "https://files.pythonhosted.org/packages/60/ae/fe8e462f3158b56f1c0bd2f03706083698e4da34e9e09851009815fb69f3/wbt-0.8.2-cp310-abi3-win_amd64.whl", hash = "sha256:5a0530d0fbd1790cd846caa46739b9388cbc5b434eec3c2183da2be3d27be0f6", size = 20860289, upload-time = "2026-09-01T03:36:49.89Z" },
 ]
 
 [[package]]

@@ -24,6 +24,7 @@ dependencies = [
     "streamlit>=1.41.0",
     "typer>=0.20.1",
     "tomlkit>=0.15.0",
+    "wbt==0.8.2",
 ]
 
 
@@ -65,6 +66,7 @@ explicit = true
 
 [tool.uv.sources]
 shinny-calendar = { index = "pypi" }
+wbt = { index = "pypi" }
 
 [build-system]
 requires = ["hatchling"]

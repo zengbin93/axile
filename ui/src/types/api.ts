@@ -150,6 +150,8 @@ export interface AlgorithmInfo {
 
 /** 账户完整信息，对应 `AccountPublic`（AccountBase + id/时间戳）。 */
 export interface Account {
+  backtest_weight_type?: 'ts' | 'cs'
+  backtest_fee_rate?: number
   id: number | null
   name: string
   market: string
@@ -178,6 +180,35 @@ export interface Account {
   execution_timeout: number
   updated_at: string
   created_at: string
+}
+
+export interface PerformanceSettings {
+  backtest_weight_type: 'ts' | 'cs'
+  backtest_fee_rate: number
+}
+
+export interface PerformancePoint {
+  date: string
+  account_return: number | null
+  portfolio_return: number | null
+  account_daily_return: number | null
+  portfolio_daily_return: number | null
+  difference: number | null
+}
+
+export interface AccountPerformance {
+  settings: PerformanceSettings
+  engine_version: string
+  range: '30' | '90' | 'all'
+  baseline: string | null
+  end: string | null
+  record_count: number
+  observation_count: number
+  used_record_count: number
+  invalid_asset_count: number
+  gap: { time: string; execution_id: string | null; reason: string; symbols: string[] } | null
+  points: PerformancePoint[]
+  bindings: Array<{ time: string; portfolio_id: number | null }>
 }
 
 export type FeishuCardConfig =

@@ -1,374 +1,141 @@
-import { useCallback, useState } from 'react'
-import { useParams, useViewTransitionState } from 'react-router'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { useParams } from 'react-router'
+import { RefreshCw, Save } from 'lucide-react'
 import { useNavigate } from '@/components/ui/nav'
-import { Card, SectionLabel } from '@/components/ui/Card'
-import { Skeleton } from '@/components/ui/Skeleton'
-import { StatCard } from '@/components/ui/StatCard'
-import { EquityChart, type ChartMarker } from '@/components/viz/EquityChart'
-import { DailyBars } from '@/components/viz/DailyBars'
+import { SectionLabel } from '@/components/ui/Card'
 import { Segmented } from '@/components/ui/Segmented'
 import { ErrorNotice } from '@/components/ui/ErrorNotice'
+import { PerformanceChart } from '@/components/viz/PerformanceChart'
 import { AccountPageTitle } from '@/features/account/pageHead'
-import {
-  getAccount,
-  getAccountActivity,
-  getAccountAssetSnapshots,
-  getCachedExecuteRecords,
-  getPortfolioRecords,
-} from '@/lib/api/accounts'
+import { getAccount, getAccountActivity, getPortfolioRecords } from '@/lib/api/accounts'
+import { getPerformance, savePerformanceSettings } from '@/lib/api/performance'
 import { usePolling } from '@/lib/hooks/usePolling'
 import { withViewTransition } from '@/lib/viewTransition'
-import { accountAssetTerms } from '@/features/dashboard/display'
-import { formatMoney } from '@/lib/derive'
-import { displayCurrencyUnit } from '@/lib/format'
-import {
-  aggregateStats,
-  buildDailyBars,
-  buildEquityPoints,
-  buildEvents,
-  buildSegments,
-  filterAssetSnapshots,
-  filterRecords,
-  filterScheduleSkips,
-  type RangeKey,
-} from '@/features/history/derive'
+import { aggregateStats, buildEvents, filterRecords, filterScheduleSkips, type RangeKey } from '@/features/history/derive'
+import { returnText, settingsFromDraft, WEIGHT_MODES } from '@/features/history/performance'
+import type { PerformanceSettings } from '@/types/api'
 
-const RANGES: { value: RangeKey; label: string }[] = [
-  { value: '30', label: '30 天' },
-  { value: '90', label: '90 天' },
-  { value: 'all', label: '全部' },
+const RANGES: Array<{ value: RangeKey; label: string }> = [
+  { value: '30', label: '30 天' }, { value: '90', label: '90 天' }, { value: 'all', label: '全部' },
+]
+const VIEWS: Array<{ value: 'cumulative' | 'daily'; label: string }> = [
+  { value: 'cumulative', label: '累计' }, { value: 'daily', label: '每日' },
 ]
 
-const VIEWS: { value: 'daily' | 'cumulative'; label: string }[] = [
-  { value: 'daily', label: '每日' },
-  { value: 'cumulative', label: '累计' },
-]
-
-const EVENT_TAG_CLASS: Record<string, string> = {
-  create: 'text-ink-3 bg-fill',
-  rebind: 'text-accent bg-accent-soft',
-  // 失败=琥珀（红绿只留给行情涨跌，不表达成败）。
-  fail: 'text-warn bg-warn-soft',
-  skip: 'text-ink-3 bg-fill',
-}
-
-const EVENT_DOT_CLASS: Record<string, string> = {
-  create: 'bg-border-strong',
-  rebind: 'bg-accent',
-  fail: 'bg-warn',
-  skip: 'bg-border-strong',
-}
-
-/** 回看 / 绩效页 /accounts/:id/history。 */
 export function AccountHistoryPage() {
   const { id } = useParams()
-  const accountId = Number(id)
-  const [range, setRange] = useState<RangeKey>('all')
-  // 图区视角：累计估值线（默认，与总览 sparkline 同属线视角）/ 每日增量柱。
-  const [view, setView] = useState<'daily' | 'cumulative'>('cumulative')
-  // hover 命中的图内下标：scrub 时上抬为 hero 读数，图头保持权威读数位置。
-  const [hoverIdx, setHoverIdx] = useState<number | null>(null)
+  return <AccountHistory key={id} accountId={Number(id)} />
+}
+
+function AccountHistory({ accountId }: { accountId: number }) {
   const navigate = useNavigate()
-
-  /** 平滑滚动到账户时间线区块。 */
-  const scrollToTimeline = () => document.getElementById('account-timeline')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-
-  // 金额共享元素 FLIP（详情卡金额 → 本页 hero）；曲线不共享（root 淡入）。
-  const amountVt = useViewTransitionState(`/accounts/${accountId}/history`)
-
-  const account = usePolling(useCallback((s: AbortSignal) => getAccount(accountId, s), [accountId]), {
-    queryKey: `account:${accountId}`,
-    intervalMs: 0,
+  const [range, setRange] = useState<RangeKey>('all')
+  const [view, setView] = useState<'cumulative' | 'daily'>('cumulative')
+  const [hover, setHover] = useState<number | null>(null)
+  const [draft, setDraft] = useState<{ mode: 'ts' | 'cs'; fee: string } | null>(null)
+  const [saved, setSaved] = useState<PerformanceSettings | null>(null)
+  const [saving, setSaving] = useState(false)
+  const [saveError, setSaveError] = useState<Error | null>(null)
+  const mounted = useRef(true)
+  const saveLock = useRef(false)
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false } }, [])
+  const account = usePolling(useCallback((s: AbortSignal) => getAccount(accountId, s), [accountId]), { queryKey: `account:${accountId}`, intervalMs: 0 })
+  const performance = usePolling(useCallback((s: AbortSignal) => getPerformance(accountId, range, s), [accountId, range]), {
+    queryKey: `performance:${accountId}:${range}`, intervalMs: 0,
   })
-  const assetTerms = accountAssetTerms(account.data?.trade_channel)
-  const activity = usePolling(
-    useCallback((s: AbortSignal) => getAccountActivity(accountId, { limit: 500 }, s), [accountId]),
-    { queryKey: `account:${accountId}:activity:500`, intervalMs: 0 },
-  )
-  const bindings = usePolling(
-    useCallback((s: AbortSignal) => getPortfolioRecords(accountId, s), [accountId]),
-    { queryKey: `account:${accountId}:portfolio-records`, intervalMs: 0 },
-  )
-  const snapshots = usePolling(
-    useCallback((s: AbortSignal) => getAccountAssetSnapshots(accountId, { limit: 500 }, s), [accountId]),
-    { queryKey: `account:${accountId}:asset-snapshots:500`, intervalMs: 0 },
-  )
-  // 首帧优先用 hover 预取缓存：有缓存即直接出图，落地不闪骨架，金额 FLIP 有真实落点。
-  const cached = getCachedExecuteRecords(accountId)
-  const allRecords = activity.data
-    ? activity.data.data.flatMap((item) => item.kind === 'execution' ? [item.record] : [])
-    : cached?.data ?? []
-  const recordsData = activity.data ?? cached ?? null
-  const allSkips = activity.data?.data.flatMap((item) => item.kind === 'schedule_skip' ? [item] : []) ?? []
-  const ranged = filterRecords(allRecords, range)
-  const allSnapshots = snapshots.data?.data ?? []
-  const rangedSnapshots = filterAssetSnapshots(allSnapshots, range)
-  const rangedSkips = filterScheduleSkips(allSkips, allRecords, range)
-  const points = buildEquityPoints(rangedSnapshots)
-  const snapshotCurrency = [...rangedSnapshots].reverse().find((s) => s.assets.currency)?.assets.currency ?? ''
-  const stats = aggregateStats(ranged, points, snapshotCurrency)
-  const currencyUnit = displayCurrencyUnit(stats.currency)
-  const segments = bindings.data ? buildSegments(bindings.data.data, points) : []
-  const events = bindings.data ? buildEvents(bindings.data.data, ranged, rangedSkips) : []
+  const refreshPerformance = useRef(performance.refresh)
+  useEffect(() => { refreshPerformance.current = performance.refresh }, [performance.refresh])
+  const activity = usePolling(useCallback((s: AbortSignal) => getAccountActivity(accountId, { limit: 500 }, s), [accountId]), { queryKey: `account:${accountId}:activity:500`, intervalMs: 0 })
+  const bindings = usePolling(useCallback((s: AbortSignal) => getPortfolioRecords(accountId, s), [accountId]), { queryKey: `account:${accountId}:portfolio-records`, intervalMs: 0 })
+  const settings = saved ?? account.data ?? performance.data?.settings
+  const mode = draft?.mode ?? settings?.backtest_weight_type ?? 'ts'
+  const fee = draft?.fee ?? String((settings?.backtest_fee_rate ?? 0) * 10000)
+  const parsed = settingsFromDraft(mode, fee)
+  const dirty = parsed != null && (parsed.backtest_weight_type !== settings?.backtest_weight_type || parsed.backtest_fee_rate !== settings?.backtest_fee_rate)
 
-  const sgn = (v: number) => (v >= 0 ? '+' : '−') + formatMoney(Math.abs(v))
-  const ret = stats.pnl != null && stats.eqFirst ? (stats.pnl / stats.eqFirst) * 100 : null
-  const feeDrag = stats.eqLast ? (stats.fee / stats.eqLast) * 100 : null
-
-  // 疑似资金进出：有则「区间盈亏」降级为中性「估值变化」并在曲线做中性竖标；无则纯真盈亏。
-  const hasTransfer = stats.transfers.length > 0
-  const dailyBars = buildDailyBars(points, stats.transfers)
-  const transferMarkers: ChartMarker[] = stats.transfers.map((t) => ({
-    index: t.index,
-    label: '疑似资金进出',
-    color: 'var(--color-ink-3)',
-  }))
-
-  /**
-   * hover 读数：把 scrub 命中的那个点/柱折算成「权益水平 + 盈亏 + 日期」，
-   * 供 hero 顶替最新值显示（松开即回最新）。准星只吸附真实点，故读数永不插假值。
-   */
-  const readout = (() => {
-    if (hoverIdx == null) return null
-    if (view === 'cumulative') {
-      const p = points[hoverIdx]
-      if (!p) return null
-      const pnl = stats.eqFirst != null ? p.eq - stats.eqFirst : null
-      const pct = pnl != null && stats.eqFirst ? (pnl / stats.eqFirst) * 100 : null
-      return { eq: p.eq, when: p.date, pnl, pct, label: '区间盈亏至此' }
+  const save = async () => {
+    if (!parsed || saveLock.current) return
+    saveLock.current = true
+    setSaving(true)
+    setSaveError(null)
+    try {
+      const next = await savePerformanceSettings(accountId, parsed)
+      if (!mounted.current) return
+      setSaved(next)
+      setDraft(null)
+      setHover(null)
+      await account.refresh()
+      if (mounted.current) await refreshPerformance.current()
+    } catch (error) {
+      if (mounted.current) setSaveError(error instanceof Error ? error : new Error(String(error)))
+    } finally {
+      saveLock.current = false
+      if (mounted.current) setSaving(false)
     }
-    const b = dailyBars[hoverIdx]
-    if (!b) return null
-    return { eq: b.endEq, when: b.day, pnl: b.delta, pct: null as number | null, label: '当日盈亏' }
-  })()
-  const reviewing = readout != null
-  const heroEq = reviewing ? readout.eq : stats.eqLast
+  }
 
-  /** 切换视角/区间时清掉旧 hover 下标（避免指向另一数组的错位点）。 */
-  const switchView = (v: 'daily' | 'cumulative') => withViewTransition(() => {
-    setHoverIdx(null)
-    setView(v)
-  })
-  const switchRange = (v: RangeKey) => withViewTransition(() => {
-    setHoverIdx(null)
-    setRange(v)
-  })
-  const historyError = activity.error ?? snapshots.error
-  const historyReady = recordsData != null && snapshots.data != null
+  const data = performance.data
+  const active = data?.points[hover ?? data.points.length - 1]
+  const daily = view === 'daily'
+  const accountReturn = daily ? active?.account_daily_return : active?.account_return
+  const portfolioReturn = daily ? active?.portfolio_daily_return : active?.portfolio_return
+  const difference = accountReturn != null && portfolioReturn != null ? accountReturn - portfolioReturn : null
+  const records = activity.data?.data.flatMap(item => item.kind === 'execution' ? [item.record] : []) ?? []
+  const skips = activity.data?.data.flatMap(item => item.kind === 'schedule_skip' ? [item] : []) ?? []
+  const ranged = filterRecords(records, range)
+  const stats = aggregateStats(ranged, [])
+  const events = buildEvents(bindings.data?.data ?? [], ranged, filterScheduleSkips(skips, records, range))
 
-  return (
-    <section>
-      <div className="mb-4 flex items-center justify-between gap-4">
-        <div className="flex flex-wrap items-baseline gap-3">
-          <AccountPageTitle
-            accountId={accountId}
-            page="实盘绩效"
-            name={account.data?.name}
-            channel={account.data?.trade_channel}
-            market={account.data?.market}
-          />
-        </div>
-        <Segmented size="sm" value={range} options={RANGES} onChange={switchRange} />
+  return <section>
+    <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
+      <AccountPageTitle accountId={accountId} page="实盘绩效" name={account.data?.name} channel={account.data?.trade_channel} market={account.data?.market} />
+      <Segmented size="sm" value={range} options={RANGES} onChange={value => withViewTransition(() => { setHover(null); setRange(value) })} />
+    </div>
+    <div className="border-y border-line py-4">
+      <div className="flex flex-wrap items-end gap-4">
+        <fieldset disabled={saving || !settings} className="flex flex-wrap items-end gap-4 disabled:opacity-60">
+          <div><div className="mb-2 text-xs text-ink-3">回测模式</div><Segmented size="sm" value={mode} options={WEIGHT_MODES} onChange={value => setDraft({ mode: value, fee })} /></div>
+          <label className="block text-xs text-ink-3">单边费率（BP）<input aria-label="单边费率（BP）" type="number" min="0" max="9999.99" step="any" value={fee}
+            onChange={event => setDraft({ mode, fee: event.target.value })} className="num mt-2 block h-8 w-32 rounded border border-line bg-surface px-2 text-sm text-ink-1" /></label>
+        </fieldset>
+        <button type="button" disabled={!dirty || saving || !settings} onClick={() => void save()} className="flex h-8 items-center gap-2 rounded border border-line px-3 text-sm disabled:opacity-40"><Save size={14} />{saving ? '保存并计算中' : '保存并计算'}</button>
+        <button type="button" aria-label="重新计算" title="重新计算" disabled={saving || performance.loading || performance.refreshing} onClick={() => { setHover(null); void performance.refresh() }} className="flex h-8 w-8 items-center justify-center rounded border border-line disabled:opacity-40"><RefreshCw size={14} /></button>
       </div>
-
-      {(!recordsData || !snapshots.data) && (activity.loading || snapshots.loading) && (
-        <>
-          {/* 骨架与成品同尺寸：hero + 曲线 + 概览四卡，避免整屏塌成一行（L1 消闪）。 */}
-          <Card className="p-6">
-            <Skeleton className="h-4 w-40" />
-            <Skeleton className="mt-3 h-8 w-56" />
-            <Skeleton className="mt-2 h-4 w-72" />
-            <Skeleton className="mt-4 h-[180px] w-full" />
-          </Card>
-          <SectionLabel>概览</SectionLabel>
-          <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
-            {Array.from({ length: 4 }, (_, i) => (
-              <Card key={i} className="px-4 py-4">
-                <Skeleton className="h-3 w-16" />
-                <Skeleton className="mt-2 h-6 w-20" />
-                <Skeleton className="mt-2 h-3 w-24" />
-              </Card>
-            ))}
-          </div>
-        </>
-      )}
-      <ErrorNotice
-        title="账户绩效数据加载失败"
-        error={historyError}
-        variant={historyReady ? 'stale' : 'section'}
-        updatedAt={activity.updatedAt ?? snapshots.updatedAt}
-        onRetry={() => Promise.all([activity.refresh(), snapshots.refresh()]).then(() => undefined)}
-      />
-
-      {recordsData && snapshots.data && (
-        <>
-          {/* Hero + 曲线（账户名/渠道已在页头标题行，此处不再重复）。 */}
-          <Card className="p-6">
-            <div
-              // w-fit：金额盒贴文字宽（与卡片金额同形），FLIP 只剩上移平移 + 微缩，避免横向硬拉。
-              className="num w-fit text-[33px] font-[640] tracking-tight"
-              style={amountVt ? { viewTransitionName: `equity-amount-${accountId}` } : undefined}
-            >
-              {heroEq != null ? formatMoney(heroEq) : '—'}
-              <span className="ml-1.5 text-[16px] font-medium text-ink-3">{currencyUnit}</span>
-              {reviewing && (
-                // 明确「这是回看历史点、非实时」，避免 hero 跳动被误读为账户实变。
-                <span className="ml-2 align-middle text-xs font-normal text-ink-3">· 回看 {readout.when}</span>
-              )}
-            </div>
-            <div className="mt-1 text-[14.5px] text-ink-2">
-              {reviewing ? (
-                // scrub 读数：命中点的盈亏（累计=至此区间盈亏，每日=当日盈亏），红涨绿跌。
-                <>
-                  {readout.label}{' '}
-                  <span className={`num ${readout.pnl == null ? 'text-ink-3' : readout.pnl >= 0 ? 'text-up' : 'text-down'}`}>
-                    {readout.pnl == null ? '—' : sgn(readout.pnl)} {currencyUnit}
-                    {readout.pct != null && `（${readout.pct >= 0 ? '+' : '−'}${Math.abs(readout.pct).toFixed(1)}%）`}
-                  </span>
-                </>
-              ) : stats.pnl == null ? (
-                `区间内${assetTerms.pointLabel}不足`
-              ) : hasTransfer ? (
-                // 有疑似资金进出：这是「估值变化」而非盈亏，走中性；免责升为琥珀提示。
-                <>
-                  区间估值变化{' '}
-                  <span className="num text-ink-1">
-                    {sgn(stats.pnl)} {currencyUnit}
-                  </span>
-                  <span className="text-warn"> · 含疑似资金进出 {stats.transfers.length} 笔（见图标注）</span>
-                </>
-              ) : (
-                // 无资金进出：等同真盈亏，走红绿，不再常驻免责。
-                <>
-                  区间盈亏{' '}
-                  <span className={`num ${stats.pnl >= 0 ? 'text-up' : 'text-down'}`}>
-                    {sgn(stats.pnl)} {currencyUnit}
-                    {ret != null && `（${ret >= 0 ? '+' : '−'}${Math.abs(ret).toFixed(1)}%）`}
-                  </span>
-                </>
-              )}
-            </div>
-            {/* 曲线不挂共享名（禁止小图/线柱内容 morph）：大图随 root 淡入；只金额做 FLIP。 */}
-            <div className="mt-4">
-              <div className="mb-1.5 flex items-center justify-between">
-                <span className="text-xs text-ink-3">{view === 'daily' ? '每日盈亏' : '累计估值'}</span>
-                <Segmented size="sm" value={view} options={VIEWS} onChange={switchView} />
-              </div>
-              {/*
-                页内每日↔累计是内容真换：锚点（Segmented）钉死，图区靠 withViewTransition +
-                槽位替换，不挂 viewTransitionName（避免线↔柱内容 morph）。
-              */}
-              <div>
-                {view === 'daily' ? (
-                  <DailyBars bars={dailyBars} hoverIndex={hoverIdx} onHover={setHoverIdx} />
-                ) : (
-                  <EquityChart points={points} markers={transferMarkers} hoverIndex={hoverIdx} onHover={setHoverIdx} />
-                )}
-              </div>
-            </div>
-          </Card>
-
-          {/* 统计卡 */}
-          <SectionLabel>概览</SectionLabel>
-          <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
-            <StatCard
-              k={hasTransfer ? '区间估值变化' : '区间盈亏'}
-              v={stats.pnl != null ? `${sgn(stats.pnl)}` : '—'}
-              vClass={stats.pnl == null || hasTransfer ? '' : stats.pnl >= 0 ? 'text-up' : 'text-down'}
-              sub={hasTransfer ? `${currencyUnit} · 含资金进出` : `${currencyUnit} · 真盈亏`}
-              subWarn={hasTransfer}
-            />
-            <StatCard
-              k="累计手续费"
-              v={stats.fee > 0 ? stats.fee.toFixed(4) : '0'}
-              sub={feeDrag != null ? `${assetTerms.ratioLabel} ${feeDrag.toFixed(2)}%` : currencyUnit}
-              subWarn={feeDrag != null && feeDrag > 0}
-            />
-            <StatCard
-              k="执行"
-              v={`${stats.fills}`}
-              vUnit="成交"
-              sub={`空跑 ${stats.noops} · 跳过 ${rangedSkips.length} · 失败 ${stats.fails}${stats.terminated > 0 ? ` · 终止 ${stats.terminated}` : ''}`}
-            />
-            <StatCard
-              k="失败"
-              v={`${stats.fails}`}
-              vUnit="次"
-              sub={stats.fails > 0 ? '见时间线 ↓' : '无异常'}
-              subWarn={stats.fails > 0}
-              onSub={stats.fails > 0 ? scrollToTimeline : undefined}
-            />
-          </div>
-
-          {/* 分段收益 */}
-          <SectionLabel>绑定分段收益 · {assetTerms.shortLabel}跨多段绑定，分开算才诚实</SectionLabel>
-          <Card className="px-6 py-4">
-            {!bindings.data && bindings.loading ? (
-              <><Skeleton className="h-4 w-44" /><Skeleton className="mt-3 h-4 w-56" /></>
-            ) : bindings.error ? (
-              <ErrorNotice title="绑定记录加载失败" error={bindings.error} onRetry={bindings.refresh} />
-            ) : segments.length === 0 ? (
-              <p className="text-[14px] text-ink-3">本区间无可用的分段数据。</p>
-            ) : (
-              segments.map((s, i) => (
-                <div key={i} className="flex items-center gap-3 border-t border-line py-3 text-[15px] first:border-t-0">
-                  <div className="flex-1 min-w-0">
-                    <div className="font-semibold">{s.portfolioId != null ? `组合 #${s.portfolioId}` : '未绑定'}</div>
-                    <div className="text-xs text-ink-3">自 {s.start}</div>
-                  </div>
-                  <div className={`num w-24 flex-none text-right font-semibold ${s.pnl == null ? 'text-ink-3' : s.pnl >= 0 ? 'text-up' : 'text-down'}`}>
-                    {s.pnl == null ? '—' : `${sgn(s.pnl)}`}
-                  </div>
-                </div>
-              ))
-            )}
-          </Card>
-
-          {/* 账户时间线（账户级动态；失败行可下钻到执行级事件详情） */}
-          <div id="account-timeline" className="scroll-mt-4">
-          <SectionLabel>账户时间线 · 你不在时发生了什么</SectionLabel>
-          <Card className="px-6 py-4">
-            {!bindings.data && bindings.loading ? (
-              <><Skeleton className="h-4 w-full" /><Skeleton className="mt-3 h-4 w-4/5" /><Skeleton className="mt-3 h-4 w-3/5" /></>
-            ) : bindings.error ? (
-              <ErrorNotice title="绑定时间线加载失败" error={bindings.error} onRetry={bindings.refresh} />
-            ) : events.length === 0 ? (
-              <p className="text-[14px] text-ink-3">本区间无异常事件。</p>
-            ) : (
-              <div className="relative pl-[22px]">
-                <div className="absolute left-1.5 top-1.5 bottom-1.5 w-0.5 bg-line" />
-                {events.map((e, i) => {
-                  const clickable = e.kind === 'fail' && Boolean(e.executionId)
-                  return (
-                    <div
-                      key={i}
-                      className={`group relative -mx-2 flex items-baseline gap-3 rounded px-2 py-2.5 ${
-                        clickable ? 'cursor-pointer hover:bg-bg-subtle' : ''
-                      }`}
-                      onClick={
-                        clickable
-                          ? () => navigate(`/accounts/${accountId}/executions/${e.executionId}`)
-                          : undefined
-                      }
-                    >
-                      <span className={`absolute -left-[17px] top-[15px] h-[9px] w-[9px] rounded-full border-2 border-surface ${EVENT_DOT_CLASS[e.kind]}`} />
-                      <span className="w-24 flex-none text-xs text-ink-3">{e.date}</span>
-                      <span className="min-w-0 flex-1 text-[15px]">
-                        <span className={`mr-1.5 rounded px-1.5 py-px text-[12px] font-semibold ${EVENT_TAG_CLASS[e.kind]}`}>{e.tag}</span>
-                        {e.text}
-                      </span>
-                      {clickable && (
-                        <span className="flex-none text-sm text-accent opacity-0 transition-opacity group-hover:opacity-100">→</span>
-                      )}
-                    </div>
-                  )
-                })}
-              </div>
-            )}
-          </Card>
-          </div>
-        </>
-      )}
-    </section>
-  )
+      {!parsed && <p role="alert" className="mt-2 text-xs text-warn">费率须大于等于 0 且小于 10000 BP</p>}
+      {draft && dirty && <p className="mt-2 text-xs text-ink-3">参数尚未保存</p>}
+      <ErrorNotice title="参数保存失败" error={saveError} />
+      <ErrorNotice title="账户设置读取失败" error={account.error} onRetry={account.refresh} />
+    </div>
+    <ErrorNotice title={saved ? '参数已保存，收益计算失败' : '收益计算失败'} error={performance.error} variant={data ? 'stale' : 'section'} onRetry={performance.refresh} />
+    {performance.loading && <div className="flex h-[380px] items-center justify-center text-sm text-ink-3">正在计算收益</div>}
+    {data && <div className="py-5" aria-busy={performance.refreshing}>
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+        <div className="text-xs text-ink-3">{data.settings.backtest_weight_type === 'ts' ? '时序' : '截面'} · 单边费率 {Number((data.settings.backtest_fee_rate * 10000).toFixed(8))} BP · 未调整出入金{performance.refreshing ? ' · 计算中' : ''}</div>
+        <Segmented size="sm" value={view} options={VIEWS} onChange={value => withViewTransition(() => { setHover(null); setView(value) })} />
+      </div>
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+        {[['账户收益', accountReturn, '%', 'text-accent'], ['组合回测收益', portfolioReturn, '%', 'text-ink-2'], ['收益差额', difference, ' 个百分点', 'text-ink-1']].map(([label, value, unit, color]) =>
+          <div key={String(label)} className={label === '收益差额' ? 'col-span-2 sm:col-span-1' : ''}><div className={`text-xs ${color}`}>{label}</div><div className="num mt-1 text-2xl font-semibold">{returnText(value as number | null | undefined, String(unit))}</div></div>)}
+      </div>
+      <div className="mt-3 h-5 text-xs text-ink-3">{active?.date.replace('T', ' ') ?? '暂无收益数据'}</div>
+      <PerformanceChart data={data} daily={daily} hoverIndex={hover} onHover={setHover} />
+      <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-ink-3">
+        <span>基准 {data.baseline?.replace('T', ' ') ?? '—'}</span><span>截止 {data.end?.replace('T', ' ') ?? '—'}</span><span>有效回测记录 {data.used_record_count} / 历史记录 {data.record_count}</span>
+      </div>
+      {data.gap && <p role="status" className="mt-3 break-words text-sm text-warn">组合收益自 {data.gap.time.replace('T', ' ')} 中断：{data.gap.reason}{data.gap.symbols.length ? `（${data.gap.symbols.join('、')}）` : ''}</p>}
+      {data.invalid_asset_count > 0 && <p className="mt-2 text-xs text-warn">{data.invalid_asset_count} 条账户资产快照不可用</p>}
+      {data.bindings.length > 0 && <div className="mt-3 flex flex-wrap gap-3 text-xs text-ink-3">{data.bindings.map((b, i) => <span key={i}>{b.time.replace('T', ' ')} · {b.portfolio_id == null ? '解绑' : `组合 #${b.portfolio_id}`}</span>)}</div>}
+    </div>}
+    <div className="border-t border-line py-4">
+      <SectionLabel>近期执行</SectionLabel>
+      <ErrorNotice title="执行记录读取失败" error={activity.error} onRetry={activity.refresh} />
+      <div className="text-sm text-ink-2">成功 {stats.fills} · 空跑 {stats.noops} · 失败 {stats.fails} · 终止 {stats.terminated} · 跳过 {filterScheduleSkips(skips, records, range).length} · 手续费 {stats.fee.toFixed(4)} {stats.currency}</div>
+      <SectionLabel>账户时间线</SectionLabel>
+      <ErrorNotice title="绑定记录读取失败" error={bindings.error} onRetry={bindings.refresh} />
+      {events.length === 0 ? <p className="text-sm text-ink-3">本区间无异常事件</p> : events.map((event, i) => <div key={i} className="flex flex-wrap items-baseline gap-3 border-b border-line py-3 text-sm">
+        <span className="text-xs text-ink-3">{event.date}</span><span className={event.kind === 'fail' ? 'text-warn' : 'text-ink-2'}>{event.tag}</span>
+        {event.kind === 'fail' && event.executionId ? <button className="text-left hover:underline" onClick={() => navigate(`/accounts/${accountId}/executions/${event.executionId}`)}>{event.text}</button> : <span>{event.text}</span>}
+      </div>)}
+    </div>
+  </section>
 }

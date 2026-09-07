@@ -1,0 +1,264 @@
+"""使用真实 WBT 验证收益、缺口与回测设置持久化."""
+
+import asyncio
+from datetime import datetime, timedelta
+from types import SimpleNamespace
+
+import pytest
+import sqlalchemy as sa
+from alembic.migration import MigrationContext
+from alembic.operations import Operations
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+from pydantic import ValidationError
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+from sqlalchemy.pool import NullPool
+from sqlmodel import SQLModel
+
+from axile.server.api.deps import get_db
+from axile.server.api.routes.account_performance import router
+from axile.server.db.models import AccountCreate, AccountUpdate, ExecuteRecord, PortfolioAccount
+from axile.server.db.models.performance import PerformanceSettings
+from axile.server.performance import Observation, build_wbt_input, calculate_performance, observation
+from tests.unit.server._execution_test_support import build_account
+from tests.unit.server.test_initial_migration import _MIGRATIONS_DIR, _load_migration
+
+
+def obs(day, prices=None, target=None, asset=100, **kwargs):
+    return Observation(
+        day,
+        f"exec-{day}",
+        datetime(2026, 1, 1) + timedelta(days=day - 1),
+        asset,
+        target if target is not None else {"A": 1.0},
+        prices or {"A": 100.0},
+        **kwargs,
+    )
+
+
+def run(items, mode="ts", fee=0, range_key="all"):
+    return calculate_performance(
+        items, PerformanceSettings(backtest_weight_type=mode, backtest_fee_rate=fee), range_key
+    )
+
+
+def test_real_wbt_and_account_compound_returns():
+    result = run([obs(1), obs(2, {"A": 110.0}, asset=110), obs(3, {"A": 99.0}, asset=99)])
+    assert result.points[0].account_return == 0
+    assert result.points[-2].account_return == pytest.approx(0.1)
+    assert result.points[-1].account_return == pytest.approx(-0.01)
+    assert result.points[-1].portfolio_return == pytest.approx(-0.01)
+    assert result.points[-1].difference == pytest.approx(0)
+
+
+@pytest.mark.parametrize("mode,expected", [("ts", 0.025), ("cs", 0.05)])
+def test_native_weight_mode_and_long_short(mode, expected):
+    weights = {"A": 1.0, "B": -0.5}
+    result = run([obs(1, {"A": 100.0, "B": 100.0}, weights), obs(2, {"A": 110.0, "B": 110.0}, weights)], mode)
+    assert result.points[-1].portfolio_return == pytest.approx(expected)
+
+
+def test_exit_row_accounts_for_last_holding_return_and_fee():
+    items = [obs(1), obs(2, {"A": 110.0}, {}), obs(3, {"A": 140.0}, {})]
+    frame, gap, _ = build_wbt_input(items)
+    assert gap is None
+    assert frame.iloc[-1]["weight"] == 0
+    assert run(items).points[-1].portfolio_return == pytest.approx(0.1)
+    assert run(items, fee=0.001).points[-1].portfolio_return == pytest.approx(0.099)
+
+
+def test_missing_exit_price_stops_portfolio_but_not_account():
+    items = [obs(1), obs(2, {"B": 10.0}, {"B": 1.0}, 110), obs(3, {"A": 120.0, "B": 11.0}, {"B": 1.0}, 120)]
+    result = run(items)
+    assert result.gap.symbols == ["A"]
+    assert result.used_record_count == 1
+    assert result.points[-1].portfolio_return is None
+    assert result.points[-1].difference is None
+    assert result.points[-1].account_return == pytest.approx(0.2)
+
+
+def test_missing_target_is_not_a_clear():
+    item = obs(2)
+    item.target = None
+    result = run([obs(1), item, obs(3)])
+    assert result.gap.reason == "目标权重缺失或无效"
+    assert result.points[-1].portfolio_return is None
+
+
+def test_range_restarts_after_old_gap_and_has_no_500_record_limit():
+    items = [obs(i + 1, {"A": float(100 + i)}) for i in range(600)]
+    items[2].target = None
+    assert run(items).gap is not None
+    recent = run(items, range_key="30")
+    assert recent.gap is None
+    assert recent.record_count == 600
+    assert recent.used_record_count == 31
+
+
+def test_duplicates_keep_last_record_and_zero_assets_are_not_removed():
+    items = [obs(1), obs(2, asset=110), obs(2, asset=0)]
+    items[-1].id = 99
+    result = run(items)
+    assert result.used_record_count == 2
+    assert result.points[-1].account_return == -1
+
+
+def test_missing_asset_is_null_not_zero_and_later_cumulative_recovers():
+    result = run([obs(1), obs(2, asset=None), obs(3, asset=120)])
+    assert result.points[-2].account_return is None
+    assert result.points[-1].account_return == pytest.approx(0.2)
+    assert result.points[-1].account_daily_return is None
+
+
+def test_intraday_observations_all_reach_wbt():
+    items = [obs(1), obs(2, {"A": 110.0}, asset=110), obs(3, {"A": 121.0}, asset=121)]
+    for i, item in enumerate(items):
+        item.time = datetime(2026, 1, 1, 9 + i)
+    result = run(items)
+    assert result.points[-1].account_return == pytest.approx(0.21)
+    # WBT 原生日内收益为各 BAR 收益之和，适配层不重写引擎口径。
+    assert result.points[-1].portfolio_daily_return == pytest.approx(0.2)
+
+
+@pytest.mark.parametrize("layout", ["nested", "dict", "list"])
+def test_tick_formats_and_failed_records(layout):
+    tick = {"symbol": "A", "bid_price": [99], "ask_price": [101]}
+    result = {"account_assets": {"total_asset": 100}}
+    if layout == "nested":
+        result["symbol_results"] = {"A": {"first_tick": tick}}
+    else:
+        result["first_ticks"] = [tick] if layout == "list" else {"A": tick}
+    record = SimpleNamespace(
+        id=1,
+        execution_id="x",
+        created_at="2026-01-01T01:00:00Z",
+        raw_input={"curr_target": {"A": 1}},
+        raw_result=result,
+        is_success=0,
+    )
+    item = observation(record)
+    assert item.prices == {"A": 100.0}
+    assert item.time.hour == 9
+    tick["book_valid"] = False
+    assert observation(record).prices == {}
+    record.raw_input = {}
+    assert observation(record, {"A": 0.5}).target == {"A": 0.5}
+    record.raw_result["execution_kind"] = "clear_positions"
+    assert observation(record).target == {}
+
+
+@pytest.mark.parametrize("fee", [True, None, "0.01", float("nan"), float("inf"), -0.1, 1.0])
+def test_invalid_settings_rejected(fee):
+    with pytest.raises(ValidationError):
+        PerformanceSettings(backtest_weight_type="ts", backtest_fee_rate=fee)
+
+
+def test_empty_and_single_observation():
+    assert run([]).points == []
+    assert run([obs(1)]).points[-1].portfolio_return == 0
+    assert run([obs(1)]).observation_count == 1
+
+
+def test_account_creation_defaults_and_ordinary_updates_preserve_settings():
+    payload = build_account().model_dump(exclude={"backtest_weight_type", "backtest_fee_rate"})
+    created = AccountCreate.model_validate(payload)
+    assert created.backtest_weight_type == "ts"
+    assert created.backtest_fee_rate == 0
+    account = build_account(backtest_weight_type="cs", backtest_fee_rate=0.0002)
+    account.sqlmodel_update(AccountUpdate(name="renamed").model_dump(exclude_unset=True))
+    assert account.backtest_weight_type == "cs"
+    assert account.backtest_fee_rate == 0.0002
+
+
+def test_two_intraday_observations_are_not_an_empty_chart():
+    items = [obs(1), obs(2, {"A": 110.0}, asset=110)]
+    items[1].time = items[0].time + timedelta(hours=1)
+    result = run(items)
+    assert result.observation_count == 2
+    assert len(result.points) == 2
+    assert result.points[-1].portfolio_return == pytest.approx(0.1)
+
+
+@pytest.mark.parametrize(
+    "source,expected", [("dummy", 100.0), ("real", 100.0), ("assumed", None), ("error", None), ("unavailable", None)]
+)
+def test_only_explicit_degraded_asset_sources_are_excluded(source, expected):
+    record = SimpleNamespace(
+        id=1,
+        execution_id="x",
+        created_at="2026-01-01",
+        raw_input={},
+        raw_result={"account_assets": {"total_asset": 100, "source": source}},
+    )
+    assert observation(record).asset == expected
+
+
+def test_migration_roundtrip_defaults(tmp_path):
+    engine = sa.create_engine(f"sqlite:///{tmp_path / 'migration.db'}")
+    migration = _load_migration(_MIGRATIONS_DIR / "0010_account_performance.py")
+    with engine.begin() as conn:
+        conn.execute(sa.text("CREATE TABLE account (id INTEGER PRIMARY KEY)"))
+        conn.execute(sa.text("INSERT INTO account VALUES (2)"))
+        migration.op = Operations(MigrationContext.configure(conn))
+        migration.upgrade()
+        assert conn.execute(sa.text("SELECT backtest_weight_type, backtest_fee_rate FROM account")).one() == ("ts", 0)
+        migration.downgrade()
+        assert conn.execute(sa.text("SELECT id FROM account")).scalar() == 2
+        migration.upgrade()
+
+
+def test_routes_persist_settings_across_sessions_without_scheduler(tmp_path):
+    engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'account.db'}", poolclass=NullPool)
+    sessions = async_sessionmaker(engine, expire_on_commit=False)
+
+    async def setup():
+        async with engine.begin() as conn:
+            await conn.run_sync(SQLModel.metadata.create_all)
+        async with sessions() as session:
+            session.add(build_account(id=2, account_control_preset="default"))
+            session.add(build_account(id=3, account_control_preset="default"))
+            for i, price in enumerate([100, 110, 99]):
+                session.add(
+                    ExecuteRecord(
+                        account_id=2,
+                        is_success=1,
+                        created_at=f"2026-01-0{i + 1}T09:00:00",
+                        raw_input={"curr_target": {"A": 1}},
+                        raw_result={
+                            "account_assets": {"total_asset": price},
+                            "first_ticks": {"A": {"bid_price": price, "ask_price": price}},
+                        },
+                    )
+                )
+            session.add(PortfolioAccount(account_id=2, portfolio_id=None, created_at="2026-01-02T09:00:00"))
+            await session.commit()
+
+    asyncio.run(setup())
+    app = FastAPI()
+    app.include_router(router, prefix="/account")
+
+    async def db():
+        async with sessions() as session:
+            yield session
+
+    app.dependency_overrides[get_db] = db
+    with TestClient(app) as client:
+        initial = client.get("/account/performance/2").json()
+        assert initial["settings"] == {"backtest_weight_type": "ts", "backtest_fee_rate": 0}
+        assert initial["bindings"][0]["portfolio_id"] is None
+        settings = {"backtest_weight_type": "cs", "backtest_fee_rate": 0.0002}
+        response = client.patch("/account/performance-settings/2", json=settings)
+        assert response.status_code == 200, response.text
+        assert response.json() == settings
+    with TestClient(app) as client:
+        assert client.get("/account/performance/2").json()["settings"] == settings
+        assert client.get("/account/performance/3").json()["settings"]["backtest_weight_type"] == "ts"
+        assert client.get("/account/performance/999").status_code == 404
+        assert client.get("/account/performance/2?range=bad").status_code == 422
+        assert (
+            client.patch(
+                "/account/performance-settings/2", json={**settings, "backtest_weight_type": "bad"}
+            ).status_code
+            == 422
+        )
+    asyncio.run(engine.dispose())

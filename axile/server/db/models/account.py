@@ -15,6 +15,7 @@ from axile.executor.account_control.models import AccountControlOverride
 from axile.executor.models.feishu import FeishuCardConfig
 from axile.executor.models.unified_input import DEFAULT_EXECUTION_TIMEOUT_SECONDS
 from axile.server.db.models.base import PydanticJSONType, now_str
+from axile.server.db.models.performance import FeeRate, WeightType
 
 if TYPE_CHECKING:
     from axile.server.db.models.account_asset import AccountAssetSnapshot
@@ -154,6 +155,8 @@ def _validate_algorithm_config(config: Optional[Dict[str, Any]], field_label: st
 class AccountBase(SQLModel):
     """账户模型共用字段."""
 
+    backtest_weight_type: WeightType = Field(default="ts", sa_column=Column(Text, nullable=False, server_default="ts"))
+    backtest_fee_rate: FeeRate = Field(default=0.0, sa_column=Column(Float, nullable=False, server_default="0"))
     name: str = Field(sa_column=Column(Text, nullable=False), description="账户名称, 必填")
     market: str = Field(
         sa_column=Column(Text, nullable=False),
