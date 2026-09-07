@@ -42,6 +42,23 @@ export function money(v: number, currency: string): string {
   return withCurrency(fmtMoney(v), currency)
 }
 
+/** 滑点 bps：带号、有利为正。 */
+export function fmtBps(v: number): string {
+  return `${v >= 0 ? '+' : '−'}${Math.abs(v).toFixed(2)}bps`
+}
+
+/**
+ * 滑点着色（三态，红绿只留给行情涨跌，故用 accent/ink/warn 表执行质量）。
+ *
+ * 有利为正：``> +0.05`` 吃到价格改善＝accent 蓝「表扬极」；``< -0.05`` 付出成本＝琥珀「报警极」；
+ * 其间视作持平＝中性，安静。补上「表扬极」后，好成交不再和平庸成交同为一片灰。
+ */
+export function bpsCls(v: number): string {
+  if (v > 0.05) return 'text-accent'
+  if (v < -0.05) return 'text-warn'
+  return 'text-ink-3'
+}
+
 /** 把过去的时间戳（ms）格式化为「N 秒前 / N 分钟前」。 */
 export function timeAgo(ts: number | null, now = Date.now()): string {
   if (ts == null) return '—'

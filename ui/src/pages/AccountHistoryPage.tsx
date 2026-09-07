@@ -3,6 +3,7 @@ import { useParams, useViewTransitionState } from 'react-router'
 import { useNavigate } from '@/components/ui/nav'
 import { Card, SectionLabel } from '@/components/ui/Card'
 import { Skeleton } from '@/components/ui/Skeleton'
+import { StatCard } from '@/components/ui/StatCard'
 import { EquityChart, type ChartMarker } from '@/components/viz/EquityChart'
 import { DailyBars } from '@/components/viz/DailyBars'
 import { Segmented } from '@/components/ui/Segmented'
@@ -369,41 +370,5 @@ export function AccountHistoryPage() {
         </>
       )}
     </section>
-  )
-}
-
-function StatCard({
-  k,
-  v,
-  vUnit,
-  vClass = '',
-  sub,
-  subWarn,
-  onSub,
-}: {
-  k: string
-  v: string
-  vUnit?: string
-  vClass?: string
-  sub: string
-  subWarn?: boolean
-  onSub?: () => void
-}) {
-  const subCls = `mt-0.5 text-xs ${subWarn ? 'text-warn' : 'text-ink-3'}`
-  return (
-    <Card className="px-4 py-4">
-      <div className="text-xs text-ink-3">{k}</div>
-      <div className={`num mt-0.5 text-[21px] font-[640] ${vClass}`}>
-        {v}
-        {vUnit && <span className="ml-1 text-[14px] font-normal text-ink-3">{vUnit}</span>}
-      </div>
-      {onSub ? (
-        <button className={`${subCls} cursor-pointer border-0 bg-transparent p-0 hover:underline`} onClick={onSub}>
-          {sub}
-        </button>
-      ) : (
-        <div className={subCls}>{sub}</div>
-      )}
-    </Card>
   )
 }

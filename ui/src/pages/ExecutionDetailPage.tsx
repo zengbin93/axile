@@ -1,5 +1,6 @@
 import { useCallback, useState } from 'react'
-import { useParams } from 'react-router'
+import { useLocation, useParams } from 'react-router'
+import { Link } from '@/components/ui/nav'
 import { Card } from '@/components/ui/Card'
 import { SkeletonLines } from '@/components/ui/Skeleton'
 import { NumberTicker } from '@/components/ui/NumberTicker'
@@ -9,7 +10,7 @@ import { isQuantizedZero, weightText } from '@/features/account/sizingEvidenceMo
 import { usePolling } from '@/lib/hooks/usePolling'
 import { getExecutionArtifacts, getExecutionEvents, getExecutionStatus } from '@/lib/api/executions'
 import { currencyOf } from '@/lib/derive'
-import { displayCurrencyUnit, fmtMoney, withCurrency } from '@/lib/format'
+import { bpsCls, displayCurrencyUnit, fmtBps, fmtMoney, withCurrency } from '@/lib/format'
 import {
   buildExecutionDetail,
   executionHeadline,
@@ -120,23 +121,6 @@ function fmtDuration(sec: number | null): string {
 /** 敞口整数百分数。 */
 function expPct(v: number | null): string {
   return v == null ? '—' : `${Math.round(v)}%`
-}
-
-/** 滑点 bps：带号、有利为正。 */
-function fmtBps(v: number): string {
-  return `${v >= 0 ? '+' : '−'}${Math.abs(v).toFixed(2)}bps`
-}
-
-/**
- * 滑点着色（三态，红绿只留给行情涨跌，故用 accent/ink/warn 表执行质量）。
- *
- * 有利为正：``> +0.05`` 吃到价格改善＝accent 蓝「表扬极」；``< -0.05`` 付出成本＝琥珀「报警极」；
- * 其间视作持平＝中性，安静。补上「表扬极」后，好成交不再和平庸成交同为一片灰。
- */
-function bpsCls(v: number): string {
-  if (v > 0.05) return 'text-accent'
-  if (v < -0.05) return 'text-warn'
-  return 'text-ink-3'
 }
 
 /** 头条：整条链坍缩成的结论 + 诚实来源条。 */
@@ -553,6 +537,10 @@ function Evidence({
  */
 export function ExecutionDetailPage() {
   const { id, executionId } = useParams()
+  const location = useLocation()
+  const journalPath = `/accounts/${Number(id)}/executions`
+  const requestedReturn = (location.state as { journalReturn?: string } | null)?.journalReturn
+  const journalReturn = requestedReturn === journalPath || requestedReturn?.startsWith(`${journalPath}?`) ? requestedReturn : journalPath
   const accountId = Number(id)
   const accounts = useDomainStore((s) => s.accounts)
   const item = accounts?.find((a) => a.account_id === accountId) ?? null
@@ -605,6 +593,7 @@ export function ExecutionDetailPage() {
 
   return (
     <section>
+      <Link to={journalReturn} className="mb-3 inline-block text-[13px] text-accent hover:underline">返回执行记录</Link>
       <div className="flex flex-wrap items-baseline gap-3">
         {/* 执行详情路径含动态段、无法纳入账户名 FLIP 门控（flip=false），结构仍与全域统一。 */}
         <AccountPageTitle
