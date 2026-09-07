@@ -467,6 +467,13 @@ def _run_termination_control_loop(connection: Connection, state: _WorkerBackendS
                 _request_worker_termination(state, signal)
     except (EOFError, OSError):
         return
+    except BaseException as exc:  # noqa: BLE001 - IPC 最外层必须保留所有进程退出原因
+        # 线程异常默认只走 threading.excepthook 写 stderr，多进程管道下容易被
+        # 其他输出撕碎；必须兜底写入 loguru，完整堆栈才能落进日志文件。
+        logger.opt(exception=exc).error(
+            "控制管道监听线程异常退出 | account_id={}",
+            state.account_id,
+        )
 
 
 def run_worker_backend_loop(connection: Connection, account_id: int, control_connection: Connection) -> None:
