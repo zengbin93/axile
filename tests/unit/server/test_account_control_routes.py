@@ -521,3 +521,27 @@ def test_account_write_dtos_forbid_unknown_fields_and_publish_edit_contract() ->
     assert unknown_update.status_code == 422
     assert any(error["loc"][-1] == "unknown" for error in unknown_create.json()["detail"])
     assert any(error["loc"][-1] == "unknown" for error in unknown_update.json()["detail"])
+
+
+def test_account_connection_values_only_expose_declared_non_secret_fields() -> None:
+    """连接编辑只回显声明的非密钥字段，未知扩展也不泄露。"""
+    account = _build_account()
+    account.account_config["private_extension"] = "hidden"
+    public = account_crud_routes._account_public(account)
+    assert public.connection_values["investor_id"] == "test"
+    assert public.connection_values["td_front"] == "tcp://td:1"
+    assert "password" not in public.connection_values
+    assert "auth_code" not in public.connection_values
+    assert "private_extension" not in public.connection_values
+
+
+def test_update_same_channel_preserves_omitted_credentials(monkeypatch: pytest.MonkeyPatch) -> None:
+    """同渠道只改连接地址时，原凭证仍保留。"""
+    monkeypatch.setattr(account_crud_routes, "enqueue_account_runtime_sync", _noop_async)
+    monkeypatch.setattr(account_crud_routes, "reconcile_account_runtime", _synchronized_runtime_sync)
+    session = _RouteSession(_build_account())
+    response = TestClient(_build_app(session)).patch("/account/1", json={"account_config": {"td_front": "tcp://new:1"}})
+    assert response.status_code == 200
+    assert session.account is not None
+    assert session.account.account_config["td_front"] == "tcp://new:1"
+    assert session.account.account_config["password"] == "test"

@@ -157,6 +157,7 @@ export interface Account {
   account_control_preset: string
   account_control_override: AccountControlOverride | null
   account_configured: boolean
+  connection_values?: Record<string, unknown>
   is_started: boolean
   cron_expr: string
   remark: string | null

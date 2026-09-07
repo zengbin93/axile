@@ -91,12 +91,12 @@ class TestResult(BaseModel):
 
 
 class InitSaveRequest(BaseModel):
-    """初始化向导保存载荷（对应 :class:`~axile.common.config.Settings` 的向导字段）."""
+    """初始化向导保存载荷；凭证省略或为 None 时保留现值，告警空串则清除。"""
 
     model_config = ConfigDict(extra="forbid")
 
-    sqlalchemy_database_uri: str
-    exe_err_feishu_key: str = ""
+    sqlalchemy_database_uri: str | None = None
+    exe_err_feishu_key: str | None = None
     environment: Literal["local", "staging", "production"] = "local"
     app_log_dir: str = "./logs"
     axile_log_rotation: str = "1 day"
@@ -272,8 +272,14 @@ def init_save(payload: InitSaveRequest, background_tasks: BackgroundTasks) -> Te
     HTTPException
         数据库地址不合法时返回 422；写入文件失败时返回 500。
     """
+    database_uri = (
+        payload.sqlalchemy_database_uri
+        if payload.sqlalchemy_database_uri is not None
+        else str(settings.sqlalchemy_database_uri)
+    )
+    feishu_key = payload.exe_err_feishu_key if payload.exe_err_feishu_key is not None else settings.exe_err_feishu_key
     try:
-        _DSN_ADAPTER.validate_python(payload.sqlalchemy_database_uri)
+        _DSN_ADAPTER.validate_python(database_uri)
     except ValidationError as exc:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -281,8 +287,8 @@ def init_save(payload: InitSaveRequest, background_tasks: BackgroundTasks) -> Te
         ) from exc
 
     values: dict[str, Any] = {
-        "sqlalchemy_database_uri": payload.sqlalchemy_database_uri,
-        "exe_err_feishu_key": payload.exe_err_feishu_key,
+        "sqlalchemy_database_uri": database_uri,
+        "exe_err_feishu_key": feishu_key,
         "environment": payload.environment,
         "app_log_dir": payload.app_log_dir,
         "axile_log_rotation": payload.axile_log_rotation,

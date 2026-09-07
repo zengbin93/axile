@@ -64,12 +64,17 @@ router = APIRouter()
 
 def _account_public(account: Account) -> AccountPublic:
     """将持久化账户转换为不含凭证的读取 DTO。"""
-    # ``AccountPublic`` 有两个从凭证派生的字段，并不属于 ORM 模型；先补全输入
+    # ``AccountPublic`` 有从凭证派生的摘要字段，并不属于 ORM 模型；先补全输入
     # 再校验，避免 Pydantic 在响应构造阶段把已提交的更新误报为 500。
     return AccountPublic.model_validate(
         account.model_dump()
         | {
             "account_configured": bool(account.account_config),
+            "connection_values": {
+                field.name: account.account_config[field.name]
+                for field in get_channel(str(account.trade_channel)).descriptor.account_form.fields
+                if field.kind != "secret" and field.name in account.account_config
+            },
             "feishu_configured": bool(account.feishu_key),
         }
     )
@@ -687,11 +692,13 @@ async def update_account(
         # 账户控制 binding 要按“更新后的目标状态”校验，不能只看当前库里的旧值。
         next_trade_channel, next_preset = _resolve_next_account_control_binding(db_account, account)
         account_routes._validate_account_control_binding(next_trade_channel, next_preset)
-        # PATCH 的连接配置是增量替换：未给出的密钥与其他字段保留原值，避免前端为
-        # 了编辑一个非敏感字段而重新取得或回传凭证。
+        # 同渠道 PATCH 保留未提交的凭证；切换渠道则以新配置替换，避免旧渠道
+        # 专属字段混入新模型校验。
         next_account_config = (
             db_account.account_config
             if account.account_config is None
+            else account.account_config
+            if next_trade_channel != db_account.trade_channel
             else {**db_account.account_config, **account.account_config}
         )
         normalized_account_config = _validate_channel_account_config(next_trade_channel, next_account_config)

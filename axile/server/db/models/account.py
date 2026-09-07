@@ -331,7 +331,7 @@ class AccountPublic(SQLModel):
     """账户读取响应。
 
     与持久化模型刻意分离。连接配置和 webhook 是可复用凭证，绝不能通过读取接口
-    返回；调用方只能获知其是否已经配置。
+    返回；调用方只能获知凭证是否已经配置，以及渠道声明的非密钥连接字段。
     """
 
     id: Optional[int]
@@ -341,6 +341,7 @@ class AccountPublic(SQLModel):
     account_control_preset: str
     account_control_override: AccountControlOverride | None = None
     account_configured: bool = False
+    connection_values: dict[str, Any] = Field(default_factory=dict)
     is_started: bool
     cron_expr: str
     remark: Optional[str] = None

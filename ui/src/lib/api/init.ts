@@ -94,6 +94,15 @@ export function saveExecutionAlert(exeErrFeishuKey: string): Promise<TestResult>
 }
 
 /** 保存初始化配置；成功后后端将自退出并由 supervisor 拉起重启。 */
-export function saveInit(values: InitValues): Promise<TestResult> {
+export function saveInit(values: Omit<InitValues, 'sqlalchemy_database_uri' | 'exe_err_feishu_key'> & Partial<Pick<InitValues, 'sqlalchemy_database_uri' | 'exe_err_feishu_key'>>): Promise<TestResult> {
   return apiSend<TestResult>('POST', '/init/save', values)
+}
+
+/** 高级设置只提交新输入的数据库地址，告警由独立表单维护。 */
+export function initSavePayload(values: InitValues, isEdit: boolean) {
+  return {
+    ...values,
+    sqlalchemy_database_uri: isEdit ? (values.sqlalchemy_database_uri.trim() || undefined) : values.sqlalchemy_database_uri,
+    exe_err_feishu_key: isEdit ? undefined : values.exe_err_feishu_key,
+  }
 }

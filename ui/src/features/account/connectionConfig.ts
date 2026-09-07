@@ -3,12 +3,12 @@ import type { Account, ChannelAccountField } from '@/types/api'
 
 /** 初始化连接编辑草稿；敏感值绝不带入输入框。 */
 export function initialConnectionDraft(
-  _account: Pick<Account, 'account_configured'>,
+  account: Pick<Account, 'account_configured' | 'connection_values'>,
   fields: ChannelAccountField[],
 ): Record<string, unknown> {
   return Object.fromEntries(fields.map((field) => [
     field.name,
-    field.default ?? '',
+    field.kind === 'secret' ? '' : (account.connection_values?.[field.name] ?? field.default ?? ''),
   ]))
 }
 

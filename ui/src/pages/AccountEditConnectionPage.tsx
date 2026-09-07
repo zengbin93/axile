@@ -72,7 +72,7 @@ export function AccountEditConnectionPage() {
     })
   }
   const nextConfig = mergedConnectionConfig(acc, fields, draft)
-  const changed = !sameConnectionConfig(nextConfig, initialConnectionDraft(acc, fields))
+  const changed = !sameConnectionConfig(draft, initialConnectionDraft(acc, fields))
 
   const validate = () => {
     const nextErrors: Record<string, string> = {}
@@ -103,11 +103,11 @@ export function AccountEditConnectionPage() {
     if (!validate()) return toast('请检查连接设置')
     setSaveError(null)
     try {
-      await updateAccount(accountId, { account_config: nextConfig })
+      const updated = await updateAccount(accountId, { account_config: nextConfig })
       toast('连接设置已更新')
       void refreshAccounts()
       account.refresh()
-      setDraft(initialConnectionDraft(acc, fields))
+      setDraft(initialConnectionDraft(updated, fields))
     } catch (caught) {
       setSaveError(caught instanceof Error ? caught : new Error(String(caught)))
     }

@@ -277,3 +277,22 @@ def test_calendar_initialization_field_is_removed(client: TestClient) -> None:
     )
 
     assert response.status_code == 422
+
+
+def test_advanced_save_preserves_omitted_credentials(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """只改日志目录时保留现有数据库与告警凭证。"""
+    toml_path = tmp_path / "config.toml"
+    monkeypatch.setattr(cfg, "CONFIG_TOML_PATH", toml_path)
+    monkeypatch.setattr(cfg.settings, "sqlalchemy_database_uri", "sqlite+aiosqlite:///custom.db")
+    monkeypatch.setattr(cfg.settings, "exe_err_feishu_key", "existing-key")
+    monkeypatch.setattr(init_module, "_restart_process", lambda: None)
+
+    response = client.post("/api/v1/init/save", json={"app_log_dir": "./new-logs"})
+
+    assert response.status_code == 200
+    written = toml_path.read_text()
+    assert 'sqlalchemy_database_uri = "sqlite+aiosqlite:///custom.db"' in written
+    assert 'exe_err_feishu_key = "existing-key"' in written
+    assert 'app_log_dir = "./new-logs"' in written
