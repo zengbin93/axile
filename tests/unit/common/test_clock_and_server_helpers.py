@@ -11,6 +11,7 @@ from axile.server import initial_data
 from axile.server.api import deps
 from axile.server.api.routes import utils as route_utils
 from axile.server.core import std_log_config
+from axile.server.execution import account_runtime_sync
 
 
 class _FakeScalarResult:
@@ -80,30 +81,31 @@ def test_get_db_yields_session_from_sessionlocal(monkeypatch: pytest.MonkeyPatch
     asyncio.run(scenario())
 
 
-def test_init_scheduler_recreates_jobs_for_all_accounts(monkeypatch: pytest.MonkeyPatch) -> None:
-    """启动期间应根据已持久化账户重建调度任务；空 cron 跳过."""
-    account_a = SimpleNamespace(cron_expr="*/5 * * * *")
-    account_b = SimpleNamespace(cron_expr="0 * * * *")
-    account_blank = SimpleNamespace(cron_expr="")
-    create_calls: list[tuple[object, object, list[str]]] = []
+def test_init_scheduler_recovers_runtime_for_all_accounts(monkeypatch: pytest.MonkeyPatch) -> None:
+    """启动应恢复全部持久化账户的运行态，空 cron 账户也需要对齐 worker。"""
+    account_a = SimpleNamespace(id=1, cron_expr="*/5 * * * *")
+    account_b = SimpleNamespace(id=2, cron_expr="0 * * * *")
+    account_blank = SimpleNamespace(id=3, cron_expr="")
+    context = _FakeSessionContext([account_a, account_blank, account_b])
+    recovery_calls: list[tuple[object, object, object]] = []
 
     monkeypatch.setattr(
         initial_data,
         "SessionLocal",
-        lambda: _FakeSessionContext([account_a, account_blank, account_b]),
+        lambda: context,
     )
-    monkeypatch.setattr(initial_data, "parse_cron_expr", lambda expr: [f"parsed:{expr}"])
 
-    async def fake_create_job(scheduler: object, account: object, cron_expr: list[str]) -> None:
-        create_calls.append((scheduler, account, cron_expr))
+    async def fake_reconcile(session: object, scheduler: object, account: object) -> None:
+        recovery_calls.append((session, scheduler, account))
 
-    monkeypatch.setattr(initial_data, "create_job", fake_create_job)
+    monkeypatch.setattr(account_runtime_sync, "reconcile_account_runtime", fake_reconcile)
 
     asyncio.run(initial_data.init_scheduler())
 
-    assert create_calls == [
-        (initial_data.scheduler, account_a, ["parsed:*/5 * * * *"]),
-        (initial_data.scheduler, account_b, ["parsed:0 * * * *"]),
+    assert recovery_calls == [
+        (context.session, initial_data.scheduler, account_a),
+        (context.session, initial_data.scheduler, account_blank),
+        (context.session, initial_data.scheduler, account_b),
     ]
 
 
