@@ -10,7 +10,7 @@ import { AccountPageTitle } from '@/features/account/pageHead'
 import { FeeControl } from '@/features/history/FeeControl'
 import { getAccount } from '@/lib/api/accounts'
 import { getPortfolios } from '@/lib/api/portfolios'
-import { shanghaiLabel } from '@/features/history/costs'
+import { shanghaiDay, shanghaiLabel } from '@/features/history/costs'
 import { reconcileSelection, type ChartSelection } from '@/features/history/chartModel'
 import { CostDiagnostics } from '@/features/history/CostDiagnostics'
 import { getPerformanceCosts, selectionQuery, savePerformanceSettings } from '@/lib/api/performance'
@@ -123,9 +123,11 @@ function AccountHistory({ accountId }: { accountId: number }) {
           channel={account.data?.trade_channel ?? item?.trade_channel}
           market={account.data?.market ?? item?.market}
         />
-        <span className="shrink-0 text-xs text-ink-3">
-          {snapshot?.data_until ? `数据截止 ${shanghaiLabel(snapshot.data_until)}` : '暂无绩效快照'}
-        </span>
+        {data ? <dl className="flex min-w-0 flex-wrap items-baseline text-xs text-ink-3">
+          <div className="whitespace-nowrap"><dt className="sr-only">基准</dt><dd className="inline">{data.baseline ? <time dateTime={data.baseline} title={shanghaiLabel(data.baseline)}>{shanghaiDay(data.baseline)}</time> : '—'}</dd><span aria-hidden="true">&nbsp;→&nbsp;</span><dt className="sr-only">截止</dt><dd className="inline">{data.end ? <time dateTime={data.end} title={shanghaiLabel(data.end)}>{shanghaiDay(data.end)}</time> : '—'}</dd><span aria-hidden="true">&nbsp;·</span></div>
+          <div className="whitespace-nowrap"><dt className="sr-only">有效回测记录</dt><dd className="inline">回测 {data.backtest_included ? data.used_record_count : 0}</dd><span aria-hidden="true">&nbsp;·</span></div>
+          <div className="whitespace-nowrap"><dt className="sr-only">历史记录</dt><dd className="inline">历史 {data.record_count}</dd></div>
+        </dl> : <span className="shrink-0 text-xs text-ink-3">{snapshot?.data_until ? `数据截止 ${shanghaiLabel(snapshot.data_until)}` : '暂无绩效快照'}</span>}
       </div>
       <div className="flex flex-wrap items-center gap-2">
         <Segmented size="sm" value={range} options={RANGES} onChange={value => withViewTransition(() => { setSelection(null); setRange(value) })} />
@@ -146,9 +148,6 @@ function AccountHistory({ accountId }: { accountId: number }) {
     <ErrorNotice title="区间成本读取失败" error={intervalCosts.error} variant="compact" onRetry={intervalCosts.refresh} />
     {data && <div className="pb-4">
       <PerformanceChart key={range} data={data} daily={daily} costs={costs} intervalCost={intervalCosts.error || intervalCosts.loading ? null : intervalCosts.data?.summary ?? null} onSelect={setSelection} selection={selection} portfolioNames={portfolioNames} controls={controls} />
-      <details className="mt-2 text-xs text-ink-3"><summary className="min-h-9 cursor-pointer py-2">数据明细</summary><div className="flex flex-wrap gap-x-4 gap-y-1">
-        <span>基准 {data.baseline?.replace('T', ' ') ?? '—'}</span><span>截止 {data.end?.replace('T', ' ') ?? '—'}</span><span>{data.backtest_included ? `有效回测记录 ${data.used_record_count} / ` : ''}历史记录 {data.record_count}</span>
-      </div></details>
       {data.gap && <p role="status" className="mt-3 break-words text-sm text-warn">组合收益自 {data.gap.time.replace('T', ' ')} 中断：{data.gap.reason}{data.gap.symbols.length ? `（${data.gap.symbols.join('、')}）` : ''}</p>}
       {data.invalid_asset_count > 0 && <p className="mt-2 text-xs text-warn">{data.invalid_asset_count} 条账户资产快照不可用</p>}
     </div>}
