@@ -73,7 +73,7 @@ async def account_rebalance_plan(session: SessionDep, account_id: int) -> Accoun
         await session.execute(
             select(AccountAssetSnapshot)
             .where(AccountAssetSnapshot.account_id == account_id)
-            .order_by(AccountAssetSnapshot.id.desc())
+            .order_by(col(AccountAssetSnapshot.id).desc())
             .limit(1)
         )
     ).scalar_one_or_none()
