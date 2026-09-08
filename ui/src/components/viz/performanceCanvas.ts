@@ -3,8 +3,8 @@ import { axisPercent, niceReturnAxis } from '@/features/history/performance'
 import { amount, shanghaiTime, type CostSummary } from '@/features/history/costs'
 import { pointTime, timeLabel, type ChartSelection, type Viewport } from '@/features/history/chartModel'
 
-export const CHART_HEIGHT = 510
-export const PLOT = { left: 12, right: 78, top: 16, bottom: 254, binding: 283, bindingHeight: 24, costTop: 339, costBottom: 414, navTop: 458, navBottom: 492 }
+export const CHART_HEIGHT = 600
+export const PLOT = { left: 12, right: 78, top: 16, bottom: 379, binding: 408, bindingHeight: 24, costTop: 464, costBottom: 504, navTop: 548, navBottom: 582 }
 export type SeriesKey = 'account_return' | 'portfolio_return' | 'account_daily_return' | 'portfolio_daily_return'
 export interface CanvasTheme { bg: string; surface: string; ink: string; muted: string; line: string; accent: string; warn: string; fill: string; font: string }
 export interface ChartScene {
@@ -75,7 +75,7 @@ function textFit(ctx: CanvasRenderingContext2D, text: string, width: number): st
 
 function drawBindings(ctx: CanvasRenderingContext2D, scene: ChartScene) {
   const { data, width, viewport, theme } = scene
-  ctx.fillStyle = theme.muted; ctx.fillText('组合绑定', PLOT.left, 271)
+  ctx.fillStyle = theme.muted; ctx.fillText('组合绑定', PLOT.left, PLOT.binding - 12)
   data.bindings.forEach((binding, i) => {
     const start = Math.max(PLOT.left, xPosition(shanghaiTime(binding.time), width, viewport))
     const end = Math.min(plotRight(width), xPosition(i + 1 < data.bindings.length ? shanghaiTime(data.bindings[i + 1].time) : viewport.end, width, viewport))
@@ -122,7 +122,7 @@ function drawReturns(ctx: CanvasRenderingContext2D, scene: ChartScene) {
 
 function drawCosts(ctx: CanvasRenderingContext2D, scene: ChartScene) {
   const { data, times, costs, width, viewport, theme } = scene
-  ctx.fillStyle = theme.muted; ctx.fillText('每日滑点成本', PLOT.left, 329)
+  ctx.fillStyle = theme.muted; ctx.fillText('每日滑点成本', PLOT.left, PLOT.costTop - 10)
   const days = data.points.flatMap((p, i) => (i === data.points.length - 1 || p.date.slice(0, 10) !== data.points[i + 1].date.slice(0, 10)) && times[i] >= viewport.start && times[i] <= viewport.end ? [{ p, time: times[i] }] : [])
   const values = days.flatMap(({ p }) => { const v = costs?.get(p.date.slice(0, 10))?.cost; return v == null ? [] : [v] })
   if (!values.length) {
@@ -160,7 +160,7 @@ function drawTimeAxis(ctx: CanvasRenderingContext2D, scene: ChartScene, exclude?
     ctx.textAlign = i === 0 ? 'left' : i === count ? 'right' : 'center'
     const x = PLOT.left + available * i / count, textWidth = ctx.measureText(label).width
     const left = x - (i === 0 ? 0 : i === count ? textWidth : textWidth / 2)
-    if (!exclude || left + textWidth < exclude.left || left > exclude.right) ctx.fillText(label, x, 439)
+    if (!exclude || left + textWidth < exclude.left || left > exclude.right) ctx.fillText(label, x, PLOT.costBottom + 25)
   }
   ctx.textAlign = 'left'
 }
@@ -230,8 +230,8 @@ export function drawOverlay(canvas: HTMLCanvasElement, scene: ChartScene, hover:
     ctx.fillStyle = theme.ink; ctx.fillText(axisPercent(value, axis.step), right + 8, cursor.y + 4)
     const label = timeLabel(cursor.time), labelWidth = ctx.measureText(label).width + 12
     const labelX = Math.max(PLOT.left, Math.min(right - labelWidth, x - labelWidth / 2))
-    ctx.fillStyle = theme.ink; ctx.fillRect(labelX, 424, labelWidth, 22)
-    ctx.fillStyle = theme.bg; ctx.fillText(label, labelX + 6, 439)
+    ctx.fillStyle = theme.ink; ctx.fillRect(labelX, PLOT.costBottom + 10, labelWidth, 22)
+    ctx.fillStyle = theme.bg; ctx.fillText(label, labelX + 6, PLOT.costBottom + 25)
     return
   }
   if (hover == null || !data.points[hover] || selection?.kind === 'execution') return
@@ -251,10 +251,10 @@ export function drawOverlay(canvas: HTMLCanvasElement, scene: ChartScene, hover:
   const label = timeLabel(times[hover])
   const labelWidth = ctx.measureText(label).width + 12
   const labelX = Math.max(PLOT.left, Math.min(right - labelWidth, x - labelWidth / 2))
-  ctx.fillStyle = theme.bg; ctx.fillRect(PLOT.left, 423, right - PLOT.left, 25)
+  ctx.fillStyle = theme.bg; ctx.fillRect(PLOT.left, PLOT.costBottom + 9, right - PLOT.left, 25)
   drawTimeAxis(ctx, scene, { left: labelX - 8, right: labelX + labelWidth + 8 })
-  ctx.fillStyle = theme.ink; ctx.fillRect(labelX, 424, labelWidth, 22)
-  ctx.fillStyle = theme.bg; ctx.fillText(label, labelX + 6, 439)
+  ctx.fillStyle = theme.ink; ctx.fillRect(labelX, PLOT.costBottom + 10, labelWidth, 22)
+  ctx.fillStyle = theme.bg; ctx.fillText(label, labelX + 6, PLOT.costBottom + 25)
 }
 
 export function bindingAt(data: AccountPerformance, time: number) {
