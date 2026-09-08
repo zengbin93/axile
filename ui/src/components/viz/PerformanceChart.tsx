@@ -21,6 +21,8 @@ interface Props {
 type DragKind = 'pan' | 'compare' | 'start' | 'end' | 'nav' | 'navStart' | 'navEnd'
 interface Drag { kind: DragKind; x: number; y: number; viewport: Viewport; anchor: number; moved: boolean; pending: ChartSelection; bindingTime: number | null }
 
+const slippageCostAmount = (value: number | null) => value == null ? '—' : value.toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+
 function ClearSelectionButton({ onClick }: { onClick: () => void }) {
   return <button type="button" onClick={onClick} className="inline-flex h-9 shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded px-2 text-xs text-ink-2 hover:bg-fill focus-visible:outline-2 focus-visible:outline-accent"><X size={16} aria-hidden="true" />取消选择</button>
 }
@@ -228,7 +230,7 @@ function CanvasPerformanceChart({ data, daily, costs, intervalCost, selection, o
       <span>回测 <b className="font-medium">{returnText(portfolio)}</b></span>
       <span>收益差 <b className="font-medium">{returnText(account != null && portfolio != null ? portfolio - account : null, ' 个百分点')}</b></span>
       <span>{interval ? '区间' : '当日'}成交额 {amount(costs ? readingCost?.value ?? null : null)}</span>
-      <span className={readingCost?.cost != null && readingCost.cost > 0 ? 'text-warn' : ''}>{readingCost && readingCost.covered < readingCost.count ? '已知滑点成本' : '滑点成本'} {amount(costs ? readingCost?.cost ?? null : null)}</span>
+      <span className={readingCost?.cost != null && readingCost.cost > 0 ? 'text-warn' : ''}>{readingCost && readingCost.covered < readingCost.count ? '已知滑点成本' : '滑点成本'} {slippageCostAmount(costs ? readingCost?.cost ?? null : null)}</span>
       <span className="text-ink-3">{costs == null || (interval && !summary) ? '成本数据未就绪' : readingCost ? coverageText(readingCost) : '无成交记录'}</span>
       {interval && summary && <><span>手续费 {feeText(summary)}</span>{estimated > 0 && <span className="text-warn">{estimated} 笔使用执行时间</span>}</>}
     </div>
@@ -297,7 +299,7 @@ function CanvasPerformanceChart({ data, daily, costs, intervalCost, selection, o
         <div className="mb-2 text-ink-3">{pointLabel(point)}</div>
         <div className="flex justify-between gap-4"><span className="text-accent">账户</span><span>{returnText(point[keys[0]])}</span></div>
         <div className="flex justify-between gap-4"><span>回测</span><span>{returnText(point[keys[1]])}</span></div>
-        <div className="flex justify-between gap-4"><span>当日滑点成本</span><span>{amount(daySummary?.cost ?? null)}</span></div>
+        <div className="flex justify-between gap-4"><span>当日滑点成本</span><span>{slippageCostAmount(daySummary?.cost ?? null)}</span></div>
         <div className="mt-2 break-words border-t border-line pt-2">{bindingName}</div>
         {binding && <div className="mt-1 text-[11px] text-ink-3">{binding.binding.time.replace('T', ' ')}<br />→ {binding.end?.replace('T', ' ') ?? '当前'}</div>}
         </>}
