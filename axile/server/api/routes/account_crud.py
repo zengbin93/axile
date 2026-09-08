@@ -35,7 +35,6 @@ from axile.server.db.models import (
     PortfolioAccount,
     PortfolioAccountListPublic,
     PortfolioAccountPublic,
-    now_str,
 )
 from axile.server.execution.account_runtime_sync import enqueue_account_runtime_sync, reconcile_account_runtime
 from axile.server.execution.ctp_channels import drop_account_worker
@@ -48,10 +47,9 @@ from axile.server.execution.registry import (
 )
 from axile.server.execution.scheduler import delete_job
 from axile.server.integrity import plan_executable_target
+from axile.server.performance_analysis import read_performance_summaries
 from axile.server.repositories import (
     add_record_portfolio_account,
-    get_account_asset_snapshots_before_for_accounts,
-    get_earliest_account_asset_snapshots_since_for_accounts,
     get_portfolios_every_account,
     get_recent_account_asset_snapshots_for_accounts,
     get_recent_execute_records_for_accounts,
@@ -337,104 +335,12 @@ async def list_accounts(session: SessionDep) -> AccountListPublic:
     return AccountListPublic(data=[_account_public(account) for account in accounts])
 
 
-# 权益迷你线的取数窗口与降采样目标。窗口取近端 N 条资产快照（本账户 ≈ 全历史，活跃账户 ≈ 近数日），
-# 让 Hero/舰队卡的迷你线与「回看·绩效」大图（``limit=500`` 全量、点序均匀）同一形状，而非仅
-# 最近 20 条那截平尾；再等距降采样到定长，控制 payload 与绘制点数。
-_EQUITY_WINDOW = 200
-_EQUITY_POINTS = 60
-
-
-def _downsample_series(values: list[float], target: int) -> list[float]:
-    """把权益序列保极值降采样到约 ``target`` 点, 峰谷不丢、含首末端点.
-
-    分桶后每桶取 ``min`` 与 ``max`` 两个极值点、按原始序位先后排列，故每一段的最高/最低
-    都不会被抽点跳过（等距抽点会漏掉桶内尖峰）；首末端点强制保真，保证右端与当前权益一致、
-    左端为窗口起点。输出点数约为 ``target``（桶内单调或单点时该桶只出一点，故可能略少）。
-
-    Parameters
-    ----------
-    values : list[float]
-        时间正序的权益序列。
-    target : int
-        目标点数（``>= 4``）。
-
-    Returns
-    -------
-    list[float]
-        约 ``target`` 点的降采样序列；原序列不超过 ``target`` 或 ``target < 4`` 时原样返回。
-    """
-    n = len(values)
-    if n <= target or target < 4:
-        return values
-    # 预留首末两枚端点，其余交给桶内极值。
-    buckets = (target - 2) // 2
-    out: list[float] = [values[0]]
-    inner = n - 2  # 中段索引 1..n-2
-    for b in range(buckets):
-        lo = 1 + b * inner // buckets
-        hi = 1 + (b + 1) * inner // buckets
-        if lo >= hi:
-            continue
-        i_min = min(range(lo, hi), key=lambda k: values[k])
-        i_max = max(range(lo, hi), key=lambda k: values[k])
-        # 桶内两极值按序位先后画，单调/单点桶去重后只出一点。
-        out.extend(values[k] for k in sorted({i_min, i_max}))
-    out.append(values[-1])
-    return out
-
-
 def _safe_total_asset(assets: dict[str, Any]) -> float:
-    """从资产快照中容错读取总权益, 非法值回退为 0.0."""
+    """读取持仓计算需要的实时总权益。"""
     try:
         return float(assets.get("total_asset") or 0.0)
     except (TypeError, ValueError):
         return 0.0
-
-
-def _first_valid_total_asset(snapshots: list[AccountAssetSnapshot]) -> float | None:
-    """返回快照序列中第一条有效（>0）的总权益；均无则 ``None``。"""
-    for snapshot in snapshots:
-        total = _safe_total_asset(snapshot.assets)
-        if total > 0:
-            return total
-    return None
-
-
-def _today_pct_from_baselines(
-    current_total: float,
-    before_records: list[AccountAssetSnapshot],
-    since_records: list[AccountAssetSnapshot],
-) -> float | None:
-    """
-    由已批量取回的基准记录计算「今日」权益涨跌百分比.
-
-    Parameters
-    ----------
-    current_total : float
-        当前权益（取自最近一条有效快照）。
-    before_records : list[ExecuteRecord]
-        今天 00:00 之前的最近若干条记录（最新在前），用于取「昨收」基准。
-    since_records : list[ExecuteRecord]
-        今天 00:00 起最早的若干条记录（最早在前），用于取「今开」基准。
-
-    Returns
-    -------
-    float | None
-        今日涨跌百分比；当前权益或基准不可用（≤0）时返回 ``None``。
-
-    Notes
-    -----
-    与 :func:`_today_pct` 的口径完全一致（昨收优先、退回今开），只是把取数与计算
-    拆开，让仪表盘能一次批量取回全部账户的基准记录，消除 N+1。
-    """
-    if current_total <= 0:
-        return None
-    baseline = _first_valid_total_asset(before_records)
-    if baseline is None:
-        baseline = _first_valid_total_asset(since_records)
-    if baseline is None or baseline <= 0:
-        return None
-    return (current_total - baseline) / baseline * 100.0
 
 
 @router.get("/dashboard", response_model=AccountDashboardPublic)
@@ -456,31 +362,20 @@ async def account_dashboard(session: SessionDep, sched: SchedDep) -> AccountDash
 
     Notes
     -----
-    账户名称与备注取自账户主表；权益与持仓取自各账户最近一条执行记录的
-    ``raw_result.account_assets`` 快照，``next_run_time`` 取自 APScheduler；把原本
-    前端对每个账户分别发起的多次请求合并为一次，避免舰队页 N 账户 × 数次请求。
-
-    执行记录、资产快照、目标快照与今日基准都用窗口函数**批量**取回，而不是在
-    账户循环里逐账户查询——后者是 N+1，账户越多查询数线性增长。
+    卡片金额、日收益与曲线来自已发布绩效快照；持仓与偏离计算继续使用当前资产。
+    执行记录、资产、目标与绩效均批量读取，避免逐账户查询。
     """
     accounts = (await session.execute(select(Account))).scalars().all()
     bindings = await get_portfolios_every_account(session)
 
     account_ids = [cast("int", account.id) for account in accounts]
-    day_start = f"{now_str()[:10]}T00:00:00"
+    performance_by_account = await read_performance_summaries(session, account_ids)
     recent_records_by_account = await get_recent_execute_records_for_accounts(session, account_ids, limit=1)
-    recent_by_account = await get_recent_account_asset_snapshots_for_accounts(
-        session, account_ids, limit=_EQUITY_WINDOW
-    )
+    recent_by_account = await get_recent_account_asset_snapshots_for_accounts(session, account_ids, limit=1)
     target_pairs = [
         (account_id, portfolio_id) for account_id, portfolio_id in bindings.items() if portfolio_id is not None
     ]
     targets_by_account = await get_latest_account_target_snapshots_for_accounts(session, target_pairs)
-    before_by_account = await get_account_asset_snapshots_before_for_accounts(session, account_ids, day_start, limit=5)
-    since_by_account = await get_earliest_account_asset_snapshots_since_for_accounts(
-        session, account_ids, day_start, limit=5
-    )
-
     items: list[AccountDashboardItemPublic] = []
     for account in accounts:
         account_id = cast("int", account.id)
@@ -496,20 +391,7 @@ async def account_dashboard(session: SessionDep, sched: SchedDep) -> AccountDash
             (abs(float(pos.get("market_value") or 0.0)) for pos in positions if isinstance(pos, dict)),
             reverse=True,
         )[:12]
-        # 走势跨整个取数窗口、只取有快照的点（避免失败记录插入假的 0），再降采样到定长——
-        # 与「回看·绩效」大图同形，而非仅最近 20 条那截平尾。
-        equity_full = [_safe_total_asset(snapshot.assets) for snapshot in reversed(recent)]
-        equity_series = _downsample_series(equity_full, _EQUITY_POINTS)
-
-        # 「今日」涨跌按自然日锚定（昨收/今开为基准），服务端一处算准，避免前端末两点相减乱跳。
-        # 基准记录已在循环外批量取回，这里只做纯计算。
-        today_pct = _today_pct_from_baselines(
-            _safe_total_asset(assets),
-            before_by_account.get(account_id, []),
-            since_by_account.get(account_id, []),
-        )
-
-        plugin = get_channel(account.trade_channel)
+        plugin = get_channel(str(account.trade_channel))
         currency = plugin.descriptor.currency
 
         job = sched.get_job(str(account_id))  # type: ignore[no-untyped-call]
@@ -580,7 +462,7 @@ async def account_dashboard(session: SessionDep, sched: SchedDep) -> AccountDash
                 currency=str(currency),
                 holdings_count=holdings_count,
                 position_weights=position_weights,
-                equity_series=equity_series,
+                performance=performance_by_account.get(account_id, {}),
                 asset_observed_at=latest_snapshot.created_at if latest_snapshot is not None else None,
                 last_is_success=latest.is_success if latest is not None else None,
                 last_exec_at=latest.created_at if latest is not None else None,
@@ -592,7 +474,6 @@ async def account_dashboard(session: SessionDep, sched: SchedDep) -> AccountDash
                 running_status=running_status,
                 pending_execution_id=pending_execution_id,
                 pending_kind=pending_kind,
-                today_pct=today_pct,
             )
         )
 

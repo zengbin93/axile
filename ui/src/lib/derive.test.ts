@@ -18,7 +18,6 @@ function item(over: Partial<AccountDashboardItem>): AccountDashboardItem {
     currency: 'CNY',
     holdings_count: 0,
     position_weights: [],
-    equity_series: [],
     last_is_success: null,
     last_exec_at: null,
     last_output_status: null,

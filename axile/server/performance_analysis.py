@@ -20,7 +20,7 @@ from axile.server.db.models.performance import PerformanceBinding, PerformanceSe
 from axile.server.performance import calculate_performance, local_time, observation
 from axile.server.performance_costs import SHANGHAI, daily_costs, project_execution, summarize, timestamp
 
-LOGIC_VERSION = "4"
+LOGIC_VERSION = "5"
 ENGINE_VERSION = version("wbt")
 RETRY_DELAYS = (5, 30, 120)
 
@@ -58,12 +58,11 @@ async def read_snapshot(session, account_id: int, range_key: str) -> dict:
         .mappings()
         .first()
     )
-    row = joined
-    snapshot = (
-        {column.name: joined[f"snapshot_{column.name}"] for column in snapshots.c}
-        if joined and joined["snapshot_id"]
-        else None
-    )
+    return _snapshot_response(joined, range_key)
+
+
+def _snapshot_status(row, has_snapshot: bool):
+    """共享卡片和绩效页的发布状态。"""
     status = "empty"
     if row:
         if row["error"]:
@@ -73,13 +72,25 @@ async def read_snapshot(session, account_id: int, range_key: str) -> dict:
         ):
             status = (
                 "stale"
-                if snapshot
+                if has_snapshot
                 else "pending"
                 if row["requested"] or row["running_version"] is not None
                 else "empty"
             )
-        elif snapshot:
+        elif has_snapshot:
             status = "ready"
+    return status
+
+
+def _snapshot_response(joined, range_key: str) -> dict:
+    """共用单账户与批量读取的快照状态语义。"""
+    row = joined
+    snapshot = (
+        {column.name: joined[f"snapshot_{column.name}"] for column in snapshots.c}
+        if joined and joined["snapshot_id"]
+        else None
+    )
+    status = _snapshot_status(row, snapshot is not None)
     result = snapshot["ranges"][range_key] if snapshot else None
     return {
         "status": status,
@@ -98,6 +109,44 @@ async def read_snapshot(session, account_id: int, range_key: str) -> dict:
         "events": result["events"] if result else [],
         "event_count": result["event_count"] if result else 0,
     }
+
+
+async def read_performance_summaries(session, account_ids: list[int]) -> dict:
+    """一次读取已发布绩效；卡片不读取执行历史、不触发计算。"""
+    from axile.server.db.models.performance import PerformanceSummary
+
+    if not account_ids:
+        return {}
+    rows = (
+        (
+            await session.execute(
+                sa.select(
+                    states,
+                    snapshots.c.id.label("snapshot_id"),
+                    snapshots.c.computed_at,
+                    snapshots.c.ranges["all"]["performance"]["points"].label("points"),
+                )
+                .select_from(states.outerjoin(snapshots, states.c.current_snapshot == snapshots.c.id))
+                .where(states.c.account_id.in_(account_ids))
+            )
+        )
+        .mappings()
+        .all()
+    )
+    summaries = {}
+    for row in rows:
+        points = row["points"] or []
+        last = points[-1] if points else {}
+        summaries[row["account_id"]] = PerformanceSummary(
+            snapshot_id=row["snapshot_id"],
+            status=_snapshot_status(row, row["snapshot_id"] is not None),
+            computed_at=row["computed_at"],
+            observed_at=last.get("observed_at"),
+            account_equity=last.get("account_equity"),
+            account_daily_return=last.get("account_daily_return"),
+            points=points,
+        )
+    return summaries
 
 
 def _events(records, bindings, skips) -> list[dict]:

@@ -27,5 +27,5 @@ export function usePerformanceSnapshot(id: number, range: PerformanceRange) {
     void check()
     return () => { disposed = true; clearTimeout(timer); entry.listeners.delete(unsubscribe); document.removeEventListener('visibilitychange', visibility) }
   }, [id, range, entry])
-  return { ...state, refresh: useCallback(() => requestPerformanceRefresh(id), [id]), check: useCallback(() => checkPerformance(id, range), [id, range]) }
+  return { ...state, refresh: useCallback(async () => { await requestPerformanceRefresh(id) }, [id]), check: useCallback(() => checkPerformance(id, range), [id, range]) }
 }

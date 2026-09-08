@@ -93,7 +93,7 @@ def _snapshot(
 
 
 def test_dashboard_aggregates_account(monkeypatch: pytest.MonkeyPatch) -> None:
-    """聚合最新权益/持仓/权益序列/绑定/下次执行/上次成败。"""
+    """绩效金额与实时资产不同，卡片仍保留绩效真源。"""
     account = build_account(id=1, name="acc", remark="SimNow 测试账户", is_started=True)
     recent = [
         _record(
@@ -135,10 +135,12 @@ def test_dashboard_aggregates_account(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(account_crud, "get_portfolios_every_account", _bindings)
     monkeypatch.setattr(account_crud, "get_recent_execute_records_for_accounts", _recent)
     monkeypatch.setattr(account_crud, "get_recent_account_asset_snapshots_for_accounts", _snapshots)
-    # 「今日涨跌」的基准查询走独立数据访问函数；假 session 对任意查询都返回账户对象，
-    # 故在数据访问层桩掉基准记录（本用例不校验 today_pct）。
-    monkeypatch.setattr(account_crud, "get_account_asset_snapshots_before_for_accounts", _no_baseline_records)
-    monkeypatch.setattr(account_crud, "get_earliest_account_asset_snapshots_since_for_accounts", _no_baseline_records)
+
+    async def _performance(_session: object, account_ids: list[int]) -> dict:
+        assert account_ids == [1]
+        return {1: {"snapshot_id": "published", "status": "ready", "account_equity": 5000.0}}
+
+    monkeypatch.setattr(account_crud, "read_performance_summaries", _performance)
 
     async def _no_targets(_session: object, _pairs: object) -> dict[int, object]:
         return {}
@@ -159,7 +161,10 @@ def test_dashboard_aggregates_account(monkeypatch: pytest.MonkeyPatch) -> None:
     assert item["currency"] == "CNY"  # CTP 渠道币种由渠道决定
     assert item["holdings_count"] == 2
     assert item["position_weights"] == [60000.0, 40000.0]  # 降序
-    assert item["equity_series"] == [100.0, 102.0]  # 升序:旧→新
+    assert item["performance"]["account_equity"] == 5000.0
+    assert item["performance"]["snapshot_id"] == "published"
+    assert "equity_series" not in item
+    assert "today_pct" not in item
     assert item["asset_observed_at"] == "2026-07-02T09:03:00"
     assert item["last_is_success"] == 1
     assert item["last_output_status"] is None
@@ -184,8 +189,7 @@ def test_dashboard_handles_account_without_records(monkeypatch: pytest.MonkeyPat
     monkeypatch.setattr(account_crud, "get_portfolios_every_account", _bindings)
     monkeypatch.setattr(account_crud, "get_recent_execute_records_for_accounts", _recent)
     monkeypatch.setattr(account_crud, "get_recent_account_asset_snapshots_for_accounts", _recent)
-    monkeypatch.setattr(account_crud, "get_account_asset_snapshots_before_for_accounts", _no_baseline_records)
-    monkeypatch.setattr(account_crud, "get_earliest_account_asset_snapshots_since_for_accounts", _no_baseline_records)
+    monkeypatch.setattr(account_crud, "read_performance_summaries", _no_baseline_records)
 
     async def _no_targets(_session: object, _pairs: object) -> dict[int, object]:
         return {}
@@ -201,7 +205,8 @@ def test_dashboard_handles_account_without_records(monkeypatch: pytest.MonkeyPat
     assert item["currency"] == "CNY"  # 无执行记录也由 CTP 渠道决定币种
     assert item["holdings_count"] == 0
     assert item["position_weights"] == []
-    assert item["equity_series"] == []
+    assert item["performance"]["points"] == []
+    assert item["performance"]["account_equity"] is None
     assert item["asset_observed_at"] is None
     assert item["last_is_success"] is None
     assert item["last_output_status"] is None
@@ -250,8 +255,7 @@ def test_dashboard_counts_off_symbols_from_target_and_snapshot(monkeypatch: pyte
     monkeypatch.setattr(account_crud, "get_portfolios_every_account", _bindings)
     monkeypatch.setattr(account_crud, "get_recent_execute_records_for_accounts", _recent)
     monkeypatch.setattr(account_crud, "get_recent_account_asset_snapshots_for_accounts", _snapshots)
-    monkeypatch.setattr(account_crud, "get_account_asset_snapshots_before_for_accounts", _no_baseline_records)
-    monkeypatch.setattr(account_crud, "get_earliest_account_asset_snapshots_since_for_accounts", _no_baseline_records)
+    monkeypatch.setattr(account_crud, "read_performance_summaries", _no_baseline_records)
     monkeypatch.setattr(account_crud, "get_latest_account_target_snapshots_for_accounts", _targets)
 
     app = _build_app(_Session([account]), _Scheduler(_Job(None)))
@@ -331,8 +335,7 @@ def test_dashboard_counts_off_symbols_zero_when_lots_already_match(monkeypatch: 
     monkeypatch.setattr(account_crud, "get_portfolios_every_account", _bindings)
     monkeypatch.setattr(account_crud, "get_recent_execute_records_for_accounts", _recent)
     monkeypatch.setattr(account_crud, "get_recent_account_asset_snapshots_for_accounts", _snapshots)
-    monkeypatch.setattr(account_crud, "get_account_asset_snapshots_before_for_accounts", _no_baseline_records)
-    monkeypatch.setattr(account_crud, "get_earliest_account_asset_snapshots_since_for_accounts", _no_baseline_records)
+    monkeypatch.setattr(account_crud, "read_performance_summaries", _no_baseline_records)
     monkeypatch.setattr(account_crud, "get_latest_account_target_snapshots_for_accounts", _targets)
 
     app = _build_app(_Session([account]), _Scheduler(_Job(None)))

@@ -31,6 +31,7 @@ class PerformancePoint(BaseModel):
     record_id: int | None = None
     execution_id: str | None = None
     account_return: float | None = None
+    account_equity: float | None = None
     portfolio_return: float | None = None
     account_daily_return: float | None = None
     portfolio_daily_return: float | None = None
@@ -113,3 +114,15 @@ class PerformanceSnapshot(BaseModel):
     daily_costs: dict[str, CostSummary]
     events: list[PerformanceEvent]
     event_count: int
+
+
+class PerformanceSummary(BaseModel):
+    """卡片使用的全区间绩效投影，金额与曲线同版发布。"""
+
+    snapshot_id: str | None = None
+    status: Literal["empty", "pending", "ready", "stale", "failed"] = "empty"
+    computed_at: str | None = None
+    observed_at: str | None = None
+    account_equity: float | None = None
+    account_daily_return: float | None = None
+    points: list[PerformancePoint] = Field(default_factory=list)

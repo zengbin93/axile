@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react'
 import { useViewTransitionState } from 'react-router'
 import { ArrowLeft, RefreshCw } from 'lucide-react'
+import { cardPerformance, openFullPerformance } from '@/features/dashboard/performance'
+import { checkPerformance, requestPerformanceRefresh } from '@/features/history/performanceCache'
 import { Link, useNavigate } from '@/components/ui/nav'
 import { Card, Chip } from '@/components/ui/Card'
 import { DriftBar } from '@/components/viz/DriftBar'
@@ -52,8 +54,6 @@ import {
   getAccountRebalancePlan,
   getAccountTargetSnapshot,
   getNextRun,
-  prefetchExecuteRecords,
-  refreshAccountAssets,
   refreshAccountTargetSnapshot,
   updateAccount,
   deleteAccount,
@@ -90,7 +90,7 @@ export function AccountDetail({
   const toast = useToastStore((s) => s.toast)
   const sidebarCompact = useNavigationStore((s) => s.sidebarCompact)
   const [timerOpen, setTimerOpen] = useState(false)
-  const [refreshingAssets, setRefreshingAssets] = useState(false)
+  const [refreshingPerformance, setRefreshingPerformance] = useState(false)
   // 启停乐观态：确认后立刻翻转，驱动按钮/状态句日记式换字；与 item 对齐后清除。
   const [startedOverride, setStartedOverride] = useState<boolean | null>(null)
   // 共享元素 FLIP 门控：
@@ -205,7 +205,7 @@ export function AccountDetail({
   const latestAssets = assetSnapshots.data?.data[0]?.assets
   const snapshotPositions = positionsOfAssets(latestAssets)
   const positions = latestAssets ? snapshotPositions : positionsOf(recordList)
-  const equity = observedTotalAsset(latestAssets, item.total_asset)
+  const { equity, pct, dayLabel, statusLabel } = cardPerformance(item.performance)
   const holdingsCount = latestAssets ? snapshotPositions.length : item.holdings_count
   const comparisonLoading = comparison.data === null && comparison.loading
   const comparisonError = comparison.error
@@ -221,7 +221,7 @@ export function AccountDetail({
         : `${plan.off} 只待调整`
   const targetCount = comparison.data?.rows.filter((row) => Math.abs(row.target_weight) > 1e-9).length ?? 0
   const turnover = rebalanceTurnover(plan)
-  const currentHoldings = currentHoldingPreview(positions, equity)
+  const currentHoldings = currentHoldingPreview(positions, observedTotalAsset(latestAssets, item.total_asset))
   const state = stateVerdict({ ...item, is_started: isStarted }, false)
   const gate = gateOf({ ...item, is_started: isStarted })
   // 执行态：服务端 live 优先，runner 仅首帧前乐观。queued ≠ 正在下单。
@@ -318,22 +318,20 @@ export function AccountDetail({
       toast(shortErrorReason(e))
     }
   }
-  const onRefreshAssets = async () => {
-    if (refreshingAssets || isExecuting) return
-    setRefreshingAssets(true)
+  const onRefreshPerformance = async () => {
+    if (refreshingPerformance) return
+    setRefreshingPerformance(true)
     try {
-      await refreshAccountAssets(accountId)
-      await Promise.all([assetSnapshots.refresh(), refreshComparison(), onDashboardRefresh?.()])
-      toast('账户权益已刷新')
+      if (!await requestPerformanceRefresh(accountId)) throw new Error('绩效更新请求失败，请重试')
+      await onDashboardRefresh?.()
+      toast('已请求更新绩效')
     } catch (e) {
       toast(shortErrorReason(e))
     } finally {
-      setRefreshingAssets(false)
+      setRefreshingPerformance(false)
     }
   }
 
-  // 「今日」涨跌用服务端按自然日锚定的 today_pct（昨收/今开为基准），不再前端取序列末两点相减。
-  const pct = item.today_pct ?? null
   // 兼容尚未重启、dashboard 暂未携带 remark 的开发服务；详情到位后仍能展示已保存备注。
   const remark = account.data?.remark ?? item.remark
 
@@ -491,19 +489,19 @@ export function AccountDetail({
         <div className="mt-6 border-t border-line pt-4">
           <div className="flex items-center gap-1.5 text-[14px] text-ink-2">
             <span>{assetTerms.fullLabel}</span>
-            <Tooltip content={isExecuting ? '执行中，结束后可刷新账户权益' : '从交易渠道刷新账户权益'}>
+            <Tooltip content="刷新绩效快照">
               <span className="inline-flex">
                 <button
                   type="button"
-                  onClick={onRefreshAssets}
-                  disabled={isExecuting || refreshingAssets}
-                  aria-label={refreshingAssets ? '正在刷新账户权益' : '刷新账户权益'}
-                  title={isExecuting ? '执行中，无法刷新账户权益' : undefined}
+                  onClick={onRefreshPerformance}
+                  disabled={refreshingPerformance}
+                  aria-label={refreshingPerformance ? '正在请求更新绩效' : '刷新绩效'}
+                  title="刷新绩效"
                   className="grid h-6 w-6 cursor-pointer place-items-center rounded-md text-ink-3 hover:bg-fill hover:text-ink-1 disabled:cursor-default disabled:opacity-40 disabled:hover:bg-transparent"
                 >
                   <RefreshCw
                     size={14}
-                    className={refreshingAssets ? 'animate-spin motion-reduce:animate-none' : undefined}
+                    className={refreshingPerformance ? 'animate-spin motion-reduce:animate-none' : undefined}
                   />
                 </button>
               </span>
@@ -516,13 +514,15 @@ export function AccountDetail({
                 className="num mt-0.5 text-[35px] font-[640] tracking-tight"
                 style={amountVt ? { viewTransitionName: `equity-amount-${accountId}` } : undefined}
               >
-                <NumberTicker value={equity} format={{ minimumFractionDigits: 2, maximumFractionDigits: 2 }} />
+                {equity == null ? '—' : <NumberTicker value={equity} format={{ minimumFractionDigits: 2, maximumFractionDigits: 2 }} />}
                 <span className="ml-1.5 text-[17px] font-medium text-ink-3">{displayCurrencyUnit(item.currency)}</span>
               </div>
               <div className="mt-1.5 text-[14.5px] text-ink-2">
+                {pct == null && <span>{dayLabel} — · </span>}
+                <span className="text-xs text-ink-3">{statusLabel}{statusLabel ? ' · ' : ''}</span>
                 {pct != null && (
                   <span className={`num ${pct > 0 ? 'text-up' : pct < 0 ? 'text-down' : 'text-ink-2'}`}>
-                    今日 {pct >= 0 ? '+' : '−'}
+                    {dayLabel} {pct >= 0 ? '+' : '−'}
                     <NumberTicker value={Math.abs(pct)} format={{ minimumFractionDigits: 2, maximumFractionDigits: 2 }} suffix="%" />
                   </span>
                 )}
@@ -547,16 +547,17 @@ export function AccountDetail({
             */}
             <Link
               to={`/accounts/${accountId}/history`}
-              aria-label="查看实盘绩效"
-              title="实盘绩效"
-              // hover/聚焦预取绩效全量记录：首帧有数据、不闪骨架，金额 FLIP 有真实落点。
-              onPointerEnter={() => prefetchExecuteRecords(accountId)}
-              onFocus={() => prefetchExecuteRecords(accountId)}
+              onClick={() => openFullPerformance(accountId)}
+              aria-label="查看全部区间累计绩效"
+              title="全部区间累计收益"
+              // 预取同口径绩效快照，点击固定进入全部区间。
+              onPointerEnter={() => checkPerformance(accountId, 'all')}
+              onFocus={() => checkPerformance(accountId, 'all')}
               className="group -m-2 block cursor-pointer p-2"
             >
               {/* 静止略暗、hover 提亮；只动亮度，不改色相。 */}
               <span className="inline-block opacity-70 transition-opacity duration-150 group-hover:opacity-100">
-                <Sparkline data={item.equity_series} width={150} height={46} />
+                <Sparkline data={item.performance?.points ?? []} width={150} height={46} />
               </span>
             </Link>
           </div>

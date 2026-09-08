@@ -17,7 +17,7 @@ from axile.executor.models.feishu import FeishuCardConfig
 from axile.executor.models.unified_input import DEFAULT_EXECUTION_TIMEOUT_SECONDS
 from axile.server.db.models.account_runtime_sync import AccountRuntimeSyncPublic
 from axile.server.db.models.base import PydanticJSONType, now_str
-from axile.server.db.models.performance import FeeRate, WeightType
+from axile.server.db.models.performance import FeeRate, PerformanceSummary, WeightType
 
 if TYPE_CHECKING:
     from axile.server.db.models.account_asset import AccountAssetSnapshot
@@ -433,8 +433,8 @@ class AccountDashboardItemPublic(SQLModel):
         最近一次快照的持仓品种数。
     position_weights : List[float]
         最近一次快照各持仓的市值（降序，最多 12 项），用于持仓分布条。
-    equity_series : List[float]
-        近端权益序列（按时间升序），用于迷你走势图。
+    performance : PerformanceSummary
+        已发布的全区间绩效，金额、日收益与曲线同版。
     asset_observed_at : Optional[str]
         最近一次账户资产观测时间；无快照时为 ``None``。
     last_is_success : Optional[int]
@@ -453,10 +453,6 @@ class AccountDashboardItemPublic(SQLModel):
     running_phase : Optional[str]
         当前在途执行的阶段标签（``triggered``/``snapshot``/``planning``/``executing``/
         ``settling`` 之一，见 :data:`axile.server.execution.live.PHASE_ORDER`）；无在途执行时为 ``None``。
-    today_pct : Optional[float]
-        「今日」权益涨跌百分比：``(当前权益 − 今日基准) / 今日基准 × 100``。基准取今天
-        00:00 之前最后一条有效快照（昨收），无跨日数据时退回今天最早一条（今开）；无可用
-        基准时为 ``None``。刻意在服务端按时间戳锚定自然日，而非由前端取序列末两点相减。
     """
 
     account_id: int
@@ -472,7 +468,7 @@ class AccountDashboardItemPublic(SQLModel):
     currency: str
     holdings_count: int
     position_weights: List[float]
-    equity_series: List[float]
+    performance: PerformanceSummary = Field(default_factory=PerformanceSummary)
     asset_observed_at: Optional[str] = None
     last_is_success: Optional[int] = None
     last_exec_at: Optional[str] = None
@@ -484,7 +480,6 @@ class AccountDashboardItemPublic(SQLModel):
     running_status: Optional[str] = None
     pending_execution_id: Optional[str] = None
     pending_kind: Optional[str] = None
-    today_pct: Optional[float] = None
 
 
 class AccountDashboardPublic(SQLModel):

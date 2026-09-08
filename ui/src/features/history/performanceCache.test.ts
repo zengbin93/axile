@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from 'bun:test'
-import { checkPerformance, performanceEntry, requestPerformanceRefresh, snapshotPending } from './performanceCache'
+import { checkPerformance, performanceEntry, requestPerformanceRefresh, snapshotPending, reconcilePerformanceVersion } from './performanceCache'
 import type { PerformanceSnapshot } from '@/lib/api/performance'
 import { summarizeCosts } from './costs'
 
@@ -50,4 +50,25 @@ test('manual refresh coalesces POST and replaces curves and costs together', asy
   expect(performanceEntry(802, 'all').state.data?.daily_costs).toHaveProperty('new')
   expect(snapshotPending(snapshot({ status: 'failed', retry_at: null }))).toBe(false)
   expect(snapshotPending(snapshot({ status: 'failed', retry_at: 123 }))).toBe(true)
+})
+
+test('dashboard publication refreshes subscribed ranges and failure is reported to card caller', async () => {
+  mockFetch(async () => Response.json(snapshot()))
+  await checkPerformance(803, 'all')
+  const entry = performanceEntry(803, 'all')
+  const listener = () => {}
+  entry.listeners.add(listener)
+  let gets = 0
+  mockFetch(async () => { gets++; return Response.json(snapshot({ snapshot_id: 'batch-2' })) })
+  reconcilePerformanceVersion(803, 'batch-2')
+  await entry.flight
+  expect(gets).toBe(1)
+  expect(entry.state.data?.snapshot_id).toBe('batch-2')
+  reconcilePerformanceVersion(803, 'batch-2')
+  expect(gets).toBe(1)
+  entry.listeners.delete(listener)
+  mockFetch(async () => { throw new Error('offline') })
+  expect(await requestPerformanceRefresh(803)).toBe(false)
+  expect(entry.state.data?.snapshot_id).toBe('batch-2')
+  expect(entry.state.error?.message).toBe('offline')
 })

@@ -20,7 +20,13 @@ from axile.server.db.models import Account, ExecuteRecord, PortfolioAccount, Tar
 from axile.server.db.models.analysis import analysis_snapshot as snapshots
 from axile.server.db.models.analysis import analysis_state as states
 from axile.server.db.models.analysis import cost_trade as trades
-from axile.server.performance_analysis import AnalysisManager, compute_batch, enqueue, read_snapshot
+from axile.server.performance_analysis import (
+    AnalysisManager,
+    compute_batch,
+    enqueue,
+    read_performance_summaries,
+    read_snapshot,
+)
 from axile.server.performance_costs import daily_costs, project_execution, summarize, timestamp
 from axile.server.performance_details import CostQuery, read_costs
 from tests.unit.server._execution_test_support import build_account
@@ -108,6 +114,96 @@ def test_legacy_performance_waits_for_current_settings(tmp_path):
                     if not pending.done():
                         pending.cancel()
                     await asyncio.gather(pending, return_exceptions=True)
+
+    asyncio.run(check())
+
+
+def test_dashboard_summary_matches_full_90_day_snapshot_in_one_query(tmp_path):
+    """2160 条小时观测完整进入同版卡片，不再取最近 200 条。"""
+
+    async def check():
+        async with database(tmp_path, count=0) as (engine, sessions, manager):
+            async with sessions() as session:
+                rows = [record(i + 1) for i in range(2160)]
+                for i, row in enumerate(rows):
+                    row.created_at = (datetime(2026, 1, 1) + timedelta(hours=i)).isoformat()
+                session.add_all(rows)
+                await session.commit()
+            await queue(sessions)
+            await manager.run_once()
+            full = await snapshot(sessions)
+            statements = []
+
+            def capture(_conn, _cursor, statement, _parameters, _context, _many):
+                statements.append(statement)
+
+            sa.event.listen(engine.sync_engine, "before_cursor_execute", capture)
+            try:
+                async with sessions() as session:
+                    summaries = await read_performance_summaries(session, [2, 999])
+            finally:
+                sa.event.remove(engine.sync_engine, "before_cursor_execute", capture)
+            assert len(statements) == 1
+            assert "executerecord" not in statements[0].lower()
+            assert "json_extract" in statements[0].lower()
+            summary = summaries[2]
+            assert summary.snapshot_id == full["snapshot_id"]
+            assert len(summary.points) == 91
+            assert [point.model_dump() for point in summary.points] == full["result"]["points"]
+            assert summary.account_equity == 2260
+            assert summary.account_daily_return == full["result"]["points"][-1]["account_daily_return"]
+            assert summary.observed_at == full["result"]["points"][-1]["observed_at"]
+            for error, expected in [(None, "stale"), ("calculation failed", "failed")]:
+                async with sessions() as session:
+                    await session.execute(
+                        states.update().where(states.c.account_id == 2).values(requested=True, error=error)
+                    )
+                    await session.commit()
+                    old = (await read_performance_summaries(session, [2]))[2]
+                    assert old.status == expected
+                    assert old.snapshot_id == summary.snapshot_id
+                    assert old.account_equity == summary.account_equity
+
+    asyncio.run(check())
+
+
+def test_legacy_summary_waits_for_equity_and_rebuilds_on_logic_upgrade(tmp_path):
+    """旧 JSON 不伪造金额，启动升级后发布完整新快照。"""
+
+    async def check():
+        async with database(tmp_path) as (_, sessions, manager):
+            await queue(sessions)
+            await manager.run_once()
+            initial = await snapshot(sessions)
+            async with sessions() as session:
+                ranges = (await session.execute(sa.select(snapshots.c.ranges))).scalar_one()
+                for result in ranges.values():
+                    for point in result["performance"]["points"]:
+                        point.pop("account_equity", None)
+                await session.execute(snapshots.update().values(ranges=ranges, logic_version="4"))
+                await session.execute(states.update().values(logic_version="4"))
+                await session.commit()
+                old = (await read_performance_summaries(session, [2]))[2]
+                assert old.account_equity is None
+                assert old.points[-1].account_return is not None
+            await manager.start()
+            await manager.stop()
+            await manager.run_once()
+            async with sessions() as session:
+                current = (await read_performance_summaries(session, [2]))[2]
+                assert current.snapshot_id != initial["snapshot_id"]
+                assert current.status == "ready"
+                assert current.account_equity == 103
+                # 日末缺失时金额保持缺失，不回退到前一天。
+                ranges = (
+                    await session.execute(sa.select(snapshots.c.ranges).where(snapshots.c.id == current.snapshot_id))
+                ).scalar_one()
+                ranges["all"]["performance"]["points"][-1]["account_equity"] = None
+                await session.execute(
+                    snapshots.update().where(snapshots.c.id == current.snapshot_id).values(ranges=ranges)
+                )
+                await session.commit()
+                assert (await read_performance_summaries(session, [2]))[2].account_equity is None
 
     asyncio.run(check())
 

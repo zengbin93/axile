@@ -1,5 +1,6 @@
 import { useViewTransitionState } from 'react-router'
 import { Plus } from 'lucide-react'
+import { cardPerformance, openFullPerformance } from '@/features/dashboard/performance'
 import { Link, useNavigate } from '@/components/ui/nav'
 import { Card } from '@/components/ui/Card'
 import { NumberTicker } from '@/components/ui/NumberTicker'
@@ -28,8 +29,8 @@ function FleetCard({
   const gate = gateOf(item)
   // 服务端真源的在途执行：在跑时状态文案与卡边优先反映「正在执行」。
   const live = useRunning(item.account_id)
-  // 「今日」涨跌用服务端按自然日锚定的 today_pct，不再前端取序列末两点相减。
-  const pct = item.today_pct ?? null
+  // 金额与日涨跌绑定同一个绩效观测。
+  const { equity, pct, dayLabel, statusLabel } = cardPerformance(item.performance)
   // 红涨绿跌：涨→up(红)、跌→down(绿)。
   const pctCls = pct == null ? 'text-ink-2' : pct > 0 ? 'text-up' : pct < 0 ? 'text-down' : 'text-ink-2'
 
@@ -79,17 +80,21 @@ function FleetCard({
       <div className="mt-3 flex items-end justify-between gap-3">
         <div className="flex flex-wrap items-baseline gap-2">
           <span className="num text-[27px] font-[640] tracking-tight">
-            <NumberTicker value={item.total_asset} format={{ minimumFractionDigits: 2, maximumFractionDigits: 2 }} />
+            {equity == null ? '—' : <NumberTicker value={equity} format={{ minimumFractionDigits: 2, maximumFractionDigits: 2 }} />}
           </span>
           <span className="text-[14px] text-ink-3">{displayCurrencyUnit(item.currency)}</span>
+          {pct == null && <span className="text-ink-3">{dayLabel} —</span>}
+          <span className="text-xs text-ink-3">{statusLabel}</span>
           {pct != null && (
             <span className={`num text-[14px] ${pctCls}`}>
-              今日 {pct >= 0 ? '+' : '−'}
+              {dayLabel} {pct >= 0 ? '+' : '−'}
               <NumberTicker value={Math.abs(pct)} format={{ minimumFractionDigits: 2, maximumFractionDigits: 2 }} suffix="%" />
             </span>
           )}
         </div>
-        <Sparkline data={item.equity_series} width={120} height={34} />
+        <Link to={`/accounts/${item.account_id}/history`} onClick={event => { event.stopPropagation(); openFullPerformance(item.account_id) }} aria-label="查看全部区间累计绩效">
+          <Sparkline data={item.performance?.points ?? []} width={120} height={34} />
+        </Link>
       </div>
 
       <div className="mt-3 flex gap-2.5 border-t border-line pt-3 text-[14.5px]">

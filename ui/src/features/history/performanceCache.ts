@@ -3,7 +3,7 @@ import { getPerformanceSnapshot, refreshPerformance, type PerformanceRange, type
 interface State { data: PerformanceSnapshot | null; error: Error | null; checking: boolean }
 interface Entry { state: State; listeners: Set<() => void>; flight?: Promise<void> }
 const entries = new Map<string, Entry>()
-const refreshes = new Map<number, Promise<void>>()
+const refreshes = new Map<number, Promise<boolean>>()
 const keyOf = (id: number, range: PerformanceRange) => `${id}:${range}`
 
 export function performanceEntry(id: number, range: PerformanceRange): Entry {
@@ -33,7 +33,7 @@ export function checkPerformance(id: number, range: PerformanceRange): Promise<v
   })()
   return entry.flight
 }
-export function requestPerformanceRefresh(id: number): Promise<void> {
+export function requestPerformanceRefresh(id: number): Promise<boolean> {
   const existing = refreshes.get(id)
   if (existing) return existing
   const flight = (async () => {
@@ -45,11 +45,22 @@ export function requestPerformanceRefresh(id: number): Promise<void> {
         if (entry.state.data) publish(entry, { ...entry.state, data: { ...entry.state.data, status: entry.state.data.result ? 'stale' : 'pending', error: null } })
         await checkPerformance(id, key.split(':')[1] as PerformanceRange)
       }))
+      return true
     } catch (error) {
       for (const [key, entry] of entries) if (key.startsWith(`${id}:`)) publish(entry, { ...entry.state, error: error instanceof Error ? error : new Error(String(error)) })
+      return false
     } finally { refreshes.delete(id) }
   })()
   refreshes.set(id, flight)
   return flight
 }
 export const snapshotPending = (data: PerformanceSnapshot | null) => data?.status === 'pending' || data?.status === 'stale' || (data?.status === 'failed' && data.retry_at != null)
+
+/** 仪表盘发现新版时更新已订阅的绩效页。 */
+export function reconcilePerformanceVersion(id: number, snapshotId: string | null) {
+  for (const [key, entry] of entries) {
+    if (key.startsWith(`${id}:`) && entry.listeners.size && entry.state.data?.snapshot_id !== snapshotId) {
+      void checkPerformance(id, key.split(':')[1] as PerformanceRange)
+    }
+  }
+}

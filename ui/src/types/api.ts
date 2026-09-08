@@ -188,6 +188,7 @@ export interface PerformanceSettings {
 }
 
 export interface PerformancePoint {
+  account_equity?: number | null
   date: string
   observed_at?: string
   record_id?: number | null
@@ -318,8 +319,8 @@ export interface AccountDashboardItem {
   holdings_count: number
   /** 各持仓市值绝对值降序（最多 12），用于敞口条。 */
   position_weights: number[]
-  /** 最近若干次执行的权益快照（时间正序），用于 sparkline。 */
-  equity_series: number[]
+  /** 已发布的全区间绩效；金额、日收益与曲线同版。 */
+  performance?: PerformanceSummary
   /** 最近一次账户资产观测时间；无快照为 null。 */
   asset_observed_at?: string | null
   /** 最近一次执行是否成功（1/0）；无记录为 null。 */
@@ -340,8 +341,16 @@ export interface AccountDashboardItem {
   /** running 背后排队的下一张票；没有 pending 为 null。 */
   pending_execution_id?: string | null
   pending_kind?: string | null
-  /** 「今日」权益涨跌百分比（服务端按自然日锚定：昨收/今开为基准）；无基准为 null。 */
-  today_pct?: number | null
+}
+
+export interface PerformanceSummary {
+  snapshot_id: string | null
+  status: 'empty' | 'pending' | 'ready' | 'stale' | 'failed'
+  computed_at: string | null
+  observed_at: string | null
+  account_equity: number | null
+  account_daily_return: number | null
+  points: PerformancePoint[]
 }
 
 /** `GET /account/dashboard` 响应。 */
