@@ -123,6 +123,9 @@ function AccountHistory({ accountId }: { accountId: number }) {
           channel={account.data?.trade_channel ?? item?.trade_channel}
           market={account.data?.market ?? item?.market}
         />
+        <span className="shrink-0 text-xs text-ink-3">
+          {snapshot?.data_until ? `数据截止 ${shanghaiLabel(snapshot.data_until)}` : '暂无绩效快照'}
+        </span>
       </div>
       <div className="flex flex-wrap items-center gap-2">
         <Segmented size="sm" value={range} options={RANGES} onChange={value => withViewTransition(() => { setSelection(null); setRange(value) })} />
@@ -135,11 +138,10 @@ function AccountHistory({ accountId }: { accountId: number }) {
       <ErrorNotice title="参数保存失败" error={saveError} />
       <ErrorNotice title="账户设置读取失败" error={account.error} onRetry={account.refresh} />
     </div>
-    <div role="status" className="flex min-h-8 flex-wrap items-center gap-x-4 gap-y-1 py-1 text-xs text-ink-3" data-testid="performance-status">
-      <span>{snapshot?.data_until ? `数据截止 ${shanghaiLabel(snapshot.data_until)}` : '暂无绩效快照'}</span>
+    {(backtestBusy || pendingSettings) && <div role="status" className="flex flex-wrap items-center gap-x-4 gap-y-1 py-1 text-xs text-ink-3" data-testid="performance-status">
       {backtestBusy && <span>{data ? '后台更新中' : '正在准备绩效'}</span>}
       {pendingSettings && <span className="text-warn">新费率 {Number(((settings?.backtest_fee_rate ?? 0) * 10000).toFixed(8))} BP 待计算</span>}
-    </div>
+    </div>}
     <ErrorNotice title={data ? '更新失败，保留上次结果' : '绩效读取失败'} error={calculationError} variant="compact" onRetry={performance.refresh} />
     <ErrorNotice title="区间成本读取失败" error={intervalCosts.error} variant="compact" onRetry={intervalCosts.refresh} />
     {data && <div className="pb-4">
