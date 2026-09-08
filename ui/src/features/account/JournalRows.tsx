@@ -1,65 +1,129 @@
-import type { ReactNode } from 'react'
+import { useCallback, type ReactNode } from 'react'
 import { ChevronDown } from 'lucide-react'
 import { Select } from '@/components/ui/Select'
-import { bpsCls, fmtBps } from '@/lib/format'
-import { journalAmount as amount, journalTime as time, type JournalSymbol, type Quality } from '@/features/account/executionJournal'
+import { ErrorNotice } from '@/components/ui/ErrorNotice'
+import { usePolling } from '@/lib/hooks/usePolling'
+import { getPerformanceCosts, type CostPage, type CostQuery } from '@/lib/api/performance'
+import { getExecutionArtifacts, getExecutionEvents } from '@/lib/api/executions'
+import { ExecutionEvidence } from '@/features/history/ExecutionEvidence'
+import { quantityUnit } from '@/features/history/executionEvidenceModel'
+import { buildExecutionDetail, type ExecutionDetailModel } from '@/features/account/executionDetail'
+import { amount, quantityText, shanghaiLabel, lossClass, coverageText, durationText, type CostSummary, type CostTrade } from '@/features/history/costs'
+import type { JournalExecution, JournalSymbol } from '@/features/account/executionJournal'
+import type { SnapshotScope } from '@/features/account/journalSource'
+import type { ChannelCapability } from '@/types/api'
 
-export const EXEC_COLS = 'grid grid-cols-2 gap-x-5 gap-y-2 xl:grid-cols-[145px_minmax(0,1fr)_80px_120px_140px_60px]'
-export const SYMBOL_COLS = 'grid grid-cols-2 gap-x-5 gap-y-2 xl:grid-cols-[minmax(0,1fr)_140px_160px_80px_145px_20px]'
-const TRADE_COLS = 'grid grid-cols-2 gap-x-4 gap-y-2 xl:grid-cols-[145px_48px_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_110px_60px]'
+export interface Expansion { open: boolean; count: number; side: string; cursors?: (string | undefined)[]; evidenceView?: 'actions' | 'positions' }
+const tableClass = 'w-full whitespace-nowrap text-left text-xs [&_td]:px-3 [&_td]:py-2 [&_th]:px-3 [&_th]:py-2'
+export const EXEC_COLS = 'grid grid-cols-2 gap-x-4 gap-y-2 xl:grid-cols-[155px_minmax(120px,1fr)_70px_95px_105px_115px_55px]'
+export const SYMBOL_COLS = 'grid grid-cols-2 gap-x-4 gap-y-2 xl:grid-cols-[minmax(120px,1fr)_110px_115px_120px_80px_145px_20px]'
 const SIDES = [{ value: 'all', label: '全部方向' }, { value: 'buy', label: '买入' }, { value: 'sell', label: '卖出' }]
-export interface Expansion { open: boolean; count: number; side: string }
-function quantity(value: number): string { return value.toLocaleString('zh-CN', { maximumFractionDigits: 8 }) }
+type Units = ChannelCapability['units']
+type DetailLink = (id: string | null) => ReactNode
 
-export function Slip({ quality }: { quality: Quality }) {
-  return <span className="inline-flex flex-col items-start xl:items-end">
-    <span className={`num ${quality.slippage == null ? 'text-ink-3' : bpsCls(quality.slippage)}`}>{quality.slippage == null ? '—' : fmtBps(quality.slippage)}</span>
-    {quality.nTrades > 0 && (quality.coverage < 1 || !quality.amountComplete) && <span className="text-[11px] text-ink-3">{quality.amountComplete ? `覆盖 ${(quality.coverage * 100).toFixed(0)}% 成交额` : '成交额数据不完整'}</span>}
-  </span>
-}
 export function Field({ label, children }: { label: string; children: ReactNode }) {
   return <span className="block min-w-0 break-words xl:text-right"><span className="mr-2 text-xs text-ink-3 xl:hidden">{label}</span>{children}</span>
 }
+export function Slip({ summary }: { summary: CostSummary }) {
+  return <span className={`num ${lossClass(summary.lossBp)}`}>{amount(summary.lossBp)}</span>
+}
+export function Cost({ summary }: { summary: CostSummary }) {
+  return <span className="inline-flex flex-col items-start xl:items-end"><span className={`num ${lossClass(summary.cost)}`}>{amount(summary.cost)}</span>
+    {summary.count > 0 && (summary.covered < summary.count || !summary.amountComplete) && <span className="text-[11px] text-ink-3">已知成本 · {coverageText(summary)}</span>}</span>
+}
 
-export function SymbolGroup({ row, expansion, update, detailLink }: {
-  row: JournalSymbol; expansion: Expansion; update: (next: Expansion) => void
-  detailLink: (id: string | null) => ReactNode
+// Immutable snapshot pages and terminal execution evidence survive collapse and detail navigation.
+const tradePages = new Map<string, CostPage<CostTrade>>()
+const evidenceCache = new Map<string, Promise<ExecutionDetailModel>>()
+function remember<K, V>(cache: Map<K, V>, key: K, value: V) {
+  cache.set(key, value)
+  if (cache.size > 200) cache.delete(cache.keys().next().value!)
+}
+function readEvidence(id: string): Promise<ExecutionDetailModel> {
+  const existing = evidenceCache.get(id)
+  if (existing) return existing
+  const flight = Promise.all([getExecutionEvents(id), getExecutionArtifacts(id)])
+    .then(([events, artifacts]) => buildExecutionDetail(events.data, artifacts.data))
+    .catch(error => { evidenceCache.delete(id); throw error })
+  remember(evidenceCache, id, flight)
+  return flight
+}
+
+export function TradeTable({ trades, currency, units, detailLink }: { trades: CostTrade[]; currency: string; units?: Units; detailLink?: DetailLink }) {
+  return <div className="relative overflow-x-auto"><table className={tableClass}><thead className="text-ink-3"><tr><th>成交时间</th><th>品种</th><th>方向 / 数量</th><th>参考价</th><th>成交价</th><th>成交额 {currency}</th><th>滑点损耗 BP</th><th>滑点成本 {currency}</th>{detailLink && <th>详情</th>}</tr></thead><tbody>
+    {trades.map((trade, i) => <tr key={trade.trade_id ?? `${trade.record_id}:${trade.symbol}:${i}`} className="border-t border-line"><td>{shanghaiLabel(new Date(trade.time).toISOString())}{trade.timeEstimated && <small className="block text-warn">使用执行时间</small>}</td><td>{trade.symbol}</td><td>{trade.side === 'buy' ? '买' : trade.side === 'sell' ? '卖' : '方向未知'} / {quantityText(trade.quantity)} {quantityUnit(units, trade.symbol, currency)}</td><td>{amount(trade.reference)}{trade.referenceSource === 'last' && <small className="block text-ink-3">到达最新价</small>}</td><td>{amount(trade.price)}</td><td>{amount(trade.value)}</td><td className={lossClass(trade.lossBp)}>{amount(trade.lossBp)}</td><td className={lossClass(trade.cost)}>{amount(trade.cost)}</td>{detailLink && <td>{detailLink(trade.execution_id ?? null)}</td>}</tr>)}
+  </tbody></table></div>
+}
+
+function TradeList({ accountId, scope, trades, expansion, update, currency, units, detailLink, scoped }: {
+  accountId: number; scope?: SnapshotScope; trades: CostTrade[]; expansion: Expansion; update: (next: Expansion) => void
+  currency: string; units?: Units; detailLink?: DetailLink; scoped: boolean
 }) {
-  const panelId = `symbol-${encodeURIComponent(row.symbol)}`
-  const trades = row.trades.filter((t) => expansion.side === 'all' || t.side === expansion.side)
-  return <div className="border-b border-line">
-    <button type="button" aria-expanded={expansion.open} aria-controls={panelId}
-      onClick={() => update({ ...expansion, open: !expansion.open })}
-      className={`${SYMBOL_COLS} w-full items-baseline px-3 py-4 text-left text-[13px] hover:bg-bg-subtle ${expansion.open ? 'bg-bg-subtle' : ''}`}>
-      <span className="col-span-2 flex min-w-0 items-center justify-between gap-2 font-medium xl:col-span-1"><span className="break-all">{row.symbol}</span><ChevronDown size={15} className={`shrink-0 transition-transform duration-200 motion-reduce:transition-none xl:hidden ${expansion.open ? 'rotate-180' : ''}`} aria-hidden /></span>
-      <Field label="成交额"><span className="num">{row.amountComplete ? amount(row.value) : '—'}</span></Field>
-      <Field label="滑点"><Slip quality={row} /></Field>
-      <Field label="成交笔数"><span className="num">{row.nTrades}</span></Field>
-      <Field label="最近成交"><span className="num text-xs text-ink-3">{time(row.lastTime)}</span></Field>
-      <ChevronDown size={15} className={`hidden text-ink-3 transition-transform duration-200 motion-reduce:transition-none xl:block ${expansion.open ? 'rotate-180' : ''}`} aria-hidden />
+  const cursors = expansion.cursors ?? [undefined]
+  const side = expansion.side === 'buy' || expansion.side === 'sell' ? expansion.side : undefined
+  const query: CostQuery | null = scope ? { ...scope, dimension: 'trade', side, cursor: cursors.at(-1) } : null
+  const key = JSON.stringify(query)
+  const poll = usePolling(useCallback(async (signal: AbortSignal) => {
+    const cacheKey = `${accountId}:${key}`
+    const cached = tradePages.get(cacheKey)
+    if (cached) return cached
+    const page = await getPerformanceCosts<CostTrade>(accountId, JSON.parse(key), signal)
+    if (!signal.aborted) remember(tradePages, cacheKey, page)
+    return page
+  }, [accountId, key]), { queryKey: `journal-trades:${accountId}:${key}`, enabled: !!scope && expansion.open, intervalMs: 0 })
+  const local = trades.filter(t => !side || t.side === side).toSorted((a, b) => b.time - a.time)
+  const shown = scope ? poll.data?.data ?? [] : local.slice(0, expansion.count)
+  const count = scope ? poll.data?.count ?? 0 : local.length
+  return <div className="py-3" data-testid="journal-trades">
+    <div className="mb-2 flex flex-wrap items-center justify-between gap-2 text-xs text-ink-3"><span>{scoped ? '区间内成交' : '逐笔成交'} · {scope && !poll.data ? '—' : count} 笔</span>
+      <Select ariaLabel="成交方向" value={expansion.side} options={SIDES} onChange={side => update({ ...expansion, side, count: 20, cursors: [undefined] })} /></div>
+    <ErrorNotice title="成交读取失败" error={poll.error} onRetry={poll.refresh} />
+    {poll.loading && <p role="status" className="py-3 text-xs text-ink-3">成交读取中</p>}
+    <TradeTable trades={shown} currency={currency} units={units} detailLink={detailLink} />
+    {!poll.loading && !poll.error && count === 0 && <p className="py-3 text-xs text-ink-3">无匹配成交</p>}
+    {scope && poll.data ? <div className="flex min-h-9 items-center justify-end gap-4 text-xs text-ink-3"><span>{count} 笔 · 第 {cursors.length} 页</span><button className="min-h-9 text-accent disabled:opacity-30" disabled={cursors.length === 1} onClick={() => update({ ...expansion, cursors: cursors.slice(0, -1) })}>上一页</button><button className="min-h-9 text-accent disabled:opacity-30" disabled={!poll.data.next_cursor} onClick={() => update({ ...expansion, cursors: [...cursors, poll.data!.next_cursor!] })}>下一页</button></div>
+      : !scope && local.length > shown.length && <button className="min-h-9 text-xs text-accent" onClick={() => update({ ...expansion, count: expansion.count + 20 })}>加载更多成交</button>}
+  </div>
+}
+
+function ExecutionExpansion({ row, accountId, scope, expansion, update, currency, units, detailLink }: RowProps) {
+  const evidence = usePolling(useCallback(() => readEvidence(row.executionId!), [row.executionId]), {
+    queryKey: `journal-evidence:${row.executionId}`, intervalMs: 0, enabled: expansion.open && !!row.executionId,
+  })
+  const scoped = !!scope && (scope.start != null || !!scope.day)
+  return <div className="border-l-2 border-accent px-3 py-2" data-testid="execution-expansion">
+    <div className="flex min-h-9 items-center gap-4 text-xs">{detailLink(row.executionId)}{scope && <span className="text-ink-3">完整执行持仓变化</span>}</div>
+    {!row.executionId && <p className="py-2 text-xs text-ink-3">历史记录无执行附件</p>}
+    <ErrorNotice title="执行证据读取失败" error={evidence.error} onRetry={evidence.refresh} />
+    {evidence.loading && <p role="status" className="py-2 text-xs text-ink-3">执行证据读取中</p>}
+    {evidence.data && <ExecutionEvidence model={evidence.data} currency={currency} units={units} view={expansion.evidenceView ?? 'actions'} onViewChange={evidenceView => update({ ...expansion, evidenceView })} />}
+    <TradeList accountId={accountId} scope={scope && row.recordId != null ? { ...scope, record_id: row.recordId } : undefined} trades={row.trades} expansion={expansion} update={update} currency={currency} units={units} scoped={scoped} />
+  </div>
+}
+interface RowProps { row: JournalExecution; accountId: number; scope?: SnapshotScope; expansion: Expansion; update: (next: Expansion) => void; currency: string; units?: Units; detailLink: DetailLink }
+export function ExecutionGroup(props: RowProps) {
+  const { row, expansion, update, scope } = props
+  const panel = `execution-panel-${row.key}`
+  const expandable = row.recordId != null || !!row.executionId || row.trades.length > 0
+  return <div className="border-b border-line" data-journal-record={row.recordId ?? undefined}>
+    <button type="button" disabled={!expandable} aria-expanded={expandable ? expansion.open : undefined} aria-controls={expandable ? panel : undefined} aria-label={`${expansion.open ? '收起' : '展开'}执行 ${row.recordId ?? row.key}`} onClick={() => update({ ...expansion, open: !expansion.open })} className={`${EXEC_COLS} w-full items-baseline px-3 py-4 text-left text-[13px] hover:bg-bg-subtle disabled:cursor-default ${expansion.open ? 'bg-bg-subtle' : ''}`}>
+      <span className="flex min-w-0 items-center gap-1 num text-xs text-ink-3">{expandable && <ChevronDown size={14} className={`shrink-0 transition-transform motion-reduce:transition-none ${expansion.open ? 'rotate-180' : ''}`} />}{shanghaiLabel(row.time)}</span>
+      <span className="col-span-2 min-w-0 break-words text-ink-2 xl:col-span-1">{row.description}{scope && (scope.start != null || scope.day) && <small className="block text-ink-3">区间内成交</small>}</span>
+      <span className={row.warning ? 'text-warn' : 'text-ink-2'}>{row.status}</span>
+      <Field label="成交额"><span className="num">{amount(row.summary.value)}</span></Field><Field label="滑点损耗 BP"><Slip summary={row.summary} /></Field><Field label="滑点成本"><Cost summary={row.summary} /></Field><Field label="耗时"><span className="num">{durationText(row.durationSec)}</span></Field>
     </button>
-    <div id={panelId} inert={!expansion.open} className={`grid transition-[grid-template-rows] duration-200 motion-reduce:transition-none ${expansion.open ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'}`}>
-      <div className="min-h-0 overflow-hidden">
-        <div className="border-t border-line bg-bg-subtle/50 px-3 pb-4 xl:px-6">
-          <div className="flex flex-wrap items-center justify-between gap-2 py-3">
-            <span className="text-xs text-ink-3">逐笔成交 · {trades.length} 笔</span>
-            <Select ariaLabel={`${row.symbol}成交方向`} value={expansion.side} options={SIDES} onChange={(side) => update({ ...expansion, side, count: 10 })} />
-          </div>
-          <div className={`${TRADE_COLS} hidden border-b border-line py-2 text-xs text-ink-3 xl:grid`}><span>时间</span><span>方向</span><span className="text-right">数量</span><span className="text-right">成交价</span><span className="text-right">成交额</span><span className="text-right">滑点</span><span /></div>
-          {trades.slice(0, expansion.count).map((trade) => <div key={trade.key} className={`${TRADE_COLS} items-baseline border-b border-line py-3 text-[13px]`}>
-            <span className="num text-xs text-ink-3">{time(trade.time)}</span><span>{trade.side === 'buy' ? '买入' : trade.side === 'sell' ? '卖出' : '方向未知'}</span>
-            <Field label="数量"><span className="num">{quantity(trade.volume)}</span></Field>
-            <Field label="成交价"><span className="num">{quantity(trade.price)}</span></Field>
-            <Field label="成交额"><span className="num">{trade.value == null ? '—' : amount(trade.value)}</span></Field>
-            <Field label="滑点"><span className={`num ${trade.slippageBps == null ? 'text-ink-3' : bpsCls(trade.slippageBps)}`}>{trade.slippageBps == null ? '—' : fmtBps(trade.slippageBps)}</span></Field>
-            <span className="text-right">{detailLink(trade.executionId)}</span>
-          </div>)}
-          {trades.length === 0 && <p className="py-4 text-sm text-ink-3">无匹配成交</p>}
-          <div className="mt-3 flex items-center gap-4 text-xs text-ink-3"><span>已展示 {Math.min(expansion.count, trades.length)} / {trades.length} 笔</span>
-            {expansion.count < trades.length && <button type="button" className="text-accent hover:underline" onClick={() => update({ ...expansion, count: expansion.count + 10 })}>加载更多</button>}
-          </div>
-        </div>
-      </div>
-    </div>
+    <div id={panel} inert={!expansion.open} className={`grid transition-[grid-template-rows] duration-200 motion-reduce:transition-none ${expansion.open ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'}`}><div className="min-h-0 overflow-hidden"><ExecutionExpansion {...props} /></div></div>
+  </div>
+}
+
+export function SymbolGroup({ row, accountId, scope, expansion, update, detailLink, currency, units }: Omit<RowProps, 'row'> & { row: JournalSymbol }) {
+  const panel = `symbol-${encodeURIComponent(row.symbol)}`
+  return <div className="border-b border-line" data-journal-symbol={row.symbol}>
+    <button type="button" aria-label={`${row.symbol}成交`} aria-expanded={expansion.open} aria-controls={panel} onClick={() => update({ ...expansion, open: !expansion.open })} className={`${SYMBOL_COLS} w-full items-baseline px-3 py-4 text-left text-[13px] hover:bg-bg-subtle ${expansion.open ? 'bg-bg-subtle' : ''}`}>
+      <span className="col-span-2 break-all font-medium xl:col-span-1">{row.symbol}</span><Field label="成交额"><span className="num">{amount(row.summary.value)}</span></Field><Field label="滑点损耗 BP"><Slip summary={row.summary} /></Field><Field label="滑点成本"><Cost summary={row.summary} /></Field><Field label="成交笔数">{row.summary.count}</Field><Field label="最近成交"><span className="num text-xs text-ink-3">{row.lastTime ? shanghaiLabel(new Date(row.lastTime).toISOString()) : '—'}</span></Field><ChevronDown size={15} className={`text-ink-3 transition-transform motion-reduce:transition-none ${expansion.open ? 'rotate-180' : ''}`} />
+    </button>
+    <div id={panel} inert={!expansion.open} className={`grid transition-[grid-template-rows] duration-200 motion-reduce:transition-none ${expansion.open ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'}`}><div className="min-h-0 overflow-hidden"><div className="border-t border-line bg-bg-subtle/50 px-3 xl:px-6">
+      <TradeList accountId={accountId} scope={scope ? { ...scope, symbol: row.symbol } : undefined} trades={row.trades} expansion={expansion} update={update} currency={currency} units={units} detailLink={detailLink} scoped={!!scope && (scope.start != null || !!scope.day)} />
+    </div></div></div>
   </div>
 }

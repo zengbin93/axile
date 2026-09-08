@@ -1,7 +1,9 @@
 import { execFileSync } from 'node:child_process'
 import assert from 'node:assert/strict'
-import { mkdirSync } from 'node:fs'
+import { mkdirSync, readFileSync } from 'node:fs'
 
+const canvasSource = readFileSync(new URL('../src/components/viz/performanceCanvas.ts', import.meta.url), 'utf8')
+const navY = (Number(canvasSource.match(/navTop: (\d+)/)[1]) + Number(canvasSource.match(/navBottom: (\d+)/)[1])) / 2
 const base = process.env.CANVAS_PREVIEW_URL ?? 'http://127.0.0.1:1425'
 const account = process.env.CANVAS_ACCOUNT_ID ?? '2'
 const session = execFileSync('agent-browser', ['session', 'id', '--scope', 'worktree', '--prefix', 'canvas-check'], { encoding: 'utf8' }).trim()
@@ -15,7 +17,7 @@ function browser(...args) {
 }
 const evaluate = code => browser('eval', code).result
 const wait = code => browser('wait', '--fn', code)
-const settled = () => wait('document.getAnimations().every(a => a.playState !== "running" || a.effect.getTiming().iterations === Infinity)')
+const settled = () => { evaluate('(async () => { await new Promise(requestAnimationFrame); await new Promise(requestAnimationFrame) })()'); wait('document.getAnimations().every(a => a.playState !== "running" || a.effect.getTiming().iterations === Infinity)') }
 const click = name => { settled(); browser('find', 'role', 'button', 'click', '--name', name, '--exact'); settled() }
 const read = testid => evaluate(`document.querySelector('[data-testid="${testid}"]').innerText`)
 const view = () => read('chart-viewport')
@@ -46,6 +48,7 @@ function wheel(ctrlKey, deltaY = -100) {
   })()`)
 }
 function resetView() {
+  if (evaluate('!!document.querySelector("button[aria-label=关闭成交浮层]")')) browser('click', 'button[aria-label=关闭成交浮层]')
   bounds(); browser('dblclick', '[data-testid=performance-chart]')
 }
 async function nativeWheel(rect, ctrlKey, deltaY) {
@@ -58,7 +61,7 @@ async function nativeWheel(rect, ctrlKey, deltaY) {
   try {
     await new Promise((resolve, reject) => { socket.onopen = resolve; socket.onerror = reject })
     await new Promise((resolve, reject) => {
-      socket.onmessage = ({ data }) => { const response = JSON.parse(data); if (response.id === 1) response.error ? reject(response.error) : resolve() }
+      socket.onmessage = ({ data }) => { const response = JSON.parse(data); if (response.id === 1) { if (response.error) reject(response.error); else resolve() } }
       socket.send(JSON.stringify({ id: 1, method: 'Input.dispatchMouseEvent', params: { type: 'mouseWheel', x: rect.x + 100, y: rect.y + 110, deltaX: 0, deltaY, modifiers: ctrlKey ? 2 : 0 } }))
     })
   } finally { socket.close() }
@@ -67,7 +70,7 @@ async function nativeWheel(rect, ctrlKey, deltaY) {
 try {
   browser('set', 'viewport', '1440', '1100')
   browser('open', `${base}/accounts/${account}/history`)
-  const ready = '!!document.querySelector("[data-testid=cost-diagnostics]") && !!document.querySelector("[data-testid=performance-chart]")'
+  const ready = '!!document.querySelector("[data-testid=performance-chart]")'
   try { wait(ready) } catch (error) {
     if (!evaluate('document.querySelector("main")?.textContent.includes("正在读取完整执行区间")')) throw error
     wait(ready)
@@ -91,9 +94,9 @@ try {
   await nativeWheel(wheelBounds, false, 180)
   wait(`Array.from(document.querySelectorAll('*')).reduce((sum, e) => sum + e.scrollTop, window.scrollY) !== ${scrollBefore}`)
   assert.equal(view(), beforeWheel, 'Native ordinary wheel must scroll without zooming')
-  const zoomed = view(); drag(0.5, 0.4, 476); assert.notEqual(view(), zoomed)
+  const zoomed = view(); drag(0.5, 0.4, navY); assert.notEqual(view(), zoomed)
   resetView(); assert.equal(view(), original)
-  drag(1, 0.75, 476); assert.notEqual(view(), original, 'Navigator right handle must resize the window')
+  drag(1, 0.75, navY); assert.notEqual(view(), original, 'Navigator right handle must resize the window')
   resetView()
   wheel(true)
   assert.equal(evaluate('Array.from(document.querySelectorAll("button")).some(b => ["浏览", "区间比较"].includes(b.textContent))'), false)
@@ -103,9 +106,38 @@ try {
   wait('!!document.querySelector("button[aria-label=比较起点]")')
   const selection = evaluate('Array.from(document.querySelectorAll("button[aria-label^=比较]")).map(e => e.textContent.trim())')
   assert.ok(selection[1] > selection[0])
-  const summary = read('chart-readout'), diagnostics = read('cost-diagnostics-summary')
-  assert.equal(summary.match(/滑点成本 ([\d.,-]+)/)?.[1], diagnostics.match(/滑点成本 ([\d.,-]+)/)?.[1])
+  wait('!document.querySelector("[data-testid=chart-readout]").textContent.includes("成本数据未就绪")')
+  const summary = read('chart-readout')
   assert.match(summary, /区间比较/)
+  assert.match(summary, /滑点损耗/)
+  assert.equal(evaluate('!!document.querySelector("[data-testid=cost-diagnostics]")'), false)
+  const chartScroll = evaluate('document.querySelector("main.app-workspace").scrollTop')
+  const journalHref = evaluate('document.querySelector("[data-testid=journal-link]").getAttribute("href")')
+  assert.ok(new URL(journalHref, base).searchParams.has('start'))
+  browser('click', '[data-testid=journal-link]')
+  wait('!!document.querySelector("[data-testid=journal-summary]")')
+  const journal = read('journal-summary')
+  const value = (text, label) => Number(text.match(new RegExp(label + ' ([\\d.,-]+)'))?.[1].replaceAll(',', ''))
+  assert.ok(Math.abs(value(summary, '滑点成本') - value(journal, '滑点成本')) < 0.011, 'Chart and journal cost must agree')
+  assert.equal(value(summary, '滑点损耗'), value(journal, '滑点损耗'), 'Chart and journal BP must agree')
+  const row = evaluate('document.querySelector("[data-journal-record]")?.getAttribute("data-journal-record")')
+  assert.ok(row, 'Selected interval must have execution rows')
+  browser('click', `[data-journal-record="${row}"] > button`)
+  wait(`!!document.querySelector('[data-journal-record="${row}"] [data-testid=execution-evidence]')`)
+  wait(`document.querySelector('[data-journal-record="${row}"] [data-testid=journal-trades]').textContent.includes('区间内成交')`)
+  assert.match(read('execution-expansion'), /完整执行持仓变化/)
+  click('全部持仓')
+  browser('screenshot', `${output}/journal-expanded.png`)
+  settled(); browser('click', `[data-journal-record="${row}"] a`); settled()
+  wait('document.querySelector("main").textContent.includes("返回执行记录")')
+  settled(); browser('find', 'role', 'link', 'click', '--name', '返回执行记录', '--exact'); settled()
+  wait(`document.querySelector('[data-journal-record="${row}"] > button')?.getAttribute('aria-expanded') === 'true'`)
+  wait(`Array.from(document.querySelectorAll('[data-journal-record="${row}"] [data-testid=execution-evidence] button')).some(b => b.textContent === '全部持仓' && b.getAttribute('aria-pressed') === 'true')`)
+  settled(); browser('find', 'role', 'link', 'click', '--name', '返回实盘绩效', '--exact'); settled()
+  wait('!!document.querySelector("[data-testid=performance-chart]")')
+  assert.equal(view(), beforeSelection)
+  assert.deepEqual(evaluate('Array.from(document.querySelectorAll("button[aria-label^=比较]")).map(e => e.textContent.trim())'), selection)
+  wait(`Math.abs(document.querySelector('main.app-workspace').scrollTop - ${chartScroll}) < 3`)
   const beforeMode = selection
   const beforeModeView = view()
   click('每日')
@@ -121,8 +153,8 @@ try {
   browser('screenshot', `${output}/desktop-comparison.png`)
   click('取消选择')
   browser('focus', '[data-testid=performance-chart]'); browser('press', 'Home'); browser('press', 'ArrowRight'); browser('press', 'Enter')
-  assert.ok(evaluate('!!document.querySelector("button[aria-label=清除日期筛选]")'))
-  browser('press', 'Escape'); assert.equal(evaluate('!!document.querySelector("button[aria-label=清除日期筛选]")'), false)
+  assert.ok(evaluate('Array.from(document.querySelectorAll("button")).some(b => b.textContent.includes("取消选择"))'))
+  browser('press', 'Escape'); assert.equal(evaluate('Array.from(document.querySelectorAll("button")).some(b => b.textContent.includes("取消选择"))'), false)
   browser('focus', '[data-testid=performance-chart]'); browser('press', '0')
   assert.equal(view(), original)
   browser('press', '+'); assert.notEqual(view(), original)
@@ -149,15 +181,17 @@ try {
   assert.equal(retina.width, Math.round(retina.cssWidth * 2))
   click('每日'); assert.ok(pixels()[0].count > 1000)
   browser('screenshot', `${output}/retina-daily.png`)
-  // Response-only fixtures exercise unavailable/legacy data without writing to the account.
+  // Response-only fixtures keep real accounts unchanged while exercising legacy and empty charts.
   evaluate(`(async () => {
     const realFetch = window.fetch.bind(window);
-    const data = await (await realFetch('/api/v1/account/performance/${account}?range=all')).json();
-    window.canvasFixture = data;
+    const snapshot = await (await realFetch('/api/v1/account/performance/${account}/snapshot?range=all')).json();
+    window.canvasSnapshot = snapshot;
+    window.canvasFixture = snapshot.result;
+    window.fixtureVersion = 0;
     window.fetch = async (input, init) => {
       const url = new URL(String(input), location.origin);
-      if (url.pathname === '/api/v1/account/performance/${account}') return new Response(JSON.stringify(window.canvasFixture), { headers: { 'Content-Type': 'application/json' } });
-      if (url.pathname === '/api/v1/account/${account}/activity') return new Response(JSON.stringify({ count: 0, data: [] }), { headers: { 'Content-Type': 'application/json' } });
+      if (url.pathname === '/api/v1/account/performance/${account}/refresh') return new Response('{}', { status: 202, headers: { 'Content-Type': 'application/json' } });
+      if (url.pathname === '/api/v1/account/performance/${account}/snapshot') return new Response(JSON.stringify({...window.canvasSnapshot, snapshot_id: 'fixture-' + ++window.fixtureVersion, result: window.canvasFixture}), { headers: { 'Content-Type': 'application/json' } });
       return realFetch(input, init);
     };
   })()`)
@@ -196,7 +230,7 @@ try {
   browser('screenshot', `${output}/dense-gap.png`)
   const errors = browser('errors')
   assert.ok(!errors.errors?.length, JSON.stringify(errors))
-  console.log(JSON.stringify({ result: 'passed', checks: 'canvas pixels, Ctrl wheel, ordinary scrolling, double-click reset, pan, navigator, comparison, diagnostics, keyboard, responsive controls, desktop/mobile themes, retina, reduced motion, legacy, empty, dense gaps', denseHoverP90Ms: sorted[Math.floor(sorted.length * 0.9)], screenshots: output }))
+  console.log(JSON.stringify({ result: 'passed', checks: 'canvas pixels, Ctrl wheel, ordinary scrolling, double-click reset, pan, navigator, comparison, journal drilldown and return, keyboard, responsive controls, desktop/mobile themes, retina, reduced motion, legacy, empty, dense gaps', denseHoverP90Ms: sorted[Math.floor(sorted.length * 0.9)], screenshots: output }))
 } catch (error) {
   browser('screenshot', `${output}/failure.png`)
   console.error(evaluate('document.querySelector("main")?.innerText.slice(0, 1800)'))

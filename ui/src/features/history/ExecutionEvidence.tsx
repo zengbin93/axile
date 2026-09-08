@@ -9,8 +9,10 @@ import type { ChannelCapability } from '@/types/api'
 const actions = { open: '建仓', close: '平仓', increase: '加仓', reduce: '减仓', flip: '翻向', aligned: '持仓不变', skipped: '跳过', failed: '未完成' }
 const tableClass = 'w-full whitespace-nowrap text-left text-xs [&_td]:px-3 [&_td]:py-2 [&_th]:px-3 [&_th]:py-2'
 
-export function ExecutionEvidence({ model, units, currency }: { model: ExecutionDetailModel; units?: ChannelCapability['units']; currency: string }) {
-  const [view, setView] = useState<'actions' | 'positions'>('actions')
+export function ExecutionEvidence({ model, units, currency, view: controlledView, onViewChange }: { model: ExecutionDetailModel; units?: ChannelCapability['units']; currency: string; view?: 'actions' | 'positions'; onViewChange?: (view: 'actions' | 'positions') => void }) {
+  const [localView, setLocalView] = useState<'actions' | 'positions'>('actions')
+  const view = controlledView ?? localView
+  const setView = onViewChange ?? setLocalView
   const before = snapshotPositions(model.artifacts, 'account_snapshot_before')
   const after = snapshotPositions(model.artifacts, 'account_snapshot')
   const involved = model.symbols.filter(s => s.action !== 'aligned' || s.filled !== 0 || s.broken)

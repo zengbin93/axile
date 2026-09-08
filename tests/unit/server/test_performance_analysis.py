@@ -564,3 +564,48 @@ def test_migration_roundtrip_and_restart_running_state(tmp_path):
             assert (await snapshot(sessions))["status"] == "ready"
 
     asyncio.run(check())
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [(0, 0), (41.2, 41.2), ("65.5", 65.5), (None, None), (-1, None), (True, None), ("NaN", None)],
+)
+def test_execution_duration_projection(value, expected):
+    payload, _ = project_execution(record(execution_time=value))
+    assert payload["durationSec"] == expected
+
+
+def test_legacy_execution_without_duration():
+    payload, _ = project_execution(record())
+    assert payload["durationSec"] is None
+
+
+def test_journal_snapshot_trade_identity_filter_and_aggregation(tmp_path):
+    """Journal drilldown retains the chart scope and original execution identity."""
+
+    async def check():
+        async with database(tmp_path, count=2) as (_, sessions, manager):
+            await queue(sessions)
+            await manager.run_once()
+            batch = await snapshot(sessions)
+            async with sessions() as session:
+                query = CostQuery(snapshot_id=batch["snapshot_id"], dimension="trade", symbol_search="a")
+                page = await read_costs(session, 2, query)
+                assert page["count"] == 2
+                assert page["data_until"] == batch["data_until"]
+                assert len({row["trade_id"] for row in page["data"]}) == 2
+                assert all(row["record_id"] and row["execution_id"] for row in page["data"])
+                assert page["summary"]["coveredValue"] == page["summary"]["value"]
+                sells = await read_costs(session, 2, query.model_copy(update={"side": "sell"}))
+                assert all(row["side"] == "sell" for row in sells["data"])
+                assert sells["count"] == 0
+                literal = await read_costs(session, 2, query.model_copy(update={"symbol_search": "%"}))
+                assert literal["count"] == 0
+                symbols = await read_costs(session, 2, query.model_copy(update={"dimension": "symbol"}))
+                assert symbols["data"][0]["lastTime"] == max(row["time"] for row in page["data"])
+                assert symbols["summary"] == page["summary"]
+                record_id = page["data"][0]["record_id"]
+                exact = await read_costs(session, 2, query.model_copy(update={"record_id": record_id}))
+                assert all(row["record_id"] == record_id for row in exact["data"])
+
+    asyncio.run(check())

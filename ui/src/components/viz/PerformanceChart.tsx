@@ -1,3 +1,6 @@
+import { Link } from '@/components/ui/nav'
+import { performanceJournalPath } from '@/features/account/journalSource'
+import { lossClass } from '@/features/history/costs'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent, type ReactNode } from 'react'
 import { X } from 'lucide-react'
 import { ChartTradingOverlay } from '@/features/history/ChartTradingOverlay'
@@ -286,12 +289,14 @@ function CanvasPerformanceChart({ data, daily, costs, intervalCost, selection, o
       <span>回测 <b className="font-medium">{returnText(portfolio)}</b></span>
       <span>收益差 <b className="font-medium">{returnText(account != null && portfolio != null ? portfolio - account : null, ' 个百分点')}</b></span>
       <span>{interval ? '区间' : selection?.kind !== 'day' && readingExecution ? '本次执行' : '当日'}成交额 {amount(costs ? readingCost?.value ?? null : null)}</span>
-      <span className={readingCost?.cost != null && readingCost.cost > 0 ? 'text-warn' : ''}>{readingCost && readingCost.covered < readingCost.count ? '已知滑点成本' : '滑点成本'} {slippageCostAmount(costs ? readingCost?.cost ?? null : null)}</span>
+      <span className={lossClass(readingCost?.lossBp)}>滑点损耗 {amount(costs ? readingCost?.lossBp ?? null : null)} BP</span>
+      <span className={lossClass(readingCost?.cost)}>{readingCost && readingCost.covered < readingCost.count ? '已知滑点成本' : '滑点成本'} {slippageCostAmount(costs ? readingCost?.cost ?? null : null)} {accountInfo?.currency ?? ''}</span>
       <span className="text-ink-3">{costs == null || (interval && !summary) ? '成本数据未就绪' : readingCost ? coverageText(readingCost) : '无成交记录'}</span>
       {interval && summary && <><span>手续费 {feeText(summary)}</span>{estimated > 0 && <span className="text-warn">{estimated} 笔使用执行时间</span>}</>}
     </div>
     <div className="flex flex-wrap items-center gap-2">
       {shownSelection && !interval && <ClearSelectionButton onClick={clear} />}
+      {snapshotId && <Link aria-disabled={!!draft} tabIndex={draft ? -1 : undefined} onClick={event => { if (draft) event.preventDefault() }} data-testid="journal-link" to={performanceJournalPath(accountId, snapshotId, data.range, selection)} className="inline-flex min-h-9 items-center text-xs text-accent hover:underline">{selection?.kind === 'interval' ? '查看区间执行' : selection?.kind === 'day' ? '查看当日执行' : selection?.kind === 'execution' ? '查看本次执行' : '查看执行记录'}</Link>}
       {controls}
     </div>
     </div>

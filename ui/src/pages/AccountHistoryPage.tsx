@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useParams } from 'react-router'
-import { ChevronDown, RefreshCw, Save } from 'lucide-react'
+import { RefreshCw, Save } from 'lucide-react'
 import { useNavigate } from '@/components/ui/nav'
 import { SectionLabel } from '@/components/ui/Card'
 import { Segmented } from '@/components/ui/Segmented'
@@ -13,7 +13,6 @@ import { getAccount } from '@/lib/api/accounts'
 import { getPortfolios } from '@/lib/api/portfolios'
 import { shanghaiDay, shanghaiLabel } from '@/features/history/costs'
 import { reconcileSelection, type ChartSelection } from '@/features/history/chartModel'
-import { CostDiagnostics } from '@/features/history/CostDiagnostics'
 import { performanceViews } from '@/features/history/viewState'
 import { getPerformanceCosts, selectionQuery, savePerformanceSettings } from '@/lib/api/performance'
 import { usePerformanceSnapshot } from '@/features/history/usePerformanceSnapshot'
@@ -43,10 +42,8 @@ function AccountHistory({ accountId }: { accountId: number }) {
   const [range, setRange] = useState<RangeKey>(() => performanceViews.get(accountId)?.range ?? 'all')
   const [view, setView] = useState<'cumulative' | 'daily'>(() => performanceViews.get(accountId)?.view ?? 'cumulative')
   const [selection, setSelection] = useState<ChartSelection>(() => performanceViews.get(accountId)?.selection ?? null)
-  useEffect(() => { performanceViews.set(accountId, { range, view, selection }) }, [accountId, range, view, selection])
-  const clearSelection = useCallback(() => setSelection(null), [])
+  useEffect(() => { performanceViews.set(accountId, { ...performanceViews.get(accountId), range, view, selection }) }, [accountId, range, view, selection])
   const [showEvents, setShowEvents] = useState(false)
-  const [showCosts, setShowCosts] = useState(false)
   const [draft, setDraft] = useState<{ mode: 'ts' | 'cs'; fee: string } | null>(null)
   const [saved, setSaved] = useState<PerformanceSettings | null>(null)
   const [saving, setSaving] = useState(false)
@@ -61,7 +58,35 @@ function AccountHistory({ accountId }: { accountId: number }) {
   useEffect(() => { refreshPerformance.current = performance.refresh }, [performance.refresh])
   const snapshot = performance.data
   const data = snapshot?.result
-  useEffect(() => { if (data) setSelection(current => current?.kind === 'execution' && !data.executions?.some(row => row.record.id === current.recordId) ? null : reconcileSelection(current, data.points)) }, [data])
+  const restoreScroll = useRef(performanceViews.get(accountId)?.scroll ?? null)
+  const [selectionNotice, setSelectionNotice] = useState(false)
+  useEffect(() => {
+    const main = document.querySelector('main.app-workspace')
+    const save = () => {
+      const state = performanceViews.get(accountId)
+      if (state) performanceViews.set(accountId, { ...state, scroll: main?.scrollTop ?? 0 })
+    }
+    main?.addEventListener('scroll', save, { passive: true })
+    return () => { main?.removeEventListener('scroll', save) }
+  }, [accountId])
+  useLayoutEffect(() => {
+    if (!data || restoreScroll.current == null) return
+    const scroll = restoreScroll.current
+    const frame = requestAnimationFrame(() => {
+      const main = document.querySelector('main.app-workspace')
+      if (main) main.scrollTop = scroll
+      restoreScroll.current = null
+    })
+    return () => cancelAnimationFrame(frame)
+  }, [data])
+  useEffect(() => {
+    if (!data) return
+    setSelection(current => {
+      const next = current?.kind === 'execution' && !data.executions?.some(row => row.record.id === current.recordId) ? null : reconcileSelection(current, data.points)
+      if (current && !next) setSelectionNotice(true)
+      return next
+    })
+  }, [data])
   const selectionKey = JSON.stringify(selectionQuery(selection))
   const intervalCosts = usePolling(useCallback((s: AbortSignal) => getPerformanceCosts(accountId, { snapshot_id: snapshot!.snapshot_id!, range, dimension: 'summary', ...JSON.parse(selectionKey) }, s), [accountId, snapshot?.snapshot_id, range, selectionKey]), {
     queryKey: `performance-summary:${accountId}:${snapshot?.snapshot_id}:${range}:${selectionKey}`, intervalMs: 0, enabled: !!snapshot?.snapshot_id && selection?.kind === 'interval',
@@ -147,16 +172,13 @@ function AccountHistory({ accountId }: { accountId: number }) {
       {pendingSettings && <span className="text-warn">新费率 {Number(((settings?.backtest_fee_rate ?? 0) * 10000).toFixed(8))} BP 待计算</span>}
     </div>}
     <ErrorNotice title={data ? '更新失败，保留上次结果' : '绩效读取失败'} error={calculationError} variant="compact" onRetry={performance.refresh} />
+    {selectionNotice && <p role="status" className="py-1 text-xs text-ink-3">数据已更新，原选区已失效，请重新选择。</p>}
     <ErrorNotice title="区间成本读取失败" error={intervalCosts.error} variant="compact" onRetry={intervalCosts.refresh} />
     {!data && <PerformanceChartPlaceholder accountId={accountId} controls={controls} loading={backtestBusy || !snapshot && !calculationError} failed={!!calculationError} />}
     {data && <div className="pb-4">
-      <PerformanceChart key={range} accountId={accountId} snapshotId={snapshot?.snapshot_id} viewKey={`${accountId}:${range}`} data={data} daily={daily} costs={costs} intervalCost={intervalCosts.error || intervalCosts.loading ? null : intervalCosts.data?.summary ?? null} onSelect={setSelection} selection={selection} portfolioNames={portfolioNames} controls={controls} />
+      <PerformanceChart key={range} accountId={accountId} snapshotId={snapshot?.snapshot_id} viewKey={`${accountId}:${range}`} data={data} daily={daily} costs={costs} intervalCost={intervalCosts.error || intervalCosts.loading ? null : intervalCosts.data?.summary ?? null} onSelect={value => { setSelectionNotice(false); setSelection(value) }} selection={selection} portfolioNames={portfolioNames} controls={controls} />
       {data.gap && <p role="status" className="mt-3 break-words text-sm text-warn">组合收益自 {data.gap.time.replace('T', ' ')} 中断：{data.gap.reason}{data.gap.symbols.length ? `（${data.gap.symbols.join('、')}）` : ''}</p>}
       {data.invalid_asset_count > 0 && <p className="mt-2 text-xs text-warn">{data.invalid_asset_count} 条账户资产快照不可用</p>}
-    </div>}
-    {snapshot?.snapshot_id && <div className="border-t border-line">
-      <button type="button" aria-expanded={showCosts} className="flex min-h-10 items-center gap-2 text-xs text-ink-3" onClick={() => setShowCosts(value => !value)}><ChevronDown size={14} className={showCosts ? 'rotate-180' : ''} />{showCosts ? '收起成本明细' : '查看成本明细'}</button>
-      <div inert={!showCosts} className={`grid transition-[grid-template-rows] duration-200 motion-reduce:transition-none ${showCosts ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'}`}><div className="min-h-0 overflow-hidden"><CostDiagnostics enabled={showCosts} key={`${snapshot.snapshot_id}:${range}`} snapshotId={snapshot.snapshot_id} range={range} selection={selection?.kind === 'execution' ? null : selection} onClear={clearSelection} accountId={accountId} onExpired={performance.check} /></div></div>
     </div>}
     <div className="border-t border-line py-4">
       <SectionLabel>账户时间线</SectionLabel>

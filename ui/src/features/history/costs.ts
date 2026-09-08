@@ -1,6 +1,8 @@
 import type { AccountActivity, AccountActivityList } from '@/lib/api/accounts'
 import type { ExecuteRecord } from '@/types/api'
-import { dict, loadJournal, number, sideOf, type TimeWindow } from '@/features/account/executionJournal'
+import { dict, number, sideOf, shanghaiTime } from '@/features/account/executionValues'
+import { loadJournal, type TimeWindow } from '@/features/account/journalActivity'
+export { shanghaiTime } from '@/features/account/executionValues'
 
 export const amount = (value: number | null) => value == null ? '—' : value.toLocaleString('zh-CN', { maximumFractionDigits: Math.abs(value) < 0.01 ? 8 : 2 })
 export const quantityText = (value: number | null) => value == null ? '—' : value.toLocaleString('zh-CN', { maximumFractionDigits: 8 })
@@ -16,11 +18,6 @@ export async function loadPerformanceActivity(accountId: number, window: TimeWin
   return second
 }
 
-export function shanghaiTime(value: string): number {
-  const iso = value.replace(' ', 'T')
-  return Date.parse(/(?:Z|[+-]\d{2}:?\d{2})$/i.test(iso) ? iso : `${iso}+08:00`)
-}
-
 export function shanghaiDay(value: string): string {
   return new Date(shanghaiTime(value) + 8 * 3600000).toISOString().slice(0, 10)
 }
@@ -30,6 +27,9 @@ export function shanghaiLabel(value: string): string {
 }
 
 export interface CostTrade {
+  record_id?: number
+  execution_id?: string | null
+  trade_id?: number
   symbol: string
   day: string
   time: number
@@ -56,6 +56,8 @@ export interface CostSummary {
   amountComplete: boolean
   fees: Record<string, number>
   feeCovered: number
+  coveredValue?: number
+  estimated?: number
 }
 
 const positive = (value: unknown) => { const n = number(value); return n != null && n > 0 ? n : null }
@@ -83,7 +85,7 @@ export function costTrades(record: ExecuteRecord): CostTrade[] {
       const actualTime = typeof trade.trade_time === 'string' && trade.trade_time.trim() ? shanghaiTime(trade.trade_time) : NaN
       const timeEstimated = !Number.isFinite(actualTime)
       const time = timeEstimated ? shanghaiTime(record.created_at) : actualTime
-      return { symbol, day: new Date(time + 8 * 3600000).toISOString().slice(0, 10), time, timeEstimated,
+      return { record_id: record.id ?? undefined, execution_id: record.execution_id, symbol, day: new Date(time + 8 * 3600000).toISOString().slice(0, 10), time, timeEstimated,
         side, quantity, price, reference, referenceSource: mid != null ? 'mid' as const : reference != null ? 'last' as const : null,
         value, cost, lossBp: reference != null && price != null && side !== 'none' ? (price - reference) / reference * 1e4 * (side === 'buy' ? 1 : -1) : null,
         fee: number(extra.commission), feeCurrency: typeof extra.commission_asset === 'string' && extra.commission_asset.trim() ? extra.commission_asset : null }
@@ -105,7 +107,7 @@ export function summarizeCosts(trades: CostTrade[]): CostSummary {
   return { value: valued.length ? value : null, cost: valid.length ? valid.reduce((sum, t) => sum + t.cost!, 0) : null,
     lossBp: coveredValue > 0 ? valid.reduce((sum, t) => sum + t.lossBp! * t.value!, 0) / coveredValue : null,
     coverage: valued.length === trades.length && value > 0 ? coveredValue / value : null,
-    covered: valid.length, count: trades.length, amountComplete: valued.length === trades.length, fees, feeCovered }
+    coveredValue, estimated: trades.filter(t => t.timeEstimated).length, covered: valid.length, count: trades.length, amountComplete: valued.length === trades.length, fees, feeCovered }
 }
 
 export interface CostExecution {
@@ -145,3 +147,28 @@ export function dailyCosts(executions: CostExecution[]): Map<string, CostSummary
   }
   return new Map([...groups].map(([day, trades]) => [day, summarizeCosts(trades)]))
 }
+
+/** 完整执行耗时；缺失或非法值不显示为零。 */
+export function durationText(seconds: number | null | undefined): string {
+  if (seconds == null || !Number.isFinite(seconds) || seconds < 0) return '—'
+  if (seconds < 60) return `${seconds.toFixed(1)}s`
+  const rounded = Math.round(seconds)
+  return `${Math.floor(rounded / 60)}m${rounded % 60}s`
+}
+
+/** 合并互不重叠的分组；有效成交额独立于完整度，不能从未知覆盖率反推。 */
+export function combineCosts(groups: CostSummary[]): CostSummary {
+  const sum = (key: 'count' | 'covered' | 'feeCovered') => groups.reduce((total, s) => total + s[key], 0)
+  const nullableSum = (key: 'value' | 'cost') => groups.some(s => s[key] != null) ? groups.reduce((total, s) => total + (s[key] ?? 0), 0) : null
+  const coveredValue = groups.reduce((total, s) => total + (s.coveredValue ?? (s.coverage != null && s.value != null ? s.coverage * s.value : 0)), 0)
+  const value = nullableSum('value')
+  const complete = groups.every(s => s.amountComplete)
+  const fees: Record<string, number> = {}
+  for (const s of groups) for (const [currency, fee] of Object.entries(s.fees)) fees[currency] = (fees[currency] ?? 0) + fee
+  return { value, cost: nullableSum('cost'), count: sum('count'), covered: sum('covered'), coveredValue,
+    lossBp: coveredValue > 0 ? groups.reduce((total, s) => total + (s.lossBp ?? 0) * (s.coveredValue ?? ((s.coverage ?? 0) * (s.value ?? 0))), 0) / coveredValue : null,
+    coverage: complete && value != null && value > 0 ? coveredValue / value : null,
+    amountComplete: complete, fees, feeCovered: sum('feeCovered'), estimated: groups.reduce((total, s) => total + (s.estimated ?? 0), 0) }
+}
+
+export const lossClass = (loss: number | null | undefined) => loss == null || loss === 0 ? 'text-ink-3' : loss > 0 ? 'text-warn' : 'text-accent'

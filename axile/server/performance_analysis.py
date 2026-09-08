@@ -20,7 +20,7 @@ from axile.server.db.models.performance import PerformanceBinding, PerformanceSe
 from axile.server.performance import calculate_performance, local_time, observation
 from axile.server.performance_costs import SHANGHAI, daily_costs, project_execution, summarize, timestamp
 
-LOGIC_VERSION = "5"
+LOGIC_VERSION = "6"
 ENGINE_VERSION = version("wbt")
 RETRY_DELAYS = (5, 30, 120)
 

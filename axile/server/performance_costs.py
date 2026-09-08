@@ -118,6 +118,7 @@ def project_execution(record) -> tuple[dict, list[dict]]:
             and all(result.get("status") == "NOOP" for result in results.values())
         )
     )
+    duration = number(raw.get("execution_time"))
     payload = {
         "key": str(record.id),
         "record": {
@@ -128,6 +129,7 @@ def project_execution(record) -> tuple[dict, list[dict]]:
             "raw_result": {key: raw[key] for key in ("status", "task_status") if key in raw},
         },
         "noop": noop,
+        "durationSec": duration if duration is not None and duration >= 0 else None,
         "symbolCount": len({trade["symbol"] for trade in trades if trade["quantity"] is not None}),
         "positionCount": position_count(raw.get("account_assets")),
         "positions": position_preview(raw.get("account_assets")),

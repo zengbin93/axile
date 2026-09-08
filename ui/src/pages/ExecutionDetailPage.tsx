@@ -1,3 +1,4 @@
+import { lossClass } from '@/features/history/costs'
 import { useCallback, useState } from 'react'
 import { useLocation, useParams } from 'react-router'
 import { Link } from '@/components/ui/nav'
@@ -10,7 +11,7 @@ import { isQuantizedZero, weightText } from '@/features/account/sizingEvidenceMo
 import { usePolling } from '@/lib/hooks/usePolling'
 import { getExecutionArtifacts, getExecutionEvents, getExecutionStatus } from '@/lib/api/executions'
 import { currencyOf } from '@/lib/derive'
-import { bpsCls, displayCurrencyUnit, fmtBps, fmtMoney, withCurrency } from '@/lib/format'
+import { displayCurrencyUnit, fmtBps, fmtMoney, withCurrency } from '@/lib/format'
 import {
   buildExecutionDetail,
   executionHeadline,
@@ -352,8 +353,8 @@ function SymbolChainRow({
         <div className="num mt-0.5 text-[13px]">
           {tca.liquidity && <span className="text-ink-2">{LIQUIDITY_LABEL[tca.liquidity] ?? tca.liquidity}</span>}
           {tca.slippage_bps != null && (
-            <span className={bpsCls(tca.slippage_bps)}>
-              {tca.liquidity ? ' · ' : ''}滑点 {fmtBps(tca.slippage_bps)}
+            <span className={lossClass(-tca.slippage_bps)}>
+              {tca.liquidity ? ' · ' : ''}滑点损耗 {fmtBps(-tca.slippage_bps)}
             </span>
           )}
           <span className="text-ink-3">

@@ -9,7 +9,7 @@ function execution(id: number, result: Record<string, unknown> = {}): AccountAct
   } }
 }
 function symbol(price = 99, value: number | null = 1000, tick = true, direction = 'BUY') {
-  return { status: 'SUCCEEDED', first_tick: tick ? { bid_price: 99, ask_price: 101 } : {},
+  return { status: 'SUCCEEDED', sizing: value == null ? {} : { unit_multiplier: value / price }, first_tick: tick ? { bid_price: 99, ask_price: 101 } : {},
     orders: [{ order_id: 'order', direction }],
     trades: [{ trade_price: price, trade_volume: 1, trade_value: value, order_id: 'order' }],
   }
@@ -47,10 +47,10 @@ describe('journal pagination', () => {
 })
 
 describe('journal quality', () => {
-  it('weights slippage by actual trade value and reports partial coverage', () => {
+  it('weights loss by projected notional and reports partial coverage', () => {
     const rows = journalExecutions([execution(1, { symbol_results: { A: symbol(99, 9000), B: symbol(101, 1000), C: symbol(100, 10000, false) } })])
     const q = qualityOf(rows[0].trades)
-    expect(q.slippage).toBeCloseTo(80)
+    expect(q.slippage).toBeCloseTo(-80)
     expect(q.coverage).toBe(0.5)
     expect(q.value).toBe(20000)
     expect(journalSymbols(rows, 'b').map((s) => s.symbol)).toEqual(['B'])
@@ -86,7 +86,16 @@ describe('journal quality', () => {
 
 it('uses today for relative ranges and rejects reversed custom dates', () => {
   const w = journalWindow('7', '', '', new Date('2026-09-07T12:00:00'))!
-  expect(new Date(w.start).getDate()).toBe(1)
-  expect(new Date(w.end).getDate()).toBe(8)
+  expect(new Date(w.start).toISOString()).toBe('2026-08-31T16:00:00.000Z')
+  expect(new Date(w.end).toISOString()).toBe('2026-09-07T16:00:00.000Z')
   expect(journalWindow('custom', '2026-09-08', '2026-09-07')).toBeNull()
+})
+
+it('retains malformed fills as unknown and rejects overflow calendar dates', () => {
+  const row = journalExecutions([execution(1, { symbol_results: { A: { ...symbol(), trades: [{ trade_volume: 1 }] } } })])[0]
+  expect(row.trades).toHaveLength(1)
+  expect(row.summary.count).toBe(1)
+  expect(row.summary.cost).toBeNull()
+  expect(row.summary.amountComplete).toBe(false)
+  expect(journalWindow('custom', '2026-02-30', '2026-03-01')).toBeNull()
 })

@@ -25,6 +25,7 @@ export interface CostExecutionRow {
   key: string
   record: { id: number; execution_id: string | null; created_at: string; is_success: number; raw_result: { status?: string; task_status?: string } }
   noop: boolean
+  durationSec?: number | null
   symbolCount: number
   positionCount?: number | null
   positions?: Array<{ symbol: string; quantity: number; direction: string }> | null
@@ -47,8 +48,9 @@ export interface TransactionPreview {
   target: number | null
   summary: CostSummary
 }
-export interface CostSymbolRow { symbol: string; summary: CostSummary; buy: number; sell: number; quantityIncomplete: boolean }
+export interface CostSymbolRow { lastTime?: number; symbol: string; summary: CostSummary; buy: number; sell: number; quantityIncomplete: boolean }
 export interface CostPage<T = CostExecutionRow | CostSymbolRow | CostTrade> {
+  data_until?: string | null
   snapshot_id: string
   summary: CostSummary & { estimated: number }
   successful: number
@@ -67,6 +69,9 @@ export interface CostQuery {
   end?: number
   record_id?: number
   symbol?: string
+  symbol_search?: string
+  side?: 'buy' | 'sell' | 'none'
+  limit?: number
   cursor?: string
 }
 export function selectionQuery(selection: ChartSelection) {

@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { costExecutions, costTrades, dailyCosts, executionsOnDay, loadPerformanceActivity, shanghaiDay, shanghaiTime, summarizeCosts } from './costs'
+import { costExecutions, costTrades, durationText, dailyCosts, executionsOnDay, loadPerformanceActivity, shanghaiDay, shanghaiTime, summarizeCosts } from './costs'
 import { loadJournal } from '@/features/account/executionJournal'
 import type { AccountActivity } from '@/lib/api/accounts'
 import type { ExecuteRecord } from '@/types/api'
@@ -111,4 +111,13 @@ test('选日只汇总当天成交，跨日执行不会重复计成本，清除�
   expect(executionsOnDay(executions, '2026-01-02')[0].summary.cost).toBe(20)
   expect(executionsOnDay(executions, '2026-01-03')).toEqual([])
   expect(executionsOnDay(executions, null)[0].summary.cost).toBe(40)
+})
+
+
+test('执行耗时保留零值、拒绝缺失与非法值并正确进位', () => {
+  expect(durationText(0)).toBe('0.0s')
+  expect(durationText(41.2)).toBe('41.2s')
+  expect(durationText(65.5)).toBe('1m6s')
+  expect(durationText(119.9)).toBe('2m0s')
+  for (const value of [null, undefined, -1, NaN, Infinity]) expect(durationText(value)).toBe('—')
 })

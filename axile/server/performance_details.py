@@ -29,6 +29,8 @@ class CostQuery(BaseModel):
     end: float | None = Field(default=None, allow_inf_nan=False)
     record_id: int | None = None
     symbol: str | None = None
+    symbol_search: str | None = None
+    side: Literal["buy", "sell", "none"] | None = None
     limit: int = Field(default=20, ge=1, le=100)
     cursor: str | None = Field(default=None, max_length=1024)
 
@@ -88,10 +90,15 @@ def _filters(query: CostQuery, result: dict):
         time_filter = sa.and_(executions.c.time > query.start, executions.c.time <= query.end)
     if query.symbol is not None:
         trade_filter.append(trades.c.symbol == query.symbol)
-    if query.symbol is not None or time_filter is not None:
+    if query.side is not None:
+        trade_filter.append(trades.c.payload["side"].as_string() == query.side)
+    if query.symbol_search:
+        trade_filter.append(trades.c.symbol.icontains(query.symbol_search, autoescape=True))
+    has_symbol = query.symbol is not None or bool(query.symbol_search) or query.side is not None
+    if has_symbol or time_filter is not None:
         matching = executions.c.record_id.in_(sa.select(trades.c.record_id).where(*trade_filter))
         execution_filter.append(
-            sa.or_(matching, time_filter) if time_filter is not None and query.symbol is None else matching
+            sa.or_(matching, time_filter) if time_filter is not None and not has_symbol else matching
         )
     return execution_filter, trade_filter
 
@@ -133,6 +140,7 @@ async def summary(session, filters: list) -> dict:
         "lossBp": row["weighted_loss"] / row["covered_value"] if row["covered_value"] else None,
         "coverage": row["covered_value"] / row["value"] if complete and row["value"] else None,
         "covered": row["covered"],
+        "coveredValue": row["covered_value"],
         "count": row["count"],
         "amountComplete": complete,
         "fees": {currency: value for currency, value, _ in fee_rows},
@@ -210,6 +218,7 @@ async def _symbol_page(session, filters, query, offset):
         data.append(
             {
                 "symbol": symbol,
+                "lastTime": await session.scalar(sa.select(sa.func.max(trades.c.time)).where(*row_filter)),
                 "summary": await summary(session, row_filter),
                 "buy": quantities[0] or 0,
                 "sell": quantities[1] or 0,
@@ -261,19 +270,33 @@ async def read_costs(session, account_id: int, query: CostQuery) -> dict:
         ordering = [trades.c.time.desc(), trades.c.id]
         if query.sort == "cost":
             ordering.insert(0, trades.c.cost.desc().nulls_last())
-        data = (
-            (
-                await session.execute(
-                    sa.select(trades.c.payload)
-                    .where(*trade_filter)
-                    .order_by(*ordering)
-                    .offset(offset)
-                    .limit(query.limit)
+        rows = (
+            await session.execute(
+                sa.select(trades.c.payload, trades.c.id, trades.c.record_id, executions.c.payload)
+                .select_from(
+                    trades.join(
+                        executions,
+                        sa.and_(
+                            trades.c.snapshot_id == executions.c.snapshot_id,
+                            trades.c.record_id == executions.c.record_id,
+                        ),
+                    )
                 )
+                .where(*trade_filter)
+                .order_by(*ordering)
+                .offset(offset)
+                .limit(query.limit)
             )
-            .scalars()
-            .all()
-        )
+        ).all()
+        data = [
+            {
+                **payload,
+                "trade_id": trade_id,
+                "record_id": record_id,
+                "execution_id": execution["record"]["execution_id"],
+            }
+            for payload, trade_id, record_id, execution in rows
+        ]
     next_cursor = (
         base64.urlsafe_b64encode(json.dumps({"scope": digest, "offset": offset + query.limit}).encode()).decode()
         if offset + query.limit < count
@@ -281,6 +304,7 @@ async def read_costs(session, account_id: int, query: CostQuery) -> dict:
     )
     return {
         "snapshot_id": query.snapshot_id,
+        "data_until": batch["data_until"],
         "summary": totals,
         "successful": execution_counts[1] or 0,
         "noop": execution_counts[2] or 0,

@@ -21,6 +21,6 @@ test('缺失和退化快照不当成空仓，完整空数组才是空仓', () =>
   expect(snapshotPositions([], 'account_snapshot')).toBeNull()
   expect(snapshotPositions(artifacts({ source: 'assumed', account_assets: { positions: [] } }), 'account_snapshot')).toBeNull()
   expect(snapshotPositions(artifacts({ source: 'real', account_assets: { positions: [] } }), 'account_snapshot')).toEqual([])
-  expect(snapshotPositions(artifacts({ account_assets: { positions: [{ symbol: 'BTCUSDT' }] } }), 'account_snapshot')).toBeNull()
-  expect(quantityUnit({ quantity_kind: 'base_asset', quantity_label: '币', quantity_max_decimals: 6, price_label: '', notional_label: '' }, 'BTCUSDT', 'USDT')).toBe('BTC')
+  expect(snapshotPositions(artifacts({ account_assets: { positions: [{ symbol: 'rb2610' }] } }), 'account_snapshot')).toBeNull()
+  expect(quantityUnit({ quantity_kind: 'base_asset', quantity_label: '单位', quantity_max_decimals: 6, price_label: '', notional_label: '' }, 'ASSETCNY', 'CNY')).toBe('ASSET')
 })
