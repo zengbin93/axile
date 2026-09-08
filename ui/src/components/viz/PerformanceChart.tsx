@@ -2,6 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, typ
 import { X } from 'lucide-react'
 import type { AccountPerformance } from '@/types/api'
 import { Select } from '@/components/ui/Select'
+import { OverflowText } from '@/components/ui/OverflowText'
 import { chartAxis } from '@/components/viz/performanceCanvas'
 import { amount, coverageText, feeText, shanghaiTime, type CostSummary } from '@/features/history/costs'
 import { returnText } from '@/features/history/performance'
@@ -135,21 +136,21 @@ function CanvasPerformanceChart({ data, daily, costs, intervalCost, selection, o
     return () => element.removeEventListener('wheel', wheel)
   }, [])
 
-  const locate = (event: PointerEvent<HTMLCanvasElement>) => {
-    const rect = event.currentTarget.getBoundingClientRect()
+  const locate = (event: PointerEvent<HTMLElement>) => {
+    const rect = container.current!.getBoundingClientRect()
     const x = event.clientX - rect.left, y = event.clientY - rect.top
     const time = xTime(Math.max(PLOT.left, Math.min(plotRight(size.width), x)), size.width, viewport)
     return { x, y, time, index: nearestIndex(times, time) }
   }
   const showHover = (index: number | null) => { hoverRef.current = index; setHover(previous => previous === index ? previous : index); schedule() }
-  const startDrag = (event: PointerEvent<HTMLCanvasElement>) => {
+  const startDrag = (event: PointerEvent<HTMLElement>) => {
     if (!event.isPrimary || event.button !== 0) return
     const p = locate(event)
     if (p.x < PLOT.left || p.x > plotRight(size.width) || p.y < PLOT.top) return
     if ((p.y > PLOT.costBottom && p.y < PLOT.navTop) || p.y > PLOT.navBottom) return
     const onBinding = p.y >= PLOT.binding && p.y <= PLOT.binding + PLOT.bindingHeight
     setBindingTime(onBinding ? p.time : null)
-    event.currentTarget.focus({ preventScroll: true }); event.currentTarget.setPointerCapture(event.pointerId)
+    overlay.current?.focus({ preventScroll: true }); event.currentTarget.setPointerCapture(event.pointerId)
     let kind: DragKind = !onBinding && exact ? 'compare' : 'pan'
     let anchor = times[p.index]
     if (p.y >= PLOT.navTop) {
@@ -162,7 +163,7 @@ function CanvasPerformanceChart({ data, daily, costs, intervalCost, selection, o
     drag.current = { kind, x: p.x, y: p.y, viewport, anchor, moved: false, pending: selection, bindingTime: onBinding ? p.time : null }
     pointer.current = p; showHover(p.index)
   }
-  const move = (event: PointerEvent<HTMLCanvasElement>) => {
+  const move = (event: PointerEvent<HTMLElement>) => {
     const p = locate(event); pointer.current = p
     const active = drag.current
     if (!active) {
@@ -190,7 +191,7 @@ function CanvasPerformanceChart({ data, daily, costs, intervalCost, selection, o
     const time = times[index]
     onSelect(selection?.kind === 'day' && selection.time === time ? null : { kind: 'day', day: data.points[index].date.slice(0, 10), time })
   }
-  const finish = (event: PointerEvent<HTMLCanvasElement>) => {
+  const finish = (event: PointerEvent<HTMLElement>) => {
     const active = drag.current
     if (!active) return
     const p = locate(event)
@@ -270,6 +271,23 @@ function CanvasPerformanceChart({ data, daily, costs, intervalCost, selection, o
           else if (event.key === '-') { event.preventDefault(); zoom(1.4) }
           else if (event.key === '0') { event.preventDefault(); setViewport(full); setReturnRange(null) }
         }} />
+      <div className="pointer-events-none absolute inset-0"
+        onPointerDown={startDrag} onPointerMove={move} onPointerUp={finish}
+        onPointerCancel={() => { drag.current = null; setDraft(null); showHover(null) }}
+        onLostPointerCapture={() => { drag.current = null; setDraft(null) }}
+        onPointerLeave={event => { if (!drag.current) { showHover(null); if (event.pointerType !== 'touch') setBindingTime(null) } }}
+        onDoubleClick={() => setViewport(full)}>
+        {data.bindings.map((period, index) => {
+          const start = Math.max(PLOT.left, xPosition(shanghaiTime(period.time), size.width, viewport))
+          const end = Math.min(plotRight(size.width), xPosition(index + 1 < data.bindings.length ? shanghaiTime(data.bindings[index + 1].time) : viewport.end, size.width, viewport))
+          if (end - start < 90) return null
+          const name = period.portfolio_id == null ? '未绑定' : portfolioNames.get(period.portfolio_id) ?? `组合 #${period.portfolio_id}`
+          return <div key={`${period.time}-${index}`} className="pointer-events-auto absolute cursor-crosshair touch-pan-y px-2 text-[11px] leading-6 text-ink-3"
+            style={{ left: start, top: PLOT.binding, width: end - start, height: PLOT.bindingHeight }}>
+            <OverflowText text={name} />
+          </div>
+        })}
+      </div>
       <div role="group" aria-label="收益率轴缩放" data-testid="return-axis" className="absolute right-0 cursor-ns-resize touch-none"
         style={{ top: PLOT.top, height: PLOT.bottom - PLOT.top, width: PLOT.right }}
         onPointerDown={event => {

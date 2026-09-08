@@ -73,7 +73,7 @@ function textFit(ctx: CanvasRenderingContext2D, text: string, width: number): st
 }
 
 function drawBindings(ctx: CanvasRenderingContext2D, scene: ChartScene) {
-  const { data, width, viewport, theme, portfolioNames } = scene
+  const { data, width, viewport, theme } = scene
   ctx.fillStyle = theme.muted; ctx.fillText('组合绑定', PLOT.left, 271)
   data.bindings.forEach((binding, i) => {
     const start = Math.max(PLOT.left, xPosition(shanghaiTime(binding.time), width, viewport))
@@ -82,12 +82,6 @@ function drawBindings(ctx: CanvasRenderingContext2D, scene: ChartScene) {
     line(ctx, start, PLOT.binding + PLOT.bindingHeight - 1, end, PLOT.binding + PLOT.bindingHeight - 1, theme.line)
     const boundary = xPosition(shanghaiTime(binding.time), width, viewport)
     if (boundary >= PLOT.left) line(ctx, boundary, PLOT.binding + 4, boundary, PLOT.binding + PLOT.bindingHeight - 1, theme.muted)
-    const name = binding.portfolio_id == null ? '未绑定' : portfolioNames.get(binding.portfolio_id) ?? `组合 #${binding.portfolio_id}`
-    if (end - start >= 90) {
-      let label = name
-      while (label.length > 1 && ctx.measureText(label === name ? label : `…${label}`).width > end - start - 16) label = label.slice(1)
-      ctx.fillStyle = theme.muted; ctx.fillText(label === name ? label : `…${label}`, start + 8, PLOT.binding + 16)
-    }
   })
 }
 
