@@ -345,6 +345,12 @@ def test_cost_cross_day_unknowns_fees_noop_and_interval_boundary(tmp_path):
     assert summarize(fills)["feeCovered"] == 2
     assert summarize(fills)["coverage"] == pytest.approx(4040 / 6040)
     assert daily_costs(fills)["2026-01-02"]["cost"] == 20
+    previews = payload["transactions"]
+    assert [preview["side"] for preview in previews] == ["buy", "sell", "none"]
+    assert previews[0]["time"] == timestamp("2026-01-01T23:59:00")
+    assert previews[1]["time"] == timestamp("2026-01-02T00:01:00")
+    assert previews[2]["summary"]["cost"] is None
+    assert previews[2]["timeEstimated"] is True
 
     async def check():
         async with database(tmp_path, count=0) as (_, sessions, manager):
@@ -371,8 +377,68 @@ def test_cost_cross_day_unknowns_fees_noop_and_interval_boundary(tmp_path):
                 )
                 assert interval["summary"]["cost"] == 20
                 assert interval["summary"]["count"] == 1
+                exact = await read_costs(session, 2, CostQuery(snapshot_id=batch["snapshot_id"], record_id=item.id))
+                assert exact["count"] == 1
+                assert exact["summary"]["cost"] == 40
+                assert exact["summary"]["count"] == 3
 
     asyncio.run(check())
+
+
+@pytest.mark.parametrize(
+    ("assets", "expected"),
+    [
+        ({}, None),
+        ({"positions": []}, 0),
+        ({"positions": [{"symbol": "A", "volume": 2}, {"symbol": "B", "volume": 0}]}, 1),
+        ({"positions": [{"symbol": "A"}]}, None),
+        ({"source": "assumed", "positions": []}, None),
+        ({"source": "error", "positions": []}, None),
+    ],
+)
+def test_execution_position_state_requires_valid_snapshot(assets, expected):
+    payload, _ = project_execution(record(account_assets=assets))
+    assert payload["positionCount"] == expected
+
+
+def test_execution_strip_preserves_intraday_failed_and_empty_records():
+    records = [
+        record(1),
+        record(2, status="NOOP", symbol_results={}, account_assets={"total_asset": 100, "positions": []}),
+        record(3),
+    ]
+    records[1].created_at = "2026-01-01T10:00:00"
+    records[2].created_at = "2026-01-01T11:00:00"
+    records[2].is_success = 0
+    from axile.server.db.models.performance import PerformanceSettings
+
+    ranges, _, _ = compute_batch(
+        records, [], [], [], PerformanceSettings(backtest_weight_type="cs", backtest_fee_rate=0)
+    )
+    result = ranges["all"]["performance"]
+    assert [point["record_id"] for point in result["points"]] == [1, 3]
+    assert [row["record"]["id"] for row in result["executions"]] == [1, 2, 3]
+    assert result["executions"][1]["positionCount"] == 0
+    assert result["executions"][1]["noop"] is True
+    assert result["executions"][2]["record"]["is_success"] == 0
+
+
+def test_failed_execution_preview_exposes_plan_and_confirmed_zero_fills():
+    item = record(
+        status="FAILED",
+        symbol_results={
+            "A": {
+                "sizing": {"current_quantity": 2, "target_quantity": 5},
+                "orders": [],
+                "trades": [],
+                "error": "超过最大下单量",
+            }
+        },
+    )
+    item.is_success = 0
+    payload, _ = project_execution(item)
+    assert payload["transactions"] == []
+    assert payload["attempts"] == [{"symbol": "A", "planned": 3, "filled": 0, "reason": "超过最大下单量"}]
 
 
 def test_migration_roundtrip_and_restart_running_state(tmp_path):

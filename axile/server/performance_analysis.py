@@ -18,9 +18,9 @@ from axile.server.db.models.analysis import cost_execution as executions
 from axile.server.db.models.analysis import cost_trade as trades
 from axile.server.db.models.performance import PerformanceBinding, PerformanceSettings
 from axile.server.performance import calculate_performance, local_time, observation
-from axile.server.performance_costs import SHANGHAI, daily_costs, project_execution, timestamp
+from axile.server.performance_costs import SHANGHAI, daily_costs, project_execution, summarize, timestamp
 
-LOGIC_VERSION = "1"
+LOGIC_VERSION = "4"
 ENGINE_VERSION = version("wbt")
 RETRY_DELAYS = (5, 30, 120)
 
@@ -185,6 +185,11 @@ def compute_batch(records, targets, bindings, skips, settings: PerformanceSettin
             PerformanceBinding(time=local_time(binding.created_at).isoformat(), portfolio_id=binding.portfolio_id)
             for binding in sorted(bindings, key=lambda item: local_time(item.created_at))
             if start <= timestamp(binding.created_at) <= end
+        ]
+        result.executions = [
+            item["payload"] | {"summary": summarize(by_record[item["record_id"]])}
+            for item in sorted(projected, key=lambda item: (item["time"], item["record_id"]))
+            if start <= item["time"] <= end
         ]
         selected_trades = [
             fill for record in records if start <= timestamp(record.created_at) <= end for fill in by_record[record.id]

@@ -26,6 +26,25 @@ export interface CostExecutionRow {
   record: { id: number; execution_id: string | null; created_at: string; is_success: number; raw_result: { status?: string; task_status?: string } }
   noop: boolean
   symbolCount: number
+  positionCount?: number | null
+  positions?: Array<{ symbol: string; quantity: number; direction: string }> | null
+  transactions?: TransactionPreview[]
+  reason?: string
+  attempts?: Array<{ symbol: string; planned: number | null; filled: number | null; reason: string }>
+  summary: CostSummary
+}
+export interface TransactionPreview {
+  symbol: string
+  side: 'buy' | 'sell' | 'none'
+  quantity: number
+  price: number | null
+  reference: number | null
+  referenceSource: 'mid' | 'last' | null
+  time: number
+  endTime: number
+  timeEstimated: boolean
+  before: number | null
+  target: number | null
   summary: CostSummary
 }
 export interface CostSymbolRow { symbol: string; summary: CostSummary; buy: number; sell: number; quantityIncomplete: boolean }
@@ -51,7 +70,7 @@ export interface CostQuery {
   cursor?: string
 }
 export function selectionQuery(selection: ChartSelection) {
-  return selection?.kind === 'day' ? { day: selection.day } : selection?.kind === 'interval' ? { start: selection.start, end: selection.end } : {}
+  return selection?.kind === 'execution' ? { record_id: selection.recordId } : selection?.kind === 'day' ? { day: selection.day } : selection?.kind === 'interval' ? { start: selection.start, end: selection.end } : {}
 }
 export const getPerformanceSnapshot = (id: number, range: PerformanceRange) => apiGet<PerformanceSnapshot>(`/account/performance/${id}/snapshot?range=${range}`)
 export const refreshPerformance = (id: number) => apiSend('POST', `/account/performance/${id}/refresh`)

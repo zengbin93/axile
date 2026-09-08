@@ -3,13 +3,18 @@ import { ChevronDown, ChevronLeft, ChevronRight, ExternalLink, X } from 'lucide-
 import { Link } from '@/components/ui/nav'
 import { Segmented } from '@/components/ui/Segmented'
 import { ErrorNotice } from '@/components/ui/ErrorNotice'
-import { getExecutionArtifacts } from '@/lib/api/executions'
+import { getExecutionArtifacts, getExecutionEvents } from '@/lib/api/executions'
+import { useChannelDescriptor } from '@/stores/channels'
+import { useDomainStore } from '@/stores/domain'
+import { ExecutionEvidence } from '@/features/history/ExecutionEvidence'
+import { quantityUnit } from '@/features/history/executionEvidenceModel'
+import { executionState } from '@/features/history/executionSelection'
 import { buildExecutionDetail } from '@/features/account/executionDetail'
 import { ApiError } from '@/lib/api/client'
 import { getPerformanceCosts, selectionQuery, type CostExecutionRow, type CostSymbolRow, type CostPage, type CostQuery, type PerformanceRange } from '@/lib/api/performance'
-import type { ExecutionArtifact } from '@/types/api'
-import { amount, coverageText, feeText, quantityText, shanghaiLabel, type CostSummary, type CostTrade } from './costs'
-import { selectionLabel, type ChartSelection } from './chartModel'
+import type { ExecutionArtifact, ExecutionEvent } from '@/types/api'
+import { amount, coverageText, feeText, quantityText, shanghaiLabel, type CostSummary, type CostTrade } from '@/features/history/costs'
+import { selectionLabel, type ChartSelection } from '@/features/history/chartModel'
 import { withViewTransition } from '@/lib/viewTransition'
 
 function SummaryCells({ summary }: { summary: CostSummary }) {
@@ -45,10 +50,14 @@ function useCostPage<T>(accountId: number, query: CostQuery, enabled: boolean, o
 }
 
 function ExecutionRow({ execution, accountId, query, onExpired }: { execution: CostExecutionRow; accountId: number; query: CostQuery; onExpired: () => Promise<void> }) {
-  const [open, setOpen] = useState(false)
+  const [open, setOpen] = useState(query.record_id != null)
+  const account = useDomainStore(s => s.accounts?.find(a => a.account_id === accountId))
+  const descriptor = useChannelDescriptor(account?.trade_channel)
+  const currency = account?.currency ?? ''
   const [cursors, setCursors] = useState<(string | undefined)[]>([undefined])
   const fills = useCostPage<CostTrade>(accountId, { ...query, dimension: 'trade', record_id: execution.record.id, cursor: cursors.at(-1) }, open, onExpired)
   const [artifacts, setArtifacts] = useState<ExecutionArtifact[] | null>(null)
+  const [events, setEvents] = useState<ExecutionEvent[]>([])
   const [error, setError] = useState<Error | null>(null)
   const [retry, setRetry] = useState(0)
   const record = execution.record
@@ -56,28 +65,29 @@ function ExecutionRow({ execution, accountId, query, onExpired }: { execution: C
     if (!open || !record.execution_id || artifacts) return
     let disposed = false
     setError(null)
-    void getExecutionArtifacts(record.execution_id).then(response => { if (!disposed) setArtifacts(response.data) }).catch(error => { if (!disposed) setError(error) })
+    void Promise.all([getExecutionArtifacts(record.execution_id), getExecutionEvents(record.execution_id)]).then(([response, eventResponse]) => { if (!disposed) { setArtifacts(response.data); setEvents(eventResponse.data) } }).catch(error => { if (!disposed) setError(error) })
     return () => { disposed = true }
   }, [open, record.execution_id, artifacts, retry])
-  const symbols = artifacts ? buildExecutionDetail([], artifacts).symbols : []
-  const status = record.raw_result.task_status === 'TERMINATED' ? '已终止' : execution.noop ? '成功 · 空跑' : record.raw_result.status === 'PARTIAL' ? '部分执行' : record.is_success === 1 ? '成功' : '失败'
-  return <><tr className="border-t border-line"><td><button className="flex min-h-9 items-center gap-2 text-left" aria-expanded={open} onClick={() => setOpen(!open)}><ChevronDown size={14} className={open ? 'rotate-180' : ''} />{shanghaiLabel(record.created_at)}</button></td><td>{execution.symbolCount}</td><SummaryCells summary={execution.summary} /><td className={record.is_success === 1 ? '' : 'text-warn'}>{status}</td></tr>
-    <tr><td colSpan={6} className="!p-0"><div inert={!open} className={`grid transition-[grid-template-rows] duration-200 motion-reduce:transition-none ${open ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'}`}><div className="min-h-0 overflow-hidden"><div className="border-l-2 border-accent px-3 py-2">
-      {record.execution_id && <Link to={`/accounts/${accountId}/executions/${record.execution_id}`} className="inline-flex min-h-9 items-center gap-1 text-accent">执行详情 <ExternalLink size={14} /></Link>}
+  const model = artifacts ? buildExecutionDetail(events, artifacts) : null
+  const status = executionState(execution)
+  const detail = <div inert={!open} className={`grid transition-[grid-template-rows] duration-200 motion-reduce:transition-none ${open ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'}`}><div className="min-h-0 overflow-hidden"><div className="border-l-2 border-accent px-3 py-2">
+      {record.execution_id && <Link to={`/accounts/${accountId}/executions/${record.execution_id}`} state={{ performanceReturn: `/accounts/${accountId}/history` }} className="inline-flex min-h-9 items-center gap-1 text-accent">完整执行详情 <ExternalLink size={14} /></Link>}
       {!record.execution_id && <p className="py-2 text-xs text-ink-3">历史记录无执行附件</p>}
       <ErrorNotice title="附件读取失败" error={error} onRetry={() => setRetry(value => value + 1)} />
-      {symbols.length > 0 && <p className="py-1 text-xs text-ink-3">执行前 → 目标 → 执行后</p>}
-      {symbols.map(s => <div key={s.symbol} className="py-1 text-xs">{s.symbol} · {quantityText(s.before)} → {quantityText(s.target)} → {quantityText(s.after)}</div>)}
+      {open && !artifacts && !error && record.execution_id && <p role="status">执行证据读取中</p>}
+      {model && <ExecutionEvidence model={model} units={descriptor?.units} currency={currency} />}
       <ErrorNotice title="成交读取失败" error={fills.error} onRetry={fills.retry} />
       {open && !fills.data && !fills.error && <p role="status">成交读取中</p>}
-      <table className={tableClass}><thead className="text-ink-3"><tr><th>成交时间</th><th>品种</th><th>方向 / 数量</th><th>参考价</th><th>成交价</th><th>滑点成本</th><th>手续费</th></tr></thead><tbody>
-        {fills.data?.data.map((trade, index) => <tr key={index} className="border-t border-line"><td>{shanghaiLabel(new Date(trade.time).toISOString())}{trade.timeEstimated && <small className="block text-warn">使用执行时间</small>}</td><td>{trade.symbol}</td><td>{trade.side === 'buy' ? '买' : trade.side === 'sell' ? '卖' : '未知'} / {quantityText(trade.quantity)}</td><td>{amount(trade.reference)}{trade.referenceSource === 'last' && ' (最新价)'}</td><td>{amount(trade.price)}</td><td>{amount(trade.cost)}</td><td>{amount(trade.fee)} {trade.feeCurrency ?? ''}</td></tr>)}
-      </tbody></table>
+      <div className="overflow-x-auto"><table className={tableClass}><thead className="text-ink-3"><tr><th>成交时间</th><th>品种</th><th>方向 / 数量</th><th>参考价</th><th>成交价</th><th>滑点损耗 BP</th><th>滑点成本 {currency}</th><th>手续费</th></tr></thead><tbody>
+        {fills.data?.data.map((trade, index) => <tr key={index} className="border-t border-line"><td>{shanghaiLabel(new Date(trade.time).toISOString())}{trade.timeEstimated && <small className="block text-warn">使用执行时间</small>}</td><td>{trade.symbol}</td><td>{trade.side === 'buy' ? '买' : trade.side === 'sell' ? '卖' : '未知'} / {quantityText(trade.quantity)} {quantityUnit(descriptor?.units, trade.symbol, currency)}</td><td>{amount(trade.reference)}{trade.referenceSource === 'last' && ' (最新价)'}</td><td>{amount(trade.price)}</td><td className={trade.lossBp == null || trade.lossBp === 0 ? '' : trade.lossBp > 0 ? 'text-warn' : 'text-accent'}>{amount(trade.lossBp)}</td><td>{amount(trade.cost)}</td><td>{amount(trade.fee)} {trade.feeCurrency ?? ''}</td></tr>)}
+      </tbody></table></div>
       {fills.data && <Pager count={fills.data.count} cursors={cursors} next={fills.data.next_cursor} onPrevious={() => setCursors(value => value.slice(0, -1))} onNext={() => setCursors(value => [...value, fills.data!.next_cursor!])} />}
-    </div></div></div></td></tr></>
+    </div></div></div>
+  if (query.record_id != null) return <div className="min-w-0"><div className="flex flex-wrap gap-x-4 gap-y-1 py-2 text-xs"><span>{shanghaiLabel(record.created_at)}</span><span>{status}</span><span>成交 {execution.symbolCount} 品种</span><span>成交额 {amount(execution.summary.value)} {currency}</span></div>{detail}</div>
+  return <><tr className="border-t border-line"><td><button className="flex min-h-9 items-center gap-2 text-left" aria-expanded={open} onClick={() => setOpen(!open)}><ChevronDown size={14} className={open ? 'rotate-180' : ''} />{shanghaiLabel(record.created_at)}</button></td><td>{execution.symbolCount}</td><SummaryCells summary={execution.summary} /><td className={record.is_success === 1 ? '' : 'text-warn'}>{status}</td></tr><tr><td colSpan={6} className="!p-0">{detail}</td></tr></>
 }
 
-interface Props { snapshotId: string; range: PerformanceRange; selection: ChartSelection; onClear: () => void; accountId: number; onExpired: () => Promise<void> }
+interface Props { enabled?: boolean; snapshotId: string; range: PerformanceRange; selection: ChartSelection; onClear: () => void; accountId: number; onExpired: () => Promise<void> }
 export const CostDiagnostics = memo(function CostDiagnostics(props: Props) {
   const root = useRef<HTMLDivElement>(null)
   const [visible, setVisible] = useState(false)
@@ -87,7 +97,7 @@ export const CostDiagnostics = memo(function CostDiagnostics(props: Props) {
     return () => observer.disconnect()
   }, [])
   return <div ref={root} data-testid="cost-diagnostics" className="min-h-40 border-t border-line py-4">
-    {visible ? <DiagnosticsBody key={JSON.stringify(selectionQuery(props.selection))} {...props} /> : <h2 className="text-sm font-semibold">执行成本诊断</h2>}
+    {props.enabled !== false && (visible || props.selection) ? <DiagnosticsBody key={JSON.stringify(selectionQuery(props.selection))} {...props} /> : <h2 className="text-sm font-semibold">执行成本诊断</h2>}
   </div>
 })
 
@@ -101,7 +111,7 @@ function DiagnosticsBody({ snapshotId, range, selection, onClear, accountId, onE
   const data = page.data
   const summary = data?.summary
   return <>
-    <div className="mb-3 flex flex-wrap items-center justify-between gap-2"><h2 className="text-sm font-semibold">执行成本诊断</h2><div className="flex flex-wrap items-center gap-2">
+    <div className="mb-3 flex flex-wrap items-center justify-between gap-2"><h2 className="text-sm font-semibold">{selection?.kind === 'execution' ? '本次执行' : '执行成本诊断'}</h2><div className="flex flex-wrap items-center gap-2">
       {selection && <button aria-label="清除日期筛选" className="flex min-h-9 min-w-0 items-center gap-2 text-left text-xs text-accent" onClick={onClear}><span className="break-words">{selectionLabel(selection)}</span><X size={14} className="shrink-0" /></button>}
       <input aria-label="品种筛选" placeholder="品种" className="h-9 w-28 border border-line bg-transparent px-2 text-xs" value={symbol} onChange={event => { setSymbol(event.target.value); setCursors([undefined]) }} />
       <Segmented size="sm" className="[&_button]:min-h-9" value={mode} options={[{ value: 'execution', label: '按执行' }, { value: 'symbol', label: '按品种' }]} onChange={value => withViewTransition(() => { setMode(value); setCursors([undefined]) })} />
@@ -109,10 +119,10 @@ function DiagnosticsBody({ snapshotId, range, selection, onClear, accountId, onE
     </div></div>
     <ErrorNotice title="成本读取失败" error={page.error} onRetry={page.retry} />
     {!data && !page.error && <p role="status" className="py-4 text-sm text-ink-3">成本读取中</p>}
-    {summary && data && <div data-testid="cost-diagnostics-summary" className="mb-3 flex flex-wrap gap-x-5 gap-y-1 text-xs text-ink-2"><span>成功 {data.successful} 次，其中空跑 {data.noop} 次</span><span>{summary.covered < summary.count ? '已知滑点成本' : '滑点成本'} {amount(summary.cost)}</span><span>手续费 {feeText(summary)}</span><span>{coverageText(summary)}</span>{summary.estimated > 0 && <span className="text-warn">{summary.estimated} 笔使用执行时间</span>}</div>}
-    <div className="overflow-x-auto"><table className={tableClass}><thead className="text-ink-3"><tr>{mode === 'execution' ? <><th>执行时间</th><th>成交品种</th></> : <><th>品种</th><th>买 / 卖数量</th><th>滑点损耗 BP</th></>}<th>成交额</th><th>滑点成本</th><th>手续费</th>{mode === 'execution' && <th>状态</th>}</tr></thead><tbody>
+    {summary && data && <div data-testid="cost-diagnostics-summary" className="mb-3 flex flex-wrap gap-x-5 gap-y-1 text-xs text-ink-2"><span>成功 {data.successful} 次，其中无需交易 {data.noop} 次</span><span>{summary.covered < summary.count ? '已知滑点成本' : '滑点成本'} {amount(summary.cost)}</span><span>手续费 {feeText(summary)}</span><span>{coverageText(summary)}</span>{summary.estimated > 0 && <span className="text-warn">{summary.estimated} 笔使用执行时间</span>}</div>}
+    {selection?.kind === 'execution' && mode === 'execution' ? data?.data.map(row => 'record' in row ? <ExecutionRow key={`${row.key}:${JSON.stringify(query)}`} execution={row} accountId={accountId} query={query} onExpired={onExpired} /> : null) : <div className="overflow-x-auto"><table className={tableClass}><thead className="text-ink-3"><tr>{mode === 'execution' ? <><th>执行时间</th><th>成交品种</th></> : <><th>品种</th><th>买 / 卖数量</th><th>滑点损耗 BP</th></>}<th>成交额</th><th>滑点成本</th><th>手续费</th>{mode === 'execution' && <th>状态</th>}</tr></thead><tbody>
       {data?.data.map(row => 'record' in row ? <ExecutionRow key={`${row.key}:${JSON.stringify(query)}`} execution={row} accountId={accountId} query={query} onExpired={onExpired} /> : <tr key={row.symbol} className="border-t border-line"><td>{row.symbol}</td><td>{quantityText(row.buy)} / {quantityText(row.sell)}{row.quantityIncomplete && <small className="block text-ink-3">仅已知数量</small>}</td><td>{amount(row.summary.lossBp)}</td><SummaryCells summary={row.summary} /></tr>)}
-    </tbody></table></div>
+    </tbody></table></div>}
     {data?.count === 0 && <p className="py-4 text-sm text-ink-3">本区间无执行成交</p>}
     {data && <Pager count={data.count} cursors={cursors} next={data.next_cursor} onPrevious={() => setCursors(value => value.slice(0, -1))} onNext={() => setCursors(value => [...value, data.next_cursor!])} />}
   </>

@@ -70,6 +70,8 @@ def test_points_expose_actual_observation_times(include_backtest):
     )
     assert [p.date for p in result.points] == ["2026-01-01T09:30:00", "2026-01-01", "2026-01-02"]
     assert [p.observed_at for p in result.points] == [item.time.isoformat() for item in items]
+    assert [p.record_id for p in result.points] == [item.id for item in items]
+    assert [p.execution_id for p in result.points] == [item.execution_id for item in items]
     assert result.model_dump(mode="json")["points"][-1]["observed_at"] == "2026-01-02T14:20:00"
 
 

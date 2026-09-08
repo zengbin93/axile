@@ -28,6 +28,8 @@ class PerformancePoint(BaseModel):
 
     date: str
     observed_at: str
+    record_id: int | None = None
+    execution_id: str | None = None
     account_return: float | None = None
     portfolio_return: float | None = None
     account_daily_return: float | None = None
@@ -67,6 +69,7 @@ class AccountPerformance(BaseModel):
     gap: PerformanceGap | None = None
     points: list[PerformancePoint] = Field(default_factory=list)
     bindings: list[PerformanceBinding] = Field(default_factory=list)
+    executions: list[dict] = Field(default_factory=list)
 
 
 class CostSummary(BaseModel):

@@ -1,5 +1,11 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent, type ReactNode } from 'react'
 import { X } from 'lucide-react'
+import { ChartTradingOverlay } from '@/features/history/ChartTradingOverlay'
+import { executionSelection } from '@/features/history/executionSelection'
+import { holdingAt } from '@/features/history/tradeAnnotations'
+import { useDomainStore } from '@/stores/domain'
+import { useChannelDescriptor } from '@/stores/channels'
+import { performanceViewports } from '@/features/history/viewState'
 import type { AccountPerformance } from '@/types/api'
 import { Select } from '@/components/ui/Select'
 import { OverflowText } from '@/components/ui/OverflowText'
@@ -10,6 +16,8 @@ import { bindingSelection, clampViewport, intervalReturn, intervalSelection, nea
 import { bindingAt, CHART_HEIGHT, drawOverlay, drawScene, PLOT, plotRight, pointLabel, readCanvasTheme, seriesKeys, xPosition, xTime, type ChartScene } from '@/components/viz/performanceCanvas'
 
 interface Props {
+  accountId: number
+  viewKey?: string
   data: AccountPerformance
   daily: boolean
   costs: Map<string, CostSummary> | null
@@ -33,10 +41,26 @@ export function PerformanceChart(props: Props) {
   return <CanvasPerformanceChart {...props} />
 }
 
-function CanvasPerformanceChart({ data, daily, costs, intervalCost, selection, onSelect, portfolioNames, controls }: Props) {
+function CanvasPerformanceChart({ data, daily, costs, intervalCost, selection, onSelect, portfolioNames, controls, viewKey, accountId }: Props) {
+  const accountInfo = useDomainStore(s => s.accounts?.find(a => a.account_id === accountId))
+  const descriptor = useChannelDescriptor(accountInfo?.trade_channel)
   const times = useMemo(() => data.points.map(pointTime), [data.points])
-  const full = useMemo(() => ({ start: times[0], end: times[times.length - 1] }), [times])
-  const [viewport, setViewport] = useState<Viewport>(full)
+  const navigationTimes = useMemo(() => [...new Set([...times, ...(data.executions ?? []).flatMap(r => [shanghaiTime(r.record.created_at), ...(r.transactions ?? []).flatMap(t => [t.time, t.endTime])])])].sort((a, b) => a - b), [times, data.executions])
+  const full = useMemo(() => ({ start: navigationTimes[0], end: navigationTimes[navigationTimes.length - 1] }), [navigationTimes])
+  const [viewport, setViewport] = useState<Viewport>(() => viewKey ? clampViewport(performanceViewports.get(viewKey) ?? full, navigationTimes) : full)
+  const lastExecution = useRef(selection?.kind === 'execution' ? selection.recordId : null)
+  useEffect(() => { if (viewKey) performanceViewports.set(viewKey, viewport) }, [viewKey, viewport])
+  useEffect(() => {
+    const id = selection?.kind === 'execution' ? selection.recordId : null
+    const changed = id !== lastExecution.current
+    lastExecution.current = id
+    if (!changed || selection?.kind !== 'execution') return
+    setViewport(current => {
+      if (selection.time >= current.start && selection.time <= current.end) return current
+      const span = current.end - current.start
+      return clampViewport({ start: selection.time - span / 2, end: selection.time + span / 2 }, navigationTimes)
+    })
+  }, [selection, navigationTimes])
   const [returnRange, setReturnRange] = useState<{ min: number; max: number } | null>(null)
   const axisDrag = useRef<{ y: number; min: number; max: number } | null>(null)
   useEffect(() => { setReturnRange(null); axisDrag.current = null }, [daily])
@@ -44,6 +68,9 @@ function CanvasPerformanceChart({ data, daily, costs, intervalCost, selection, o
   const [bindingTime, setBindingTime] = useState<number | null>(null)
   const [draft, setDraft] = useState<ChartSelection>(null)
   const [size, setSize] = useState({ width: 900, revision: 0 })
+  const [cursor, setCursor] = useState<{ time: number; x: number; y: number } | null>(null)
+  const cursorRef = useRef(cursor)
+  cursorRef.current = cursor
   const container = useRef<HTMLDivElement>(null)
   const baseCanvas = useRef<HTMLCanvasElement>(null)
   const overlay = useRef<HTMLCanvasElement>(null)
@@ -59,8 +86,10 @@ function CanvasPerformanceChart({ data, daily, costs, intervalCost, selection, o
   const exact = precisePoints(data.points)
   const shownSelection = draft ?? selection
   selectionRef.current = shownSelection
-  const pointIndex = Math.min(data.points.length - 1, hover ?? (selection?.kind === 'day' ? nearestIndex(times, selection.time) : data.points.length - 1))
+  const pointIndex = Math.min(data.points.length - 1, hover ?? (selection && selection.kind !== 'interval' ? nearestIndex(times, selection.time) : data.points.length - 1))
   const point = data.points[pointIndex]
+  const execution = data.executions?.find(row => row.record.id === point.record_id)
+  const selectedExecution = hover == null && selection?.kind === 'execution' ? data.executions?.find(row => row.record.id === selection.recordId) : null
   const keys = seriesKeys(daily)
   const summary = draft ? null : intervalCost
   const estimated = summary?.estimated ?? 0
@@ -68,12 +97,14 @@ function CanvasPerformanceChart({ data, daily, costs, intervalCost, selection, o
   const interval = shownSelection?.kind === 'interval'
   const account = interval ? intervalReturn(data.points, shownSelection, 'account_return') : point[keys[0]]
   const portfolio = interval ? intervalReturn(data.points, shownSelection, 'portfolio_return') : point[keys[1]]
-  const readingCost = interval ? summary : daySummary
+  const readingExecution = selectedExecution ?? execution
+  const readingCost = interval ? summary : selection?.kind === 'day' ? daySummary : readingExecution?.summary ?? daySummary
   const binding = bindingAt(data, bindingTime ?? times[pointIndex])
   const bindingName = !binding || binding.binding.portfolio_id == null ? '未绑定' : portfolioNames.get(binding.binding.portfolio_id) ?? `组合 #${binding.binding.portfolio_id}`
+  const tradingScene = useMemo<ChartScene>(() => ({ data, times, width: size.width, viewport, daily, returnRange, costs, portfolioNames, domain: full, theme: container.current ? readCanvasTheme(container.current) : { bg: '', surface: '', ink: '', muted: '', line: '', accent: '', warn: '', fill: '', font: '' } }), [data, times, size, viewport, daily, returnRange, costs, portfolioNames, full])
 
   const paintOverlay = useCallback(() => {
-    if (overlay.current && scene.current) drawOverlay(overlay.current, scene.current, hoverRef.current, selectionRef.current, bindingTimeRef.current)
+    if (overlay.current && scene.current) drawOverlay(overlay.current, scene.current, hoverRef.current, selectionRef.current, bindingTimeRef.current, cursorRef.current)
   }, [])
   const schedule = useCallback(() => {
     if (frame.current) return
@@ -105,22 +136,22 @@ function CanvasPerformanceChart({ data, daily, costs, intervalCost, selection, o
   const latestSelection = useRef({ selection, onSelect })
   latestSelection.current = { selection, onSelect }
   useEffect(() => {
-    setViewport(view => clampViewport(view, times))
+    setViewport(view => clampViewport(view, navigationTimes))
     setHover(null); hoverRef.current = null; setDraft(null); drag.current = null
     const current = latestSelection.current
     const next = reconcileSelection(current.selection, data.points)
     if (next !== current.selection) current.onSelect(next)
-  }, [data.points, times])
+  }, [data.points, times, navigationTimes])
 
   useLayoutEffect(() => {
     if (!container.current || !baseCanvas.current) return
-    scene.current = { data, times, width: size.width, viewport: clampViewport(viewport, times), daily, returnRange, costs, portfolioNames, theme: readCanvasTheme(container.current) }
+    scene.current = { ...tradingScene, theme: readCanvasTheme(container.current) }
     drawScene(baseCanvas.current, scene.current); paintOverlay()
-  }, [data, times, size, viewport, daily, returnRange, costs, portfolioNames, paintOverlay])
-  useLayoutEffect(() => { paintOverlay(); schedule() }, [shownSelection, hover, bindingTime, paintOverlay, schedule])
+  }, [tradingScene, paintOverlay])
+  useLayoutEffect(() => { paintOverlay(); schedule() }, [shownSelection, hover, bindingTime, cursor, paintOverlay, schedule])
 
-  const changeView = (view: Viewport) => setViewport(clampViewport(view, times))
-  const zoom = (factor: number, anchor = (viewport.start + viewport.end) / 2) => setViewport(view => zoomViewport(view, factor, anchor, times))
+  const changeView = (view: Viewport) => setViewport(clampViewport(view, navigationTimes))
+  const zoom = (factor: number, anchor = (viewport.start + viewport.end) / 2) => setViewport(view => zoomViewport(view, factor, anchor, navigationTimes))
   useEffect(() => {
     const element = overlay.current
     if (!element) return
@@ -130,11 +161,11 @@ function CanvasPerformanceChart({ data, daily, costs, intervalCost, selection, o
       const current = scene.current
       const x = event.clientX - element.getBoundingClientRect().left
       const delta = Math.max(-100, Math.min(100, event.deltaY))
-      setViewport(view => zoomViewport(view, Math.exp(delta * 0.003), xTime(x, current.width, view), current.times))
+      setViewport(view => zoomViewport(view, Math.exp(delta * 0.003), xTime(x, current.width, view), navigationTimes))
     }
     element.addEventListener('wheel', wheel, { passive: false })
     return () => element.removeEventListener('wheel', wheel)
-  }, [])
+  }, [navigationTimes])
 
   const locate = (event: PointerEvent<HTMLElement>) => {
     const rect = container.current!.getBoundingClientRect()
@@ -168,12 +199,14 @@ function CanvasPerformanceChart({ data, daily, costs, intervalCost, selection, o
     const active = drag.current
     if (!active) {
       const inside = p.x >= PLOT.left && p.x <= plotRight(size.width) && p.y >= PLOT.top && p.y <= PLOT.costBottom
+      setCursor(inside && p.y <= PLOT.bottom ? { x: p.x, y: p.y, time: p.time } : null)
       showHover(inside ? p.index : null)
       setBindingTime(inside && p.y >= PLOT.binding && p.y <= PLOT.binding + PLOT.bindingHeight ? p.time : null)
       return
     }
     if (Math.hypot(p.x - active.x, p.y - active.y) > 5) active.moved = true
     if (!active.moved) return
+    setCursor(null)
     const nav = active.kind.startsWith('nav')
     if (active.kind === 'pan' || active.kind === 'nav') {
       const scale = nav ? full : active.viewport
@@ -189,7 +222,8 @@ function CanvasPerformanceChart({ data, daily, costs, intervalCost, selection, o
   }
   const selectPoint = (index: number) => {
     const time = times[index]
-    onSelect(selection?.kind === 'day' && selection.time === time ? null : { kind: 'day', day: data.points[index].date.slice(0, 10), time })
+    const row = data.executions?.find(row => row.record.id === data.points[index].record_id)
+    onSelect(row ? executionSelection(row) : selection?.kind === 'day' && selection.time === time ? null : { kind: 'day', day: data.points[index].date.slice(0, 10), time })
   }
   const finish = (event: PointerEvent<HTMLElement>) => {
     const active = drag.current
@@ -210,7 +244,12 @@ function CanvasPerformanceChart({ data, daily, costs, intervalCost, selection, o
         const next = bindingSelection(times, shanghaiTime(period.binding.time), shanghaiTime(period.end), period.binding === data.bindings.at(-1))
         if (next) onSelect(next)
       }
-    } else selectPoint(p.index)
+    } else if (p.y >= PLOT.costTop && p.y <= PLOT.costBottom) onSelect({ kind: 'day', day: data.points[p.index].date.slice(0, 10), time: times[p.index] })
+    else {
+      const row = holdingAt(data.executions ?? [], p.time)
+      if (row) onSelect(executionSelection(row))
+      else selectPoint(p.index)
+    }
     setDraft(null)
   }
   const focusPoint = (index: number) => {
@@ -221,16 +260,16 @@ function CanvasPerformanceChart({ data, daily, costs, intervalCost, selection, o
     }
     showHover(index)
   }
-  const clear = () => { drag.current = null; setDraft(null); onSelect(null); showHover(null) }
+  const clear = () => { drag.current = null; setDraft(null); onSelect(null); showHover(null); setCursor(null) }
 
   return <div data-testid="performance-workbench" className="min-w-0">
     <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1">
     <div className="flex min-h-9 min-w-0 flex-1 basis-[32rem] flex-wrap items-center gap-x-3 gap-y-1 py-1 text-xs text-ink-2" data-testid="chart-readout">
-      <span className="break-words text-ink-3">{interval ? '区间比较' : pointLabel(point)}</span>
+      <span className="break-words text-ink-3">{interval ? '区间比较' : `日末观测 ${pointLabel(point)}`}</span>
       <span>账户 <b className="font-medium text-accent">{returnText(account)}</b></span>
       <span>回测 <b className="font-medium">{returnText(portfolio)}</b></span>
       <span>收益差 <b className="font-medium">{returnText(account != null && portfolio != null ? portfolio - account : null, ' 个百分点')}</b></span>
-      <span>{interval ? '区间' : '当日'}成交额 {amount(costs ? readingCost?.value ?? null : null)}</span>
+      <span>{interval ? '区间' : selection?.kind !== 'day' && readingExecution ? '本次执行' : '当日'}成交额 {amount(costs ? readingCost?.value ?? null : null)}</span>
       <span className={readingCost?.cost != null && readingCost.cost > 0 ? 'text-warn' : ''}>{readingCost && readingCost.covered < readingCost.count ? '已知滑点成本' : '滑点成本'} {slippageCostAmount(costs ? readingCost?.cost ?? null : null)}</span>
       <span className="text-ink-3">{costs == null || (interval && !summary) ? '成本数据未就绪' : readingCost ? coverageText(readingCost) : '无成交记录'}</span>
       {interval && summary && <><span>手续费 {feeText(summary)}</span>{estimated > 0 && <span className="text-warn">{estimated} 笔使用执行时间</span>}</>}
@@ -260,7 +299,7 @@ function CanvasPerformanceChart({ data, daily, costs, intervalCost, selection, o
       <canvas ref={baseCanvas} aria-hidden="true" className="absolute inset-0 h-full w-full" />
       <canvas ref={overlay} data-testid="performance-chart" tabIndex={0} role="group" aria-label={daily ? '每日收益与执行成本' : '累计收益与执行成本'} aria-describedby="performance-keyboard-reading performance-interaction-hint" className="absolute inset-0 h-full w-full cursor-crosshair touch-pan-y outline-none"
         onPointerDown={startDrag} onPointerMove={move} onPointerUp={finish} onPointerCancel={() => { drag.current = null; setDraft(null); showHover(null) }} onLostPointerCapture={() => { drag.current = null; setDraft(null) }}
-        onPointerLeave={event => { if (!drag.current) { showHover(null); if (event.pointerType !== 'touch') setBindingTime(null) } }} onBlur={() => { if (!drag.current) showHover(null) }} onDoubleClick={() => setViewport(full)}
+        onPointerLeave={event => { if (!drag.current) { showHover(null); setCursor(null); if (event.pointerType !== 'touch') setBindingTime(null) } }} onBlur={() => { if (!drag.current) showHover(null) }} onDoubleClick={() => setViewport(full)}
         onKeyDown={event => {
           const index = hoverRef.current ?? pointIndex
           if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') { event.preventDefault(); focusPoint(Math.max(0, Math.min(times.length - 1, index + (event.key === 'ArrowLeft' ? -1 : 1)))) }
@@ -275,7 +314,7 @@ function CanvasPerformanceChart({ data, daily, costs, intervalCost, selection, o
         onPointerDown={startDrag} onPointerMove={move} onPointerUp={finish}
         onPointerCancel={() => { drag.current = null; setDraft(null); showHover(null) }}
         onLostPointerCapture={() => { drag.current = null; setDraft(null) }}
-        onPointerLeave={event => { if (!drag.current) { showHover(null); if (event.pointerType !== 'touch') setBindingTime(null) } }}
+        onPointerLeave={event => { if (!drag.current) { showHover(null); setCursor(null); if (event.pointerType !== 'touch') setBindingTime(null) } }}
         onDoubleClick={() => setViewport(full)}>
         {data.bindings.map((period, index) => {
           const start = Math.max(PLOT.left, xPosition(shanghaiTime(period.time), size.width, viewport))
@@ -307,7 +346,7 @@ function CanvasPerformanceChart({ data, daily, costs, intervalCost, selection, o
         onPointerUp={event => { axisDrag.current = null; if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId) }}
         onPointerCancel={() => { axisDrag.current = null }} onLostPointerCapture={() => { axisDrag.current = null }}
         onDoubleClick={() => setReturnRange(null)} />
-      <div ref={tip} role="tooltip" className={`pointer-events-none absolute z-10 hidden w-[260px] max-w-[calc(100%-16px)] rounded border border-line bg-surface px-3 py-2 text-xs shadow-sm ${hover != null && !drag.current ? 'block' : ''}`}>
+      <div ref={tip} role="tooltip" className={`pointer-events-none absolute z-10 hidden w-[260px] max-w-[calc(100%-16px)] rounded border border-line bg-surface px-3 py-2 text-xs shadow-sm ${hover != null && !drag.current && !cursor && selection?.kind !== 'execution' ? 'block' : ''}`}>
         {bindingTime != null && binding ? <>
           <div className="break-words font-medium">{bindingName}</div>
           <div className="mt-2 text-ink-3">{binding.binding.time.replace('T', ' ')}<br />→ {binding.end.replace('T', ' ')}</div>
@@ -315,6 +354,7 @@ function CanvasPerformanceChart({ data, daily, costs, intervalCost, selection, o
           {(!exact || !bindingSelection(times, shanghaiTime(binding.binding.time), shanghaiTime(binding.end), binding.binding === data.bindings.at(-1))) && <div className="mt-2 text-ink-3">有效观测不足，无法比较</div>}
         </> : <>
         <div className="mb-2 text-ink-3">{pointLabel(point)}</div>
+        <div className="mb-1 text-ink-3">日末收益观测</div>
         <div className="flex justify-between gap-4"><span className="text-accent">账户</span><span>{returnText(point[keys[0]])}</span></div>
         <div className="flex justify-between gap-4"><span>回测</span><span>{returnText(point[keys[1]])}</span></div>
         <div className="flex justify-between gap-4"><span>当日滑点成本</span><span>{slippageCostAmount(daySummary?.cost ?? null)}</span></div>
@@ -322,10 +362,13 @@ function CanvasPerformanceChart({ data, daily, costs, intervalCost, selection, o
         {binding && <div className="mt-1 text-[11px] text-ink-3">{binding.binding.time.replace('T', ' ')}<br />→ {binding.end?.replace('T', ' ') ?? '当前'}</div>}
         </>}
       </div>
+      {data.executions && <ChartTradingOverlay scene={tradingScene} rows={data.executions} accountId={accountId} currency={accountInfo?.currency ?? ''} units={descriptor?.units} cursor={cursor} selection={selection} onSelect={onSelect} onZoom={changeView} onInspect={setCursor} />}
     </div>
+
     <p id="performance-keyboard-reading" className="sr-only" aria-live="polite">{pointLabel(point)}，账户 {returnText(point[keys[0]])}，回测 {returnText(point[keys[1]])}。方向键选点，回车确认，Escape 清除，加减号缩放，0 恢复范围。</p>
     <div className="flex min-h-7 flex-wrap justify-between gap-2 text-[11px] text-ink-3"><span data-testid="chart-viewport">{timeLabel(viewport.start)} → {timeLabel(viewport.end)}</span><span>上海时间 · 收益差 = 回测 − 账户</span></div>
     <p className="text-[11px] leading-5 text-ink-3">账户收益未调整出入金 · 回测单边费率 {Number((data.settings.backtest_fee_rate * 10000).toFixed(8))} BP</p>
+    <p className="text-[11px] leading-5 text-ink-3">↑ 买入 · ↓ 卖出 · △ 执行异常 · 标记按时间定位 · 点击固定，Ctrl + 滚轮放大</p>
     <div id="performance-interaction-hint" className="sr-only">
       <span>Ctrl + 滚轮缩放</span><span>拖动框选区间 · 底部导航条平移 · 双击恢复时间范围</span><span>聚焦图表后：← → 查看 · Home / End 首末点 · Enter / 空格选择 · Esc 清除 · + / - 缩放 · 0 重置</span>
     </div>

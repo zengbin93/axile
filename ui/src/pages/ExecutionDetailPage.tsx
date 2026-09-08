@@ -535,6 +535,8 @@ export function ExecutionDetailPage() {
   const { id, executionId } = useParams()
   const location = useLocation()
   const journalPath = `/accounts/${Number(id)}/executions`
+  const performancePath = `/accounts/${Number(id)}/history`
+  const fromPerformance = (location.state as { performanceReturn?: string } | null)?.performanceReturn === performancePath
   const requestedReturn = (location.state as { journalReturn?: string } | null)?.journalReturn
   const journalReturn = requestedReturn === journalPath || requestedReturn?.startsWith(`${journalPath}?`) ? requestedReturn : journalPath
   const accountId = Number(id)
@@ -589,7 +591,7 @@ export function ExecutionDetailPage() {
 
   return (
     <section>
-      <Link to={journalReturn} className="mb-3 inline-block text-[13px] text-accent hover:underline">返回执行记录</Link>
+      <Link to={fromPerformance ? performancePath : journalReturn} className="mb-3 inline-block text-[13px] text-accent hover:underline">{fromPerformance ? '返回实盘绩效' : '返回执行记录'}</Link>
       <div className="flex flex-wrap items-baseline gap-3">
         {/* 执行详情路径含动态段、无法纳入账户名 FLIP 门控（flip=false），结构仍与全域统一。 */}
         <AccountPageTitle

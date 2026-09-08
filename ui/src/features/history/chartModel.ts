@@ -3,12 +3,13 @@ import { chartTime } from '@/features/history/performance'
 import { executionsOnDay, shanghaiTime, summarizeCosts, type CostExecution } from '@/features/history/costs'
 
 export type ChartSelection = { kind: 'day'; day: string; time: number }
+  | { kind: 'execution'; recordId: number; time: number }
   | { kind: 'interval'; start: number; end: number } | null
 export type Viewport = { start: number; end: number }
 export const pointTime = (point: PerformancePoint) => point.observed_at ? shanghaiTime(point.observed_at) : chartTime(point.date)
 export const precisePoints = (points: PerformancePoint[]) => points.length >= 2 && points.every(p => p.observed_at && Number.isFinite(pointTime(p)))
 export const timeLabel = (time: number) => new Date(time + 8 * 3600000).toISOString().slice(0, 19).replace('T', ' ')
-export const selectionLabel = (selection: ChartSelection) => !selection ? '' : selection.kind === 'day' ? selection.day : `${timeLabel(selection.start)} → ${timeLabel(selection.end)}`
+export const selectionLabel = (selection: ChartSelection) => !selection ? '' : selection.kind === 'execution' ? timeLabel(selection.time) : selection.kind === 'day' ? selection.day : `${timeLabel(selection.start)} → ${timeLabel(selection.end)}`
 
 export function nearestIndex(times: number[], time: number): number {
   if (!times.length) return -1
@@ -57,6 +58,7 @@ export function bindingSelection(times: number[], start: number, end: number, in
 
 export function reconcileSelection(selection: ChartSelection, points: PerformancePoint[]): ChartSelection {
   if (!selection) return null
+  if (selection.kind === 'execution') return selection
   const times = points.map(pointTime)
   if (selection.kind === 'day') return points.some(p => p.date.slice(0, 10) === selection.day && pointTime(p) === selection.time) ? selection : null
   return precisePoints(points) && times.includes(selection.start) && times.includes(selection.end) ? selection : null
@@ -74,6 +76,7 @@ export function intervalReturn(points: PerformancePoint[], selection: ChartSelec
 
 export function selectedExecutions(executions: CostExecution[], selection: ChartSelection): CostExecution[] {
   if (!selection) return executions
+  if (selection.kind === 'execution') return executions.filter(e => e.record.id === selection.recordId)
   if (selection.kind === 'day') return executionsOnDay(executions, selection.day)
   const inside = (time: number) => time > selection.start && time <= selection.end
   return executions.flatMap(e => {

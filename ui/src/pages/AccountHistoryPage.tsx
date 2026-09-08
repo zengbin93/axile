@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useParams } from 'react-router'
-import { RefreshCw, Save } from 'lucide-react'
+import { ChevronDown, RefreshCw, Save } from 'lucide-react'
 import { useNavigate } from '@/components/ui/nav'
 import { SectionLabel } from '@/components/ui/Card'
 import { Segmented } from '@/components/ui/Segmented'
@@ -13,6 +13,7 @@ import { getPortfolios } from '@/lib/api/portfolios'
 import { shanghaiDay, shanghaiLabel } from '@/features/history/costs'
 import { reconcileSelection, type ChartSelection } from '@/features/history/chartModel'
 import { CostDiagnostics } from '@/features/history/CostDiagnostics'
+import { performanceViews } from '@/features/history/viewState'
 import { getPerformanceCosts, selectionQuery, savePerformanceSettings } from '@/lib/api/performance'
 import { usePerformanceSnapshot } from '@/features/history/usePerformanceSnapshot'
 import { snapshotPending } from '@/features/history/performanceCache'
@@ -38,11 +39,13 @@ export function AccountHistoryPage() {
 function AccountHistory({ accountId }: { accountId: number }) {
   const navigate = useNavigate()
   const item = useDomainStore(s => s.accounts?.find(account => account.account_id === accountId))
-  const [range, setRange] = useState<RangeKey>('all')
-  const [view, setView] = useState<'cumulative' | 'daily'>('cumulative')
-  const [selection, setSelection] = useState<ChartSelection>(null)
+  const [range, setRange] = useState<RangeKey>(() => performanceViews.get(accountId)?.range ?? 'all')
+  const [view, setView] = useState<'cumulative' | 'daily'>(() => performanceViews.get(accountId)?.view ?? 'cumulative')
+  const [selection, setSelection] = useState<ChartSelection>(() => performanceViews.get(accountId)?.selection ?? null)
+  useEffect(() => { performanceViews.set(accountId, { range, view, selection }) }, [accountId, range, view, selection])
   const clearSelection = useCallback(() => setSelection(null), [])
   const [showEvents, setShowEvents] = useState(false)
+  const [showCosts, setShowCosts] = useState(false)
   const [draft, setDraft] = useState<{ mode: 'ts' | 'cs'; fee: string } | null>(null)
   const [saved, setSaved] = useState<PerformanceSettings | null>(null)
   const [saving, setSaving] = useState(false)
@@ -57,7 +60,7 @@ function AccountHistory({ accountId }: { accountId: number }) {
   useEffect(() => { refreshPerformance.current = performance.refresh }, [performance.refresh])
   const snapshot = performance.data
   const data = snapshot?.result
-  useEffect(() => { if (data) setSelection(current => reconcileSelection(current, data.points)) }, [data])
+  useEffect(() => { if (data) setSelection(current => current?.kind === 'execution' && !data.executions?.some(row => row.record.id === current.recordId) ? null : reconcileSelection(current, data.points)) }, [data])
   const selectionKey = JSON.stringify(selectionQuery(selection))
   const intervalCosts = usePolling(useCallback((s: AbortSignal) => getPerformanceCosts(accountId, { snapshot_id: snapshot!.snapshot_id!, range, dimension: 'summary', ...JSON.parse(selectionKey) }, s), [accountId, snapshot?.snapshot_id, range, selectionKey]), {
     queryKey: `performance-summary:${accountId}:${snapshot?.snapshot_id}:${range}:${selectionKey}`, intervalMs: 0, enabled: !!snapshot?.snapshot_id && selection?.kind === 'interval',
@@ -147,11 +150,14 @@ function AccountHistory({ accountId }: { accountId: number }) {
     <ErrorNotice title={data ? '更新失败，保留上次结果' : '绩效读取失败'} error={calculationError} variant="compact" onRetry={performance.refresh} />
     <ErrorNotice title="区间成本读取失败" error={intervalCosts.error} variant="compact" onRetry={intervalCosts.refresh} />
     {data && <div className="pb-4">
-      <PerformanceChart key={range} data={data} daily={daily} costs={costs} intervalCost={intervalCosts.error || intervalCosts.loading ? null : intervalCosts.data?.summary ?? null} onSelect={setSelection} selection={selection} portfolioNames={portfolioNames} controls={controls} />
+      <PerformanceChart key={range} accountId={accountId} viewKey={`${accountId}:${range}`} data={data} daily={daily} costs={costs} intervalCost={intervalCosts.error || intervalCosts.loading ? null : intervalCosts.data?.summary ?? null} onSelect={setSelection} selection={selection} portfolioNames={portfolioNames} controls={controls} />
       {data.gap && <p role="status" className="mt-3 break-words text-sm text-warn">组合收益自 {data.gap.time.replace('T', ' ')} 中断：{data.gap.reason}{data.gap.symbols.length ? `（${data.gap.symbols.join('、')}）` : ''}</p>}
       {data.invalid_asset_count > 0 && <p className="mt-2 text-xs text-warn">{data.invalid_asset_count} 条账户资产快照不可用</p>}
     </div>}
-    {snapshot?.snapshot_id && <CostDiagnostics key={`${snapshot.snapshot_id}:${range}`} snapshotId={snapshot.snapshot_id} range={range} selection={selection} onClear={clearSelection} accountId={accountId} onExpired={performance.check} />}
+    {snapshot?.snapshot_id && <div className="border-t border-line">
+      <button type="button" aria-expanded={showCosts} className="flex min-h-10 items-center gap-2 text-xs text-ink-3" onClick={() => setShowCosts(value => !value)}><ChevronDown size={14} className={showCosts ? 'rotate-180' : ''} />{showCosts ? '收起成本明细' : '查看成本明细'}</button>
+      <div inert={!showCosts} className={`grid transition-[grid-template-rows] duration-200 motion-reduce:transition-none ${showCosts ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'}`}><div className="min-h-0 overflow-hidden"><CostDiagnostics enabled={showCosts} key={`${snapshot.snapshot_id}:${range}`} snapshotId={snapshot.snapshot_id} range={range} selection={selection?.kind === 'execution' ? null : selection} onClear={clearSelection} accountId={accountId} onExpired={performance.check} /></div></div>
+    </div>}
     <div className="border-t border-line py-4">
       <SectionLabel>账户时间线</SectionLabel>
       {events.length === 0 ? <p className="text-sm text-ink-3">本区间无异常事件</p> : events.slice(0, showEvents ? undefined : 8).map((event, i) => <div key={i} className="flex flex-wrap items-baseline gap-3 border-b border-line py-2 text-xs">

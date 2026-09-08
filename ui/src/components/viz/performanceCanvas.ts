@@ -8,6 +8,7 @@ export const PLOT = { left: 12, right: 78, top: 16, bottom: 254, binding: 283, b
 export type SeriesKey = 'account_return' | 'portfolio_return' | 'account_daily_return' | 'portfolio_daily_return'
 export interface CanvasTheme { bg: string; surface: string; ink: string; muted: string; line: string; accent: string; warn: string; fill: string; font: string }
 export interface ChartScene {
+  domain?: Viewport
   data: AccountPerformance
   times: number[]
   width: number
@@ -52,7 +53,7 @@ export function chartAxis(scene: ChartScene) {
     return { min, max, step, ticks }
   }
   const keys = seriesKeys(scene.daily)
-  const values = scene.data.points.flatMap((p, i) => scene.times[i] >= scene.viewport.start && scene.times[i] <= scene.viewport.end
+  const values = scene.data.points.flatMap((p, i) => scene.times[i] >= scene.viewport.start && scene.times[i] <= scene.viewport.end || !scene.daily && (scene.times[i] < scene.viewport.start && (scene.times[i + 1] ?? Infinity) >= scene.viewport.start || scene.times[i] > scene.viewport.end && (scene.times[i - 1] ?? -Infinity) <= scene.viewport.end)
     ? keys.flatMap(key => typeof p[key] === 'number' && Number.isFinite(p[key]) ? [p[key]!] : []) : [])
   return niceReturnAxis(values)
 }
@@ -166,7 +167,7 @@ function drawTimeAxis(ctx: CanvasRenderingContext2D, scene: ChartScene, exclude?
 
 function drawNavigator(ctx: CanvasRenderingContext2D, scene: ChartScene) {
   const { width, viewport, times, data, theme } = scene
-  const full = { start: times[0], end: times[times.length - 1] }
+  const full = scene.domain ?? { start: times[0], end: times[times.length - 1] }
   ctx.fillStyle = theme.line; ctx.fillRect(PLOT.left, PLOT.navTop, plotRight(width) - PLOT.left, PLOT.navBottom - PLOT.navTop)
   const values = data.points.flatMap(p => p.account_return == null ? [] : [p.account_return])
   const low = Math.min(0, ...values), high = Math.max(0.01, ...values)
@@ -193,7 +194,7 @@ export function drawScene(canvas: HTMLCanvasElement, scene: ChartScene) {
   drawReturns(ctx, scene); drawBindings(ctx, scene); drawCosts(ctx, scene); drawTimeAxis(ctx, scene); drawNavigator(ctx, scene)
 }
 
-export function drawOverlay(canvas: HTMLCanvasElement, scene: ChartScene, hover: number | null, selection: ChartSelection, bindingTime: number | null = null) {
+export function drawOverlay(canvas: HTMLCanvasElement, scene: ChartScene, hover: number | null, selection: ChartSelection, bindingTime: number | null = null, cursor: { time: number; x: number; y: number } | null = null) {
   const ctx = prepareCanvas(canvas, scene.width)
   if (!ctx) return
   const { width, viewport, theme, times, data } = scene
@@ -209,7 +210,7 @@ export function drawOverlay(canvas: HTMLCanvasElement, scene: ChartScene, hover:
     line(ctx, a, PLOT.binding + PLOT.bindingHeight - 1, b, PLOT.binding + PLOT.bindingHeight - 1, theme.accent)
   }
   if (selection) {
-    const a = xPosition(selection.kind === 'day' ? selection.time : selection.start, width, viewport)
+    const a = xPosition(selection.kind !== 'interval' ? selection.time : selection.start, width, viewport)
     const b = selection.kind === 'interval' ? xPosition(selection.end, width, viewport) : a
     ctx.save(); ctx.beginPath(); ctx.rect(PLOT.left, PLOT.top, right - PLOT.left, PLOT.costBottom - PLOT.top); ctx.clip()
     if (selection.kind === 'interval') { ctx.fillStyle = theme.accent; ctx.globalAlpha = 0.08; ctx.fillRect(a, PLOT.top, b - a, PLOT.costBottom - PLOT.top); ctx.globalAlpha = 1 }
@@ -219,7 +220,21 @@ export function drawOverlay(canvas: HTMLCanvasElement, scene: ChartScene, hover:
     }
     ctx.restore()
   }
-  if (hover == null || !data.points[hover]) return
+  if (cursor && selection?.kind !== 'execution') {
+    const x = xPosition(cursor.time, width, viewport)
+    ctx.setLineDash([3, 3]); line(ctx, x, PLOT.top, x, PLOT.costBottom, theme.muted)
+    line(ctx, PLOT.left, cursor.y, right, cursor.y, theme.muted); ctx.setLineDash([])
+    const axis = chartAxis(scene)
+    const value = axis.max - (cursor.y - PLOT.top) / (PLOT.bottom - PLOT.top) * (axis.max - axis.min)
+    ctx.fillStyle = theme.bg; ctx.fillRect(right + 2, cursor.y - 10, PLOT.right - 2, 20)
+    ctx.fillStyle = theme.ink; ctx.fillText(axisPercent(value, axis.step), right + 8, cursor.y + 4)
+    const label = timeLabel(cursor.time), labelWidth = ctx.measureText(label).width + 12
+    const labelX = Math.max(PLOT.left, Math.min(right - labelWidth, x - labelWidth / 2))
+    ctx.fillStyle = theme.ink; ctx.fillRect(labelX, 424, labelWidth, 22)
+    ctx.fillStyle = theme.bg; ctx.fillText(label, labelX + 6, 439)
+    return
+  }
+  if (hover == null || !data.points[hover] || selection?.kind === 'execution') return
   const x = xPosition(times[hover], width, viewport)
   if (x < PLOT.left || x > right) return
   ctx.setLineDash([3, 3]); line(ctx, x, PLOT.top, x, PLOT.costBottom, theme.muted); ctx.setLineDash([])

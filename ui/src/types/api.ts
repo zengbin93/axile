@@ -190,6 +190,8 @@ export interface PerformanceSettings {
 export interface PerformancePoint {
   date: string
   observed_at?: string
+  record_id?: number | null
+  execution_id?: string | null
   account_return: number | null
   portfolio_return: number | null
   account_daily_return: number | null
@@ -210,6 +212,7 @@ export interface AccountPerformance {
   invalid_asset_count: number
   gap: { time: string; execution_id: string | null; reason: string; symbols: string[] } | null
   points: PerformancePoint[]
+  executions?: import('@/lib/api/performance').CostExecutionRow[]
   bindings: Array<{ time: string; portfolio_id: number | null }>
 }
 

@@ -129,8 +129,97 @@ def project_execution(record) -> tuple[dict, list[dict]]:
         },
         "noop": noop,
         "symbolCount": len({trade["symbol"] for trade in trades if trade["quantity"] is not None}),
+        "positionCount": position_count(raw.get("account_assets")),
+        "positions": position_preview(raw.get("account_assets")),
+        "transactions": transaction_preview(trades, results),
+        "reason": str(raw.get("error") or "")[:300],
+        "attempts": attempted_trades(results)
+        if record.is_success != 1 or raw.get("status") == "PARTIAL" or raw.get("task_status") == "TERMINATED"
+        else [],
     }
     return payload, trades
+
+
+def attempted_trades(results: dict) -> list[dict]:
+    """Keep planned and filled net quantities for failed or partial executions."""
+    output = []
+    for symbol, result in results.items():
+        sizing = mapping(result.get("sizing"))
+        before, target = number(sizing.get("current_quantity")), number(sizing.get("target_quantity"))
+        orders = result.get("orders")
+        filled = []
+        for raw in sequence(orders):
+            order = mapping(raw)
+            quantity, side = number(order.get("filled_volume")), side_of(order.get("direction"))
+            filled.append(quantity * (1 if side == "buy" else -1) if quantity is not None and side != "none" else None)
+        output.append(
+            {
+                "symbol": symbol,
+                "planned": target - before if target is not None and before is not None else None,
+                "filled": sum(filled) if isinstance(orders, list) and all(n is not None for n in filled) else None,
+                "reason": str(result.get("error") or "")[:200],
+            }
+        )
+    return output
+
+
+def position_preview(value: Any) -> list[dict] | None:
+    """Keep explicit positions for chart inspection; unavailable is not flat."""
+    assets = mapping(value)
+    if position_count(value) is None:
+        return None
+    return [
+        {
+            "symbol": str(position.get("symbol", "")),
+            "quantity": number(position.get("volume")),
+            "direction": str(position.get("direction", "")),
+        }
+        for raw in assets["positions"]
+        if (position := mapping(raw)) and number(position.get("volume")) != 0
+    ]
+
+
+def transaction_preview(trades: list[dict], results: dict) -> list[dict]:
+    """Aggregate each symbol and side separately, keeping real fill times and unknowns."""
+    groups = defaultdict(list)
+    for trade in trades:
+        if trade["quantity"] is not None:
+            groups[(trade["symbol"], trade["side"])].append(trade)
+    output = []
+    for (symbol, side), fills in groups.items():
+        quantity = sum(fill["quantity"] for fill in fills)
+        priced = all(fill["price"] is not None for fill in fills)
+        refs = {fill["reference"] for fill in fills}
+        sizing = mapping(results.get(symbol, {}).get("sizing"))
+        output.append(
+            {
+                "symbol": symbol,
+                "side": side,
+                "quantity": quantity,
+                "price": sum(fill["quantity"] * fill["price"] for fill in fills) / quantity if priced else None,
+                "reference": next(iter(refs)) if len(refs) == 1 else None,
+                "referenceSource": fills[0]["referenceSource"],
+                "time": min(fill["time"] for fill in fills),
+                "endTime": max(fill["time"] for fill in fills),
+                "timeEstimated": any(fill["timeEstimated"] for fill in fills),
+                "before": number(sizing.get("current_quantity")),
+                "target": number(sizing.get("target_quantity")),
+                "summary": summarize(fills),
+            }
+        )
+    return output
+
+
+def position_count(value: Any) -> int | None:
+    """Unknown or degraded snapshots must never be classified as flat."""
+    assets = mapping(value)
+    positions = assets.get("positions")
+    if assets.get("source") in ("assumed", "error", "unavailable") or not isinstance(positions, list):
+        return None
+    quantities = [number(mapping(position).get("volume")) for position in positions]
+    if any(quantity is None for quantity in quantities):
+        return None
+    return sum(quantity != 0 for quantity in quantities)
 
 
 def summarize(trades: list[dict]) -> dict:
