@@ -362,13 +362,13 @@ function CanvasPerformanceChart({ data, daily, costs, intervalCost, selection, o
         {binding && <div className="mt-1 text-[11px] text-ink-3">{binding.binding.time.replace('T', ' ')}<br />→ {binding.end?.replace('T', ' ') ?? '当前'}</div>}
         </>}
       </div>
-      {data.executions && <ChartTradingOverlay scene={tradingScene} rows={data.executions} accountId={accountId} currency={accountInfo?.currency ?? ''} units={descriptor?.units} cursor={cursor} selection={selection} onSelect={onSelect} onZoom={changeView} onInspect={setCursor} />}
+      {data.executions && <ChartTradingOverlay scene={tradingScene} rows={data.executions} accountId={accountId} currency={accountInfo?.currency ?? ''} units={descriptor?.units} cursor={cursor} selection={selection} onSelect={onSelect} onInspect={setCursor} />}
     </div>
 
     <p id="performance-keyboard-reading" className="sr-only" aria-live="polite">{pointLabel(point)}，账户 {returnText(point[keys[0]])}，回测 {returnText(point[keys[1]])}。方向键选点，回车确认，Escape 清除，加减号缩放，0 恢复范围。</p>
     <div className="flex min-h-7 flex-wrap justify-between gap-2 text-[11px] text-ink-3"><span data-testid="chart-viewport">{timeLabel(viewport.start)} → {timeLabel(viewport.end)}</span><span>上海时间 · 收益差 = 回测 − 账户</span></div>
     <p className="text-[11px] leading-5 text-ink-3">账户收益未调整出入金 · 回测单边费率 {Number((data.settings.backtest_fee_rate * 10000).toFixed(8))} BP</p>
-    <p className="text-[11px] leading-5 text-ink-3">↑ 买入 · ↓ 卖出 · △ 执行异常 · 标记按时间定位 · 点击固定，Ctrl + 滚轮放大</p>
+    <p className="text-[11px] leading-5 text-ink-3">移动十字光标查看持仓 · 点击曲线查看成交 · Ctrl + 滚轮放大</p>
     <div id="performance-interaction-hint" className="sr-only">
       <span>Ctrl + 滚轮缩放</span><span>拖动框选区间 · 底部导航条平移 · 双击恢复时间范围</span><span>聚焦图表后：← → 查看 · Home / End 首末点 · Enter / 空格选择 · Esc 清除 · + / - 缩放 · 0 重置</span>
     </div>
