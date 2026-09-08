@@ -37,10 +37,10 @@ test('最新价退化有来源，锁定盘口有效，倒挂盘口不作中间�
 })
 
 test('手续费缺失不补零，不同币种独立汇总，负收费返佣保留', () => {
-  const summary = summarizeCosts(costTrades(record([trade(101, 'b', { commission: 0, commission_asset: 'USDT' }),
-    trade(101, 'b', { commission: 2, commission_asset: 'BNB' }), trade(99, 's', { commission: -0.1, commission_asset: 'USDT' }),
+  const summary = summarizeCosts(costTrades(record([trade(101, 'b', { commission: 0, commission_asset: 'CNY' }),
+    trade(101, 'b', { commission: 2, commission_asset: 'USD' }), trade(99, 's', { commission: -0.1, commission_asset: 'CNY' }),
     trade(100), trade(100, 's', { commission: 3 })])))
-  expect(summary.fees).toEqual({ USDT: -0.1, BNB: 2 })
+  expect(summary.fees).toEqual({ CNY: -0.1, USD: 2 })
   expect(summary.feeCovered).toBe(3)
 })
 

@@ -3,16 +3,16 @@ import { X } from 'lucide-react'
 import type { AccountPerformance } from '@/types/api'
 import { Select } from '@/components/ui/Select'
 import { chartAxis } from '@/components/viz/performanceCanvas'
-import { amount, coverageText, feeText, shanghaiTime, summarizeCosts, type CostExecution, type CostSummary } from '@/features/history/costs'
+import { amount, coverageText, feeText, shanghaiTime, type CostSummary } from '@/features/history/costs'
 import { returnText } from '@/features/history/performance'
-import { bindingSelection, clampViewport, intervalReturn, intervalSelection, nearestIndex, pointTime, precisePoints, reconcileSelection, selectedExecutions, timeLabel, zoomViewport, type ChartSelection, type Viewport } from '@/features/history/chartModel'
+import { bindingSelection, clampViewport, intervalReturn, intervalSelection, nearestIndex, pointTime, precisePoints, reconcileSelection, timeLabel, zoomViewport, type ChartSelection, type Viewport } from '@/features/history/chartModel'
 import { bindingAt, CHART_HEIGHT, drawOverlay, drawScene, PLOT, plotRight, pointLabel, readCanvasTheme, seriesKeys, xPosition, xTime, type ChartScene } from '@/components/viz/performanceCanvas'
 
 interface Props {
   data: AccountPerformance
   daily: boolean
   costs: Map<string, CostSummary> | null
-  executions: CostExecution[]
+  intervalCost: (CostSummary & { estimated: number }) | null
   selection: ChartSelection
   onSelect: (selection: ChartSelection) => void
   portfolioNames: Map<number, string>
@@ -30,7 +30,7 @@ export function PerformanceChart(props: Props) {
   return <CanvasPerformanceChart {...props} />
 }
 
-function CanvasPerformanceChart({ data, daily, costs, executions, selection, onSelect, portfolioNames, controls }: Props) {
+function CanvasPerformanceChart({ data, daily, costs, intervalCost, selection, onSelect, portfolioNames, controls }: Props) {
   const times = useMemo(() => data.points.map(pointTime), [data.points])
   const full = useMemo(() => ({ start: times[0], end: times[times.length - 1] }), [times])
   const [viewport, setViewport] = useState<Viewport>(full)
@@ -59,9 +59,8 @@ function CanvasPerformanceChart({ data, daily, costs, executions, selection, onS
   const pointIndex = Math.min(data.points.length - 1, hover ?? (selection?.kind === 'day' ? nearestIndex(times, selection.time) : data.points.length - 1))
   const point = data.points[pointIndex]
   const keys = seriesKeys(daily)
-  const selected = useMemo(() => selectedExecutions(executions, shownSelection), [executions, shownSelection])
-  const summary = useMemo(() => summarizeCosts(selected.flatMap(e => e.trades)), [selected])
-  const estimated = selected.reduce((count, e) => count + e.trades.filter(t => t.timeEstimated).length, 0)
+  const summary = draft ? null : intervalCost
+  const estimated = summary?.estimated ?? 0
   const daySummary = costs?.get(point.date.slice(0, 10))
   const interval = shownSelection?.kind === 'interval'
   const account = interval ? intervalReturn(data.points, shownSelection, 'account_return') : point[keys[0]]
@@ -230,8 +229,8 @@ function CanvasPerformanceChart({ data, daily, costs, executions, selection, onS
       <span>收益差 <b className="font-medium">{returnText(account != null && portfolio != null ? portfolio - account : null, ' 个百分点')}</b></span>
       <span>{interval ? '区间' : '当日'}成交额 {amount(costs ? readingCost?.value ?? null : null)}</span>
       <span className={readingCost?.cost != null && readingCost.cost > 0 ? 'text-warn' : ''}>{readingCost && readingCost.covered < readingCost.count ? '已知滑点成本' : '滑点成本'} {amount(costs ? readingCost?.cost ?? null : null)}</span>
-      <span className="text-ink-3">{costs == null ? '成本数据未就绪' : readingCost ? coverageText(readingCost) : '无成交记录'}</span>
-      {interval && costs && <><span>手续费 {feeText(summary)}</span>{estimated > 0 && <span className="text-warn">{estimated} 笔使用执行时间</span>}</>}
+      <span className="text-ink-3">{costs == null || (interval && !summary) ? '成本数据未就绪' : readingCost ? coverageText(readingCost) : '无成交记录'}</span>
+      {interval && summary && <><span>手续费 {feeText(summary)}</span>{estimated > 0 && <span className="text-warn">{estimated} 笔使用执行时间</span>}</>}
     </div>
     <div className="flex flex-wrap items-center gap-2">
       {shownSelection && !interval && <ClearSelectionButton onClick={clear} />}

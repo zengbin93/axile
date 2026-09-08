@@ -1,0 +1,404 @@
+"""Durable analysis races, invalidation, retention and cost semantics."""
+
+import asyncio
+import threading
+import time
+from contextlib import asynccontextmanager
+from datetime import datetime, timedelta
+from types import SimpleNamespace
+
+import pytest
+import sqlalchemy as sa
+from alembic.migration import MigrationContext
+from alembic.operations import Operations
+from fastapi import HTTPException
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+from sqlmodel import SQLModel
+
+from axile.server.api.routes.account_performance import get_performance
+from axile.server.db.models import Account, ExecuteRecord, PortfolioAccount, TargetWeightSnapshot
+from axile.server.db.models.analysis import analysis_snapshot as snapshots
+from axile.server.db.models.analysis import analysis_state as states
+from axile.server.db.models.analysis import cost_trade as trades
+from axile.server.performance_analysis import AnalysisManager, compute_batch, enqueue, read_snapshot
+from axile.server.performance_costs import daily_costs, project_execution, summarize, timestamp
+from axile.server.performance_details import CostQuery, read_costs
+from tests.unit.server._execution_test_support import build_account
+from tests.unit.server.test_initial_migration import _MIGRATIONS_DIR, _load_migration
+
+
+def record(index=1, **kwargs):
+    return ExecuteRecord(
+        account_id=2,
+        id=index,
+        execution_id=f"exec-{index}",
+        is_success=1,
+        created_at=(datetime(2026, 1, 1, 9) + timedelta(days=index - 1)).isoformat(),
+        raw_input={"curr_target": {"A": 1}},
+        raw_result={
+            "account_assets": {"total_asset": 100 + index},
+            "symbol_results": {
+                "A": {
+                    "first_tick": {"bid_price": 100 + index, "ask_price": 100 + index},
+                    "sizing": {"unit_multiplier": 10},
+                    "orders": [{"order_id": "buy", "direction": "BUY"}],
+                    "trades": [
+                        {
+                            "order_id": "buy",
+                            "trade_price": 102 + index,
+                            "trade_volume": 2,
+                            "extra": {"commission": 0, "commission_asset": "CNY"},
+                        }
+                    ],
+                }
+            },
+            **kwargs,
+        },
+    )
+
+
+@asynccontextmanager
+async def database(tmp_path, count=3):
+    engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'analysis.db'}")
+    sessions = async_sessionmaker(engine, expire_on_commit=False)
+    migration = _load_migration(_MIGRATIONS_DIR / "0012_performance_snapshots.py")
+    async with engine.begin() as conn:
+        await conn.run_sync(SQLModel.metadata.create_all)
+        await conn.run_sync(migration.install_triggers)
+    async with sessions() as session:
+        session.add(build_account(id=2, account_control_preset="default"))
+        await session.commit()
+        session.add_all([record(i + 1) for i in range(count)])
+        await session.commit()
+    try:
+        yield engine, sessions, AnalysisManager(sessions)
+    finally:
+        await engine.dispose()
+
+
+async def queue(sessions, force=False):
+    async with sessions() as session:
+        await enqueue(session, 2, force)
+
+
+async def snapshot(sessions):
+    async with sessions() as session:
+        return await read_snapshot(session, 2, "all")
+
+
+def test_legacy_performance_waits_for_current_settings(tmp_path):
+    async def check():
+        async with database(tmp_path) as (_, sessions, manager):
+            await queue(sessions)
+            await manager.run_once()
+            async with sessions() as session:
+                await session.execute(sa.update(Account).where(Account.id == 2).values(backtest_fee_rate=0.001))
+                await session.commit()
+            request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(analysis_manager=manager)))
+            async with sessions() as session:
+                pending = asyncio.create_task(get_performance(session, request, 2))
+                try:
+                    await asyncio.wait_for(manager.wake.wait(), timeout=2)
+                    assert not pending.done()
+                    await manager.run_once()
+                    result = await asyncio.wait_for(pending, timeout=2)
+                    assert result.settings.backtest_fee_rate == 0.001
+                    assert result.backtest_included
+                finally:
+                    if not pending.done():
+                        pending.cancel()
+                    await asyncio.gather(pending, return_exceptions=True)
+
+    asyncio.run(check())
+
+
+@pytest.mark.parametrize("state", ["empty", "stale", "failed"])
+def test_account_only_performance_ignores_unavailable_backtest(tmp_path, monkeypatch, state):
+    async def check():
+        async with database(tmp_path) as (_, sessions, manager):
+            if state != "empty":
+                await queue(sessions)
+                await manager.run_once()
+            async with sessions() as session:
+                await session.execute(sa.update(Account).where(Account.id == 2).values(backtest_fee_rate=0.001))
+                session.add(PortfolioAccount(account_id=2, portfolio_id=None, created_at="2026-01-02T09:00:00"))
+                await session.commit()
+
+            def fail(*args):
+                raise RuntimeError("WBT unavailable")
+
+            monkeypatch.setattr("axile.server.performance._portfolio_daily", fail)
+            if state == "failed":
+                await manager.run_once()
+                assert (await snapshot(sessions))["status"] == "failed"
+            request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(analysis_manager=manager)))
+            async with sessions() as session:
+                result = await get_performance(session, request, 2, include_backtest=False)
+                assert result.settings.backtest_fee_rate == 0.001
+                assert result.points[-1].account_return == pytest.approx(103 / 101 - 1)
+                assert not result.backtest_included
+                assert result.gap is None
+                assert result.used_record_count == 0
+                assert all(point.portfolio_return is None for point in result.points)
+                assert result.bindings[0].time == "2026-01-02T09:00:00"
+                assert result.bindings[0].portfolio_id is None
+                if state == "failed":
+                    with pytest.raises(HTTPException) as error:
+                        await get_performance(session, request, 2)
+                    assert error.value.status_code == 503
+
+    asyncio.run(check())
+
+
+def test_snapshot_hits_never_read_history_or_call_wbt_and_survive_restart(tmp_path, monkeypatch):
+    async def check():
+        async with database(tmp_path) as (engine, sessions, manager):
+            assert (await snapshot(sessions))["status"] == "empty"
+            await queue(sessions)
+            assert await manager.run_once()
+            initial = await snapshot(sessions)
+            assert initial["status"] == "ready"
+            assert initial["result"]["points"][-1]["account_return"] == pytest.approx(103 / 101 - 1)
+            assert initial["daily_costs"]["2026-01-01"]["cost"] == 40
+            monkeypatch.setattr(
+                "axile.server.performance_analysis.compute_batch", lambda *args: pytest.fail("WBT cache miss")
+            )
+            queries = []
+            sa.event.listen(
+                engine.sync_engine,
+                "before_cursor_execute",
+                lambda conn, cursor, statement, *args: queries.append(statement),
+            )
+            restarted = AnalysisManager(sessions)
+            await restarted.start()
+            try:
+                for _ in range(5):
+                    assert await snapshot(sessions) == initial
+            finally:
+                await restarted.stop()
+            assert not any("executerecord" in stmt or "target_weight_snapshot" in stmt for stmt in queries)
+
+    asyncio.run(check())
+
+
+def test_refresh_merges_and_inflight_source_change_discards_batch(tmp_path, monkeypatch):
+    async def check():
+        async with database(tmp_path) as (_, sessions, manager):
+            await asyncio.gather(*(queue(sessions, True) for _ in range(8)))
+            entered, release = threading.Event(), threading.Event()
+            calls = []
+
+            def blocked(*args):
+                calls.append(1)
+                entered.set()
+                assert release.wait(10)
+                return compute_batch(*args)
+
+            monkeypatch.setattr("axile.server.performance_analysis.compute_batch", blocked)
+            job = asyncio.create_task(manager.run_once())
+            while not entered.is_set():
+                await asyncio.sleep(0.01)
+            async with sessions() as session:
+                await session.execute(
+                    sa.update(ExecuteRecord)
+                    .where(ExecuteRecord.id == 3)
+                    .values(raw_result={"account_assets": {"total_asset": 200}})
+                )
+                await session.commit()
+            release.set()
+            await job
+            stale = await snapshot(sessions)
+            assert stale["snapshot_id"] is None
+            assert stale["status"] == "pending"
+            assert await manager.run_once()
+            assert len(calls) == 2
+            assert not await manager.run_once()
+            assert (await snapshot(sessions))["result"]["points"][-1]["account_return"] == pytest.approx(200 / 101 - 1)
+
+    asyncio.run(check())
+
+
+def test_failed_batch_keeps_results_and_limits_retries_then_new_data_recovers(tmp_path, monkeypatch):
+    async def check():
+        async with database(tmp_path) as (_, sessions, manager):
+            await queue(sessions)
+            await manager.run_once()
+            initial = await snapshot(sessions)
+            await queue(sessions, True)
+
+            def fail(*args):
+                raise RuntimeError("secret broker configuration must not be sent to client")
+
+            with monkeypatch.context() as patch:
+                patch.setattr("axile.server.performance_analysis.compute_batch", fail)
+                for attempt, delay in enumerate((5, 30, 120, 120), 1):
+                    before = time.time()
+                    assert await manager.run_once()
+                    result = await snapshot(sessions)
+                    assert result["status"] == "failed" and result["result"] == initial["result"]
+                    assert "secret" not in result["error"]
+                    async with sessions() as session:
+                        row = (await session.execute(sa.select(states))).mappings().one()
+                        assert row["failures"] == attempt
+                        assert before + delay <= row["retry_at"] <= time.time() + delay
+                        assert not await manager.run_once()
+                        await session.execute(states.update().values(retry_at=0))
+                        await session.commit()
+                assert not await manager.run_once()
+            async with sessions() as session:
+                await session.execute(sa.update(Account).where(Account.id == 2).values(backtest_fee_rate=0.001))
+                await session.commit()
+            assert await manager.run_once()
+            assert (await snapshot(sessions))["settings"]["backtest_fee_rate"] == 0.001
+
+    asyncio.run(check())
+
+
+def test_transactional_invalidation_and_bulk_delete(tmp_path):
+    async def check():
+        async with database(tmp_path) as (_, sessions, manager):
+            await queue(sessions)
+            await manager.run_once()
+            initial = await snapshot(sessions)
+            async with sessions() as session:
+                await session.execute(sa.update(ExecuteRecord).values(raw_input={"curr_target": {}}))
+                await session.rollback()
+            assert await snapshot(sessions) == initial
+            async with sessions() as session:
+                session.add(PortfolioAccount(account_id=2, portfolio_id=None))
+                session.add(TargetWeightSnapshot(account_id=2, portfolio_id=1, source="manual", normalized_weights={}))
+                await session.commit()
+            assert (await snapshot(sessions))["source_version"] > initial["source_version"]
+            async with sessions() as session:
+                await session.execute(sa.delete(ExecuteRecord).where(ExecuteRecord.account_id == 2))
+                await session.commit()
+            assert await manager.run_once()
+            assert (await snapshot(sessions))["result"]["points"] == []
+
+    asyncio.run(check())
+
+
+def test_cost_pages_bind_filter_sort_and_retained_versions(tmp_path):
+    async def check():
+        async with database(tmp_path, count=25) as (_, sessions, manager):
+            await queue(sessions)
+            await manager.run_once()
+            initial = await snapshot(sessions)
+            query = CostQuery(snapshot_id=initial["snapshot_id"])
+            async with sessions() as session:
+                first = await read_costs(session, 2, query)
+                assert first["count"] == 25 and len(first["data"]) == 20
+                assert first["summary"]["cost"] == 1000
+                assert "trades" not in first["data"][0]
+                second = await read_costs(session, 2, query.model_copy(update={"cursor": first["next_cursor"]}))
+                assert len(second["data"]) == 5
+                assert not {row["key"] for row in first["data"]} & {row["key"] for row in second["data"]}
+                with pytest.raises(HTTPException) as error:
+                    await read_costs(
+                        session, 2, query.model_copy(update={"cursor": first["next_cursor"], "sort": "cost"})
+                    )
+                assert error.value.status_code == 400
+                symbols = await read_costs(session, 2, query.model_copy(update={"dimension": "symbol"}))
+                assert symbols["summary"] == first["summary"]
+                assert symbols["data"][0]["buy"] == 50
+            await queue(sessions, True)
+            await manager.run_once()
+            async with sessions() as session:
+                assert (await read_costs(session, 2, query))["summary"] == first["summary"]
+            await queue(sessions, True)
+            await manager.run_once()
+            async with sessions() as session:
+                with pytest.raises(HTTPException) as error:
+                    await read_costs(session, 2, query)
+                assert error.value.status_code == 410
+                assert await session.scalar(sa.select(sa.func.count()).select_from(snapshots)) == 2
+                assert await session.scalar(sa.select(sa.func.count()).select_from(trades)) == 50
+
+    asyncio.run(check())
+
+
+def test_cost_cross_day_unknowns_fees_noop_and_interval_boundary(tmp_path):
+    item = record()
+    result = item.raw_result["symbol_results"]["A"]
+    result["trades"] = [
+        {
+            "order_id": "buy",
+            "trade_price": 102,
+            "trade_volume": 2,
+            "trade_time": "2026-01-01T23:59:00",
+            "extra": {"commission": 0, "commission_asset": "CNY"},
+        },
+        {
+            "order_id": "sell",
+            "trade_price": 100,
+            "trade_volume": 2,
+            "trade_time": "2026-01-02T00:01:00",
+            "extra": {"direction": "sell", "commission": 0.1, "commission_asset": "USD"},
+        },
+        {"trade_price": 100, "trade_volume": 2, "trade_time": "bad"},
+    ]
+    payload, fills = project_execution(item)
+    assert not payload["noop"]
+    assert [fill["cost"] for fill in fills] == [20, 20, None]
+    assert fills[-1]["timeEstimated"]
+    assert summarize(fills)["fees"] == {"CNY": 0, "USD": 0.1}
+    assert summarize(fills)["feeCovered"] == 2
+    assert summarize(fills)["coverage"] == pytest.approx(4040 / 6040)
+    assert daily_costs(fills)["2026-01-02"]["cost"] == 20
+
+    async def check():
+        async with database(tmp_path, count=0) as (_, sessions, manager):
+            async with sessions() as session:
+                session.add(item)
+                session.add(record(2, status="NOOP", symbol_results={}))
+                await session.commit()
+            await queue(sessions)
+            await manager.run_once()
+            batch = await snapshot(sessions)
+            async with sessions() as session:
+                page = await read_costs(session, 2, CostQuery(snapshot_id=batch["snapshot_id"], day="2026-01-02"))
+                assert page["summary"]["cost"] == 20
+                assert page["noop"] == 1
+                assert page["count"] == 2
+                interval = await read_costs(
+                    session,
+                    2,
+                    CostQuery(
+                        snapshot_id=batch["snapshot_id"],
+                        start=timestamp("2026-01-01T23:59:00"),
+                        end=timestamp("2026-01-02T00:01:00"),
+                    ),
+                )
+                assert interval["summary"]["cost"] == 20
+                assert interval["summary"]["count"] == 1
+
+    asyncio.run(check())
+
+
+def test_migration_roundtrip_and_restart_running_state(tmp_path):
+    migration = _load_migration(_MIGRATIONS_DIR / "0012_performance_snapshots.py")
+
+    async def check():
+        async with database(tmp_path) as (engine, sessions, manager):
+            async with engine.begin() as conn:
+
+                def roundtrip(connection):
+                    migration.op = Operations(MigrationContext.configure(connection))
+                    migration.downgrade()
+                    migration.upgrade()
+                    assert len(sa.inspect(connection).get_columns("account_analysis")) == len(states.columns)
+
+                await conn.run_sync(roundtrip)
+            await queue(sessions)
+            async with sessions() as session:
+                await session.execute(states.update().values(running_version=1, requested=False))
+                await session.commit()
+            await manager.start()
+            for _ in range(100):
+                if (await snapshot(sessions))["status"] == "ready":
+                    break
+                await asyncio.sleep(0.02)
+            await manager.stop()
+            assert (await snapshot(sessions))["status"] == "ready"
+
+    asyncio.run(check())

@@ -67,3 +67,46 @@ class AccountPerformance(BaseModel):
     gap: PerformanceGap | None = None
     points: list[PerformancePoint] = Field(default_factory=list)
     bindings: list[PerformanceBinding] = Field(default_factory=list)
+
+
+class CostSummary(BaseModel):
+    """成交额覆盖率、滑点及分币种手续费；未知金额保持空值."""
+
+    value: float | None
+    cost: float | None
+    lossBp: float | None
+    coverage: float | None
+    covered: int
+    count: int
+    amountComplete: bool
+    fees: dict[str, float]
+    feeCovered: int
+
+
+class PerformanceEvent(BaseModel):
+    """有界账户时间线摘要."""
+
+    time: str
+    tag: str
+    text: str
+    executionId: str | None
+
+
+class PerformanceSnapshot(BaseModel):
+    """结果版本与源版本分离，失败或待更新时可同时携带上次成功结果."""
+
+    status: Literal["empty", "pending", "ready", "stale", "failed"]
+    source_version: int
+    snapshot_id: str | None
+    snapshot_version: int | None
+    logic_version: str
+    engine_version: str
+    computed_at: str | None
+    data_until: str | None
+    settings: PerformanceSettings | None
+    error: str | None
+    retry_at: float | None
+    result: AccountPerformance | None
+    daily_costs: dict[str, CostSummary]
+    events: list[PerformanceEvent]
+    event_count: int

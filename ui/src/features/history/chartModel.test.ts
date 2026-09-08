@@ -69,14 +69,14 @@ test('时间和像素映射互逆，缩放固定锚点且平移不越界', () =>
 test('区间逐笔采用左开右闭，保留跨日成交、替代时间与多币种收费', () => {
   const trade = (trade_time: string | undefined, currency: string, price = 101) => ({ trade_time, trade_price: price, trade_volume: 1, order_id: 'a', extra: { commission: 1, commission_asset: currency } })
   const record: ExecuteRecord = { id: 1, execution_id: 'one', created_at: '2026-01-01T18:00:00', is_success: 1, raw_input: {}, raw_result: { symbol_results: { A: { sizing: { unit_multiplier: 1 }, first_tick: { last_price: 100 }, orders: [{ order_id: 'a', direction: 'buy' }], trades: [
-    trade('2026-01-01T17:00:00', 'USDT'), trade(undefined, 'BNB'), trade('2026-01-01T16:30:00Z', 'USDT'), trade('2026-01-02T17:00:00', 'USDT'), trade('2026-01-02T17:00:01', 'USDT'),
+    trade('2026-01-01T17:00:00', 'CNY'), trade(undefined, 'USD'), trade('2026-01-01T16:30:00Z', 'CNY'), trade('2026-01-02T17:00:00', 'CNY'), trade('2026-01-02T17:00:01', 'CNY'),
   ] } } } }
   const executions = costExecutions([{ kind: 'execution', occurred_at: record.created_at, record }])
   const selection = intervalSelection(shanghaiTime('2026-01-01T17:00:00'), shanghaiTime('2026-01-02T17:00:00'))
   const filtered = selectedExecutions(executions, selection)
   expect(filtered[0].trades).toHaveLength(3)
   expect(filtered[0].trades.filter(t => t.timeEstimated)).toHaveLength(1)
-  expect(filtered[0].summary.fees).toEqual({ BNB: 1, USDT: 2 })
+  expect(filtered[0].summary.fees).toEqual({ USD: 1, CNY: 2 })
   expect(filtered[0].summary).toEqual(summarizeCosts(filtered.flatMap(e => e.trades)))
   expect(filtered[0].trades[1].day).toBe('2026-01-02')
   expect(selectedExecutions(executions, null)).toBe(executions)

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from sqlmodel import SQLModel
 
+from axile.server.db.models import analysis as analysis
 from axile.server.db.models.account import (
     Account,
     AccountBase,

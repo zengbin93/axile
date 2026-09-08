@@ -1,0 +1,290 @@
+"""Version-bound cost pagination over compact indexed projections."""
+
+import base64
+import hashlib
+import json
+from typing import Literal
+
+import sqlalchemy as sa
+from fastapi import HTTPException
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+from axile.server.db.models.analysis import analysis_snapshot as snapshots
+from axile.server.db.models.analysis import cost_execution as executions
+from axile.server.db.models.analysis import cost_trade as trades
+from axile.server.db.models.performance import RangeKey
+from axile.server.performance_costs import timestamp
+
+
+class CostQuery(BaseModel):
+    """An immutable snapshot plus exact filter and ordering scope."""
+
+    model_config = ConfigDict(extra="forbid")
+    snapshot_id: str
+    range: RangeKey = "all"
+    dimension: Literal["execution", "symbol", "trade", "summary"] = "execution"
+    sort: Literal["time", "cost"] = "time"
+    day: str | None = None
+    start: float | None = Field(default=None, allow_inf_nan=False)
+    end: float | None = Field(default=None, allow_inf_nan=False)
+    record_id: int | None = None
+    symbol: str | None = None
+    limit: int = Field(default=20, ge=1, le=100)
+    cursor: str | None = Field(default=None, max_length=1024)
+
+    @model_validator(mode="after")
+    def boundaries(self):
+        """Reject ambiguous or malformed time selectors."""
+        if (self.start is None) != (self.end is None):
+            raise ValueError("start and end must define a nonempty interval")
+        if self.start is not None and self.end is not None and self.start >= self.end:
+            raise ValueError("start and end must define a nonempty interval")
+        if self.day:
+            if self.start is not None:
+                raise ValueError("day and interval cannot be combined")
+            from datetime import date
+
+            if date.fromisoformat(self.day).isoformat() != self.day:
+                raise ValueError("day must be YYYY-MM-DD")
+        return self
+
+
+def _cursor(query: CostQuery, account_id: int) -> tuple[str, int]:
+    scope = query.model_dump(exclude={"cursor"}) | {"account_id": account_id}
+    digest = hashlib.sha256(json.dumps(scope, sort_keys=True).encode()).hexdigest()
+    offset = 0
+    if query.cursor:
+        try:
+            payload = json.loads(base64.urlsafe_b64decode(query.cursor))
+            offset = payload["offset"]
+            if payload["scope"] != digest or type(offset) is not int or offset < 0:
+                raise ValueError
+        except (ValueError, KeyError, TypeError):
+            raise HTTPException(
+                400, detail={"code": "INVALID_COST_CURSOR", "message": "游标与查询条件不匹配"}
+            ) from None
+    return digest, offset
+
+
+def _filters(query: CostQuery, result: dict):
+    start = timestamp(result["baseline"]) if result["baseline"] else 0
+    end = timestamp(result["end"]) if result["end"] else -1
+    execution_filter = [
+        executions.c.snapshot_id == query.snapshot_id,
+        executions.c.time >= start,
+        executions.c.time <= end,
+    ]
+    if query.record_id is not None:
+        execution_filter.append(executions.c.record_id == query.record_id)
+    record_ids = sa.select(executions.c.record_id).where(*execution_filter)
+    trade_filter = [trades.c.snapshot_id == query.snapshot_id, trades.c.record_id.in_(record_ids)]
+    time_filter = None
+    if query.day:
+        trade_filter.append(trades.c.day == query.day)
+        day_start = timestamp(query.day)
+        time_filter = sa.and_(executions.c.time >= day_start, executions.c.time < day_start + 86400000)
+    elif query.start is not None:
+        trade_filter.extend([trades.c.time > query.start, trades.c.time <= query.end])
+        time_filter = sa.and_(executions.c.time > query.start, executions.c.time <= query.end)
+    if query.symbol is not None:
+        trade_filter.append(trades.c.symbol == query.symbol)
+    if query.symbol is not None or time_filter is not None:
+        matching = executions.c.record_id.in_(sa.select(trades.c.record_id).where(*trade_filter))
+        execution_filter.append(
+            sa.or_(matching, time_filter) if time_filter is not None and query.symbol is None else matching
+        )
+    return execution_filter, trade_filter
+
+
+async def summary(session, filters: list) -> dict:
+    """Aggregate projected numeric columns without loading per-trade JSON."""
+    valid = sa.and_(trades.c.cost.is_not(None), trades.c.value.is_not(None))
+    row = (
+        (
+            await session.execute(
+                sa.select(
+                    sa.func.count().label("count"),
+                    sa.func.count(trades.c.value).label("valued"),
+                    sa.func.sum(trades.c.value).label("value"),
+                    sa.func.sum(trades.c.cost).label("cost"),
+                    sa.func.count(sa.case((valid, 1))).label("covered"),
+                    sa.func.sum(sa.case((valid, trades.c.value), else_=0)).label("covered_value"),
+                    sa.func.sum(sa.case((valid, trades.c.loss_bp * trades.c.value), else_=0)).label("weighted_loss"),
+                    sa.func.sum(sa.cast(trades.c.estimated, sa.Integer)).label("estimated"),
+                )
+                .select_from(trades)
+                .where(*filters)
+            )
+        )
+        .mappings()
+        .one()
+    )
+    fee_rows = (
+        await session.execute(
+            sa.select(trades.c.fee_currency, sa.func.sum(trades.c.fee), sa.func.count())
+            .where(*filters, trades.c.fee.is_not(None), trades.c.fee_currency.is_not(None))
+            .group_by(trades.c.fee_currency)
+        )
+    ).all()
+    complete = row["count"] == row["valued"]
+    return {
+        "value": row["value"],
+        "cost": row["cost"],
+        "lossBp": row["weighted_loss"] / row["covered_value"] if row["covered_value"] else None,
+        "coverage": row["covered_value"] / row["value"] if complete and row["value"] else None,
+        "covered": row["covered"],
+        "count": row["count"],
+        "amountComplete": complete,
+        "fees": {currency: value for currency, value, _ in fee_rows},
+        "feeCovered": sum(count for _, _, count in fee_rows),
+        "estimated": row["estimated"] or 0,
+    }
+
+
+async def _execution_page(session, filters, trade_filter, query, offset):
+    cost = (
+        sa.select(trades.c.record_id, sa.func.sum(trades.c.cost).label("cost"))
+        .where(*trade_filter)
+        .group_by(trades.c.record_id)
+        .subquery()
+    )
+    stmt = (
+        sa.select(executions.c.payload, cost.c.cost)
+        .select_from(executions.outerjoin(cost, executions.c.record_id == cost.c.record_id))
+        .where(*filters)
+    )
+    ordering = [executions.c.time.desc(), executions.c.record_id.desc()]
+    if query.sort == "cost":
+        ordering.insert(0, cost.c.cost.desc().nulls_last())
+    rows = (await session.execute(stmt.order_by(*ordering).offset(offset).limit(query.limit))).all()
+    data = []
+    for payload, _ in rows:
+        row_filter = [*trade_filter, trades.c.record_id == payload["record"]["id"]]
+        row_summary = await summary(session, row_filter)
+        symbol_count = await session.scalar(
+            sa.select(sa.func.count(sa.distinct(trades.c.symbol))).where(
+                *row_filter, trades.c.payload["quantity"].as_float().is_not(None)
+            )
+        )
+        data.append({**payload, "symbolCount": symbol_count, "summary": row_summary})
+    return data
+
+
+async def _symbol_page(session, filters, query, offset):
+    cost = sa.func.sum(trades.c.cost)
+    stmt = sa.select(trades.c.symbol).where(*filters).group_by(trades.c.symbol)
+    ordering = [cost.desc().nulls_last(), trades.c.symbol] if query.sort == "cost" else [trades.c.symbol]
+    symbols = (await session.execute(stmt.order_by(*ordering).offset(offset).limit(query.limit))).scalars().all()
+    data = []
+    for symbol in symbols:
+        row_filter = [*filters, trades.c.symbol == symbol]
+        quantities = (
+            await session.execute(
+                sa.select(
+                    sa.func.sum(
+                        sa.case(
+                            (trades.c.payload["side"].as_string() == "buy", trades.c.payload["quantity"].as_float()),
+                            else_=0,
+                        )
+                    ),
+                    sa.func.sum(
+                        sa.case(
+                            (trades.c.payload["side"].as_string() == "sell", trades.c.payload["quantity"].as_float()),
+                            else_=0,
+                        )
+                    ),
+                    sa.func.count(
+                        sa.case(
+                            (
+                                sa.or_(
+                                    trades.c.payload["side"].as_string() == "none",
+                                    trades.c.payload["quantity"].as_float().is_(None),
+                                ),
+                                1,
+                            )
+                        )
+                    ),
+                ).where(*row_filter)
+            )
+        ).one()
+        data.append(
+            {
+                "symbol": symbol,
+                "summary": await summary(session, row_filter),
+                "buy": quantities[0] or 0,
+                "sell": quantities[1] or 0,
+                "quantityIncomplete": bool(quantities[2]),
+            }
+        )
+    return data
+
+
+async def read_costs(session, account_id: int, query: CostQuery) -> dict:
+    """Read a stable page or explicitly reject an evicted snapshot version."""
+    digest, offset = _cursor(query, account_id)
+    # Keep version existence, aggregates and page rows in the same read transaction.
+    if session.in_transaction():
+        await session.rollback()
+    await session.execute(sa.text("BEGIN"))
+    batch = (
+        (
+            await session.execute(
+                sa.select(snapshots).where(snapshots.c.id == query.snapshot_id, snapshots.c.account_id == account_id)
+            )
+        )
+        .mappings()
+        .first()
+    )
+    if batch is None:
+        raise HTTPException(410, detail={"code": "SNAPSHOT_EXPIRED", "message": "快照版本已失效，请重新读取绩效"})
+    execution_filter, trade_filter = _filters(query, batch["ranges"][query.range]["performance"])
+    totals = await summary(session, trade_filter)
+    execution_counts = (
+        await session.execute(
+            sa.select(
+                sa.func.count(),
+                sa.func.sum(sa.cast(executions.c.success, sa.Integer)),
+                sa.func.sum(sa.cast(executions.c.noop, sa.Integer)),
+            ).where(*execution_filter)
+        )
+    ).one()
+    if query.dimension == "summary":
+        count, data = 0, []
+    elif query.dimension == "execution":
+        count = execution_counts[0]
+        data = await _execution_page(session, execution_filter, trade_filter, query, offset)
+    elif query.dimension == "symbol":
+        count = await session.scalar(sa.select(sa.func.count(sa.distinct(trades.c.symbol))).where(*trade_filter))
+        data = await _symbol_page(session, trade_filter, query, offset)
+    else:
+        count = totals["count"]
+        ordering = [trades.c.time.desc(), trades.c.id]
+        if query.sort == "cost":
+            ordering.insert(0, trades.c.cost.desc().nulls_last())
+        data = (
+            (
+                await session.execute(
+                    sa.select(trades.c.payload)
+                    .where(*trade_filter)
+                    .order_by(*ordering)
+                    .offset(offset)
+                    .limit(query.limit)
+                )
+            )
+            .scalars()
+            .all()
+        )
+    next_cursor = (
+        base64.urlsafe_b64encode(json.dumps({"scope": digest, "offset": offset + query.limit}).encode()).decode()
+        if offset + query.limit < count
+        else None
+    )
+    return {
+        "snapshot_id": query.snapshot_id,
+        "summary": totals,
+        "successful": execution_counts[1] or 0,
+        "noop": execution_counts[2] or 0,
+        "count": count,
+        "data": data,
+        "next_cursor": next_cursor,
+    }

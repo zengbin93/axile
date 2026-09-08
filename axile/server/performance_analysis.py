@@ -1,0 +1,397 @@
+"""Single-worker, durable performance queue and atomic snapshot publication."""
+
+import asyncio
+import time
+from datetime import datetime
+from importlib.metadata import version
+from uuid import uuid4
+
+import sqlalchemy as sa
+from loguru import logger
+from sqlalchemy.dialects.sqlite import insert
+from starlette.concurrency import run_in_threadpool
+
+from axile.server.db.models import Account, ExecuteRecord, PortfolioAccount, ScheduleSkip, TargetWeightSnapshot
+from axile.server.db.models.analysis import analysis_snapshot as snapshots
+from axile.server.db.models.analysis import analysis_state as states
+from axile.server.db.models.analysis import cost_execution as executions
+from axile.server.db.models.analysis import cost_trade as trades
+from axile.server.db.models.performance import PerformanceBinding, PerformanceSettings
+from axile.server.performance import calculate_performance, local_time, observation
+from axile.server.performance_costs import SHANGHAI, daily_costs, project_execution, timestamp
+
+LOGIC_VERSION = "1"
+ENGINE_VERSION = version("wbt")
+RETRY_DELAYS = (5, 30, 120)
+
+
+async def enqueue(session, account_id: int, force: bool = False) -> None:
+    """Coalesce refresh requests; a ready or exhausted batch can be forced again."""
+    await session.execute(insert(states).values(account_id=account_id).on_conflict_do_nothing())
+    if force:
+        await session.execute(
+            states.update()
+            .where(
+                states.c.account_id == account_id,
+                states.c.running_version.is_(None),
+                sa.or_(
+                    states.c.error.is_not(None),
+                    sa.and_(states.c.published_version == states.c.source_version, ~states.c.requested),
+                ),
+            )
+            .values(source_version=states.c.source_version + 1, failures=0, retry_at=0, error=None)
+        )
+    await session.execute(states.update().where(states.c.account_id == account_id).values(requested=True))
+    await session.commit()
+
+
+async def read_snapshot(session, account_id: int, range_key: str) -> dict:
+    """Read only compact persisted results; never deserialize execution history."""
+    joined = (
+        (
+            await session.execute(
+                sa.select(states, *[column.label(f"snapshot_{column.name}") for column in snapshots.c])
+                .select_from(states.outerjoin(snapshots, states.c.current_snapshot == snapshots.c.id))
+                .where(states.c.account_id == account_id)
+            )
+        )
+        .mappings()
+        .first()
+    )
+    row = joined
+    snapshot = (
+        {column.name: joined[f"snapshot_{column.name}"] for column in snapshots.c}
+        if joined and joined["snapshot_id"]
+        else None
+    )
+    status = "empty"
+    if row:
+        if row["error"]:
+            status = "failed"
+        elif (
+            row["requested"] or row["running_version"] is not None or row["published_version"] != row["source_version"]
+        ):
+            status = (
+                "stale"
+                if snapshot
+                else "pending"
+                if row["requested"] or row["running_version"] is not None
+                else "empty"
+            )
+        elif snapshot:
+            status = "ready"
+    result = snapshot["ranges"][range_key] if snapshot else None
+    return {
+        "status": status,
+        "source_version": row["source_version"] if row else 0,
+        "snapshot_id": snapshot["id"] if snapshot else None,
+        "snapshot_version": snapshot["source_version"] if snapshot else None,
+        "logic_version": snapshot["logic_version"] if snapshot else LOGIC_VERSION,
+        "engine_version": snapshot["engine_version"] if snapshot else ENGINE_VERSION,
+        "computed_at": snapshot["computed_at"] if snapshot else None,
+        "data_until": snapshot["data_until"] if snapshot else None,
+        "settings": snapshot["settings"] if snapshot else None,
+        "error": row["error"] if row else None,
+        "retry_at": row["retry_at"] if row and row["error"] and row["failures"] <= len(RETRY_DELAYS) else None,
+        "result": result["performance"] if result else None,
+        "daily_costs": result["daily_costs"] if result else {},
+        "events": result["events"] if result else [],
+        "event_count": result["event_count"] if result else 0,
+    }
+
+
+def _events(records, bindings, skips) -> list[dict]:
+    events = [
+        {
+            "time": binding.created_at,
+            "tag": "换绑",
+            "text": "解绑组合" if binding.portfolio_id is None else f"组合 #{binding.portfolio_id}",
+            "executionId": None,
+        }
+        for binding in bindings
+    ]
+    events.extend(
+        {
+            "time": skip.triggered_at,
+            "tag": "跳过",
+            "text": "执行中" if skip.reason_code == "BUSY" else "休市",
+            "executionId": None,
+        }
+        for skip in skips
+    )
+    for record in records:
+        if record.is_success == 1:
+            continue
+        raw = record.raw_result
+        error = raw.get("error")
+        text = (
+            "上次执行中断，未自动续跑"
+            if raw.get("interrupt_reason") == "process_interrupted"
+            else error
+            if isinstance(error, str) and error.strip()
+            else "执行未完成"
+        )
+        events.append(
+            {
+                "time": record.created_at,
+                "tag": "终止" if raw.get("task_status") == "TERMINATED" else "失败",
+                "text": text[:500],
+                "executionId": record.execution_id,
+            }
+        )
+    return sorted(events, key=lambda event: timestamp(event["time"]), reverse=True)
+
+
+def compute_batch(records, targets, bindings, skips, settings: PerformanceSettings) -> tuple[dict, list, list]:
+    """Read history once, independently rebase each range, and share daily/cumulative results."""
+    fallback = {item.execution_id: item.normalized_weights for item in targets if item.execution_id}
+    observations = [observation(record, fallback.get(record.execution_id or "")) for record in records]
+    projected, cost_rows, by_record = [], [], {}
+    for record in records:
+        payload, fills = project_execution(record)
+        by_record[record.id] = fills
+        projected.append(
+            {
+                "record_id": record.id,
+                "time": timestamp(record.created_at),
+                "success": record.is_success == 1,
+                "noop": payload["noop"],
+                "payload": payload,
+            }
+        )
+        for fill in fills:
+            cost_rows.append(
+                {
+                    "id": len(cost_rows),
+                    "record_id": record.id,
+                    "symbol": fill["symbol"],
+                    "time": fill["time"],
+                    "day": fill["day"],
+                    "value": fill["value"],
+                    "cost": fill["cost"],
+                    "loss_bp": fill["lossBp"],
+                    "fee": fill["fee"],
+                    "fee_currency": fill["feeCurrency"],
+                    "estimated": fill["timeEstimated"],
+                    "payload": fill,
+                }
+            )
+    events = _events(records, bindings, skips)
+    ranges = {}
+    for range_key in ("30", "90", "all"):
+        result = calculate_performance(observations, settings, range_key)
+        start, end = timestamp(result.baseline) if result.baseline else 0, timestamp(result.end) if result.end else -1
+        result.bindings = [
+            PerformanceBinding(time=local_time(binding.created_at).isoformat(), portfolio_id=binding.portfolio_id)
+            for binding in sorted(bindings, key=lambda item: local_time(item.created_at))
+            if start <= timestamp(binding.created_at) <= end
+        ]
+        selected_trades = [
+            fill for record in records if start <= timestamp(record.created_at) <= end for fill in by_record[record.id]
+        ]
+        selected_events = [event for event in events if start <= timestamp(event["time"]) <= end]
+        ranges[range_key] = {
+            "performance": result.model_dump(mode="json"),
+            "daily_costs": daily_costs(selected_trades),
+            "events": selected_events[:100],
+            "event_count": len(selected_events),
+        }
+    return ranges, projected, cost_rows
+
+
+class AnalysisManager:
+    """One background calculation at a time, independent of trading execution locks."""
+
+    def __init__(self, sessions):
+        self.sessions = sessions
+        self.wake = asyncio.Event()
+        self.task = None
+        self.stopping = False
+        self.compute_lock = asyncio.Lock()
+
+    async def start(self) -> None:
+        """Recover interrupted jobs and invalidate results from older calculation engines."""
+        async with self.sessions() as session:
+            await session.execute(
+                states.update()
+                .where(states.c.running_version.is_not(None))
+                .values(running_version=None, requested=True)
+            )
+            await session.execute(
+                states.update()
+                .where(
+                    states.c.current_snapshot.is_not(None),
+                    sa.or_(states.c.logic_version != LOGIC_VERSION, states.c.engine_version != ENGINE_VERSION),
+                )
+                .values(source_version=states.c.source_version + 1, failures=0, retry_at=0, error=None)
+            )
+            await session.commit()
+        self.stopping = False
+        self.task = asyncio.create_task(self._loop(), name="performance-analysis")
+
+    async def stop(self) -> None:
+        """Let an in-flight thread finish before releasing the single calculation slot."""
+        self.stopping = True
+        self.wake.set()
+        if self.task:
+            await self.task
+            self.task = None
+
+    async def _loop(self) -> None:
+        while not self.stopping:
+            self.wake.clear()
+            try:
+                if await self.run_once():
+                    continue
+            except Exception:
+                logger.exception("Performance queue iteration failed")
+            try:
+                await asyncio.wait_for(self.wake.wait(), timeout=5)
+            except TimeoutError:
+                pass
+
+    async def _claim(self):
+        async with self.sessions() as session:
+            row = (
+                (
+                    await session.execute(
+                        sa.select(states)
+                        .where(
+                            states.c.running_version.is_(None),
+                            states.c.failures <= len(RETRY_DELAYS),
+                            states.c.retry_at <= time.time(),
+                            sa.or_(
+                                states.c.requested,
+                                sa.and_(
+                                    states.c.current_snapshot.is_not(None),
+                                    states.c.source_version != states.c.published_version,
+                                ),
+                            ),
+                        )
+                        .order_by(states.c.retry_at, states.c.account_id)
+                        .limit(1)
+                    )
+                )
+                .mappings()
+                .first()
+            )
+            if row:
+                await session.execute(
+                    states.update()
+                    .where(states.c.account_id == row["account_id"])
+                    .values(running_version=states.c.source_version, requested=False)
+                )
+                await session.commit()
+            return row
+
+    async def _load(self, account_id):
+        async with self.sessions() as session:
+            # SQLite legacy transaction mode does not begin a snapshot for SELECT.
+            await session.execute(sa.text("BEGIN"))
+            account = await session.get(Account, account_id)
+            if account is None:
+                return None
+            settings = PerformanceSettings.model_validate(account, from_attributes=True)
+            history = []
+            for model in (ExecuteRecord, TargetWeightSnapshot, PortfolioAccount, ScheduleSkip):
+                history.append(
+                    (await session.execute(sa.select(model).where(model.account_id == account_id))).scalars().all()
+                )
+            return (*history, settings)
+
+    async def run_once(self) -> bool:
+        """Claim one durable job, compute outside DB transactions, then compare-and-publish."""
+        async with self.compute_lock:
+            row = await self._claim()
+            if row is None:
+                return False
+            try:
+                inputs = await self._load(row["account_id"])
+                if inputs is None:
+                    return True
+                records, targets, bindings, skips, settings = inputs
+                result = await run_in_threadpool(compute_batch, records, targets, bindings, skips, settings)
+                await self._publish(row, inputs[-1], result)
+            except Exception:
+                logger.exception("Performance calculation failed for account {}", row["account_id"])
+                await self._fail(row)
+            return True
+
+    async def _fail(self, row) -> None:
+        async with self.sessions() as session:
+            failures = row["failures"] + 1
+            await session.execute(
+                states.update()
+                .where(states.c.account_id == row["account_id"], states.c.source_version == row["source_version"])
+                .values(
+                    running_version=None,
+                    requested=True if failures <= len(RETRY_DELAYS) else False,
+                    failures=failures,
+                    retry_at=time.time() + RETRY_DELAYS[min(failures - 1, len(RETRY_DELAYS) - 1)],
+                    error="绩效计算失败，请重试或查看服务日志",
+                )
+            )
+            await session.execute(
+                states.update()
+                .where(states.c.account_id == row["account_id"], states.c.source_version != row["source_version"])
+                .values(running_version=None, requested=True)
+            )
+            await session.commit()
+
+    async def _publish(self, row, settings, result) -> None:
+        batch_id = uuid4().hex
+        ranges, projected, cost_rows = result
+        async with self.sessions() as session:
+            # Acquire the SQLite writer slot only for publication, never during WBT.
+            updated = await session.execute(
+                states.update()
+                .where(states.c.account_id == row["account_id"], states.c.source_version == row["source_version"])
+                .values(
+                    previous_snapshot=states.c.current_snapshot,
+                    current_snapshot=batch_id,
+                    published_version=row["source_version"],
+                    running_version=None,
+                    requested=False,
+                    failures=0,
+                    retry_at=0,
+                    error=None,
+                    logic_version=LOGIC_VERSION,
+                    engine_version=ENGINE_VERSION,
+                )
+                .returning(states.c.previous_snapshot)
+            )
+            previous = updated.first()
+            if previous is None:
+                await session.execute(
+                    states.update()
+                    .where(states.c.account_id == row["account_id"])
+                    .values(running_version=None, requested=True)
+                )
+                await session.commit()
+                return
+            await session.execute(
+                snapshots.insert().values(
+                    id=batch_id,
+                    account_id=row["account_id"],
+                    source_version=row["source_version"],
+                    logic_version=LOGIC_VERSION,
+                    engine_version=ENGINE_VERSION,
+                    computed_at=datetime.now(SHANGHAI).isoformat(),
+                    data_until=ranges["all"]["performance"]["end"],
+                    settings=settings.model_dump(),
+                    ranges=ranges,
+                )
+            )
+            for table, values in ((executions, projected), (trades, cost_rows)):
+                for start in range(0, len(values), 500):
+                    await session.execute(
+                        table.insert(), [{**value, "snapshot_id": batch_id} for value in values[start : start + 500]]
+                    )
+            obsolete = sa.select(snapshots.c.id).where(
+                snapshots.c.account_id == row["account_id"],
+                snapshots.c.id.not_in([value for value in (batch_id, previous[0]) if value]),
+            )
+            for table in (trades, executions):
+                await session.execute(table.delete().where(table.c.snapshot_id.in_(obsolete)))
+            await session.execute(snapshots.delete().where(snapshots.c.id.in_(obsolete)))
+            await session.commit()

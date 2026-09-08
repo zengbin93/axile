@@ -1,6 +1,8 @@
 """使用真实 WBT 验证收益、缺口与回测设置持久化."""
 
 import asyncio
+import time
+from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 from types import SimpleNamespace
 
@@ -20,6 +22,7 @@ from axile.server.api.routes.account_performance import router
 from axile.server.db.models import AccountCreate, AccountPublic, AccountUpdate, ExecuteRecord, PortfolioAccount
 from axile.server.db.models.performance import PerformanceSettings
 from axile.server.performance import Observation, build_wbt_input, calculate_performance, observation
+from axile.server.performance_analysis import AnalysisManager
 from tests.unit.server._execution_test_support import build_account
 from tests.unit.server.test_initial_migration import _MIGRATIONS_DIR, _load_migration
 
@@ -298,6 +301,8 @@ def test_routes_persist_settings_across_sessions_without_scheduler(tmp_path, mon
     async def setup():
         async with engine.begin() as conn:
             await conn.run_sync(SQLModel.metadata.create_all)
+            migration = _load_migration(_MIGRATIONS_DIR / "0012_performance_snapshots.py")
+            await conn.run_sync(migration.install_triggers)
         async with sessions() as session:
             session.add(build_account(id=2, account_control_preset="default"))
             session.add(build_account(id=3, account_control_preset="default"))
@@ -318,7 +323,16 @@ def test_routes_persist_settings_across_sessions_without_scheduler(tmp_path, mon
             await session.commit()
 
     asyncio.run(setup())
-    app = FastAPI()
+
+    @asynccontextmanager
+    async def lifespan(app):
+        manager = AnalysisManager(sessions)
+        app.state.analysis_manager = manager
+        await manager.start()
+        yield
+        await manager.stop()
+
+    app = FastAPI(lifespan=lifespan)
     app.include_router(router, prefix="/account")
 
     async def db():
@@ -341,8 +355,7 @@ def test_routes_persist_settings_across_sessions_without_scheduler(tmp_path, mon
                 raise RuntimeError("backtest unavailable")
 
             patch.setattr("axile.server.performance._portfolio_daily", fail_backtest)
-            with pytest.raises(RuntimeError, match="backtest unavailable"):
-                client.get("/account/performance/2")
+            assert client.get("/account/performance/2").json() == initial
             assert client.get("/account/performance/2?include_backtest=false").json() == quick
         assert initial["settings"] == {"backtest_weight_type": "cs", "backtest_fee_rate": 0}
         assert initial["bindings"][0]["portfolio_id"] is None
@@ -350,6 +363,13 @@ def test_routes_persist_settings_across_sessions_without_scheduler(tmp_path, mon
         response = client.patch("/account/performance-settings/2", json=settings)
         assert response.status_code == 200, response.text
         assert response.json() == settings
+        assert client.post("/account/performance/2/refresh").status_code == 202
+        for _ in range(100):
+            result = client.get("/account/performance/2/snapshot").json()
+            if result["status"] == "ready":
+                break
+            time.sleep(0.05)
+        assert result["settings"] == settings
     with TestClient(app) as client:
         assert client.get("/account/performance/2").json()["settings"] == settings
         assert client.get("/account/performance/3").json()["settings"]["backtest_weight_type"] == "cs"

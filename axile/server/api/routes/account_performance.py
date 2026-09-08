@@ -1,16 +1,65 @@
 """账户绩效设置和 WBT 收益对比接口，不操作执行与调度."""
 
-from fastapi import APIRouter
+import asyncio
+import time
+from typing import Annotated
+
+from fastapi import APIRouter, HTTPException, Query, Request
+from sqlalchemy import text
 from sqlmodel import col, select
 from starlette.concurrency import run_in_threadpool
 
 from axile.server.api.deps import SessionDep
 from axile.server.api.routes.account_support import _get_account_or_404
 from axile.server.db.models import ExecuteRecord, PortfolioAccount, TargetWeightSnapshot
-from axile.server.db.models.performance import AccountPerformance, PerformanceBinding, PerformanceSettings, RangeKey
+from axile.server.db.models.performance import (
+    AccountPerformance,
+    PerformanceBinding,
+    PerformanceSettings,
+    PerformanceSnapshot,
+    RangeKey,
+)
 from axile.server.performance import calculate_performance, local_time, observation
+from axile.server.performance_analysis import enqueue, read_snapshot
+from axile.server.performance_details import CostQuery, read_costs
 
 router = APIRouter()
+
+
+async def _account_performance(session, account_id: int, range_key: RangeKey) -> AccountPerformance:
+    """从同一数据库快照独立计算账户收益，不依赖 WBT 或后台队列."""
+    await session.rollback()
+    await session.execute(text("BEGIN"))
+    account = await _get_account_or_404(session, account_id)
+    settings = PerformanceSettings.model_validate(account, from_attributes=True)
+    records = (
+        (await session.execute(select(ExecuteRecord).where(col(ExecuteRecord.account_id) == account_id)))
+        .scalars()
+        .all()
+    )
+    targets = (
+        (await session.execute(select(TargetWeightSnapshot).where(col(TargetWeightSnapshot.account_id) == account_id)))
+        .scalars()
+        .all()
+    )
+    bindings = (
+        (await session.execute(select(PortfolioAccount).where(col(PortfolioAccount.account_id) == account_id)))
+        .scalars()
+        .all()
+    )
+    fallback = {item.execution_id: item.normalized_weights for item in targets if item.execution_id}
+    items = [observation(record, fallback.get(record.execution_id or "")) for record in records]
+    binding_values = [(local_time(binding.created_at), binding.portfolio_id) for binding in bindings]
+    await session.rollback()
+    result = await run_in_threadpool(calculate_performance, items, settings, range_key, False)
+    if result.baseline and result.end:
+        start, end = local_time(result.baseline), local_time(result.end)
+        result.bindings = [
+            PerformanceBinding(time=when.isoformat(), portfolio_id=portfolio_id)
+            for when, portfolio_id in sorted(binding_values, key=lambda item: item[0])
+            if start <= when <= end
+        ]
+    return result
 
 
 @router.patch("/performance-settings/{account_id}", response_model=PerformanceSettings)
@@ -33,34 +82,52 @@ async def save_performance_settings(
 
 @router.get("/performance/{account_id}", response_model=AccountPerformance)
 async def get_performance(
-    session: SessionDep, account_id: int, range: RangeKey = "all", include_backtest: bool = True
+    session: SessionDep, request: Request, account_id: int, range: RangeKey = "all", include_backtest: bool = True
 ) -> AccountPerformance:
-    """完整读取历史；可跳过 WBT，独立返回同口径账户收益."""
-    account = await _get_account_or_404(session, account_id)
-    settings = PerformanceSettings.model_validate(account, from_attributes=True)
-    records = (
-        (await session.execute(select(ExecuteRecord).where(col(ExecuteRecord.account_id) == account_id)))
-        .scalars()
-        .all()
-    )
-    snapshots = (
-        (await session.execute(select(TargetWeightSnapshot).where(col(TargetWeightSnapshot.account_id) == account_id)))
-        .scalars()
-        .all()
-    )
-    fallback = {item.execution_id: item.normalized_weights for item in snapshots if item.execution_id}
-    items = [observation(record, fallback.get(record.execution_id or "")) for record in records]
-    bindings = (
-        (await session.execute(select(PortfolioAccount).where(col(PortfolioAccount.account_id) == account_id)))
-        .scalars()
-        .all()
-    )
-    result = await run_in_threadpool(calculate_performance, items, settings, range, include_backtest)
-    if result.baseline and result.end:
-        start, end = local_time(result.baseline), local_time(result.end)
-        result.bindings = [
-            PerformanceBinding(time=local_time(binding.created_at).isoformat(), portfolio_id=binding.portfolio_id)
-            for binding in sorted(bindings, key=lambda item: local_time(item.created_at))
-            if start <= local_time(binding.created_at) <= end
-        ]
+    """完整绩效等待当前快照；纯账户收益不依赖回测成功."""
+    await _get_account_or_404(session, account_id)
+    snapshot = await read_snapshot(session, account_id, range)
+    if snapshot["status"] != "ready" and not include_backtest:
+        return await _account_performance(session, account_id, range)
+    if snapshot["status"] != "ready":
+        await enqueue(session, account_id)
+        request.app.state.analysis_manager.wake.set()
+        deadline = time.monotonic() + 120
+        while snapshot["status"] != "ready":
+            await session.rollback()
+            snapshot = await read_snapshot(session, account_id, range)
+            if snapshot["status"] == "failed" or time.monotonic() > deadline:
+                raise HTTPException(503, detail="绩效尚未就绪，请读取快照状态或稍后重试")
+            if snapshot["status"] != "ready":
+                await asyncio.sleep(0.1)
+    result = AccountPerformance.model_validate(snapshot["result"])
+    if not include_backtest:
+        result.backtest_included = False
+        result.gap = None
+        result.used_record_count = 0
+        for point in result.points:
+            point.portfolio_return = point.portfolio_daily_return = point.difference = None
     return result
+
+
+@router.get("/performance/{account_id}/snapshot", response_model=PerformanceSnapshot)
+async def get_snapshot(session: SessionDep, account_id: int, range: RangeKey = "all") -> dict:
+    """只读取已发布结果及更新状态，不触达历史大 JSON."""
+    await _get_account_or_404(session, account_id)
+    return await read_snapshot(session, account_id, range)
+
+
+@router.post("/performance/{account_id}/refresh", status_code=202)
+async def refresh_performance(session: SessionDep, request: Request, account_id: int) -> dict:
+    """幂等排队；已有成功结果在新批次发布前保持可读."""
+    await _get_account_or_404(session, account_id)
+    await enqueue(session, account_id, force=True)
+    request.app.state.analysis_manager.wake.set()
+    return {"status": "pending", "account_id": account_id}
+
+
+@router.get("/performance/{account_id}/costs")
+async def get_costs(session: SessionDep, account_id: int, query: Annotated[CostQuery, Query()]) -> dict:
+    """按不可变快照版本聚合、排序并分页读取成本投影."""
+    await _get_account_or_404(session, account_id)
+    return await read_costs(session, account_id, query)
