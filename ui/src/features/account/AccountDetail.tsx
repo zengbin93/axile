@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react'
 import { useViewTransitionState } from 'react-router'
 import { ArrowLeft, RefreshCw } from 'lucide-react'
-import { cardPerformance, openFullPerformance } from '@/features/dashboard/performance'
-import { checkPerformance, requestPerformanceRefresh } from '@/features/history/performanceCache'
+import { cardPerformance } from '@/features/dashboard/performance'
+import { requestPerformanceRefresh } from '@/features/history/performanceCache'
 import { Link, useNavigate } from '@/components/ui/nav'
 import { Card, Chip } from '@/components/ui/Card'
 import { DriftBar } from '@/components/viz/DriftBar'
-import { Sparkline } from '@/components/viz/Sparkline'
+import { PerformanceCurveLink } from '@/features/history/PerformanceCurveLink'
 import { InkRewrite } from '@/components/ui/InkRewrite'
 import { NumberTicker } from '@/components/ui/NumberTicker'
 import { OverflowText } from '@/components/ui/OverflowText'
@@ -95,7 +95,7 @@ export function AccountDetail({
   const [startedOverride, setStartedOverride] = useState<boolean | null>(null)
   // 共享元素 FLIP 门控：
   // - 账户名：进详情（舰队/组合）或去编辑页时挂名；持仓/回看不飞名。
-  // - 金额：仅「去回看」；曲线不共享（禁止小图 5× 内容 morph）。
+  // - 金额：仅普通「去回看」；曲线入口走专用 SVG 展开，关闭该次原生共享过渡。
   const tDetail = useViewTransitionState(`/accounts/${accountId}`)
   const tEdit = useViewTransitionState(`/accounts/${accountId}/edit`)
   const tHistory = useViewTransitionState(`/accounts/${accountId}/history`)
@@ -509,7 +509,7 @@ export function AccountDetail({
           </div>
           <div className="flex items-end justify-between gap-4">
             <div>
-              {/* 金额 → 绩效 hero：共享元素 FLIP（平移 + 微缩）；曲线不参与。 */}
+              {/* 普通绩效导航的金额身份；点击曲线时不与曲线展开竞争。 */}
               <div
                 className="num mt-0.5 text-[35px] font-[640] tracking-tight"
                 style={amountVt ? { viewTransitionName: `equity-amount-${accountId}` } : undefined}
@@ -540,26 +540,8 @@ export function AccountDetail({
                 )}
               </div>
             </div>
-            {/*
-              权益走势迷你线即入口：点击跳「回看 · 绩效」。曲线不挂共享名（禁止小图→大图内容
-              morph）；连续叙事只落在金额 FLIP。affordance 走安静瓷砖（hover 提亮，不叠字）；
-              发现性由 title 与页内「完整实盘绩效 →」兜底。
-            */}
-            <Link
-              to={`/accounts/${accountId}/history`}
-              onClick={() => openFullPerformance(accountId)}
-              aria-label="查看全部区间累计绩效"
-              title="全部区间累计收益"
-              // 预取同口径绩效快照，点击固定进入全部区间。
-              onPointerEnter={() => checkPerformance(accountId, 'all')}
-              onFocus={() => checkPerformance(accountId, 'all')}
-              className="group -m-2 block cursor-pointer p-2"
-            >
-              {/* 静止略暗、hover 提亮；只动亮度，不改色相。 */}
-              <span className="inline-block opacity-70 transition-opacity duration-150 group-hover:opacity-100">
-                <Sparkline data={item.performance?.points ?? []} width={150} height={46} />
-              </span>
-            </Link>
+            {/* 仅账户累计收益线展开；专用导航关闭此次金额/标题共享过渡。 */}
+            <PerformanceCurveLink accountId={accountId} summary={item.performance} source="detail" width={150} height={46} />
           </div>
         </div>
 

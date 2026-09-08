@@ -6,6 +6,9 @@ import { holdingAt } from '@/features/history/tradeAnnotations'
 import { useDomainStore } from '@/stores/domain'
 import { useChannelDescriptor } from '@/stores/channels'
 import { performanceViewports } from '@/features/history/viewState'
+import { cancelAccountCurveTransition, registerCurveEndpoint } from '@/features/history/curveTransition'
+import { performanceCoordinates } from '@/features/history/curveTransitionGeometry'
+import { PerformanceChartPlaceholder } from '@/features/history/PerformanceChartPlaceholder'
 import type { AccountPerformance } from '@/types/api'
 import { Select } from '@/components/ui/Select'
 import { OverflowText } from '@/components/ui/OverflowText'
@@ -17,6 +20,7 @@ import { bindingAt, CHART_HEIGHT, drawOverlay, drawScene, PLOT, plotRight, point
 
 interface Props {
   accountId: number
+  snapshotId?: string | null
   viewKey?: string
   data: AccountPerformance
   daily: boolean
@@ -37,11 +41,11 @@ function ClearSelectionButton({ onClick }: { onClick: () => void }) {
 }
 
 export function PerformanceChart(props: Props) {
-  if (props.data.observation_count < 2 || props.data.points.length < 2) return <>{props.controls}<div className="flex h-[510px] items-center justify-center text-sm text-ink-3">有效观测不足两条</div></>
+  if (props.data.observation_count < 2 || props.data.points.length < 2) return <PerformanceChartPlaceholder accountId={props.accountId} controls={props.controls} loading={false} failed={false} message="有效观测不足两条" />
   return <CanvasPerformanceChart {...props} />
 }
 
-function CanvasPerformanceChart({ data, daily, costs, intervalCost, selection, onSelect, portfolioNames, controls, viewKey, accountId }: Props) {
+function CanvasPerformanceChart({ data, daily, costs, intervalCost, selection, onSelect, portfolioNames, controls, viewKey, accountId, snapshotId }: Props) {
   const accountInfo = useDomainStore(s => s.accounts?.find(a => a.account_id === accountId))
   const descriptor = useChannelDescriptor(accountInfo?.trade_channel)
   const times = useMemo(() => data.points.map(pointTime), [data.points])
@@ -148,6 +152,18 @@ function CanvasPerformanceChart({ data, daily, costs, intervalCost, selection, o
     scene.current = { ...tradingScene, theme: readCanvasTheme(container.current) }
     drawScene(baseCanvas.current, scene.current); paintOverlay()
   }, [tradingScene, paintOverlay])
+  useLayoutEffect(() => {
+    const element = container.current
+    const canReturn = !daily && viewKey === `${accountId}:all` && viewport.start === full.start && viewport.end === full.end && returnRange == null
+    if (!canReturn) cancelAccountCurveTransition(accountId)
+    if (!element || daily) return
+    return registerCurveEndpoint({
+      accountId, kind: 'chart', identity: `performance-chart-${accountId}`, element, points: data.points,
+      snapshotId: snapshotId ?? null,
+      coordinates: points => performanceCoordinates(tradingScene, points),
+      canReturn,
+    })
+  }, [accountId, data.points, daily, snapshotId, tradingScene, viewKey, viewport, full, returnRange])
   useLayoutEffect(() => { paintOverlay(); schedule() }, [shownSelection, hover, bindingTime, cursor, paintOverlay, schedule])
 
   const changeView = (view: Viewport) => setViewport(clampViewport(view, navigationTimes))

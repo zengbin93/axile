@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { createBrowserRouter, Navigate, Outlet, RouterProvider, ScrollRestoration } from 'react-router'
 import { AppShell } from '@/components/AppShell'
+import { cancelCurveTransition, observeCurveNavigation } from '@/features/history/curveTransition'
 import { InitWizard } from '@/features/init/InitWizard'
 import { initStatus, initValuesFromStatus, type InitValues } from '@/lib/api/init'
 import { useDomainSync } from '@/stores/domain'
@@ -133,6 +134,10 @@ const router = createBrowserRouter([
   },
   { path: 'dev/holdings-scratch', element: <ScratchHoldings /> },
 ])
+
+observeCurveNavigation(router.state.location, router.state.historyAction)
+const unsubscribeCurveNavigation = router.subscribe(state => observeCurveNavigation(state.location, state.historyAction))
+if (import.meta.hot) import.meta.hot.dispose(() => { unsubscribeCurveNavigation(); cancelCurveTransition() })
 
 export default function App() {
   return <RouterProvider router={router} />

@@ -1,11 +1,11 @@
 import { useViewTransitionState } from 'react-router'
 import { Plus } from 'lucide-react'
-import { cardPerformance, openFullPerformance } from '@/features/dashboard/performance'
+import { cardPerformance } from '@/features/dashboard/performance'
 import { Link, useNavigate } from '@/components/ui/nav'
 import { Card } from '@/components/ui/Card'
 import { NumberTicker } from '@/components/ui/NumberTicker'
 import { Skeleton } from '@/components/ui/Skeleton'
-import { Sparkline } from '@/components/viz/Sparkline'
+import { PerformanceCurveLink } from '@/features/history/PerformanceCurveLink'
 import { ExposureBar } from '@/components/viz/ExposureBar'
 import { INTEGRITY_ICON, INTEGRITY_TEXT_CLASS, INTEGRITY_ORDER, channelLabel } from '@/features/dashboard/display'
 import { isExecutingStatus, phaseLabel, runVerb } from '@/features/dashboard/execProgress'
@@ -92,9 +92,7 @@ function FleetCard({
             </span>
           )}
         </div>
-        <Link to={`/accounts/${item.account_id}/history`} onClick={event => { event.stopPropagation(); openFullPerformance(item.account_id) }} aria-label="查看全部区间累计绩效">
-          <Sparkline data={item.performance?.points ?? []} width={120} height={34} />
-        </Link>
+        <PerformanceCurveLink accountId={item.account_id} summary={item.performance} source="fleet" width={120} height={34} />
       </div>
 
       <div className="mt-3 flex gap-2.5 border-t border-line pt-3 text-[14.5px]">

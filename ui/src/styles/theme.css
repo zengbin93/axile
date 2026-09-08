@@ -283,6 +283,27 @@
   view-transition-name: app-workspace;
 }
 
+/* 仅账户累计收益的小图展开；不缩放卡片或 Canvas 快照。 */
+:root {
+  --curve-open-duration: 360ms;
+  --curve-close-duration: 280ms;
+  --curve-easing: cubic-bezier(.4, 0, .2, 1);
+}
+
+.performance-curve-flight {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 60;
+  overflow: hidden;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .performance-curve-flight { display: none; }
+}
+
 @keyframes app-workspace-old {
   to {
     opacity: 0;

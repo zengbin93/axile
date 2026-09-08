@@ -6,6 +6,7 @@ import { SectionLabel } from '@/components/ui/Card'
 import { Segmented } from '@/components/ui/Segmented'
 import { ErrorNotice } from '@/components/ui/ErrorNotice'
 import { PerformanceChart } from '@/components/viz/PerformanceChart'
+import { PerformanceChartPlaceholder } from '@/features/history/PerformanceChartPlaceholder'
 import { AccountPageTitle } from '@/features/account/pageHead'
 import { FeeControl } from '@/features/history/FeeControl'
 import { getAccount } from '@/lib/api/accounts'
@@ -137,20 +138,19 @@ function AccountHistory({ accountId }: { accountId: number }) {
       </div>
     </div>
     <div className="border-t border-line pt-2">
-      {!data && controls}
       {difference != null && difference < 0 && <p className="mt-1 text-xs text-warn">账户收益高于回测，待核对差异</p>}
       {!parsed && !editingFee && <p role="alert" className="mt-2 text-xs text-warn">费率须大于等于 0 且小于 10000 BP</p>}
       <ErrorNotice title="参数保存失败" error={saveError} />
       <ErrorNotice title="账户设置读取失败" error={account.error} onRetry={account.refresh} />
     </div>
-    {((!data && backtestBusy) || pendingSettings) && <div role="status" className="flex flex-wrap items-center gap-x-4 gap-y-1 py-1 text-xs text-ink-3" data-testid="performance-status">
-      {!data && backtestBusy && <span>正在准备绩效</span>}
+    {pendingSettings && <div role="status" className="flex flex-wrap items-center gap-x-4 gap-y-1 py-1 text-xs text-ink-3" data-testid="performance-status">
       {pendingSettings && <span className="text-warn">新费率 {Number(((settings?.backtest_fee_rate ?? 0) * 10000).toFixed(8))} BP 待计算</span>}
     </div>}
     <ErrorNotice title={data ? '更新失败，保留上次结果' : '绩效读取失败'} error={calculationError} variant="compact" onRetry={performance.refresh} />
     <ErrorNotice title="区间成本读取失败" error={intervalCosts.error} variant="compact" onRetry={intervalCosts.refresh} />
+    {!data && <PerformanceChartPlaceholder accountId={accountId} controls={controls} loading={backtestBusy || !snapshot && !calculationError} failed={!!calculationError} />}
     {data && <div className="pb-4">
-      <PerformanceChart key={range} accountId={accountId} viewKey={`${accountId}:${range}`} data={data} daily={daily} costs={costs} intervalCost={intervalCosts.error || intervalCosts.loading ? null : intervalCosts.data?.summary ?? null} onSelect={setSelection} selection={selection} portfolioNames={portfolioNames} controls={controls} />
+      <PerformanceChart key={range} accountId={accountId} snapshotId={snapshot?.snapshot_id} viewKey={`${accountId}:${range}`} data={data} daily={daily} costs={costs} intervalCost={intervalCosts.error || intervalCosts.loading ? null : intervalCosts.data?.summary ?? null} onSelect={setSelection} selection={selection} portfolioNames={portfolioNames} controls={controls} />
       {data.gap && <p role="status" className="mt-3 break-words text-sm text-warn">组合收益自 {data.gap.time.replace('T', ' ')} 中断：{data.gap.reason}{data.gap.symbols.length ? `（${data.gap.symbols.join('、')}）` : ''}</p>}
       {data.invalid_asset_count > 0 && <p className="mt-2 text-xs text-warn">{data.invalid_asset_count} 条账户资产快照不可用</p>}
     </div>}
