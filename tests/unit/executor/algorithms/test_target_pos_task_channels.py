@@ -6,18 +6,146 @@ from unittest.mock import MagicMock
 import pytest
 
 from axile.common.trade_channel import TradeChannel
+from axile.executor.abstract_executor.capability import AbstractExecutorCapabilityMixin
 from axile.executor.algorithms.core.base import AlgorithmInput, ExecutorProtocol
 from axile.executor.algorithms.defaults.ctp_target_pos_task.impl import (
     CTPTargetPosTaskParams,
     _calculate_order_price,
+    _extract_ctp_position_details,
     ctp_target_pos_task_algorithm,
 )
 from axile.executor.constants.order_status import OrderStatus
+from axile.executor.ctp.converters import account_to_unified
 from axile.executor.ctp.ctp_execute import CtpSessionRecoveryRequired
 from axile.executor.models.execution_result import ExecutionStatus
 from axile.executor.models.unified_account_assets import Position, PositionDirection, UnifiedAccountAssets
 from axile.executor.models.unified_order import OrderDirection, OrderType, TradeRecord, UnifiedOrder
 from axile.executor.models.unified_price import UnifiedPriceData
+
+
+def _native_book(reverse_rows=False, reverse_positions=False, split=False):
+    rows = []
+    for direction, total, today in (("2", 5, 2), ("3", 3, 1)):
+        quantities = [(today, today), (total - today, 0)] if split else [(total, today)]
+        for volume, td_volume in quantities:
+            rows.append(
+                {
+                    "InstrumentID": "rb2610",
+                    "PosiDirection": direction,
+                    "Position": volume,
+                    "TodayPosition": td_volume,
+                    "YdPosition": total + 4,
+                }
+            )
+    if reverse_rows:
+        rows.reverse()
+    book = account_to_unified({}, rows, {})
+    if reverse_positions:
+        book.positions.reverse()
+    return book
+
+
+@pytest.mark.parametrize("reverse_rows", [False, True])
+@pytest.mark.parametrize("reverse_positions", [False, True])
+@pytest.mark.parametrize("split", [False, True])
+@pytest.mark.parametrize("target", [2, 4])
+def test_production_positions_aggregate_and_reach_target(reverse_rows, reverse_positions, split, target):
+    book = _native_book(reverse_rows, reverse_positions, split)
+    detail = _extract_ctp_position_details(book, ["rb2610"])["rb2610"]
+    assert (detail.long_total, detail.short_total, detail.net_position) == (5, 3, 2)
+    assert detail.net_position == AbstractExecutorCapabilityMixin().get_current_volume("rb2610", book)
+    assert (detail.long_today, detail.long_yesterday, detail.short_today, detail.short_yesterday) == (2, 3, 1, 2)
+    executor = _FuturesExecutor(TradeChannel.CTP)
+    executor.get_account_assets = lambda: book
+    result = ctp_target_pos_task_algorithm(
+        cast("ExecutorProtocol", executor),
+        AlgorithmInput(
+            symbol="rb2610",
+            target_volume=target,
+            trade_rule={},
+            params=CTPTargetPosTaskParams(max_wait_seconds=1),
+        ),
+    )
+    assert result.status == (ExecutionStatus.SUCCEEDED if target == 2 else ExecutionStatus.FAILED)
+    assert result.memory["current_net_position"] == result.memory["final_net_position"] == 2
+    assert result.memory["execution_details"]["rb2610_adjustment"]["current_net"] == 2
+    assert [(order.direction, order.volume, order.extra["offset_flag"]) for order in executor.orders] == (
+        [] if target == 2 else [(OrderDirection.BUY, 2, "4")]
+    )
+
+
+def test_final_check_does_not_accept_first_direction_as_net():
+    book = _native_book()
+    executor = _FuturesExecutor(TradeChannel.CTP)
+    executor.get_account_assets = lambda: book
+    result = ctp_target_pos_task_algorithm(
+        cast("ExecutorProtocol", executor),
+        AlgorithmInput(
+            symbol="rb2610",
+            target_volume=5,
+            trade_rule={},
+            params=CTPTargetPosTaskParams(max_wait_seconds=1),
+        ),
+    )
+    assert result.status == ExecutionStatus.FAILED
+    assert result.memory["final_net_position"] == 2
+    assert result.memory["target_reached"] is False
+
+
+@pytest.mark.parametrize("indices,expected", [([], (0, 0, 0)), ([0], (5, 0, 5)), ([1], (0, 3, -3))])
+def test_position_aggregation_boundaries(indices, expected):
+    book = _native_book()
+    selected = [book.positions[index] for index in indices]
+    selected.append(book.positions[0].model_copy(update={"symbol": "other"}))
+    book.positions = selected
+    detail = _extract_ctp_position_details(book, ["rb2610"])["rb2610"]
+    assert (detail.long_total, detail.short_total, detail.net_position) == expected
+
+
+@pytest.mark.parametrize(
+    "extra",
+    [
+        {"long_td": 6, "long_yd": 0},
+        {"long_td": 2, "long_yd": 2},
+        {"long_td": -1, "long_yd": 6},
+        {"long_td": 2.5, "long_yd": 2.5},
+        {"long_td": 2, "long_yd": 3, "long_total": 8},
+        {},
+    ],
+)
+def test_inconsistent_position_blocks_orders(extra):
+    book = _native_book()
+    book.positions[0].extra = extra
+    executor = _FuturesExecutor(TradeChannel.CTP)
+    executor.get_account_assets = lambda: book
+    result = ctp_target_pos_task_algorithm(
+        cast("ExecutorProtocol", executor),
+        AlgorithmInput(
+            symbol="rb2610",
+            target_volume=8,
+            trade_rule={},
+            params=CTPTargetPosTaskParams(max_wait_seconds=1),
+        ),
+    )
+    assert result.status == ExecutionStatus.FAILED
+    assert result.error
+    assert executor.orders == []
+
+
+def test_converter_rejects_today_exceeding_total():
+    with pytest.raises(ValueError, match="今仓与总持仓不一致"):
+        account_to_unified(
+            {}, [{"InstrumentID": "rb2610", "PosiDirection": "2", "Position": 1, "TodayPosition": 2}], {}
+        )
+
+
+@pytest.mark.parametrize("field", ["Position", "TodayPosition"])
+@pytest.mark.parametrize("value", [-1, 0.5, float("nan"), float("inf"), "bad", None, True])
+def test_converter_rejects_invalid_position_quantity(field, value):
+    row = {"InstrumentID": "rb2610", "PosiDirection": "2", "Position": 5, "TodayPosition": 2}
+    row[field] = value
+    with pytest.raises(ValueError, match="持仓数量必须是非负整数"):
+        account_to_unified({}, [row], {})
 
 
 class _FuturesExecutor:
@@ -35,8 +163,7 @@ class _FuturesExecutor:
         self.orders: list[UnifiedOrder] = []
 
     def _position(self, direction: PositionDirection, today: int, yesterday: int) -> Position:
-        long_total = self.long_today + self.long_yesterday
-        short_total = self.short_today + self.short_yesterday
+        side = "long" if direction == PositionDirection.LONG else "short"
         return Position(
             symbol=self.symbol,
             volume=today + yesterday,
@@ -45,13 +172,8 @@ class _FuturesExecutor:
             direction=direction,
             avg_price=3200,
             extra={
-                "long_td": self.long_today,
-                "long_yd": self.long_yesterday,
-                "short_td": self.short_today,
-                "short_yd": self.short_yesterday,
-                "long_total": long_total,
-                "short_total": short_total,
-                "net_position": long_total - short_total,
+                f"{side}_td": today,
+                f"{side}_yd": yesterday,
             },
         )
 
