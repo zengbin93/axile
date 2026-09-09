@@ -1,7 +1,7 @@
 /** StepperNumberInput 的默认步进逻辑（纯函数，便于单测）。 */
 
 /**
- * 默认步进：草稿为整数时 ±step 并夹在 [min, max]；非法/空草稿原样返回（按钮因此禁用）。
+ * 默认步进：默认整数步进；decimal 开启后允许小数。仅主动步进夹区间，非法/空草稿不变。
  *
  * Parameters
  * ----------
@@ -15,10 +15,13 @@
 export function stepNumericValue(
   value: string,
   direction: -1 | 1,
-  options: { step: number; min: number; max?: number },
+  options: { step: number; min?: number; max?: number; decimal?: boolean; exclusiveMin?: boolean; exclusiveMax?: boolean },
 ): string {
   const n = Number(value)
-  if (value.trim() === '' || !Number.isInteger(n)) return value
-  const next = n + direction * options.step
-  return String(Math.max(options.min, options.max === undefined ? next : Math.min(options.max, next)))
+  if (value.trim() === '' || !Number.isFinite(n) || (!options.decimal && !Number.isInteger(n))) return value
+  if (!Number.isFinite(options.step) || options.step <= 0) return value
+  const next = Number((n + direction * options.step).toPrecision(15))
+  const bounded = Math.max(options.min ?? -Infinity, options.max === undefined ? next : Math.min(options.max, next))
+  if ((options.exclusiveMin && bounded === options.min) || (options.exclusiveMax && bounded === options.max)) return value
+  return String(bounded)
 }

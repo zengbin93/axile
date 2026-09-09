@@ -1,0 +1,83 @@
+import { useRef, useState } from 'react'
+import { sliderValueAt } from '@/components/ui/sliderValue'
+
+/** 自绘单值滑条：44px 操作区、指针捕获、刻度和完整键盘语义。 */
+export function ValueSlider({ value, min, max, step, onChange, label, unit = '', disabled = false, describedBy, invalid = false }: {
+  value: number
+  min: number
+  max: number
+  step: number
+  onChange: (value: number) => void
+  label: string
+  unit?: string
+  disabled?: boolean
+  describedBy?: string
+  invalid?: boolean
+}) {
+  const track = useRef<HTMLDivElement>(null)
+  const pointer = useRef<number | null>(null)
+  const [dragging, setDragging] = useState(false)
+  const bounded = Math.max(min, Math.min(max, Number.isFinite(value) ? value : min))
+  const fraction = (bounded - min) / (max - min)
+  // 用易读的参考数值标刻度，位置仍按真实值计算，不改变参数精度。
+  const marks = [...new Set([0.25, 0.5, 0.75].map((ratio) => Number((min + ratio * (max - min)).toPrecision(2))))]
+    .filter((mark) => mark > min && mark < max)
+  const changeAt = (clientX: number) => {
+    const rect = track.current?.getBoundingClientRect()
+    if (!rect || rect.width === 0) return
+    onChange(sliderValueAt((clientX - rect.left) / rect.width, min, max, step))
+  }
+  return <div className={`w-full ${disabled ? 'opacity-40' : ''}`}>
+    <div role="slider" aria-label={label} aria-describedby={describedBy} aria-orientation="horizontal"
+      aria-valuemin={min} aria-valuemax={max} aria-valuenow={bounded}
+      aria-valuetext={Number.isFinite(value) ? `${value}${unit}` : '请输入数值'}
+      aria-disabled={disabled || undefined} aria-invalid={invalid || undefined} tabIndex={disabled ? -1 : 0}
+      className={`group relative flex h-11 touch-pan-y select-none items-center rounded-lg px-3 outline-none focus-visible:ring-2 focus-visible:ring-accent/40 ${disabled ? 'cursor-default' : dragging ? 'cursor-grabbing' : 'cursor-pointer'}`}
+      onPointerDown={(event) => {
+        if (disabled || !event.isPrimary || event.button !== 0) return
+        event.currentTarget.focus()
+        event.currentTarget.setPointerCapture(event.pointerId)
+        pointer.current = event.pointerId
+        setDragging(true)
+        changeAt(event.clientX)
+      }}
+      onPointerMove={(event) => {
+        if (!disabled && pointer.current === event.pointerId) changeAt(event.clientX)
+      }}
+      onPointerUp={(event) => {
+        if (pointer.current !== event.pointerId) return
+        pointer.current = null
+        setDragging(false)
+        event.currentTarget.releasePointerCapture(event.pointerId)
+      }}
+      onLostPointerCapture={() => { pointer.current = null; setDragging(false) }}
+      onPointerCancel={() => { pointer.current = null; setDragging(false) }}
+      onKeyDown={(event) => {
+        if (disabled) return
+        let next: number
+        if (event.key === 'Home') next = min
+        else if (event.key === 'End') next = max
+        else if (['ArrowLeft', 'ArrowDown', 'ArrowRight', 'ArrowUp', 'PageUp', 'PageDown'].includes(event.key)) {
+          const direction = ['ArrowLeft', 'ArrowDown', 'PageDown'].includes(event.key) ? -1 : 1
+          const delta = step * (event.key.startsWith('Page') || event.shiftKey ? 10 : 1)
+          next = Number(Math.max(min, Math.min(max, bounded + direction * delta)).toPrecision(15))
+        } else return
+        event.preventDefault()
+        onChange(next)
+      }}>
+      <div ref={track} className="relative h-1.5 w-full rounded-full bg-ink-3/15">
+        <div className={`absolute inset-y-0 left-0 rounded-full ${invalid ? 'bg-warn' : 'bg-accent'}`} style={{ width: `${fraction * 100}%` }} />
+        {marks.map((mark) => <span key={mark} aria-hidden="true"
+          className={`absolute top-1/2 h-1 w-1 -translate-x-1/2 -translate-y-1/2 rounded-full ${mark <= bounded ? 'bg-surface/70' : 'bg-ink-3/40'}`}
+          style={{ left: `${(mark - min) / (max - min) * 100}%` }} />)}
+        <span aria-hidden="true" style={{ left: `${fraction * 100}%` }}
+          className={`absolute top-1/2 flex h-6 w-6 -translate-x-1/2 -translate-y-1/2 items-center justify-center gap-0.5 rounded-full border-2 bg-surface shadow-sm transition-shadow duration-150 motion-reduce:transition-none ${invalid ? 'border-warn' : 'border-accent'} ${dragging ? 'ring-4 ring-accent/15' : disabled ? '' : 'group-hover:ring-4 group-hover:ring-accent/10'}`}>
+          <span className="h-2 w-px rounded-full bg-ink-3/60" /><span className="h-2 w-px rounded-full bg-ink-3/60" />
+        </span>
+      </div>
+    </div>
+    <div aria-hidden="true" className="num flex justify-between px-3 text-[11px] text-ink-3">
+      <span>{min}{unit}</span><span>{marks.length === 3 ? `${marks[1]}${unit}` : ''}</span><span>{max}{unit}</span>
+    </div>
+  </div>
+}

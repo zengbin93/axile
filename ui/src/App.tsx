@@ -16,7 +16,6 @@ import { AccountEditAlgorithmPage } from '@/pages/AccountEditAlgorithmPage'
 import { AccountEditControlPage } from '@/pages/AccountEditControlPage'
 import { AccountHoldingsPage } from '@/pages/AccountHoldingsPage'
 import { ExecutionDetailPage } from '@/pages/ExecutionDetailPage'
-import { ScratchHoldings } from '@/pages/_ScratchHoldings'
 import { AccountHistoryPage } from '@/pages/AccountHistoryPage'
 import { AccountExecutionsPage } from '@/pages/AccountExecutionsPage'
 import { PortfoliosPage } from '@/pages/PortfoliosPage'
@@ -132,7 +131,6 @@ const router = createBrowserRouter([
       },
     ],
   },
-  { path: 'dev/holdings-scratch', element: <ScratchHoldings /> },
 ])
 
 observeCurveNavigation(router.state.location, router.state.historyAction)

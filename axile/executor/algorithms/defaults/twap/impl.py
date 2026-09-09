@@ -80,7 +80,7 @@ class TwapParams(BaseAlgorithmParams):
         description="实际取此值与切片间隔中的较小值。",
         ge=1,
         le=3600,
-        json_schema_extra={"x-order": 40, "x-unit": "秒"},
+        json_schema_extra={"x-order": 40, "x-unit": "秒", "x-control": "stepper"},
     )
 
     total_duration: int = Field(
@@ -89,7 +89,7 @@ class TwapParams(BaseAlgorithmParams):
         description="安排拆单节奏的计划时长，不是严格截止时间。",
         ge=1,
         le=86400,
-        json_schema_extra={"x-order": 10, "x-unit": "秒"},
+        json_schema_extra={"x-order": 10, "x-unit": "秒", "x-control": "presets", "x-presets": [60, 300, 600, 1800]},
     )
     slices: int = Field(
         default=10,
@@ -97,13 +97,17 @@ class TwapParams(BaseAlgorithmParams):
         description="切片间隔＝执行时长÷片数，至少 0.1 秒。",
         ge=1,
         le=1000,
-        json_schema_extra={"x-order": 20, "x-unit": "片"},
+        json_schema_extra={"x-order": 20, "x-unit": "片", "x-control": "stepper"},
     )
     price_strategy: Literal["ACTIVE", "PASSIVE"] = Field(
         default="ACTIVE",
         title="报价方式",
         description="每片使用本方价或对手价；前片欠量滚入后片。",
-        json_schema_extra={"x-order": 30, "x-enum-labels": {"PASSIVE": "本方挂单", "ACTIVE": "对手价"}},
+        json_schema_extra={
+            "x-order": 30,
+            "x-control": "choice",
+            "x-enum-labels": {"PASSIVE": "本方挂单", "ACTIVE": "对手价"},
+        },
     )
 
     @property

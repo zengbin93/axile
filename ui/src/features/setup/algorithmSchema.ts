@@ -10,6 +10,11 @@ export interface AlgorithmParamSchema {
   exclusiveMaximum?: number
   multipleOf?: number
   'x-enum-labels'?: Record<string, string>
+  'x-control'?: 'choice' | 'cards' | 'numberflow' | 'stepper' | 'presets' | 'slider'
+  'x-option-descriptions'?: Record<string, string>
+  'x-presets'?: number[]
+  'x-slider-min'?: number
+  'x-slider-max'?: number
   'x-order'?: number
   'x-unit'?: string
   'x-display-scale'?: number

@@ -22,8 +22,13 @@ interface StepperNumberInputProps {
   onChange: (value: string) => void
   /** 步长、区间全部由使用方决定；max 缺省 = 无上限。 */
   step: number
-  min: number
+  min?: number
   max?: number
+  exclusiveMin?: boolean
+  exclusiveMax?: boolean
+  appearance?: 'boxed' | 'plain'
+  decimal?: boolean
+  disabled?: boolean
   /** 单位文案（如 次 / 毫秒 / 秒），缺省不显示。 */
   unit?: string
   ariaLabel?: string
@@ -56,6 +61,11 @@ export function StepperNumberInput({
   step,
   min,
   max,
+  exclusiveMin = false,
+  exclusiveMax = false,
+  appearance = 'boxed',
+  decimal = false,
+  disabled = false,
   unit,
   ariaLabel,
   invalid = false,
@@ -69,12 +79,15 @@ export function StepperNumberInput({
   ref,
 }: StepperNumberInputProps) {
   const sz = SIZE_CLASS[size]
+  const plain = appearance === 'plain'
+  const autoWidth = plain ? { width: `${Math.max(1, Math.min(18, value.length))}ch` } : undefined
+  const inputWidth = plain ? '' : decimal ? 'w-[10ch]' : sz.inputW
   const innerRef = useRef<HTMLInputElement>(null)
   const [focused, setFocused] = useState(false)
 
   const parsed = Number(value)
-  const valid = value.trim() !== '' && Number.isInteger(parsed) && parsed >= min && (max === undefined || parsed <= max)
-  const stepFn = onStep ?? ((v: string, direction: -1 | 1) => stepNumericValue(v, direction, { step, min, max }))
+  const valid = value.trim() !== '' && Number.isFinite(parsed) && (decimal || Number.isInteger(parsed)) && (min === undefined || (exclusiveMin ? parsed > min : parsed >= min)) && (max === undefined || (exclusiveMax ? parsed < max : parsed <= max))
+  const stepFn = onStep ?? ((v: string, direction: -1 | 1) => stepNumericValue(v, direction, { step, min, max, decimal, exclusiveMin, exclusiveMax }))
   const decreaseValue = stepFn(value, -1)
   const increaseValue = stepFn(value, 1)
   const decreaseDisabled = decreaseValue === value
@@ -90,6 +103,7 @@ export function StepperNumberInput({
   }
 
   const onKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
+    if (disabled) return
     if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
       event.preventDefault()
       applyStep(event.key === 'ArrowUp' ? increaseValue : decreaseValue)
@@ -114,11 +128,12 @@ export function StepperNumberInput({
 
   const stepButton =
     'grid h-full flex-none cursor-pointer place-items-center border-0 bg-transparent text-ink-3 transition-colors hover:bg-fill hover:text-ink-1 disabled:cursor-default disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-ink-3'
+  const plainButton = 'grid h-9 w-9 shrink-0 cursor-pointer place-items-center rounded-full border border-line bg-transparent text-xl text-ink-3 transition-colors hover:border-accent hover:text-accent focus-visible:outline-2 focus-visible:outline-accent disabled:cursor-default disabled:opacity-30 motion-reduce:transition-none'
   const unitText = unit ? <span className={`flex-none text-ink-3 ${sz.unit}`}>{unit}</span> : null
 
   return (
     <div
-      className={`flex overflow-hidden border bg-surface ${sz.box} ${
+      className={plain ? `inline-flex items-center gap-2 ${disabled ? 'opacity-40' : ''}` : `flex overflow-hidden border bg-surface ${sz.box} ${
         invalid ? 'border-warn focus-within:border-warn' : 'border-ink-3/30 focus-within:border-accent'
       }`}
     >
@@ -126,13 +141,13 @@ export function StepperNumberInput({
         type="button"
         aria-label={`减少 ${step}${unit ? ` ${unit}` : ''}`}
         title={`减少 ${step}${unit ? ` ${unit}` : ''}`}
-        className={`${stepButton} ${sz.button} border-r border-r-line`}
-        disabled={decreaseDisabled}
+        className={plain ? plainButton : `${stepButton} ${sz.button} border-r border-r-line`}
+        disabled={disabled || decreaseDisabled}
         onClick={() => applyStep(decreaseValue)}
       >
         −
       </button>
-      <div className={`relative cursor-text ${sz.value}`}>
+      <div className={`relative cursor-text ${plain ? 'h-10 text-2xl' : sz.value}`}>
         {displayValue !== undefined && (
           <div
             aria-hidden="true"
@@ -141,15 +156,15 @@ export function StepperNumberInput({
             }`}
           >
             {/* 与输入层同宽同对齐（定宽右对齐），切换时数字位置零位移，只滚不走 */}
-            <span className={`flex justify-end ${sz.inputW}`}>
+            <span style={autoWidth} className={`flex justify-end ${inputWidth}`}>
               <NumberFlow
                 value={displayValue}
                 locales="zh-CN"
-                format={NUMBER_FORMAT}
-                className={`num text-ink-1 ${sz.text}`}
-                spinTiming={SPIN_TIMING}
-                transformTiming={TRANSFORM_TIMING}
-                opacityTiming={OPACITY_TIMING}
+                format={decimal ? { ...NUMBER_FORMAT, maximumFractionDigits: 15 } : NUMBER_FORMAT}
+                className={`num text-ink-1 ${plain ? 'text-2xl' : sz.text}`}
+                spinTiming={plain ? undefined : SPIN_TIMING}
+                transformTiming={plain ? undefined : TRANSFORM_TIMING}
+                opacityTiming={plain ? undefined : OPACITY_TIMING}
                 respectMotionPreference
               />
             </span>
@@ -166,14 +181,16 @@ export function StepperNumberInput({
         >
           <input
             ref={setRefs}
+            style={autoWidth}
             id={id}
             aria-label={ariaLabel}
             aria-describedby={describedBy}
             aria-invalid={invalid || undefined}
-            inputMode="numeric"
-            className={`num min-w-0 border-0 bg-transparent p-0 text-right text-ink-1 outline-none ${sz.inputW} ${sz.text}`}
+            inputMode={decimal ? "decimal" : "numeric"}
+            disabled={disabled}
+            className={`num min-w-0 border-0 bg-transparent p-0 text-right text-ink-1 outline-none ${inputWidth} ${plain ? 'text-2xl' : sz.text}`}
             value={value}
-            onChange={(event) => onChange(event.target.value)}
+            onChange={(event) => { setFocused(true); onChange(event.target.value) }}
             onFocus={(event) => {
               setFocused(true)
               if (selectOnFocus) event.currentTarget.select()
@@ -188,8 +205,8 @@ export function StepperNumberInput({
         type="button"
         aria-label={`增加 ${step}${unit ? ` ${unit}` : ''}`}
         title={`增加 ${step}${unit ? ` ${unit}` : ''}`}
-        className={`${stepButton} ${sz.button} border-l border-l-line`}
-        disabled={increaseDisabled}
+        className={plain ? plainButton : `${stepButton} ${sz.button} border-l border-l-line`}
+        disabled={disabled || increaseDisabled}
         onClick={() => applyStep(increaseValue)}
       >
         +

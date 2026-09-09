@@ -26,3 +26,23 @@ describe('stepNumericValue', () => {
     expect(stepNumericValue('1.5', 1, opts)).toBe('1.5')
   })
 })
+
+it('小数步进保持精度，默认整数调用仍拒绝小数', () => {
+  const opts = { step: 0.1, decimal: true }
+  expect(stepNumericValue('0.2', 1, opts)).toBe('0.3')
+  expect(stepNumericValue('0.3', -1, opts)).toBe('0.2')
+  expect(stepNumericValue('-0.2', -1, opts)).toBe('-0.3')
+  expect(stepNumericValue('1.23456', 1, { step: 0.01, decimal: true })).toBe('1.24456')
+  expect(stepNumericValue('0.2', 1, { step: 1 })).toBe('0.2')
+  expect(stepNumericValue('Infinity', 1, opts)).toBe('Infinity')
+  expect(stepNumericValue('0.3', 1, { ...opts, max: 0.35 })).toBe('0.35')
+})
+
+it('排他边界阻止越界，不缩窄合法小数范围', () => {
+  const opts = { step: 1, min: 0, max: 100, decimal: true, exclusiveMin: true }
+  expect(stepNumericValue('0.5', 1, opts)).toBe('1.5')
+  expect(stepNumericValue('0.5', -1, opts)).toBe('0.5')
+  expect(stepNumericValue('1', -1, opts)).toBe('1')
+  expect(stepNumericValue('12.3456', 1, opts)).toBe('13.3456')
+  expect(stepNumericValue('99.5', 1, opts)).toBe('100')
+})

@@ -53,7 +53,11 @@ class SingleMakerParams(BaseAlgorithmParams, ChaseParamsMixin):
         default="ACTIVE",
         title="报价方式",
         description="本方挂单等成交；对手价优先成交并承担点差。",
-        json_schema_extra={"x-order": 10, "x-enum-labels": {"PASSIVE": "本方挂单", "ACTIVE": "对手价"}},
+        json_schema_extra={
+            "x-order": 10,
+            "x-control": "choice",
+            "x-enum-labels": {"PASSIVE": "本方挂单", "ACTIVE": "对手价"},
+        },
     )
     on_missing_book: Literal["skip", "active", "market"] = Field(
         default="skip",
@@ -61,6 +65,12 @@ class SingleMakerParams(BaseAlgorithmParams, ChaseParamsMixin):
         description="盘口无效时跳过、尝试主动报价或发市价单；主动回退不保证有有效报价。",
         json_schema_extra={
             "x-order": 30,
+            "x-control": "cards",
+            "x-option-descriptions": {
+                "skip": "跳过本次下单。",
+                "active": "尝试主动报价，仍可能没有有效报价。",
+                "market": "提交市价单，成交价格由市场决定。",
+            },
             "x-enum-labels": {"skip": "跳过", "active": "尝试主动报价", "market": "市价单"},
         },
     )

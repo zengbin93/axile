@@ -43,20 +43,28 @@ class CTPTargetPosTaskParams(BaseAlgorithmParams, ChaseParamsMixin):
         description="等待本轮委托完成的上限，不保证持仓到位。",
         ge=1,
         le=3600,
-        json_schema_extra={"x-order": 30, "x-unit": "秒"},
+        json_schema_extra={"x-order": 30, "x-unit": "秒", "x-control": "stepper"},
     )
 
     price_strategy: Literal["PASSIVE", "ACTIVE"] = Field(
         default="PASSIVE",
         title="报价方式",
         description="本方挂单或对手价报价；品种 price 规则优先。",
-        json_schema_extra={"x-order": 10, "x-enum-labels": {"PASSIVE": "本方挂单", "ACTIVE": "对手价"}},
+        json_schema_extra={
+            "x-order": 10,
+            "x-control": "choice",
+            "x-enum-labels": {"PASSIVE": "本方挂单", "ACTIVE": "对手价"},
+        },
     )
     offset_priority: Literal["昨今", "今昨"] = Field(
         default="昨今",
         title="平仓顺序",
         description="先平昨仓或先平今仓；品种同名规则优先，费用取决于合约。",
-        json_schema_extra={"x-order": 20, "x-enum-labels": {"昨今": "先昨后今", "今昨": "先今后昨"}},
+        json_schema_extra={
+            "x-order": 20,
+            "x-control": "choice",
+            "x-enum-labels": {"昨今": "先昨后今", "今昨": "先今后昨"},
+        },
     )
 
     def __str__(self) -> str:

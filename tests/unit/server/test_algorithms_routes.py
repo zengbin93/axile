@@ -115,3 +115,26 @@ def test_participation_display_scale_does_not_change_wire_constraints(client):
     assert rate["exclusiveMinimum"] == 0
     assert rate["maximum"] == 1
     assert rate["default"] == 0.1
+
+
+def test_parameter_controls_keep_wire_contract(client):
+    """组件提示覆盖内置算法；快捷值有效且不缩窄参与率精度。"""
+    items = client.get("/api/v1/algorithms").json()
+    for item in items:
+        if item["name"] not in {"TWAP", "POV", "SINGLE-MAKER", "TARGET-POS-TASK", "CTP_OPTION_EXERCISE"}:
+            continue
+        fields = item["params_schema"]["properties"]
+        for field in fields.values():
+            if field["type"] in {"integer", "number"}:
+                assert field["x-control"] in {"stepper", "numberflow", "presets", "slider"}
+            if "x-enum-labels" in field:
+                assert field["x-control"] in {"choice", "cards"}
+            for preset in field.get("x-presets", []):
+                assert field["minimum"] <= preset <= field["maximum"]
+    pov = next(item for item in items if item["name"] == "POV")
+    rate = pov["params_schema"]["properties"]["participation_rate"]
+    assert rate["x-control"] == "numberflow"
+    assert rate["x-display-step"] == 1
+    assert "x-slider-min" not in rate
+    assert "x-slider-max" not in rate
+    assert "multipleOf" not in rate

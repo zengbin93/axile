@@ -70,7 +70,7 @@ class CTPOptionExerciseParams(BaseAlgorithmParams):
         description="等待指令终态的上限；等待结束不等于指令完成。",
         ge=1,
         le=3600,
-        json_schema_extra={"x-order": 40, "x-unit": "秒"},
+        json_schema_extra={"x-order": 40, "x-unit": "秒", "x-control": "stepper"},
     )
 
     action: str = Field(
@@ -79,6 +79,7 @@ class CTPOptionExerciseParams(BaseAlgorithmParams):
         description="行权、放弃或自对冲；按指定张数执行。",
         json_schema_extra={
             "x-order": 10,
+            "x-control": "choice",
             "x-enum-labels": {"exercise": "行权", "abandon": "放弃", "self_close": "自对冲"},
         },
     )
@@ -92,7 +93,7 @@ class CTPOptionExerciseParams(BaseAlgorithmParams):
         default=0.5,
         title="查询间隔",
         description="查询指令状态的间隔。",
-        json_schema_extra={"x-order": 30, "x-unit": "秒"},
+        json_schema_extra={"x-order": 30, "x-unit": "秒", "x-control": "stepper"},
     )
 
     def __str__(self) -> str:

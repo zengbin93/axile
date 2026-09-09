@@ -1,4 +1,6 @@
-import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
+import { useEffect, useLayoutEffect, useId, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
+import { ChoiceGroup } from '@/components/ui/ChoiceGroup'
+import { ParameterNumberInput } from '@/components/ui/ParameterNumberInput'
 import { Select } from '@/components/ui/Select'
 import { Skeleton } from '@/components/ui/Skeleton'
 import { Toggle } from '@/features/account/editUi'
@@ -197,16 +199,62 @@ function GenericEditor({
   )
 }
 
+/** 将显示草稿与持久数值分离，保留输入中的小数点和空值。 */
+function NumericSchemaField({ field, value, onChange, describedBy }: {
+  field: AlgorithmSchemaField
+  value: unknown
+  onChange: (value: unknown) => void
+  describedBy?: string
+}) {
+  const spec = field.schema
+  const display = algorithmNumericDisplay(spec, value)
+  const external = Number.isFinite(display.value) ? String(display.value) : ''
+  const [draft, setDraft] = useState(external)
+  const lastEmitted = useRef<unknown>(value)
+  useEffect(() => {
+    if (!Object.is(value, lastEmitted.current)) setDraft(external)
+    lastEmitted.current = value
+  }, [value, external])
+  const parsed = draft.trim() === '' ? Number.NaN : Number(draft)
+  const raw = parsed / display.scale
+  const schema = { type: 'object', properties: { [field.name]: spec }, required: [field.name] }
+  const error = validateAlgorithmSchemaParams({ [field.name]: raw }, schema)
+  const mode = spec['x-control'] === 'presets' || spec['x-control'] === 'slider' || spec['x-control'] === 'numberflow' ? spec['x-control'] : 'stepper'
+  // 排他边界仅阻止越界步进，不以显示步长缩窄手动输入的合法范围。
+  const min = display.min
+  const max = display.max
+  return <ParameterNumberInput label={spec.title || field.name} value={draft} unit={display.suffix}
+    step={display.step} min={min} max={max} exclusiveMin={spec.exclusiveMinimum !== undefined} exclusiveMax={spec.exclusiveMaximum !== undefined} decimal={spec.type === 'number'} mode={mode}
+    presets={spec['x-presets']?.map((item) => item * display.scale)}
+    sliderMin={spec['x-slider-min']} sliderMax={spec['x-slider-max']} describedBy={describedBy}
+    error={error ?? undefined} onChange={(next) => {
+      setDraft(next)
+      const nextValue = next.trim() === '' ? Number.NaN : Number(next) / display.scale
+      lastEmitted.current = nextValue
+      onChange(nextValue)
+    }} />
+}
+
 export function SchemaFieldRow({ field, value, onChange }: {
   field: AlgorithmSchemaField
   value: unknown
   onChange: (value: unknown) => void
 }) {
+  const hintId = useId()
   const spec = field.schema
   const label = spec.title || field.name
   const hint = spec.description
-  const heading = <span className="min-w-0 text-[15px]">{label}{hint && <span className={HINT}>{hint}</span>}</span>
+  const heading = <span className="min-w-0 text-[15px]">{label}{hint && <span id={hintId} className={HINT}>{hint}</span>}</span>
   const options = algorithmFieldOptions(spec)
+  if (options && (spec['x-control'] === 'choice' || spec['x-control'] === 'cards')) return (
+    <div className={spec['x-control'] === 'cards' ? 'flex flex-col gap-2 border-t border-line py-3' : ROW}>
+      {heading}
+      <ChoiceGroup ariaLabel={label} describedBy={hint ? hintId : undefined} value={String(value ?? '')}
+        variant={spec['x-control'] === 'cards' ? 'cards' : 'buttons'}
+        options={options.map((option) => ({ ...option, description: spec['x-option-descriptions']?.[option.value] }))}
+        onChange={(next) => onChange(spec.enum?.find((item) => String(item) === next) ?? next)} />
+    </div>
+  )
   if (options) return (
     <div className={ROW}>
       {heading}
@@ -219,6 +267,9 @@ export function SchemaFieldRow({ field, value, onChange }: {
     <div className={ROW}>{heading}<Toggle on={value === true} ariaLabel={label} onClick={() => onChange(value !== true)} /></div>
   )
   if (spec.type === 'integer' || spec.type === 'number') {
+    if (['stepper', 'numberflow', 'presets', 'slider'].includes(spec['x-control'] ?? '')) return (
+      <div className={ROW}>{heading}<NumericSchemaField field={field} value={value} onChange={onChange} describedBy={hint ? hintId : undefined} /></div>
+    )
     const display = algorithmNumericDisplay(spec, value)
     return <NumRow label={label} hint={hint} {...display} onChange={(next) => onChange(next / display.scale)} />
   }

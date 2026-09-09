@@ -88,7 +88,7 @@ class PovParams(BaseAlgorithmParams):
         description="实际取此值与下单间隔中的较小值。",
         ge=1,
         le=3600,
-        json_schema_extra={"x-order": 60, "x-unit": "秒"},
+        json_schema_extra={"x-order": 60, "x-unit": "秒", "x-control": "stepper"},
     )
 
     participation_rate: float = Field(
@@ -97,14 +97,20 @@ class PovParams(BaseAlgorithmParams):
         description="按收到的市场增量成交量计算目标参与量。",
         gt=0.0,
         le=1.0,
-        json_schema_extra={"x-order": 10, "x-unit": "%", "x-display-scale": 100, "x-display-step": 0.01},
+        json_schema_extra={
+            "x-order": 10,
+            "x-unit": "%",
+            "x-control": "numberflow",
+            "x-display-scale": 100,
+            "x-display-step": 1,
+        },
     )
     interval_seconds: float = Field(
         default=5.0,
         title="下单间隔",
         description="检查成交进度和下单的间隔。",
         ge=0.1,
-        json_schema_extra={"x-order": 20, "x-unit": "秒"},
+        json_schema_extra={"x-order": 20, "x-unit": "秒", "x-control": "stepper"},
     )
     max_duration: int = Field(
         default=600,
@@ -112,13 +118,17 @@ class PovParams(BaseAlgorithmParams):
         description="跟量阶段的时间上限，结束处理和补单可能延长总耗时。",
         ge=1,
         le=86400,
-        json_schema_extra={"x-order": 30, "x-unit": "秒"},
+        json_schema_extra={"x-order": 30, "x-unit": "秒", "x-control": "presets", "x-presets": [60, 300, 600, 1800]},
     )
     price_strategy: Literal["ACTIVE", "PASSIVE"] = Field(
         default="ACTIVE",
         title="报价方式",
         description="每笔使用本方价或对手价，主动报价也可能剩量。",
-        json_schema_extra={"x-order": 40, "x-enum-labels": {"PASSIVE": "本方挂单", "ACTIVE": "对手价"}},
+        json_schema_extra={
+            "x-order": 40,
+            "x-control": "choice",
+            "x-enum-labels": {"PASSIVE": "本方挂单", "ACTIVE": "对手价"},
+        },
     )
     complete_on_timeout: bool = Field(
         default=True,

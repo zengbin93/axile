@@ -25,7 +25,7 @@ class BaseAlgorithmParams(BaseModel):
         description="本轮等待成交的上限，不保证到时完成。",
         ge=1,
         le=3600,
-        json_schema_extra={"x-order": 20, "x-unit": "秒"},
+        json_schema_extra={"x-order": 20, "x-unit": "秒", "x-control": "stepper"},
     )
 
     @field_validator("max_wait_seconds")
@@ -78,21 +78,21 @@ class ChaseParamsMixin(BaseModel):
         title="偏离跳数",
         description="触发追价的价格偏离，不是每次加价幅度。开启追单后生效。",
         ge=0,
-        json_schema_extra={"x-order": 60, "x-unit": "跳"},
+        json_schema_extra={"x-order": 60, "x-unit": "跳", "x-control": "stepper"},
     )
     max_chase_count: int = Field(
         default=5,
         title="最大追单次数",
         description="单笔委托最多追价次数。开启追单后生效。",
         ge=0,
-        json_schema_extra={"x-order": 70, "x-unit": "次"},
+        json_schema_extra={"x-order": 70, "x-unit": "次", "x-control": "stepper"},
     )
     chase_interval: float = Field(
         default=5.0,
         title="追单间隔",
         description="两次追价的最小间隔。开启追单后生效。",
         ge=0.0,
-        json_schema_extra={"x-order": 80, "x-unit": "秒"},
+        json_schema_extra={"x-order": 80, "x-unit": "秒", "x-control": "stepper"},
     )
 
     @field_validator("chase_ticks")
