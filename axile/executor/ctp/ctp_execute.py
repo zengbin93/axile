@@ -27,6 +27,11 @@ from axile.executor.account_control.exceptions import AccountControlBlockedError
 from axile.executor.algorithms.utils import clock_now
 from axile.executor.china_futures_session import is_within_possible_china_futures_session
 from axile.executor.constants.order_status import OrderStatus
+from axile.executor.order_insert_rejects import (
+    insert_error_detail,
+    rejected_order_update,
+    resolve_insert_reject_order_id,
+)
 from axile.executor.ctp.converters import (
     account_to_unified,
     order_to_unified,
@@ -75,7 +80,7 @@ from axile.executor.models.unified_callback import (
     UnifiedCallbackClient,
 )
 from axile.executor.models.unified_input import AccountConfig, CTPAccountConfig, UnifiedStandardInput
-from axile.executor.models.unified_order import OrderType, UnifiedOrder
+from axile.executor.models.unified_order import OrderDirection, OrderType, UnifiedOrder
 
 _SHANGHAI = ZoneInfo("Asia/Shanghai")
 _ValueT = TypeVar("_ValueT")
@@ -830,6 +835,93 @@ class CTPExecutor(AbstractExecutor, UnifiedCallbackClient):
         e = self._error(info, name)
         if e:
             self.logger.error(str(e))
+
+    def _on_order_insert_error(self, row, info, *, source: str) -> None:
+        """把异步报单拒绝关联到稳定订单身份，并推进 REJECTED 终态。"""
+        detail = insert_error_detail(info)
+        if detail is None:
+            return
+        error_id, error_msg = detail
+        with self._lock:
+            if self._closed or self._invalid_reason:
+                return
+            order_id = resolve_insert_reject_order_id(
+                row=row,
+                order_keys=self._order_keys,
+                trading_day=self._trading_day,
+                front_id=self._front_id,
+                session_id=self._session_id,
+                stable_order_id=stable_order_id,
+            )
+            if not order_id:
+                self.logger.error(f"报单拒绝无法关联订单: ErrorID={error_id}, {error_msg}, source={source}")
+                return
+            key = dict(self._order_keys.get(order_id, {}))
+            symbol = str(getattr(row, "InstrumentID", "") or key.get("symbol", "") or "")
+            if not symbol:
+                # 从已登记订单键无法拿 symbol 时，尽量保留可诊断信息。
+                symbol = str(getattr(row, "InstrumentID", "") or "")
+            direction = getattr(row, "Direction", None)
+            if direction == td.THOST_FTDC_D_Sell:
+                direction_value = OrderDirection.SELL.value
+            else:
+                direction_value = OrderDirection.BUY.value
+            price_type = getattr(row, "OrderPriceType", None)
+            order_type_value = (
+                OrderType.LIMIT.value
+                if price_type == td.THOST_FTDC_OPT_LimitPrice
+                else OrderType.MARKET.value
+            )
+            try:
+                volume = float(getattr(row, "VolumeTotalOriginal", 0) or 0)
+            except (TypeError, ValueError):
+                volume = 0.0
+            try:
+                price = float(getattr(row, "LimitPrice", 0) or 0)
+            except (TypeError, ValueError):
+                price = 0.0
+            offset = str(getattr(row, "CombOffsetFlag", key.get("offset_flag", "")) or "")
+            fields = rejected_order_update(
+                order_id=order_id,
+                symbol=symbol,
+                direction=direction_value,
+                order_type=order_type_value,
+                volume=volume,
+                price=price,
+                channel_type=self.channel_type,
+                offset_flag=offset,
+                error_id=error_id,
+                error_msg=error_msg,
+                source=source,
+                extra={
+                    "order_ref": key.get("order_ref", str(getattr(row, "OrderRef", "") or "")),
+                    "front_id": key.get("front_id", self._front_id),
+                    "session_id": key.get("session_id", self._session_id),
+                    "exchange_id": key.get("exchange_id", str(getattr(row, "ExchangeID", "") or "")),
+                    "order_sys_id": key.get("order_sys_id", ""),
+                },
+            )
+            rejected = UnifiedOrder.create(**fields)
+            self.logger.error(
+                f"报单拒绝已关联订单 {order_id}: ErrorID={error_id}, {error_msg}, source={source}"
+            )
+        self._dispatch(self._order_callbacks, rejected)
+
+    def reconcile_terminal_order(self, symbol: str, order_id: str):
+        """查询单订单终态；查不到时返回 None，不把缺失当成已撤。"""
+        r = build_query_orders(self._config(), symbol)
+        matched = None
+        for row in self._query("ReqQryOrder", r):
+            order = self._remember_order(row)
+            if order.order_id == order_id:
+                matched = order
+                break
+        if matched is None:
+            self.logger.info(f"单订单对账未找到 {order_id}，保持未知/待对账，不伪造成撤单")
+            return None
+        if matched.is_completed():
+            return matched
+        return None
 
     @override
     def _cancel_order_impl(self, symbol, order_id):

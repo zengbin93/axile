@@ -59,10 +59,10 @@ class TraderSpi(td.CThostFtdcTraderSpi):
         self.owner._on_trade(row)
 
     def OnRspOrderInsert(self, row, info, request_id, is_last):
-        self.owner._log_error(info, "报单")
+        self.owner._on_order_insert_error(row, info, source="OnRspOrderInsert")
 
     def OnErrRtnOrderInsert(self, row, info):
-        self.owner._log_error(info, "报单")
+        self.owner._on_order_insert_error(row, info, source="OnErrRtnOrderInsert")
 
     def OnRspOrderAction(self, row, info, request_id, is_last):
         self.owner._log_error(info, "撤单")
