@@ -14,7 +14,7 @@ POV（Percentage of Volume，参与率）算法.
 - 累计跟踪：目标累计成交 = ``参与率 × 已见市场量``，本轮下单量 = 该目标减去已成交量，
   与 TWAP 的累计进度表同思想——天然实现对欠量的追平，且不超过整体目标。
 - 无量安全：市场无量则不下单，跑到 ``max_duration`` 上限；``complete_on_timeout`` 为真时
-  到期补齐剩余量，兑现框架「调仓到位」契约。
+  到期按原报价方式尝试补下剩余量，不再受参与率限制，也不保证成交。
 - 全渠道通用：不在算法层做 lot / 最小下单量取整，交由各渠道执行器兜底。
 
 使用示例
@@ -74,33 +74,58 @@ class PovParams(BaseAlgorithmParams):
     interval_seconds : float
         轮询与下单节奏（秒），不小于 0.1。
     max_duration : int
-        硬时间上限（秒），范围 1-86400，且不小于 ``interval_seconds``。
+        跟量阶段时间上限（秒），范围 1-86400，且不小于 ``interval_seconds``；补单可延长总耗时。
     price_strategy : {"ACTIVE", "PASSIVE"}
         单片下单价格策略。``ACTIVE`` 取对手价（marketable，跟量成交更确定），
-        ``PASSIVE`` 取本方价（滑点更小但可能欠量）。
+        ``PASSIVE`` 取本方价等待成交，可能欠量。
     complete_on_timeout : bool
-        到达时间上限且仍有欠量时，是否补齐剩余量到目标。
+        到达时间上限且仍有欠量时，是否尝试按原报价方式补单。
     """
+
+    max_wait_seconds: int = Field(
+        default=60,
+        title="单笔最大等待",
+        description="实际取此值与下单间隔中的较小值。",
+        ge=1,
+        le=3600,
+        json_schema_extra={"x-order": 60, "x-unit": "秒"},
+    )
 
     participation_rate: float = Field(
         default=0.1,
+        title="参与率",
+        description="按收到的市场增量成交量计算目标参与量。",
         gt=0.0,
         le=1.0,
-        description="目标市场成交量参与比例，范围：(0, 1]",
+        json_schema_extra={"x-order": 10, "x-unit": "%", "x-display-scale": 100, "x-display-step": 0.01},
     )
     interval_seconds: float = Field(
         default=5.0,
+        title="下单间隔",
+        description="检查成交进度和下单的间隔。",
         ge=0.1,
-        description="轮询/下单节奏（秒），不小于 0.1",
+        json_schema_extra={"x-order": 20, "x-unit": "秒"},
     )
     max_duration: int = Field(
         default=600,
+        title="跟量时限",
+        description="跟量阶段的时间上限，结束处理和补单可能延长总耗时。",
         ge=1,
         le=86400,
-        description="硬时间上限（秒），范围：1-86400",
+        json_schema_extra={"x-order": 30, "x-unit": "秒"},
     )
-    price_strategy: Literal["ACTIVE", "PASSIVE"] = "ACTIVE"
-    complete_on_timeout: bool = True
+    price_strategy: Literal["ACTIVE", "PASSIVE"] = Field(
+        default="ACTIVE",
+        title="报价方式",
+        description="每笔使用本方价或对手价，主动报价也可能剩量。",
+        json_schema_extra={"x-order": 40, "x-enum-labels": {"PASSIVE": "本方挂单", "ACTIVE": "对手价"}},
+    )
+    complete_on_timeout: bool = Field(
+        default=True,
+        title="到期补单",
+        description="按原报价方式尝试补下剩余量，不再受参与率约束，不保证成交。",
+        json_schema_extra={"x-order": 50},
+    )
 
     @model_validator(mode="after")
     def _validate_duration(self) -> "PovParams":
@@ -190,7 +215,7 @@ def compute_participation_want(
     Notes
     -----
     目标累计成交 = ``参与率 × 已见市场量``；本轮补下量为该目标减去已成交量，
-    并以「距目标的剩余量」封顶，确保追平欠量但不超过整体目标。
+    并以「距目标的剩余量」封顶，使本轮计划量追平欠量且不超过剩余目标量；不承诺实际成交。
     """
     desired_cum = participation_rate * market_seen
     want = min(desired_cum - filled, total_qty - filled)
@@ -290,7 +315,7 @@ def _place_participation_slice(
     ALGORITHM_NAME,
     params_class=PovParams,
     label="成交量参与率",
-    description="按市场实时成交量的固定比例逐步下单，控制自身成交占比。",
+    description="按收到的市场增量成交量乘参与率跟单，无量等待。到期补单不再受参与率约束，仍可能剩量。",
 )
 def pov(
     executor: ExecutorProtocol,
@@ -299,7 +324,7 @@ def pov(
     """
     POV（参与率）算法.
 
-    按市场实时成交量的固定比例，把目标净持仓相对当前持仓的增量逐步做到位。
+    按收到的市场增量成交量计算参与量，逐步尝试完成目标持仓差量。
 
     Parameters
     ----------
@@ -436,7 +461,7 @@ def _run_participation_loop(
     Notes
     -----
     循环按 ``interval`` 节奏轮询：读取已成交量与已见市场量，按累计参与率补下；
-    达到目标即提前退出；到达时间上限后，``complete_on_timeout`` 为真则补齐剩余量。
+    达到目标即提前退出；到达时间上限后，``complete_on_timeout`` 为真则尝试提交剩余量。
     """
     clock = get_default_clock()
     interval = params.interval_seconds
@@ -481,7 +506,7 @@ def _maybe_complete_on_timeout(
     slice_details: list[dict[str, Any]],
 ) -> None:
     """
-    到达时间上限后按需补齐剩余量到目标.
+    到达时间上限后按需尝试提交剩余量，不再受参与率限制.
 
     Parameters
     ----------

@@ -28,7 +28,7 @@ import { initialTimerForSchedule, useWizardStore } from '@/stores/wizard'
 import { useToastStore } from '@/stores/ui'
 import { resolveCronList, cronToExpr, describeCron, fmtFire, nextFires } from '@/features/setup/cron'
 import { TimerEditor, type TimerEditorState } from '@/features/setup/TimerEditor'
-import { algoLabel, intentFromParams, validateAlgorithmRef } from '@/features/setup/algorithms'
+import { algoLabel, validateAlgorithmRef } from '@/features/setup/algorithms'
 import { AlgorithmEditor } from '@/features/setup/AlgorithmEditor'
 import {
   channelAccountFieldVisible,
@@ -42,13 +42,7 @@ import type {
   ChannelCapability,
 } from '@/types/api'
 
-/** 主交易算法的人话摘要：SINGLE-MAKER 用意图档，其余用算法名。 */
-const INTENT_TEXT: Record<string, string> = { save: '省成本', fill: '保成交', balance: '平衡' }
 function algorithmSummary(algo: { method: string; params: Record<string, unknown> }): string {
-  if (algo.method === 'SINGLE-MAKER') {
-    const intent = intentFromParams(algo.params)
-    if (intent) return INTENT_TEXT[intent]
-  }
   return algoLabel(algo.method)
 }
 
@@ -522,13 +516,15 @@ export function AcctTrade() {
   const longLeverageErr = leverageError(acct.longLeverage, leverageLimits)
   const shortLeverageErr = showShortLeverage ? leverageError(acct.shortLeverage, leverageLimits) : null
   const leverageErr = longLeverageErr ?? shortLeverageErr
+  const [algorithmError, setAlgorithmError] = useState<string | null>(null)
 
   return (
     <div className="flex h-full flex-col">
       <div className="flex-1 overflow-y-auto">
-        <WizardPage kicker="账户设置 · 4 / 6" title="怎么交易？" lead="选想要的结果，参数系统替你配。">
+        <WizardPage kicker="账户设置 · 4 / 6" title="怎么交易？" lead="选择执行算法，按需调整参数。">
           <label className="mb-2 block text-[14px] text-ink-2">交易方式</label>
           <AlgorithmEditor
+            onValidationError={setAlgorithmError}
             slot="trade"
             channel={acct.channel}
             value={acct.algorithm}
@@ -609,7 +605,7 @@ export function AcctTrade() {
       <WizardNav
         prevTo="/setup/acct/portfolio"
         nextTo="/setup/acct/timer"
-        nextDisabled={Boolean(timeoutErr || leverageErr)}
+        nextDisabled={Boolean(timeoutErr || leverageErr || algorithmError)}
       />
     </div>
   )

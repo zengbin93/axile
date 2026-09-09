@@ -45,3 +45,73 @@ def test_list_algorithms_returns_builtin_metadata(client: TestClient) -> None:
     exercise = by_name["CTP_OPTION_EXERCISE"]
     assert exercise["channels"] == ["ctp"]
     assert exercise["slots"] == []
+
+
+@pytest.mark.parametrize(
+    ("name", "expected_defaults"),
+    [
+        (
+            "SINGLE-MAKER",
+            {
+                "price_strategy": "ACTIVE",
+                "on_missing_book": "skip",
+                "max_wait_seconds": 60,
+                "chase_enabled": False,
+                "chase_ticks": 1,
+                "max_chase_count": 5,
+                "chase_interval": 5.0,
+            },
+        ),
+        (
+            "TARGET-POS-TASK",
+            {
+                "price_strategy": "PASSIVE",
+                "offset_priority": "昨今",
+                "max_wait_seconds": 60,
+                "chase_enabled": False,
+                "chase_ticks": 1,
+                "max_chase_count": 5,
+                "chase_interval": 5.0,
+            },
+        ),
+        ("TWAP", {"total_duration": 300, "slices": 10, "price_strategy": "ACTIVE", "max_wait_seconds": 60}),
+        (
+            "POV",
+            {
+                "participation_rate": 0.1,
+                "interval_seconds": 5.0,
+                "max_duration": 600,
+                "price_strategy": "ACTIVE",
+                "complete_on_timeout": True,
+                "max_wait_seconds": 60,
+            },
+        ),
+        (
+            "CTP_OPTION_EXERCISE",
+            {"action": "exercise", "require_value_check": True, "poll_interval_seconds": 0.5, "max_wait_seconds": 60},
+        ),
+    ],
+)
+def test_complete_editor_metadata_preserves_defaults(client, name, expected_defaults):
+    item = next(item for item in client.get("/api/v1/algorithms").json() if item["name"] == name)
+    assert item["default_params"] == expected_defaults
+    assert item["description"]
+    fields = item["params_schema"]["properties"]
+    assert set(fields) == set(expected_defaults)
+    for field in fields.values():
+        assert field["title"]
+        assert field["description"]
+        assert isinstance(field["x-order"], int)
+        if "enum" in field:
+            assert set(field["x-enum-labels"]) == set(field["enum"])
+    assert fields["max_wait_seconds"]["minimum"] == 1
+    assert fields["max_wait_seconds"]["maximum"] == 3600
+
+
+def test_participation_display_scale_does_not_change_wire_constraints(client):
+    item = next(item for item in client.get("/api/v1/algorithms").json() if item["name"] == "POV")
+    rate = item["params_schema"]["properties"]["participation_rate"]
+    assert rate["x-display-scale"] == 100
+    assert rate["exclusiveMinimum"] == 0
+    assert rate["maximum"] == 1
+    assert rate["default"] == 0.1

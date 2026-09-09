@@ -1,70 +1,50 @@
-# POV（Percentage of Volume，参与率）
+# POV · 成交量参与率
 
-按**市场实时成交量**的固定比例跟单：市场成交活跃时多下、清淡时少下，使自身始终只占
-市场成交的一小部分，从而降低冲击成本、隐蔽大单。全渠道通用（数据前提见下）。
+按收到的市场增量成交量乘参与率跟单，无量等待。到期补单不再受参与率约束，仍可能剩量。
 
-## 算法语义
+## 执行方式与数据条件
 
-- **目标为净持仓**：先把 `target_volume` 转成相对当前持仓的增量 `delta = target − current`，
-  再对 `delta` 按市场量参与。`delta == 0` 时直接返回空结果。
-- **累计跟踪**：目标累计成交 = `参与率 × 已见市场量`，本轮下单量 = 该目标 − 已成交量，
-  以「距目标剩余量」封顶。与 TWAP 的累计进度表同思想——天然追平欠量，且不超过整体目标。
-- **市场成交量来源**：注册价格回调，累加每次行情更新携带的**增量成交量**
-  （`UnifiedPriceData.volume`）。
-- **无量安全**：市场无量则不下单，跑到 `max_duration` 上限；`complete_on_timeout` 为真时
-  到期补齐剩余量，兑现「调仓到位」契约（与 TWAP 一致）。
-- **不在算法层取整**：下单量交由各渠道执行器按 lot / 最小下单量兜底。
-- **可协作终止**：每个轮询边界响应 `terminate`。
+先计算目标持仓差量，再按收到的累计市场增量成交量计算进度：
+累计应成交量＝参与率×已收到市场量；本轮下单量扣除已成交量，并受剩余目标量限制。
 
-## 数据前提（重要）
-
-POV 依赖「能看见市场实时成交量」。各渠道 `UnifiedPriceData.volume` 的可用性：
-
-| 环境 | 成交量 | 说明 |
-| --- | --- | --- |
-| 仿真 | ✅ 逐 tick 增量 | `DataGenerator` 每 tick 带量 |
-| 支持增量成交量的渠道插件 | ✅ 逐笔增量 | 插件通过统一价格回调注入 |
-| CTP | ⚠️ 日内累计 | 语义为累计量，需按「做差」适配，暂不在本实现范围 |
-
-本实现把价格回调的 `volume` 当作**增量**累加；累计型渠道（CTP）接入前 POV 不应直接用于该渠道。
+适合希望随市场活跃程度推进的委托。算法直接累加价格回调中的 `UnifiedPriceData.volume`，
+要求它是增量成交量。日内累计成交量须由接入层先做差分；累计型行情不能直接传入。
+没有有效市场量时跟量阶段等待，不据此承诺当前渠道已具备可用的 POV 数据。
+若行情包含自身成交，该成交也可能进入参与率基数；参与率不是交易所全市场占比的硬保证。
 
 ## 参数
 
-| 参数 | 类型 | 默认 | 范围 | 说明 |
-| --- | --- | --- | --- | --- |
-| `participation_rate` | float | 0.1 | (0, 1] | 目标市场成交量参与比例 |
-| `interval_seconds` | float | 5.0 | ≥0.1 | 轮询/下单节奏（秒） |
-| `max_duration` | int | 600 | 1–86400，且 ≥ interval | 硬时间上限（秒） |
-| `price_strategy` | str | `ACTIVE` | ACTIVE / PASSIVE | 单片报价策略 |
-| `complete_on_timeout` | bool | `True` | — | 到期是否补齐剩余量到目标 |
+| 参数 | 默认值 | 约束 | 说明 |
+|---|---|---|---|
+| `participation_rate` | `0.1` | >0.0，≤1.0 | 按收到的市场增量成交量计算目标参与量。 |
+| `interval_seconds` | `5.0` | ≥0.1 | 检查成交进度和下单的间隔。 |
+| `max_duration` | `600` | ≥1，≤86400 | 跟量阶段的时间上限，结束处理和补单可能延长总耗时。 |
+| `price_strategy` | `"ACTIVE"` | ACTIVE / PASSIVE | 每笔使用本方价或对手价，主动报价也可能剩量。 |
+| `complete_on_timeout` | `true` | 见说明 | 按原报价方式尝试补下剩余量，不再受参与率约束，不保证成交。 |
+| `max_wait_seconds` | `60` | ≥1，≤3600 | 实际取此值与下单间隔中的较小值。 |
 
-- `ACTIVE`：取对手价（marketable），跟量成交更确定；`PASSIVE`：取本方价，滑点更小但可能欠量。
-
-## 使用示例
+## 例子
 
 ```python
-from axile.executor.models.unified_input import UnifiedStandardInput
-
-standard_input = UnifiedStandardInput(
-    channel_type=...,
-    account_config=...,
-    curr_target={"rb2610": 0.03},  # 目标权重（各渠道语义见 sizing_mode）
-    algorithm={
-        "method": "POV",
-        "params": {
-            "participation_rate": 0.1,  # 参与 10% 的市场成交量
-            "interval_seconds": 5,
-            "max_duration": 600,
-            "price_strategy": "ACTIVE",
-            "complete_on_timeout": True,
-        },
+algorithm = {
+    "method": "POV",
+    "params": {
+        "participation_rate": 0.1,
+        "interval_seconds": 5,
+        "max_duration": 600,
+        "price_strategy": "ACTIVE",
+        "complete_on_timeout": True,
+        "max_wait_seconds": 60,
     },
-)
-
-output = executor.execute(standard_input)
+}
 ```
 
-## 已知简化
+页面 10% 对应参数 0.1。收到增量市场量累计 1,000 时，累计目标为 100；
+若已成交 70，本轮最多尝试补到 100，并受实际剩余目标量限制。
+单笔等待为 `min(60, 5) = 5` 秒。跟量时限必须不小于下单间隔。
 
-- 若渠道行情载荷包含我方自身成交，参与率基数会被自身成交量轻微抬高（上界即参与率本身）；
-  标准 POV 首版接受该误差，暂不剔除。
+## 到期与剩量
+
+关闭到期补单时，到期结束跟量；开启时按原报价方式尝试提交剩余量，不再受参与率约束。
+即使此前没有市场量，到期也可能集中提交剩量。补单并不保证成交，也不必然是市价单。
+`max_duration` 是跟量阶段上限，补单和结束处理可能延长总耗时。轮询边界响应终止请求。

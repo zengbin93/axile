@@ -149,7 +149,17 @@ export interface AlgorithmInfo {
 /* ============================ 账户 ============================ */
 
 /** 账户读取信息；连接凭证只暴露已配置状态，绝不回传原文。 */
+export interface AccountRuntimeSync {
+  status: 'pending' | 'synchronized' | 'failed'
+  revision: number
+  attempts: number
+  last_error: string | null
+  last_attempt_at: string | null
+  synchronized_at: string | null
+}
+
 export interface Account {
+  runtime_sync?: AccountRuntimeSync | null
   backtest_weight_type?: 'ts' | 'cs'
   backtest_fee_rate?: number
   id: number | null

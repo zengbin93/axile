@@ -22,6 +22,8 @@
 
 from typing import Any, Literal
 
+from pydantic import Field
+
 from axile.executor.algorithms.common.params import BaseAlgorithmParams, ChaseParamsMixin
 from axile.executor.algorithms.core.base import (
     AlgorithmInput,
@@ -47,8 +49,21 @@ from axile.executor.models.unified_price import UnifiedPriceData, clone_price_da
 class SingleMakerParams(BaseAlgorithmParams, ChaseParamsMixin):
     """SINGLE-MAKER 算法参数."""
 
-    price_strategy: Literal["PASSIVE", "ACTIVE"] = "ACTIVE"
-    on_missing_book: Literal["skip", "active", "market"] = "skip"
+    price_strategy: Literal["PASSIVE", "ACTIVE"] = Field(
+        default="ACTIVE",
+        title="报价方式",
+        description="本方挂单等成交；对手价优先成交并承担点差。",
+        json_schema_extra={"x-order": 10, "x-enum-labels": {"PASSIVE": "本方挂单", "ACTIVE": "对手价"}},
+    )
+    on_missing_book: Literal["skip", "active", "market"] = Field(
+        default="skip",
+        title="盘口缺失处理",
+        description="盘口无效时跳过、尝试主动报价或发市价单；主动回退不保证有有效报价。",
+        json_schema_extra={
+            "x-order": 30,
+            "x-enum-labels": {"skip": "跳过", "active": "尝试主动报价", "market": "市价单"},
+        },
+    )
 
     def __str__(self) -> str:
         """便于记录日志的字符串表示."""
@@ -100,7 +115,7 @@ def _resolve_pricing_on_book(
     "SINGLE-MAKER",
     params_class=SingleMakerParams,
     label="单边挂单",
-    description="在盘口本方或对手价挂单等待成交，并可按配置追单。",
+    description="按本方或对手价下单，可撤单追价。适合不需要分时拆单的调仓；主动报价也可能剩量。",
 )
 def single_maker_callback(
     executor: ExecutorProtocol,

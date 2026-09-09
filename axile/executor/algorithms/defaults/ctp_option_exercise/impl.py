@@ -64,18 +64,35 @@ class CtpOptionExecutorProtocol(ExecutorProtocol, Protocol):
 class CTPOptionExerciseParams(BaseAlgorithmParams):
     """``CTP_OPTION_EXERCISE`` 参数."""
 
+    max_wait_seconds: int = Field(
+        default=60,
+        title="最大等待",
+        description="等待指令终态的上限；等待结束不等于指令完成。",
+        ge=1,
+        le=3600,
+        json_schema_extra={"x-order": 40, "x-unit": "秒"},
+    )
+
     action: str = Field(
         default="exercise",
-        description="指令类型：'exercise'（行权）/ 'abandon'（放弃）/ 'self_close'（自对冲）。",
+        title="指令类型",
+        description="行权、放弃或自对冲；按指定张数执行。",
+        json_schema_extra={
+            "x-order": 10,
+            "x-enum-labels": {"exercise": "行权", "abandon": "放弃", "self_close": "自对冲"},
+        },
     )
     require_value_check: bool = Field(
         default=True,
-        description="行权时是否进行内在价值检查。仅当 action='exercise' 时生效；"
-        "False 表示无视行权价 vs 标的价的关系，强制行权（一般场景不建议）。",
+        title="检查内在价值",
+        description="仅行权时生效；关闭后跳过内在价值检查，不代表完整收益评估。",
+        json_schema_extra={"x-order": 20},
     )
     poll_interval_seconds: float = Field(
         default=0.5,
-        description="状态机轮询间隔；秒。",
+        title="查询间隔",
+        description="查询指令状态的间隔。",
+        json_schema_extra={"x-order": 30, "x-unit": "秒"},
     )
 
     def __str__(self) -> str:
@@ -140,7 +157,7 @@ def _is_terminal(record: object) -> bool:
     params_class=CTPOptionExerciseParams,
     slots=[],
     label="CTP 期权行权",
-    description="提交期权行权、放弃或自对冲指令并等待终态。",
+    description="提交期权行权、放弃或自对冲指令，并等待状态回报。按指定张数执行，不用于账户主交易或清仓。",
 )
 def ctp_option_exercise_algorithm(executor: ExecutorProtocol, algorithm_input: AlgorithmInput) -> AlgorithmResult:
     """

@@ -4,7 +4,7 @@
  * 主交易 + 清仓算法完整编辑器；保存只 PATCH 算法相关字段，保存与取消都不离开本页。
  */
 
-import { useCallback, useEffect, useState, type CSSProperties } from 'react'
+import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react'
 import { useParams, useViewTransitionState } from 'react-router'
 import { getAccount, updateAccount } from '@/lib/api/accounts'
 import { usePolling } from '@/lib/hooks/usePolling'
@@ -23,6 +23,7 @@ import {
   validateAlgorithmRef,
   type AlgorithmRef,
 } from '@/features/setup/algorithms'
+import { runtimeSyncMessage, useAccountRuntimeSync } from '@/features/account/useAccountRuntimeSync'
 import { AlgorithmEditor } from '@/features/setup/AlgorithmEditor'
 import {
   EditError,
@@ -45,7 +46,13 @@ function algoParamError(algo: AlgorithmRef | null): string | null {
 
 export function AccountEditAlgorithmPage() {
   const { id } = useParams()
-  const accountId = Number(id)
+  return <AccountAlgorithmForm key={id} accountId={Number(id)} />
+}
+
+function AccountAlgorithmForm({ accountId }: { accountId: number }) {
+  const runtime = useAccountRuntimeSync(accountId)
+  const alive = useRef(true)
+  useEffect(() => { alive.current = true; return () => { alive.current = false } }, [])
   const toast = useToastStore((s) => s.toast)
   const accounts = useDomainStore((s) => s.accounts)
   const refreshAccounts = useDomainStore((s) => s.refreshAccounts)
@@ -53,7 +60,8 @@ export function AccountEditAlgorithmPage() {
     queryKey: `account:${accountId}`,
     intervalMs: 0,
   })
-  const acc = account.data
+  const [savedAccount, setSavedAccount] = useState<Account | null>(null)
+  const acc = savedAccount ?? account.data
   const cachedAccount = accounts?.find((item) => item.account_id === accountId) ?? null
   const descriptor = useChannelDescriptor(acc?.trade_channel)
 
@@ -84,6 +92,8 @@ export function AccountEditAlgorithmPage() {
   const [trade, setTrade] = useState<AlgorithmRef | null>(null)
   const [empty, setEmpty] = useState<AlgorithmRef | null>(null)
   const [saving, setSaving] = useState(false)
+  const [tradeError, setTradeError] = useState<string | null>(null)
+  const [emptyError, setEmptyError] = useState<string | null>(null)
   const [saveError, setSaveError] = useState<Error | null>(null)
 
   /** 草稿重置为服务端当前算法引用；数据未就绪时返回 false（供首帧初始化门控）。 */
@@ -121,7 +131,7 @@ export function AccountEditAlgorithmPage() {
 
   /** 标题 + 当前配置摘要：加载与就绪两态共用（同位同节点）；清仓行待就绪后追加。 */
   const synopsis = tradeSynopsis != null && (
-    <EditSynopsis note={isReady ? '保存只更新算法引用，不影响定时与启停。' : undefined}>
+    <EditSynopsis note={isReady ? '保存后用于后续执行，已在途任务不变。' : undefined}>
       <div className="grid grid-cols-[3rem_minmax(0,1fr)] gap-x-3 gap-y-0.5">
         <span className="font-normal text-ink-3">下单</span>
         <span className="inline-block" style={tradeVtStyle}>
@@ -153,9 +163,9 @@ export function AccountEditAlgorithmPage() {
   const emptyChanged = norm(empty) !== norm(origEmpty)
   const dirty = tradeChanged || emptyChanged
 
-  const err = algoParamError(trade) ?? algoParamError(empty)
+  const err = tradeError ?? emptyError ?? algoParamError(trade) ?? algoParamError(empty)
   const changes: string[] = []
-  if (tradeChanged) changes.push('下单算法已改')
+  if (tradeChanged) changes.push('主交易算法已改')
   if (emptyChanged) changes.push(empty ? '清仓算法已改' : '清仓算法已清除')
 
   const save = async () => {
@@ -168,21 +178,30 @@ export function AccountEditAlgorithmPage() {
         ? (empty as unknown as Record<string, unknown>)
         : null
     }
+    if (saving) return
+    runtime.invalidate()
     setSaving(true)
     setSaveError(null)
     try {
       const updated = await updateAccount(accountId, patch)
+      if (!alive.current) return
+      setSavedAccount(updated)
+      setTrade(algorithmRefOf(updated.algorithm) ?? descriptor.defaults.trade_algorithm)
+      setEmpty(algorithmRefOf(updated.empty_positions_algorithm))
+      runtime.acceptSaved(updated.runtime_sync)
       // 保存响应直接写摘要缓存：返回详情时 hero「算法」值首帧即新值，FLIP 落地同文。
       writeAccountConfigSummary(accountId, updated, {
         showShortLeverage: descriptor.ui.show_short_leverage,
       })
-      toast('执行算法已更新')
+      toast(runtimeSyncMessage(updated.runtime_sync))
       void refreshAccounts()
-      account.refresh()
     } catch (e) {
-      setSaveError(e instanceof Error ? e : new Error(String(e)))
+      if (alive.current) {
+        setSaveError(e instanceof Error ? e : new Error(String(e)))
+        void runtime.refresh()
+      }
     } finally {
-      setSaving(false)
+      if (alive.current) setSaving(false)
     }
   }
 
@@ -194,6 +213,7 @@ export function AccountEditAlgorithmPage() {
   ) => (
     <Row label={label} top span>
       <AlgorithmEditor
+        onValidationError={slot === 'trade' ? setTradeError : setEmptyError}
         slot={slot}
         channel={acc.trade_channel}
         value={slot === 'trade' ? (value ?? descriptor.defaults.trade_algorithm) : value}
@@ -208,17 +228,30 @@ export function AccountEditAlgorithmPage() {
       {title}
       {synopsis}
 
-      <Section label="主交易">
-        {slotRow('trade', '下单算法', trade, (v) => { setSaveError(null); setTrade(v ?? descriptor.defaults.trade_algorithm) })}
-      </Section>
-      <Section label="清仓">
-        {slotRow('empty', '清仓算法', empty, (value) => { setSaveError(null); setEmpty(value) })}
-      </Section>
+      {(runtime.error || (runtime.queried && runtime.data?.status !== 'synchronized')) && (
+        <div role="status" className="mb-5 flex flex-wrap items-center gap-3 text-sm text-warn">
+          <span>{runtime.error ? '同步状态暂不可用' : runtime.data?.status === 'failed' ? '运行态同步失败' : '运行态待同步'}</span>
+          {(runtime.error || runtime.data?.last_error) && <span className="break-words">{runtime.error?.message ?? runtime.data?.last_error}</span>}
+          <button type="button" disabled={saving || runtime.loading} onClick={() => void runtime.refresh()} className="underline disabled:opacity-50">刷新状态</button>
+          {!runtime.error && <button type="button" disabled={saving || runtime.loading} onClick={() => void runtime.retry()} className="underline disabled:opacity-50">重试同步</button>}
+        </div>
+      )}
+      <fieldset disabled={saving} className="min-w-0" inert={saving}>
+        <Section label="主交易算法">
+          <p className="mb-3 text-sm text-ink-3">用于常规定时调仓。</p>
+          {slotRow('trade', '算法', trade, (v) => { setSaveError(null); setTrade(v ?? descriptor.defaults.trade_algorithm) })}
+        </Section>
+        <Section label="清仓算法">
+          <p className="mb-3 text-sm text-ink-3">用于清仓执行。</p>
+          {slotRow('empty', '算法', empty, (value) => { setSaveError(null); setEmpty(value) })}
+        </Section>
+
+      </fieldset>
 
       <EditSaveBar
         changes={changes}
         blocked={Boolean(err)}
-        onCancel={resetAlgorithms}
+        onCancel={() => { if (!saving) resetAlgorithms() }}
         onSave={() => void save()}
         saving={saving}
         error={saveError}

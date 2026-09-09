@@ -14,6 +14,8 @@ Notes
 
 from typing import Any, Dict, List, Literal, Tuple
 
+from pydantic import Field
+
 from axile.common.trade_channel import TradeChannel
 from axile.executor.algorithms.common.params import BaseAlgorithmParams, ChaseParamsMixin
 from axile.executor.algorithms.core.base import (
@@ -35,8 +37,27 @@ from axile.executor.models.unified_price import clone_price_data
 class CTPTargetPosTaskParams(BaseAlgorithmParams, ChaseParamsMixin):
     """TARGET-POS-TASK 算法参数."""
 
-    price_strategy: Literal["PASSIVE", "ACTIVE"] = "PASSIVE"
-    offset_priority: Literal["昨今", "今昨"] = "昨今"
+    max_wait_seconds: int = Field(
+        default=60,
+        title="最大等待",
+        description="等待本轮委托完成的上限，不保证持仓到位。",
+        ge=1,
+        le=3600,
+        json_schema_extra={"x-order": 30, "x-unit": "秒"},
+    )
+
+    price_strategy: Literal["PASSIVE", "ACTIVE"] = Field(
+        default="PASSIVE",
+        title="报价方式",
+        description="本方挂单或对手价报价；品种 price 规则优先。",
+        json_schema_extra={"x-order": 10, "x-enum-labels": {"PASSIVE": "本方挂单", "ACTIVE": "对手价"}},
+    )
+    offset_priority: Literal["昨今", "今昨"] = Field(
+        default="昨今",
+        title="平仓顺序",
+        description="先平昨仓或先平今仓；品种同名规则优先，费用取决于合约。",
+        json_schema_extra={"x-order": 20, "x-enum-labels": {"昨今": "先昨后今", "今昨": "先今后昨"}},
+    )
 
     def __str__(self) -> str:
         """便于记录日志的字符串表示."""
@@ -567,7 +588,7 @@ def _execute_position_adjustment(
     channels=[TradeChannel.CTP, TradeChannel.TQ],
     params_class=CTPTargetPosTaskParams,
     label="期货目标持仓",
-    description="按目标净持仓增减期货仓位，并处理今仓与昨仓的开平顺序。",
+    description="按目标净持仓安排开平仓，并按设置处理今仓、昨仓。仅用于 CTP；品种规则可覆盖报价和平仓顺序。",
 )
 def ctp_target_pos_task_algorithm(executor: ExecutorProtocol, algorithm_input: AlgorithmInput) -> AlgorithmResult:
     """

@@ -21,6 +21,11 @@ class AlgorithmPublic(BaseModel):
         算法名称（即账户 ``algorithm.method`` 引用的值）。
     description : str
         中文说明；自定义算法暂无说明时为空串。
+    params_schema : dict[str, object]
+        参数模型生成的 JSON Schema。字段 ``title`` / ``description`` 提供界面文案；
+        可选扩展 ``x-enum-labels`` 提供枚举显示名，``x-order`` 控制顺序，
+        ``x-unit`` / ``x-display-scale`` / ``x-display-step`` 控制数值显示。
+        这些扩展不改变参数取值、默认值或验证约束；显示缩放后写回须还原原单位。
     channels : list[str] | None
         支持的交易渠道值列表；``None`` 表示全渠道通用。
     slots : list[str] | None

@@ -1,22 +1,5 @@
 import { describe, it, expect } from 'bun:test'
-
-import {
-  POV_DEFAULT_PARAMS,
-  TWAP_DEFAULT_PARAMS,
-  algorithmRefOf,
-  defaultAlgorithm,
-  describeAlgorithmRef,
-  describeSingleMakerParams,
-  describeTargetPosParams,
-  effectiveTargetPosParams,
-  effectiveSingleMakerParams,
-  emptyAlgorithm,
-  intentFromParams,
-  resolveAlgorithm,
-  seedParams,
-  validateAlgorithmRef,
-  validateAlgorithmParams,
-} from './algorithms'
+import { algorithmRefOf, validateAlgorithmRef, validateAlgorithmParams, describeAlgorithmRef, registerAlgorithmLabels } from './algorithms'
 
 describe('algorithmRefOf · 账户 JSON 安全还原', () => {
   it('还原合法引用，params 缺省补空对象', () => {
@@ -80,156 +63,17 @@ describe('validateAlgorithmParams', () => {
   })
 })
 
-describe('resolveAlgorithm · 省成本预设', () => {
-  it('产出的 params 通过后端约束校验', () => {
-    expect(validateAlgorithmParams(resolveAlgorithm('save').params)).toBeNull()
-  })
+
+it('算法摘要不再反推意图，采用后端名称', () => {
+  registerAlgorithmLabels([{ name: 'SINGLE-MAKER', label: '后端挂单名', description: '', channels: null, slots: null, builtin: true, default_params: {}, params_schema: {} }])
+  expect(describeAlgorithmRef({ method: 'SINGLE-MAKER', params: { price_strategy: 'PASSIVE', chase_enabled: true, max_wait_seconds: 60 } })).toBe('后端挂单名')
+  registerAlgorithmLabels([])
+  expect(describeAlgorithmRef({ method: 'SINGLE-MAKER', params: {} })).toBe('SINGLE-MAKER')
 })
 
-describe('intentFromParams · 意图反推（镜像 resolveAlgorithm）', () => {
-  it('三档 params 都能反推回原意图', () => {
-    for (const intent of ['save', 'fill', 'balance'] as const) {
-      expect(intentFromParams(resolveAlgorithm(intent).params)).toBe(intent)
-    }
-  })
-
-  it('无法匹配的 params 返回 null', () => {
-    expect(intentFromParams({ price_strategy: 'ACTIVE', chase_enabled: true })).toBeNull()
-    expect(intentFromParams({})).toBeNull()
-  })
-
-  it('缺省字段按后端默认值解释', () => {
-    expect(
-      intentFromParams({
-        price_strategy: 'ACTIVE',
-        max_wait_seconds: 30,
-        chase_enabled: false,
-      }),
-    ).toBe('fill')
-    expect(effectiveSingleMakerParams({}).on_missing_book).toBe('skip')
-  })
-
-  it('关闭追单时忽略未生效的追单细项', () => {
-    const fill = resolveAlgorithm('fill').params
-    expect(intentFromParams({ ...fill, max_chase_count: 999, chase_interval: 0 })).toBe('fill')
-  })
-
-  it('任一生效参数、盘口策略或未知参数不同都视为自定义', () => {
-    const balance = resolveAlgorithm('balance').params
-    expect(intentFromParams({ ...balance, max_wait_seconds: 90 })).toBeNull()
-    expect(intentFromParams({ ...balance, on_missing_book: 'active' })).toBeNull()
-    expect(intentFromParams({ ...balance, plugin_option: true })).toBeNull()
-  })
-})
-
-describe('describeSingleMakerParams · 当前执行摘要', () => {
-  it('区分追单与不追单', () => {
-    expect(describeSingleMakerParams(resolveAlgorithm('balance').params)).toBe(
-      '被动挂单 · 等待 60 秒 · 最多追单 5 次',
-    )
-    expect(describeSingleMakerParams(resolveAlgorithm('fill').params)).toBe(
-      '主动成交 · 等待 30 秒 · 不追单',
-    )
-  })
-
-  it('非预设参数在算法引用中直接显示实际执行行为', () => {
-    const params = { ...resolveAlgorithm('balance').params, on_missing_book: 'market' }
-    expect(describeSingleMakerParams(params)).toContain('盘口缺失时直接市价成交')
-    expect(describeAlgorithmRef({ method: 'SINGLE-MAKER', params })).toBe(
-      '被动挂单 · 等待 60 秒 · 最多追单 5 次 · 盘口缺失时直接市价成交',
-    )
-  })
-
-  it('主动成交并追单的非预设组合保留关键信息', () => {
-    const params = { ...resolveAlgorithm('fill').params, chase_enabled: true }
-    expect(describeAlgorithmRef({ method: 'SINGLE-MAKER', params })).toBe(
-      '主动成交 · 等待 30 秒 · 最多追单 5 次',
-    )
-  })
-
-  it('意图摘要剥掉选择器引导文案「（推荐）」', () => {
-    expect(describeAlgorithmRef(resolveAlgorithm('balance'))).toBe('平衡')
-    expect(describeAlgorithmRef(resolveAlgorithm('save'))).toBe('省成本')
-  })
-
-  it('TARGET-POS-TASK 摘要显示有效等待与追单参数', () => {
-    expect(describeTargetPosParams({})).toBe('被动挂单 · 等待 60 秒 · 不追单')
-    expect(describeAlgorithmRef(resolveAlgorithm('balance', 'TARGET-POS-TASK'))).toBe(
-      '被动挂单 · 等待 60 秒 · 最多追单 5 次',
-    )
-  })
-})
-
-describe('effectiveTargetPosParams · 目标持仓默认参数', () => {
-  it('为空参数补齐后端的七个默认字段，并允许局部覆盖', () => {
-    const effective = effectiveTargetPosParams({ chase_enabled: true, plugin_option: 'keep' })
-
-    expect(effective).toEqual({
-      price_strategy: 'PASSIVE',
-      offset_priority: '昨今',
-      max_wait_seconds: 60,
-      chase_enabled: true,
-      chase_ticks: 1,
-      max_chase_count: 5,
-      chase_interval: 5,
-      plugin_option: 'keep',
-    })
-  })
-})
-
-describe('defaultAlgorithm · 槽位默认', () => {
-  it('主交易槽由算法类型决定', () => {
-    expect(defaultAlgorithm('SINGLE-MAKER', 'trade').method).toBe('SINGLE-MAKER')
-    expect(defaultAlgorithm('TARGET-POS-TASK', 'trade').method).toBe('TARGET-POS-TASK')
-  })
-
-  it('通用清仓槽使用主动成交算法', () => {
-    const ref = defaultAlgorithm('SINGLE-MAKER', 'empty')
-    expect(ref.method).toBe('SINGLE-MAKER')
-    expect('prefer_market' in ref.params).toBe(false)
-  })
-})
-
-describe('emptyAlgorithm · 不再发送废弃键', () => {
-  it('SINGLE-MAKER 清仓只保留通用主动价格策略', () => {
-    expect(emptyAlgorithm('SINGLE-MAKER').params).toEqual({ price_strategy: 'ACTIVE' })
-  })
-
-  it('TARGET-POS-TASK 清仓保存完整参数并默认主动吃单', () => {
-    expect(emptyAlgorithm('TARGET-POS-TASK').params).toEqual({
-      price_strategy: 'ACTIVE',
-      offset_priority: '昨今',
-      max_wait_seconds: 60,
-      chase_enabled: false,
-      chase_ticks: 1,
-      max_chase_count: 5,
-      chase_interval: 5,
-    })
-  })
-})
-
-describe('seedParams · 切换算法的合法种子参数', () => {
-  it('TWAP 种子覆盖全部后端参数', () => {
-    const p = seedParams('TWAP')
-    expect(p).toEqual(TWAP_DEFAULT_PARAMS)
-    expect(validateAlgorithmRef({ method: 'TWAP', params: p })).toBeNull()
-  })
-
-  it('POV 种子覆盖全部后端参数', () => {
-    const p = seedParams('POV')
-    expect(p).toEqual(POV_DEFAULT_PARAMS)
-    expect(validateAlgorithmRef({ method: 'POV', params: p })).toBeNull()
-  })
-
-  it('SINGLE-MAKER 种子通过后端约束校验', () => {
-    expect(validateAlgorithmParams(seedParams('SINGLE-MAKER'))).toBeNull()
-  })
-
-  it('TARGET-POS-TASK 种子包含完整且合法的参数', () => {
-    const params = seedParams('TARGET-POS-TASK')
-
-    expect(params).toEqual(effectiveTargetPosParams({}))
-    expect(validateAlgorithmParams(params)).toBeNull()
-  })
-
+it('多字段校验优先采用服务端默认值', () => {
+  registerAlgorithmLabels([{ name: 'TWAP', label: 'TWAP', description: '', channels: null, slots: null, builtin: true,
+    default_params: { total_duration: 1, slices: 10 }, params_schema: {} }])
+  expect(validateAlgorithmRef({ method: 'TWAP', params: { slices: 20 } })).toContain('0.1s')
+  registerAlgorithmLabels([])
 })

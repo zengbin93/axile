@@ -58,7 +58,7 @@ describe('配置摘要缓存', () => {
     expect(readAccountConfigSummary(424242)).toEqual({
       leverage: '多 3× / 空 2×',
       symbols: '禁投 1',
-      algorithm: '时间切片（TWAP）',
+      algorithm: 'TWAP',
     })
   })
 

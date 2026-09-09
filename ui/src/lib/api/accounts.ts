@@ -2,6 +2,7 @@
 import { apiGet, apiSend } from '@/lib/api/client'
 import type {
   Account,
+  AccountRuntimeSync,
   AccountDashboard,
   AccountRebalancePlan,
   AccountNextRun,
@@ -234,4 +235,24 @@ export function updateAccount(id: number, patch: AccountUpdatePayload): Promise<
 /** 删除账户。 */
 export function deleteAccount(id: number): Promise<Message> {
   return apiSend<Message>('DELETE', `/account/${id}`)
+}
+
+/** 尚无同步记录时，后端以 202 + detail 返回，不能当作已同步。 */
+export function parseAccountRuntimeSync(value: unknown): AccountRuntimeSync | null {
+  if (!value || typeof value !== 'object') throw new Error('运行态同步响应无效')
+  const record = value as Record<string, unknown>
+  if (typeof record.detail === 'string' && record.status === undefined) return null
+  if (!['pending', 'synchronized', 'failed'].includes(String(record.status)) ||
+      !Number.isInteger(record.revision) || !Number.isInteger(record.attempts)) {
+    throw new Error('运行态同步响应无效')
+  }
+  return value as AccountRuntimeSync
+}
+
+export async function getAccountRuntimeSync(id: number, signal?: AbortSignal): Promise<AccountRuntimeSync | null> {
+  return parseAccountRuntimeSync(await apiGet<unknown>(`/account/${id}/runtime-sync`, signal))
+}
+
+export async function retryAccountRuntimeSync(id: number, signal?: AbortSignal): Promise<AccountRuntimeSync | null> {
+  return parseAccountRuntimeSync(await apiSend<unknown>('POST', `/account/${id}/runtime-sync/retry`, undefined, signal))
 }

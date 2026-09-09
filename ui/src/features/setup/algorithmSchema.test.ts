@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'bun:test'
+import { describe, expect, it, test } from 'bun:test'
 
 import {
   algorithmSchemaDefaults,
@@ -37,4 +37,15 @@ describe('validateAlgorithmSchemaParams', () => {
     expect(validateAlgorithmSchemaParams({ enabled: 'yes' }, schema)).toContain('布尔')
     expect(validateAlgorithmSchemaParams({ pace: 0.5, rounds: 3, mode: 'fast', enabled: false }, schema)).toBeNull()
   })
+})
+
+// 显示扩展不改变持久化的小数参与率，也不引入前端算法文案。
+test('服务端百分比与枚举显示元数据', async () => {
+  const { algorithmNumericDisplay, algorithmFieldOptions } = await import('./algorithmSchema')
+  const display = algorithmNumericDisplay({ type: 'number', exclusiveMinimum: 0, maximum: 1, 'x-display-scale': 100, 'x-display-step': 0.01, 'x-unit': '%' }, 0.1)
+  expect(display.value).toBe(10)
+  expect(display.max).toBe(100)
+  expect(display.exclusiveMin).toBe(true)
+  expect(12.5 / display.scale).toBe(0.125)
+  expect(algorithmFieldOptions({ type: 'string', enum: ['ACTIVE'], 'x-enum-labels': { ACTIVE: '后端新名称' } })).toEqual([{ value: 'ACTIVE', label: '后端新名称' }])
 })

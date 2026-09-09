@@ -70,24 +70,41 @@ class TwapParams(BaseAlgorithmParams):
     slices : int
         均匀切片数量，范围 1-1000；单片间隔为 ``total_duration / slices``。
     price_strategy : {"ACTIVE", "PASSIVE"}
-        单片下单价格策略。``ACTIVE`` 取对手价（marketable，保证成交，
-        为教科书式 TWAP 的标准打法）；``PASSIVE`` 取本方价（挂单等待，
-        滑点更小但可能欠量，更依赖后续片追平）。
+        单片下单价格策略。``ACTIVE`` 取对手价（优先成交，但仍可能剩量）；``PASSIVE`` 取本方价（挂单等待，
+        可能欠量，更依赖后续片追平）。
     """
+
+    max_wait_seconds: int = Field(
+        default=60,
+        title="单片最大等待",
+        description="实际取此值与切片间隔中的较小值。",
+        ge=1,
+        le=3600,
+        json_schema_extra={"x-order": 40, "x-unit": "秒"},
+    )
 
     total_duration: int = Field(
         default=300,
+        title="执行时长",
+        description="安排拆单节奏的计划时长，不是严格截止时间。",
         ge=1,
         le=86400,
-        description="总执行时长（秒），范围：1-86400",
+        json_schema_extra={"x-order": 10, "x-unit": "秒"},
     )
     slices: int = Field(
         default=10,
+        title="切片数量",
+        description="切片间隔＝执行时长÷片数，至少 0.1 秒。",
         ge=1,
         le=1000,
-        description="均匀切片数量，范围：1-1000",
+        json_schema_extra={"x-order": 20, "x-unit": "片"},
     )
-    price_strategy: Literal["ACTIVE", "PASSIVE"] = "ACTIVE"
+    price_strategy: Literal["ACTIVE", "PASSIVE"] = Field(
+        default="ACTIVE",
+        title="报价方式",
+        description="每片使用本方价或对手价；前片欠量滚入后片。",
+        json_schema_extra={"x-order": 30, "x-enum-labels": {"PASSIVE": "本方挂单", "ACTIVE": "对手价"}},
+    )
 
     @property
     def interval_seconds(self) -> float:
@@ -161,7 +178,7 @@ def compute_slice_quantity(
     Notes
     -----
     非最后一片取“到该片结束应累计完成的量”减去“已成交量”；最后一片直接吃掉
-    全部剩余量，以吸收取整残差与前序欠量，确保结束时净持仓收敛到目标。
+    全部剩余量，以吸收取整残差与前序欠量；这只决定计划下单量，不保证实际成交。
     """
     if slice_index >= slices:
         return max(total_qty - filled, 0.0)
@@ -262,7 +279,7 @@ def _execute_one_slice(
     ALGORITHM_NAME,
     params_class=TwapParams,
     label="时间加权",
-    description="在给定时长内均匀切片下单，以降低集中成交的市场冲击。",
+    description="按设定时长分片下单，前片欠量滚入后片。尾片可能集中补量，不保证全部成交。",
 )
 def twap(
     executor: ExecutorProtocol,

@@ -9,6 +9,11 @@ export interface AlgorithmParamSchema {
   exclusiveMinimum?: number
   exclusiveMaximum?: number
   multipleOf?: number
+  'x-enum-labels'?: Record<string, string>
+  'x-order'?: number
+  'x-unit'?: string
+  'x-display-scale'?: number
+  'x-display-step'?: number
 }
 
 export interface AlgorithmSchemaField {
@@ -38,7 +43,7 @@ export function algorithmSchemaFields(schema: Record<string, unknown>): Algorith
     if (!parsed) return null
     fields.push({ name, schema: parsed, required: required.has(name) })
   }
-  return fields
+  return fields.sort((a, b) => (a.schema['x-order'] ?? 100) - (b.schema['x-order'] ?? 100))
 }
 
 /** 从 schema 提取字段默认值，供运行时 default_params 缺失时补齐。 */
@@ -85,4 +90,27 @@ export function validateAlgorithmSchemaParams(
     }
   }
   return null
+}
+
+/** 枚举文案来自后端；扩展不参与参数校验。 */
+export function algorithmFieldOptions(spec: AlgorithmParamSchema) {
+  const values = spec.enum ?? (spec['x-enum-labels'] ? Object.keys(spec['x-enum-labels']) : null)
+  return values?.map((value) => ({ value: String(value), label: spec['x-enum-labels']?.[String(value)] ?? String(value) })) ?? null
+}
+
+/** 数值单位换算只影响显示，写回时除以同一比例。 */
+export function algorithmNumericDisplay(spec: AlgorithmParamSchema, value: unknown) {
+  const rawScale = spec['x-display-scale']
+  const scale = typeof rawScale === 'number' && Number.isFinite(rawScale) && rawScale > 0 ? rawScale : 1
+  const minimum = spec.exclusiveMinimum ?? spec.minimum
+  const maximum = spec.exclusiveMaximum ?? spec.maximum
+  return {
+    scale,
+    value: typeof value === 'number' ? value * scale : Number.NaN,
+    min: minimum === undefined ? undefined : minimum * scale,
+    max: maximum === undefined ? undefined : maximum * scale,
+    exclusiveMin: spec.exclusiveMinimum !== undefined,
+    step: spec['x-display-step'] ?? (spec.multipleOf === undefined ? (spec.type === 'integer' ? 1 : 0.1) : spec.multipleOf * scale),
+    suffix: spec['x-unit'],
+  }
 }
