@@ -184,6 +184,17 @@ class ExecutionSession:
         """获取当前 symbol 的最小价格变动单位."""
         return self._owner.get_tick_size(self.symbol)
 
+    def get_max_order_volume(self, order_type: OrderType = OrderType.LIMIT, trade_rule: dict[str, object] | None = None) -> int | None:
+        """获取当前 symbol 的有效单笔数量上限（合约与用户规则取严）。"""
+        getter = getattr(self._owner, "get_max_order_volume", None)
+        if not callable(getter):
+            if trade_rule and trade_rule.get("max_single_order_size") is not None:
+                from axile.executor.order_volume_limits import user_max_single_order_size
+
+                return user_max_single_order_size(trade_rule)
+            return None
+        return getter(self.symbol, order_type, trade_rule)
+
     def get_min_notional(self) -> float | None:
         """获取当前 symbol 下单的最小名义价值."""
         return self._owner.get_min_notional(self.symbol)
