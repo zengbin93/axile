@@ -1514,11 +1514,24 @@ class OrderTracker:
             deduplicated_ids.append(candidate_str)
         return deduplicated_ids
 
+    @staticmethod
+    def _trusted_trade_id(trade_id: object) -> str:
+        """返回可用于去重的可信成交 ID；空串视为不可信."""
+        return str(trade_id or "").strip()
+
     def _order_has_trade(self, order_id: str, trade: TradeRecord) -> bool:
-        """判断订单是否已包含等价成交记录，避免重复累计."""
+        """判断订单是否已包含等价成交记录，避免重复累计.
+
+        双方都有可信 ``trade_id`` 时只按 ID 判重：同 ID 视为重复，不同 ID 即使
+        同秒同价同量也保留。仅当任一侧缺少可信 ID 时，才回退到时间/价/量弱证据。
+        """
+        incoming_id = self._trusted_trade_id(trade.trade_id)
         for existing_trade in self.order_trades.get(order_id, []):
-            if trade.trade_id and existing_trade.trade_id == trade.trade_id:
-                return True
+            existing_id = self._trusted_trade_id(existing_trade.trade_id)
+            if incoming_id and existing_id:
+                if incoming_id == existing_id:
+                    return True
+                continue
             if (
                 existing_trade.trade_time == trade.trade_time
                 and existing_trade.trade_volume == trade.trade_volume

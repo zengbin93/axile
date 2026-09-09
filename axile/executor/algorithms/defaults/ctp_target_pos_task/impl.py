@@ -587,10 +587,16 @@ def _execute_position_adjustment(
     if adjust_volume > 0:  # 需要增加净持仓
         if position_detail.short_total > 0:  # 先平空头
             close_volume = min(abs(adjust_volume), position_detail.short_total)
-            close_orders, executed_volume, _ = _smart_close_position(
+            close_orders, executed_volume, close_ok = _smart_close_position(
                 executor, symbol, "BUY", close_volume, limit_price, offset_priority, trade_rule=trade_rule
             )
             orders.extend(close_orders)
+            if not close_ok:
+                # 平仓未完成时不得把未平余量转成反向/同向开仓，避免锁仓放大风险。
+                executor.logger.error(
+                    f"{symbol}: 平空未完成（目标平仓 {close_volume} 手，已提交 {executed_volume} 手），停止后续开仓"
+                )
+                return orders
             adjust_volume -= executed_volume
 
         if adjust_volume > 0:  # 开多头
@@ -612,10 +618,15 @@ def _execute_position_adjustment(
         adjust_volume = abs(adjust_volume)
         if position_detail.long_total > 0:  # 先平多头
             close_volume = min(adjust_volume, position_detail.long_total)
-            close_orders, executed_volume, _ = _smart_close_position(
+            close_orders, executed_volume, close_ok = _smart_close_position(
                 executor, symbol, "SELL", close_volume, limit_price, offset_priority, trade_rule=trade_rule
             )
             orders.extend(close_orders)
+            if not close_ok:
+                executor.logger.error(
+                    f"{symbol}: 平多未完成（目标平仓 {close_volume} 手，已提交 {executed_volume} 手），停止后续开仓"
+                )
+                return orders
             adjust_volume -= executed_volume
 
         if adjust_volume > 0:  # 开空头
