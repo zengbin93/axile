@@ -5,6 +5,7 @@ from __future__ import annotations
 import math
 from datetime import datetime
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from openctp_ctp import thosttraderapi as td
 
@@ -30,15 +31,28 @@ def _float(row: object, name: str) -> float:
     return value if math.isfinite(value) else 0.0
 
 
+_SHANGHAI = ZoneInfo("Asia/Shanghai")
+
+
 def _time(day: str, clock: str, millisec: int = 0) -> str:
-    raw = f"{day} {clock}".strip()
-    for pattern in ("%Y%m%d %H:%M:%S", "%Y%m%d"):
-        try:
-            parsed = datetime.strptime(raw, pattern)
-            return parsed.replace(microsecond=max(0, millisec) * 1000).isoformat()
-        except ValueError:
-            continue
-    return datetime.now().isoformat()
+    """解释 CTP 自然日期与本地时刻；未知时间返回空串，禁止回退当前时间。"""
+    if len(day) != 8 or not day.isdigit() or len(clock) != 8 or not 0 <= millisec <= 999:
+        return ""
+    try:
+        parsed = datetime.strptime(f"{day} {clock}", "%Y%m%d %H:%M:%S")
+    except ValueError:
+        return ""
+    return parsed.replace(tzinfo=_SHANGHAI, microsecond=millisec * 1000).isoformat()
+
+
+def _time_evidence(day: str, clock: str, source: str, event_time: str) -> dict[str, str]:
+    """保留日期来源及解析状态，供审计区分未知时间。"""
+    return {
+        "event_date": day,
+        "event_clock": clock,
+        "event_time_source": source,
+        "event_time_status": "native" if event_time else "unknown",
+    }
 
 
 def stable_order_id(trading_day: str, front_id: int, session_id: int, order_ref: str) -> str:
@@ -70,6 +84,8 @@ def order_to_unified(row: object, *, trading_day: str, front_id: int, session_id
     direction = OrderDirection.BUY if _value(row, "Direction") == td.THOST_FTDC_D_Buy else OrderDirection.SELL
     price_type = OrderType.LIMIT if _value(row, "OrderPriceType") == td.THOST_FTDC_OPT_LimitPrice else OrderType.MARKET
     insert_time = str(_value(row, "InsertTime", "") or "")
+    insert_day = str(_value(row, "InsertDate", "") or "")
+    create_time = _time(insert_day, insert_time)
     return UnifiedOrder.create(
         order_id=stable_order_id(day, row_front, row_session, order_ref),
         symbol=str(_value(row, "InstrumentID", "") or ""),
@@ -81,7 +97,10 @@ def order_to_unified(row: object, *, trading_day: str, front_id: int, session_id
         status=_ORDER_STATUS.get(_value(row, "OrderStatus"), OrderStatus.REJECTED),
         filled_volume=traded,
         avg_price=_float(row, "LimitPrice") if traded else 0.0,
-        create_time=_time(day, insert_time) if insert_time else datetime.now().isoformat(),
+        create_time=create_time,
+        update_time=datetime.now(_SHANGHAI).isoformat(),
+        trading_day=day,
+        **_time_evidence(insert_day, insert_time, "InsertDate", create_time),
         order_ref=order_ref,
         front_id=row_front,
         session_id=row_session,
@@ -100,11 +119,16 @@ def trade_to_unified(row: object, *, trading_day: str, front_id: int, session_id
     row_session = int(_value(row, "SessionID", session_id) or session_id)
     price = _float(row, "Price")
     volume = _float(row, "Volume")
+    trade_day = str(_value(row, "TradeDate", "") or "")
+    trade_clock = str(_value(row, "TradeTime", "") or "")
+    trade_time = _time(trade_day, trade_clock)
     return TradeRecord.create(
         trade_id=str(_value(row, "TradeID", "") or ""),
         symbol=str(_value(row, "InstrumentID", "") or ""),
         order_id=stable_order_id(day, row_front, row_session, order_ref),
-        trade_time=_time(day, str(_value(row, "TradeTime", "") or "")),
+        trade_time=trade_time,
+        trading_day=day,
+        **_time_evidence(trade_day, trade_clock, "TradeDate", trade_time),
         trade_volume=volume,
         trade_price=price,
         order_ref=order_ref,
@@ -117,11 +141,14 @@ def trade_to_unified(row: object, *, trading_day: str, front_id: int, session_id
 
 def quote_to_unified(row: object) -> UnifiedPriceData:
     """转换原生深度行情帧。"""
-    day = str(_value(row, "ActionDay", "") or _value(row, "TradingDay", "") or "")
+    day = str(_value(row, "ActionDay", "") or "")
     clock = str(_value(row, "UpdateTime", "") or "")
-    millisec = int(_value(row, "UpdateMillisec", 0) or 0)
+    try:
+        millisec = int(_value(row, "UpdateMillisec", 0) or 0)
+    except (TypeError, ValueError, OverflowError):
+        millisec = -1
     update_time = _time(day, clock, millisec)
-    timestamp = int(datetime.fromisoformat(update_time).timestamp() * 1000)
+    timestamp = int(datetime.fromisoformat(update_time).timestamp() * 1000) if update_time else 0
     bid = _float(row, "BidPrice1")
     ask = _float(row, "AskPrice1")
     return UnifiedPriceData(
@@ -140,7 +167,11 @@ def quote_to_unified(row: object) -> UnifiedPriceData:
         **{f"ask_price_{level}": _float(row, f"AskPrice{level}") for level in range(2, 6)},
         **{f"bid_volume_{level}": _float(row, f"BidVolume{level}") for level in range(2, 6)},
         **{f"ask_volume_{level}": _float(row, f"AskVolume{level}") for level in range(2, 6)},
-        extra={"exchange_id": str(_value(row, "ExchangeID", "") or "")},
+        extra={
+            "exchange_id": str(_value(row, "ExchangeID", "") or ""),
+            "trading_day": str(_value(row, "TradingDay", "") or ""),
+            **_time_evidence(day, clock, "ActionDay", update_time),
+        },
     )
 
 
