@@ -34,6 +34,10 @@ from axile.executor.ctp.converters import (
     stable_order_id,
     trade_to_unified,
 )
+from axile.executor.order_volume_limits import (
+    effective_max_order_volume,
+    ensure_order_volume_allowed,
+)
 from axile.executor.ctp.options import (
     OptionActionRecord,
     OptionActionStatus,
@@ -731,8 +735,15 @@ class CTPExecutor(AbstractExecutor, UnifiedCallbackClient):
             self._require_session_ready(symbol)
         if symbol not in self._instruments:
             raise ValueError(f"未知 CTP 合约: {symbol}")
-        if not isinstance(volume, (int, float)) or not float(volume).is_integer() or volume <= 0:
-            raise ValueError("CTP 下单数量必须为正整数")
+        trade_rule = kwargs.get("trade_rule")
+        if trade_rule is not None and not isinstance(trade_rule, dict):
+            raise ValueError("trade_rule 必须是字典")
+        volume = ensure_order_volume_allowed(
+            volume,
+            instrument=self._instruments.get(symbol),
+            order_type=order_type,
+            trade_rule=trade_rule if isinstance(trade_rule, dict) else None,
+        )
         tick = self.get_tick_size(symbol)
         if order_type == OrderType.LIMIT and (
             not tick or price <= 0 or not math.isclose(price / tick, round(price / tick), abs_tol=1e-7)
@@ -849,6 +860,17 @@ class CTPExecutor(AbstractExecutor, UnifiedCallbackClient):
         x = self._instruments.get(symbol)
         v = float(getattr(x, "PriceTick", 0) or 0) if x else 0
         return v if v > 0 else None
+
+    def get_max_order_volume(self, symbol, order_type=OrderType.LIMIT, trade_rule=None):
+        """返回当前合约在给定订单类型与用户规则下的有效单笔上限。"""
+        if trade_rule is not None and not isinstance(trade_rule, dict):
+            raise ValueError("trade_rule 必须是字典")
+        _minimum, maximum = effective_max_order_volume(
+            self._instruments.get(symbol),
+            order_type,
+            trade_rule if isinstance(trade_rule, dict) else None,
+        )
+        return maximum
 
     @override
     def _calculate_generic_sizing(

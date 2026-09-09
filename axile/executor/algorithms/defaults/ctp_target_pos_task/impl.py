@@ -33,6 +33,7 @@ from axile.executor.models.execution_result import ExecutionStatus
 from axile.executor.models.unified_account_assets import Position, PositionDirection, UnifiedAccountAssets
 from axile.executor.models.unified_order import UnifiedOrder
 from axile.executor.models.unified_price import clone_price_data
+from axile.executor.order_volume_limits import split_order_volumes, user_max_single_order_size
 
 
 class CTPTargetPosTaskParams(BaseAlgorithmParams, ChaseParamsMixin):
@@ -318,6 +319,54 @@ def _build_close_sequence(
     ], "先平今再平昨"
 
 
+
+def _resolve_max_single_order(executor: ExecutorProtocol, trade_rule: Dict[str, Any] | None, order_type: OrderType = OrderType.LIMIT) -> int | None:
+    """解析算法侧有效单笔上限：优先问执行器，否则只用用户规则。"""
+    getter = getattr(executor, "get_max_order_volume", None)
+    if callable(getter):
+        try:
+            return getter(order_type, trade_rule)  # ExecutionSession 签名
+        except TypeError:
+            return getter(getattr(executor, "symbol", ""), order_type, trade_rule)
+    return user_max_single_order_size(trade_rule)
+
+
+def _place_volume_slices(
+    executor: ExecutorProtocol,
+    direction: OrderDirection,
+    volume: float,
+    limit_price: float,
+    *,
+    offset_flag: str,
+    trade_rule: Dict[str, Any] | None,
+) -> Tuple[List[UnifiedOrder], float]:
+    """按有效单笔上限拆单提交；返回订单列表与成功提交手数。"""
+    orders: List[UnifiedOrder] = []
+    if volume <= 0:
+        return orders, 0.0
+    max_size = _resolve_max_single_order(executor, trade_rule, OrderType.LIMIT)
+    # 算法侧没有合约对象时，至少按用户上限拆；原生层仍会再拦合约上限。
+    slices = split_order_volumes(volume, max_size)
+    submitted = 0.0
+    for chunk in slices:
+        try:
+            order = executor.place_order(
+                direction,
+                OrderType.LIMIT,
+                chunk,
+                limit_price,
+                offset_flag=offset_flag,
+                trade_rule=trade_rule,
+            )
+        except Exception as exc:
+            executor.logger.error(
+                f"拆单提交失败: {direction.value} {chunk}手@{limit_price} offset={offset_flag}, 错误: {exc}"
+            )
+            break
+        orders.append(order)
+        submitted += float(chunk)
+    return orders, submitted
+
 def _submit_close_leg(
     executor: ExecutorProtocol,
     symbol: str,
@@ -329,22 +378,27 @@ def _submit_close_leg(
     success_message: str,
     failure_message: str,
     failure_level: str = "warning",
-) -> Tuple[UnifiedOrder | None, float]:
-    """提交单腿平仓订单，并按调用方要求记录日志."""
+    trade_rule: Dict[str, Any] | None = None,
+) -> Tuple[List[UnifiedOrder], float]:
+    """提交单腿平仓订单（可按单笔上限拆单），并按调用方要求记录日志."""
+    _ = symbol
     try:
         executor.logger.info(start_message)
-        order = executor.place_order(
+        orders, submitted = _place_volume_slices(
+            executor,
             OrderDirection(direction),
-            OrderType.LIMIT,
             close_volume,
             limit_price,
-            **{"offset_flag": offset_flag},
+            offset_flag=offset_flag,
+            trade_rule=trade_rule,
         )
-        executor.logger.info(success_message.format(order_id=order.order_id))
-        return order, close_volume
+        if not orders:
+            raise RuntimeError("平仓拆单后无任何订单提交成功")
+        executor.logger.info(success_message.format(order_id=orders[-1].order_id))
+        return orders, submitted
     except Exception as e:
         getattr(executor.logger, failure_level)(failure_message.format(error=e))
-        return None, 0
+        return [], 0
 
 
 def _smart_close_position(
@@ -354,6 +408,7 @@ def _smart_close_position(
     close_volume: float,
     limit_price: float,
     offset_priority: str = "昨今",
+    trade_rule: Dict[str, Any] | None = None,
 ) -> Tuple[List[UnifiedOrder], float, bool]:
     """
     按昨仓 / 今仓可用量智能拆分平仓顺序。
@@ -418,7 +473,7 @@ def _smart_close_position(
             continue
 
         leg_volume = min(remaining_volume, available_volume)
-        order, submitted_volume = _submit_close_leg(
+        leg_orders, submitted_volume = _submit_close_leg(
             executor=executor,
             symbol=symbol,
             direction=direction,
@@ -428,11 +483,12 @@ def _smart_close_position(
             start_message=f"{action_prefix} 执行{offset_name}: {leg_volume}手",
             success_message=f"{offset_name}订单提交成功: {leg_volume}手, 订单ID: {{order_id}}",
             failure_message=f"{offset_name}失败: {{error}}",
+            trade_rule=trade_rule,
         )
-        if not order:
+        if not leg_orders:
             continue
 
-        orders.append(order)
+        orders.extend(leg_orders)
         executed_volume += submitted_volume
         remaining_volume -= submitted_volume
 
@@ -440,7 +496,7 @@ def _smart_close_position(
     # CTP offset_flag 语义。
     if remaining_volume > 0:
         fallback_volume = remaining_volume
-        order, submitted_volume = _submit_close_leg(
+        leg_orders, submitted_volume = _submit_close_leg(
             executor=executor,
             symbol=symbol,
             direction=direction,
@@ -451,9 +507,10 @@ def _smart_close_position(
             success_message="通用平仓订单提交成功: 订单ID: {order_id}",
             failure_message="通用平仓也失败: {error}",
             failure_level="error",
+            trade_rule=trade_rule,
         )
-        if order:
-            orders.append(order)
+        if leg_orders:
+            orders.extend(leg_orders)
             executed_volume += submitted_volume
             remaining_volume -= submitted_volume
 
@@ -531,7 +588,7 @@ def _execute_position_adjustment(
         if position_detail.short_total > 0:  # 先平空头
             close_volume = min(abs(adjust_volume), position_detail.short_total)
             close_orders, executed_volume, close_ok = _smart_close_position(
-                executor, symbol, "BUY", close_volume, limit_price, offset_priority
+                executor, symbol, "BUY", close_volume, limit_price, offset_priority, trade_rule=trade_rule
             )
             orders.extend(close_orders)
             if not close_ok:
@@ -543,26 +600,26 @@ def _execute_position_adjustment(
             adjust_volume -= executed_volume
 
         if adjust_volume > 0:  # 开多头
-            try:
-                order = executor.place_order(
-                    OrderDirection.BUY,
-                    OrderType.LIMIT,
-                    adjust_volume,
-                    limit_price,
-                    offset_flag=THOST_FTDC_OF_Open,
-                    trade_rule=trade_rule,
+            open_orders, submitted = _place_volume_slices(
+                executor,
+                OrderDirection.BUY,
+                adjust_volume,
+                limit_price,
+                offset_flag=THOST_FTDC_OF_Open,
+                trade_rule=trade_rule,
+            )
+            orders.extend(open_orders)
+            if open_orders:
+                executor.logger.info(
+                    f"开多仓: {symbol} 提交 {submitted}手@{limit_price}, 末单ID: {open_orders[-1].order_id}"
                 )
-                orders.append(order)
-                executor.logger.info(f"开多仓: {symbol} {adjust_volume}手@{limit_price}, 订单ID: {order.order_id}")
-            except Exception as e:
-                executor.logger.error(f"开多仓失败: {symbol} {adjust_volume}手@{limit_price}, 错误: {e}")
 
     else:  # 需要减少净持仓
         adjust_volume = abs(adjust_volume)
         if position_detail.long_total > 0:  # 先平多头
             close_volume = min(adjust_volume, position_detail.long_total)
             close_orders, executed_volume, close_ok = _smart_close_position(
-                executor, symbol, "SELL", close_volume, limit_price, offset_priority
+                executor, symbol, "SELL", close_volume, limit_price, offset_priority, trade_rule=trade_rule
             )
             orders.extend(close_orders)
             if not close_ok:
@@ -573,19 +630,19 @@ def _execute_position_adjustment(
             adjust_volume -= executed_volume
 
         if adjust_volume > 0:  # 开空头
-            try:
-                order = executor.place_order(
-                    OrderDirection.SELL,
-                    OrderType.LIMIT,
-                    adjust_volume,
-                    limit_price,
-                    offset_flag=THOST_FTDC_OF_Open,
-                    trade_rule=trade_rule,
+            open_orders, submitted = _place_volume_slices(
+                executor,
+                OrderDirection.SELL,
+                adjust_volume,
+                limit_price,
+                offset_flag=THOST_FTDC_OF_Open,
+                trade_rule=trade_rule,
+            )
+            orders.extend(open_orders)
+            if open_orders:
+                executor.logger.info(
+                    f"开空仓: {symbol} 提交 {submitted}手@{limit_price}, 末单ID: {open_orders[-1].order_id}"
                 )
-                orders.append(order)
-                executor.logger.info(f"开空仓: {symbol} {adjust_volume}手@{limit_price}, 订单ID: {order.order_id}")
-            except Exception as e:
-                executor.logger.error(f"开空仓失败: {symbol} {adjust_volume}手@{limit_price}, 错误: {e}")
 
     return orders
 
