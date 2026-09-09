@@ -88,7 +88,12 @@ def ensure_order_volume_allowed(
     trade_rule: dict[str, Any] | None = None,
 ) -> int:
     """在原生发单前校验单笔数量，通过则返回 int(volume)。"""
-    if not isinstance(volume, (int, float)) or isinstance(volume, bool) or not float(volume).is_integer() or volume <= 0:
+    if (
+        not isinstance(volume, (int, float))
+        or isinstance(volume, bool)
+        or not float(volume).is_integer()
+        or volume <= 0
+    ):
         raise ValueError("CTP 下单数量必须为正整数")
     lots = int(volume)
     minimum, maximum = effective_max_order_volume(instrument, order_type, trade_rule)
@@ -100,7 +105,7 @@ def ensure_order_volume_allowed(
 
 
 def split_order_volumes(total: float, max_size: int | None, *, min_size: int | None = None) -> list[int]:
-    """按有效单笔上限拆单；尾单不足最小量时不凑单，留给调用方作为未完成量。
+    """用最少订单覆盖最大合法总量；为尾单预留最小量，绝不向上凑量。
 
     Parameters
     ----------
@@ -109,29 +114,32 @@ def split_order_volumes(total: float, max_size: int | None, *, min_size: int | N
     max_size:
         单笔上限；``None`` 表示不拆，整笔返回（仍受 min_size 约束）。
     min_size:
-        合约最小量；尾单 ``0 < rem < min_size`` 时停止，不发送违规单。
+        合约最小量；无法完整覆盖时返回不超过目标的最大合法总量。
     """
     if not isinstance(total, (int, float)) or isinstance(total, bool) or not float(total).is_integer() or total <= 0:
         raise ValueError("拆单数量必须为正整数")
     remaining = int(total)
-    floor = min_size if min_size and min_size > 0 else 1
-    if max_size is not None and max_size <= 0:
-        raise ValueError("单笔上限必须是正整数")
-    slices: list[int] = []
+    floor = 1 if min_size is None else min_size
+    if isinstance(floor, bool) or not isinstance(floor, int) or floor <= 0:
+        raise ValueError("单笔最小量必须是正整数")
     if max_size is None:
-        if remaining < floor:
-            return []
-        return [remaining]
-    while remaining >= floor:
-        chunk = min(remaining, max_size)
-        if chunk < floor:
-            break
+        return [remaining] if remaining >= floor else []
+    if isinstance(max_size, bool) or not isinstance(max_size, int) or max_size < floor:
+        raise ValueError("单笔上下限冲突或非法")
+    count = (remaining + max_size - 1) // max_size
+    if remaining < count * floor:
+        count = remaining // max_size
+        remaining = count * max_size
+    slices: list[int] = []
+    for index in range(count):
+        chunk = min(max_size, remaining - (count - index - 1) * floor)
         slices.append(chunk)
         remaining -= chunk
     return slices
 
 
 def sum_volumes(volumes: Iterable[int]) -> int:
+    """汇总已拆分的整数手数。"""
     return sum(int(v) for v in volumes)
 
 

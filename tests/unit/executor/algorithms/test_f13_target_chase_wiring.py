@@ -8,7 +8,6 @@ from unittest.mock import MagicMock, patch
 from axile.common.trade_channel import TradeChannel
 from axile.executor.algorithms.core.base import AlgorithmInput, ExecutorProtocol
 from axile.executor.algorithms.defaults.ctp_target_pos_task.impl import (
-    CTPPositionDetail,
     CTPTargetPosTaskParams,
     ctp_target_pos_task_algorithm,
 )
@@ -16,7 +15,7 @@ from axile.executor.algorithms.utils.order_tracker import ChaseConfig, OrderTrac
 from axile.executor.constants.order_status import OrderStatus
 from axile.executor.models.execution_result import ExecutionStatus
 from axile.executor.models.unified_account_assets import Position, PositionDirection, UnifiedAccountAssets
-from axile.executor.models.unified_order import OrderDirection, OrderType, TradeRecord, UnifiedOrder
+from axile.executor.models.unified_order import OrderDirection, TradeRecord, UnifiedOrder
 from axile.executor.models.unified_price import UnifiedPriceData
 
 
@@ -69,7 +68,7 @@ class _Exec:
 
     def place_order(self, direction, order_type, volume, price=0, **kwargs):
         order = UnifiedOrder(
-            order_id=f"ctp-{len(self.orders)+1}",
+            order_id=f"ctp-{len(self.orders) + 1}",
             symbol=self.symbol,
             direction=direction,
             order_type=order_type,
@@ -98,18 +97,41 @@ class _Exec:
         self.long_yesterday = 0
         return order
 
-    def register_order_callback(self, cb): self.order_callbacks.append(cb)
-    def unregister_order_callback(self, cb): self.order_callbacks.remove(cb)
-    def register_price_callback(self, cb): self.price_callbacks.append(cb)
-    def unregister_price_callback(self, cb): self.price_callbacks.remove(cb)
-    def register_trade_callback(self, cb): self.trade_callbacks.append(cb)
-    def unregister_trade_callback(self, cb): self.trade_callbacks.remove(cb)
-    def get_pending_orders(self): return []
-    def query_trades(self, _oid): return []
-    def cancel_order(self, _oid): return True
-    def is_termination_requested(self): return False
-    def get_termination_mode(self): return None
-    def handle_termination_checkpoint(self): return None
+    def register_order_callback(self, cb):
+        self.order_callbacks.append(cb)
+
+    def unregister_order_callback(self, cb):
+        self.order_callbacks.remove(cb)
+
+    def register_price_callback(self, cb):
+        self.price_callbacks.append(cb)
+
+    def unregister_price_callback(self, cb):
+        self.price_callbacks.remove(cb)
+
+    def register_trade_callback(self, cb):
+        self.trade_callbacks.append(cb)
+
+    def unregister_trade_callback(self, cb):
+        self.trade_callbacks.remove(cb)
+
+    def get_pending_orders(self):
+        return []
+
+    def query_trades(self, _oid):
+        return []
+
+    def cancel_order(self, _oid):
+        return True
+
+    def is_termination_requested(self):
+        return False
+
+    def get_termination_mode(self):
+        return None
+
+    def handle_termination_checkpoint(self):
+        return None
 
 
 def test_F13_target_chase_config_creates_chase_entries() -> None:
@@ -145,7 +167,9 @@ def test_F13_target_chase_config_creates_chase_entries() -> None:
     sample = executor.orders[0]
     probe.add_order(
         sample,
-        direction=OrderDirection(sample.direction) if not isinstance(sample.direction, OrderDirection) else sample.direction,
+        direction=OrderDirection(sample.direction)
+        if not isinstance(sample.direction, OrderDirection)
+        else sample.direction,
         target_volume=0,
         current_volume=5,
         offset_flag=str(sample.extra.get("offset_flag")),

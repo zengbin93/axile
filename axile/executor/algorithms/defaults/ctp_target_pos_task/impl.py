@@ -33,7 +33,7 @@ from axile.executor.models.execution_result import ExecutionStatus
 from axile.executor.models.unified_account_assets import Position, PositionDirection, UnifiedAccountAssets
 from axile.executor.models.unified_order import UnifiedOrder
 from axile.executor.models.unified_price import clone_price_data
-from axile.executor.order_volume_limits import split_order_volumes, user_max_single_order_size
+from axile.executor.order_volume_limits import split_order_volumes
 
 
 class CTPTargetPosTaskParams(BaseAlgorithmParams, ChaseParamsMixin):
@@ -319,18 +319,6 @@ def _build_close_sequence(
     ], "先平今再平昨"
 
 
-
-def _resolve_max_single_order(executor: ExecutorProtocol, trade_rule: Dict[str, Any] | None, order_type: OrderType = OrderType.LIMIT) -> int | None:
-    """解析算法侧有效单笔上限：优先问执行器，否则只用用户规则。"""
-    getter = getattr(executor, "get_max_order_volume", None)
-    if callable(getter):
-        try:
-            return getter(order_type, trade_rule)  # ExecutionSession 签名
-        except TypeError:
-            return getter(getattr(executor, "symbol", ""), order_type, trade_rule)
-    return user_max_single_order_size(trade_rule)
-
-
 def _place_volume_slices(
     executor: ExecutorProtocol,
     direction: OrderDirection,
@@ -344,9 +332,11 @@ def _place_volume_slices(
     orders: List[UnifiedOrder] = []
     if volume <= 0:
         return orders, 0.0
-    max_size = _resolve_max_single_order(executor, trade_rule, OrderType.LIMIT)
-    # 算法侧没有合约对象时，至少按用户上限拆；原生层仍会再拦合约上限。
-    slices = split_order_volumes(volume, max_size)
+    getter = getattr(executor, "get_order_volume_bounds", None)
+    bounds = (
+        cast("tuple[int | None, int | None] | None", getter(OrderType.LIMIT, trade_rule)) if callable(getter) else None
+    )
+    slices = split_order_volumes(volume, bounds[1], min_size=bounds[0]) if bounds is not None else [volume]
     submitted = 0.0
     for chunk in slices:
         try:
@@ -359,13 +349,18 @@ def _place_volume_slices(
                 trade_rule=trade_rule,
             )
         except Exception as exc:
+            if isinstance(exc, MemoryError) or bool(getattr(exc, "requires_session_recovery", False)):
+                raise
             executor.logger.error(
                 f"拆单提交失败: {direction.value} {chunk}手@{limit_price} offset={offset_flag}, 错误: {exc}"
             )
             break
         orders.append(order)
         submitted += float(chunk)
+    if submitted < volume:
+        executor.logger.warning(f"拆单未提交缺口: {volume - submitted}，目标 {volume}，已提交 {submitted}")
     return orders, submitted
+
 
 def _submit_close_leg(
     executor: ExecutorProtocol,
@@ -397,6 +392,8 @@ def _submit_close_leg(
         executor.logger.info(success_message.format(order_id=orders[-1].order_id))
         return orders, submitted
     except Exception as e:
+        if isinstance(e, MemoryError) or bool(getattr(e, "requires_session_recovery", False)):
+            raise
         getattr(executor.logger, failure_level)(failure_message.format(error=e))
         return [], 0
 
@@ -749,7 +746,9 @@ def ctp_target_pos_task_algorithm(executor: ExecutorProtocol, algorithm_input: A
                     direction=order_direction,
                     target_volume=target_volume,
                     current_volume=position_detail.net_position,
-                    offset_flag=str(order.extra.get("offset_flag")) if order.extra.get("offset_flag") is not None else None,
+                    offset_flag=str(order.extra.get("offset_flag"))
+                    if order.extra.get("offset_flag") is not None
+                    else None,
                     trade_rule=trade_rule,
                 )
 

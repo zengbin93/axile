@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from typing import Any
-from unittest.mock import MagicMock
 
 from axile.common.trade_channel import TradeChannel
 from axile.executor.algorithms.utils.order_tracker import (
@@ -12,16 +11,24 @@ from axile.executor.algorithms.utils.order_tracker import (
     _chase_place_kwargs,
 )
 from axile.executor.constants.order_status import OrderStatus
-from axile.executor.models.unified_account_assets import UnifiedAccountAssets
 from axile.executor.models.unified_order import OrderDirection, OrderType, UnifiedOrder
 
 
 class _Logger:
-    def debug(self, *a, **k): _ = a, k
-    def info(self, *a, **k): _ = a, k
-    def warning(self, *a, **k): _ = a, k
-    def error(self, *a, **k): _ = a, k
-    def exception(self, *a, **k): _ = a, k
+    def debug(self, *a, **k):
+        _ = a, k
+
+    def info(self, *a, **k):
+        _ = a, k
+
+    def warning(self, *a, **k):
+        _ = a, k
+
+    def error(self, *a, **k):
+        _ = a, k
+
+    def exception(self, *a, **k):
+        _ = a, k
 
 
 class _FakeExecutor:
@@ -111,7 +118,9 @@ def _order(order_id: str = "o1", *, offset: str = "4", direction=OrderDirection.
 
 def test_F13_add_order_creates_chase_context_with_offset_and_trade_rule() -> None:
     executor = _FakeExecutor()
-    tracker = OrderTracker(executor=executor, chase_config=ChaseConfig(enabled=True, ticks=1, max_count=3, interval=0.1))
+    tracker = OrderTracker(
+        executor=executor, chase_config=ChaseConfig(enabled=True, ticks=1, max_count=3, interval=0.1)
+    )
     rule = {"price": "PASSIVE", "max_single_order_size": 2, "offset_priority": "昨今"}
     tracker.add_order(
         _order(),

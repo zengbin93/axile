@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any, Mapping
 
 
@@ -41,24 +42,27 @@ def resolve_insert_reject_order_id(
 ) -> str | None:
     """用报单错误帧上的 OrderRef 关联稳定订单 ID。
 
-    优先匹配已登记的 ``order_keys``；若尚未登记，则按当前会话拼接稳定键，
-    供跟踪器吸收早到拒单。
+    显式会话字段优先；缺失时使用当前发单会话。完整稳定键用于精确查询
+    ``order_keys``，尚未登记时由跟踪器缓冲早到拒单，绝不跨会话搜索 OrderRef。
     """
     order_ref = str(_row_value(row, "OrderRef", "") or "").strip()
     if not order_ref:
         return None
-    for order_id, key in order_keys.items():
-        if str(key.get("order_ref", "") or "").strip() == order_ref:
-            return str(order_id)
-    day = str(_row_value(row, "TradingDay", trading_day) or trading_day)
-    row_front = _row_value(row, "FrontID", front_id)
-    row_session = _row_value(row, "SessionID", session_id)
-    try:
-        resolved_front = int(row_front or front_id)
-        resolved_session = int(row_session or session_id)
-    except (TypeError, ValueError):
-        resolved_front, resolved_session = front_id, session_id
-    return str(stable_order_id(day, resolved_front, resolved_session, order_ref))
+    day = str(_row_value(row, "TradingDay", trading_day) or trading_day).strip()
+    if not day or day != trading_day or len(day) != 8 or not day.isdigit():
+        return None
+    # CTP SessionID 是有符号 32 位整数；负数和零同样构成稳定会话身份。
+    identities = [(_row_value(row, "FrontID", front_id), 1), (_row_value(row, "SessionID", session_id), -(2**31))]
+    resolved = []
+    for value, minimum in identities:
+        if isinstance(value, bool) or re.fullmatch(r"[+-]?[0-9]+", str(value)) is None:
+            return None
+        number = int(str(value))
+        if not minimum <= number <= 2**31 - 1:
+            return None
+        resolved.append(number)
+    # 完整身份既是已登记订单的查询键，也是早到拒单的缓冲键。
+    return str(stable_order_id(day, resolved[0], resolved[1], order_ref))
 
 
 def rejected_order_update(

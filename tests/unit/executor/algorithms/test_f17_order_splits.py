@@ -52,6 +52,9 @@ class _SplitExecutor:
             return int(trade_rule["max_single_order_size"])
         return None
 
+    def get_order_volume_bounds(self, order_type=OrderType.LIMIT, trade_rule=None):
+        return 1, self.get_max_order_volume(order_type, trade_rule)
+
     def place_order(self, direction, order_type, volume, price=0, **kwargs):
         limit = self.get_max_order_volume(order_type, kwargs.get("trade_rule"))
         assert limit is None or volume <= limit
@@ -89,3 +92,47 @@ def test_F17_target_open_splits_by_max_single_order_size() -> None:
     assert sum(order.volume for order in orders) == 50
     assert all(order.direction == OrderDirection.BUY for order in orders)
     assert all(order.extra["offset_flag"] == "0" for order in orders)
+
+
+def test_target_rebalances_minimum_and_preserves_partial_submission(monkeypatch):
+    from axile.executor.algorithms.defaults.ctp_target_pos_task.impl import _place_volume_slices
+
+    executor = _SplitExecutor()
+    monkeypatch.setattr(executor, "get_order_volume_bounds", lambda *_: (3, 10))
+    orders, submitted = _place_volume_slices(executor, OrderDirection.BUY, 12, 3200, offset_flag="0", trade_rule=None)
+    assert [order.volume for order in orders] == [9, 3]
+    assert submitted == 12
+    original_place = executor.place_order
+    count = 0
+
+    def place(*args, **kwargs):
+        nonlocal count
+        count += 1
+        if count == 2:
+            raise ValueError("offline failure")
+        return original_place(*args, **kwargs)
+
+    monkeypatch.setattr(executor, "place_order", place)
+    orders, submitted = _place_volume_slices(executor, OrderDirection.BUY, 30, 3200, offset_flag="0", trade_rule=None)
+    assert count == 2
+    assert len(orders) == 1
+    assert submitted == 10
+    assert executor.logger.warning.called
+
+
+def test_target_session_recovery_is_not_swallowed(monkeypatch):
+    import pytest
+
+    from axile.executor.algorithms.defaults.ctp_target_pos_task.impl import _submit_close_leg
+    from axile.executor.ctp.ctp_execute import CtpSessionRecoveryRequired
+
+    executor = _SplitExecutor()
+
+    def fail(*_args, **_kwargs):
+        raise CtpSessionRecoveryRequired("offline disconnect")
+
+    monkeypatch.setattr(executor, "place_order", fail)
+    with pytest.raises(CtpSessionRecoveryRequired):
+        _submit_close_leg(
+            executor, executor.symbol, OrderDirection.BUY.value, 3, 3200, "3", "start", "ok", "failed {error}"
+        )

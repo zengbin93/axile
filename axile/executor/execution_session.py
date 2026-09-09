@@ -184,16 +184,23 @@ class ExecutionSession:
         """获取当前 symbol 的最小价格变动单位."""
         return self._owner.get_tick_size(self.symbol)
 
-    def get_max_order_volume(self, order_type: OrderType = OrderType.LIMIT, trade_rule: dict[str, object] | None = None) -> int | None:
-        """获取当前 symbol 的有效单笔数量上限（合约与用户规则取严）。"""
-        getter = getattr(self._owner, "get_max_order_volume", None)
-        if not callable(getter):
-            if trade_rule and trade_rule.get("max_single_order_size") is not None:
-                from axile.executor.order_volume_limits import user_max_single_order_size
+    def get_order_volume_bounds(
+        self, order_type: OrderType = OrderType.LIMIT, trade_rule: dict[str, object] | None = None
+    ) -> tuple[int | None, int | None] | None:
+        """获取当前品种数量边界；渠道不支持时返回 None，保留小数数量语义。"""
+        getter = getattr(self._owner, "get_order_volume_bounds", None)
+        return (
+            cast("tuple[int | None, int | None] | None", getter(self.symbol, order_type, trade_rule))
+            if callable(getter)
+            else None
+        )
 
-                return user_max_single_order_size(trade_rule)
-            return None
-        return getter(self.symbol, order_type, trade_rule)
+    def get_max_order_volume(
+        self, order_type: OrderType = OrderType.LIMIT, trade_rule: dict[str, object] | None = None
+    ) -> int | None:
+        """兼容仅查询上限的调用方。"""
+        bounds = self.get_order_volume_bounds(order_type, trade_rule)
+        return bounds[1] if bounds is not None else None
 
     def get_min_notional(self) -> float | None:
         """获取当前 symbol 下单的最小名义价值."""

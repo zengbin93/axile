@@ -112,3 +112,16 @@ def test_session_expect_order_ack_noop_when_owner_incapable() -> None:
     """无能力 owner：登记探针为无副作用空操作，不抛."""
     session = _session(_PlainOwner())
     session.expect_order_ack("123")
+
+
+def test_unsupported_volume_bounds_preserve_fractional_market_order():
+    from axile.executor.algorithms.defaults.ctp_target_pos_task.impl import _place_volume_slices
+    from tests.unit.executor.algorithms.test_algorithm_issue_fixes import _FallbackExecutor
+
+    owner = _FallbackExecutor()
+    owner.channel_type = TradeChannel.GM
+    session = ExecutionSession(owner=cast("Any", owner), symbol="rb2610")
+    assert session.get_order_volume_bounds(OrderType.MARKET, {"max_single_order_size": 0.1}) is None
+    orders, submitted = _place_volume_slices(owner, OrderDirection.BUY, 0.4, 100, offset_flag="0", trade_rule=None)
+    assert submitted == 0.4
+    assert orders[0].volume == 0.4

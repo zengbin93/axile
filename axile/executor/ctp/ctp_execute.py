@@ -27,21 +27,12 @@ from axile.executor.account_control.exceptions import AccountControlBlockedError
 from axile.executor.algorithms.utils import clock_now
 from axile.executor.china_futures_session import is_within_possible_china_futures_session
 from axile.executor.constants.order_status import OrderStatus
-from axile.executor.order_insert_rejects import (
-    insert_error_detail,
-    rejected_order_update,
-    resolve_insert_reject_order_id,
-)
 from axile.executor.ctp.converters import (
     account_to_unified,
     order_to_unified,
     quote_to_unified,
     stable_order_id,
     trade_to_unified,
-)
-from axile.executor.order_volume_limits import (
-    effective_max_order_volume,
-    ensure_order_volume_allowed,
 )
 from axile.executor.ctp.options import (
     OptionActionRecord,
@@ -81,6 +72,15 @@ from axile.executor.models.unified_callback import (
 )
 from axile.executor.models.unified_input import AccountConfig, CTPAccountConfig, UnifiedStandardInput
 from axile.executor.models.unified_order import OrderDirection, OrderType, UnifiedOrder
+from axile.executor.order_insert_rejects import (
+    insert_error_detail,
+    rejected_order_update,
+    resolve_insert_reject_order_id,
+)
+from axile.executor.order_volume_limits import (
+    effective_max_order_volume,
+    ensure_order_volume_allowed,
+)
 
 _SHANGHAI = ZoneInfo("Asia/Shanghai")
 _ValueT = TypeVar("_ValueT")
@@ -868,9 +868,7 @@ class CTPExecutor(AbstractExecutor, UnifiedCallbackClient):
                 direction_value = OrderDirection.BUY.value
             price_type = getattr(row, "OrderPriceType", None)
             order_type_value = (
-                OrderType.LIMIT.value
-                if price_type == td.THOST_FTDC_OPT_LimitPrice
-                else OrderType.MARKET.value
+                OrderType.LIMIT.value if price_type == td.THOST_FTDC_OPT_LimitPrice else OrderType.MARKET.value
             )
             try:
                 volume = float(getattr(row, "VolumeTotalOriginal", 0) or 0)
@@ -895,16 +893,14 @@ class CTPExecutor(AbstractExecutor, UnifiedCallbackClient):
                 source=source,
                 extra={
                     "order_ref": key.get("order_ref", str(getattr(row, "OrderRef", "") or "")),
-                    "front_id": key.get("front_id", self._front_id),
-                    "session_id": key.get("session_id", self._session_id),
+                    "front_id": key.get("front_id", getattr(row, "FrontID", self._front_id)),
+                    "session_id": key.get("session_id", getattr(row, "SessionID", self._session_id)),
                     "exchange_id": key.get("exchange_id", str(getattr(row, "ExchangeID", "") or "")),
                     "order_sys_id": key.get("order_sys_id", ""),
                 },
             )
             rejected = UnifiedOrder.create(**fields)
-            self.logger.error(
-                f"报单拒绝已关联订单 {order_id}: ErrorID={error_id}, {error_msg}, source={source}"
-            )
+            self.logger.error(f"报单拒绝已关联订单 {order_id}: ErrorID={error_id}, {error_msg}, source={source}")
         self._dispatch(self._order_callbacks, rejected)
 
     def reconcile_terminal_order(self, symbol: str, order_id: str):
@@ -953,16 +949,19 @@ class CTPExecutor(AbstractExecutor, UnifiedCallbackClient):
         v = float(getattr(x, "PriceTick", 0) or 0) if x else 0
         return v if v > 0 else None
 
-    def get_max_order_volume(self, symbol, order_type=OrderType.LIMIT, trade_rule=None):
-        """返回当前合约在给定订单类型与用户规则下的有效单笔上限。"""
+    def get_order_volume_bounds(self, symbol, order_type=OrderType.LIMIT, trade_rule=None):
+        """返回当前合约与用户规则合并后的有效最小量和最大量。"""
         if trade_rule is not None and not isinstance(trade_rule, dict):
             raise ValueError("trade_rule 必须是字典")
-        _minimum, maximum = effective_max_order_volume(
+        return effective_max_order_volume(
             self._instruments.get(symbol),
             order_type,
             trade_rule if isinstance(trade_rule, dict) else None,
         )
-        return maximum
+
+    def get_max_order_volume(self, symbol, order_type=OrderType.LIMIT, trade_rule=None):
+        """兼容仅查询上限的调用方。"""
+        return self.get_order_volume_bounds(symbol, order_type, trade_rule)[1]
 
     @override
     def _calculate_generic_sizing(
