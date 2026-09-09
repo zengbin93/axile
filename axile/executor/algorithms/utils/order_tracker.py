@@ -35,6 +35,34 @@ from axile.executor.models.unified_price import UnifiedPriceData
 MARKET_FALLBACK_MAX_SLIPPAGE = 0.005
 
 
+def _coerce_order_direction(direction: object) -> OrderDirection | None:
+    """把订单上的方向字段归一成 OrderDirection。"""
+    if direction is None or direction == "":
+        return None
+    if isinstance(direction, OrderDirection):
+        return direction
+    try:
+        return OrderDirection(direction)
+    except (TypeError, ValueError):
+        return None
+
+
+def _chase_place_kwargs(chase_info: dict[str, Any]) -> dict[str, Any]:
+    """从追价上下文恢复换单时必须保留的开平与交易规则。"""
+    kwargs: dict[str, Any] = {}
+    position_side = chase_info.get("position_side")
+    if position_side:
+        kwargs["position_side"] = position_side
+    offset_flag = chase_info.get("offset_flag")
+    if offset_flag is not None and offset_flag != "":
+        kwargs["offset_flag"] = offset_flag
+    trade_rule = chase_info.get("trade_rule")
+    if trade_rule is not None:
+        kwargs["trade_rule"] = trade_rule
+    return kwargs
+
+
+
 def _summarize_trade_records(trades: list[TradeRecord]) -> tuple[float, float]:
     """根据成交列表计算累计成交量和成交均价."""
     if not trades:
@@ -178,6 +206,8 @@ class OrderTracker:
         target_volume: float = 0,
         current_volume: float = 0,
         position_side: str | None = None,
+        offset_flag: str | None = None,
+        trade_rule: dict[str, Any] | None = None,
     ) -> None:
         """
         将新订单纳入当前跟踪器。
@@ -187,30 +217,41 @@ class OrderTracker:
         order : UnifiedOrder
             需要开始跟踪的订单对象。
         direction : OrderDirection | None, default=None
-            订单方向；启用追单时会写入追单元数据。
+            订单方向；启用追单时会写入追单元数据。缺省时回退到 ``order.direction``。
         target_volume : float, default=0
             本轮执行规划的目标持仓量。
         current_volume : float, default=0
             提交该订单前的当前持仓量。
         position_side : str | None, default=None
             双向持仓模式下的持仓方向附加参数。
+        offset_flag : str | None, default=None
+            原始开平标志；缺省时回退到 ``order.extra["offset_flag"]``。
+        trade_rule : dict[str, Any] | None, default=None
+            原始交易规则；换单时必须原样带回，避免平仓变开仓或丢失单笔上限。
         """
         buffered_trades: list[TradeRecord] = []
         buffered_order_updates: list[UnifiedOrder] = []
+        resolved_direction = direction or _coerce_order_direction(order.direction)
+        resolved_offset = offset_flag
+        if resolved_offset is None and isinstance(order.extra, dict):
+            raw_offset = order.extra.get("offset_flag")
+            resolved_offset = None if raw_offset is None else str(raw_offset)
         with self.lock:
             self.pending_orders[order.order_id] = order
             self.order_trades.setdefault(order.order_id, [])
 
-            if self.chase_config and direction:
+            if self.chase_config and resolved_direction:
                 self._chase_info[order.order_id] = {
                     "symbol": order.symbol,
-                    "direction": direction,
+                    "direction": resolved_direction,
                     "target_volume": target_volume,
                     "current_volume": current_volume,
                     "original_price": order.price,
                     "chase_count": 0,
                     "last_chase_time": 0.0,
                     "position_side": position_side,
+                    "offset_flag": resolved_offset,
+                    "trade_rule": dict(trade_rule) if trade_rule is not None else None,
                 }
 
             self.all_done_event.clear()
@@ -759,10 +800,7 @@ class OrderTracker:
                 order = self._latest_known_order(order_id, order)
                 remaining_volume = self._get_effective_remaining_volume(order_id, order)
                 if remaining_volume > 0:
-                    position_side = chase_info.get("position_side")
-                    kwargs: dict[str, str] = {}
-                    if position_side:
-                        kwargs["position_side"] = position_side
+                    kwargs = _chase_place_kwargs(chase_info)
 
                     new_order = self.executor.place_order(
                         direction,
@@ -1044,9 +1082,7 @@ class OrderTracker:
             return
 
         position_side = chase_info.get("position_side")
-        kwargs: dict[str, str] = {}
-        if position_side:
-            kwargs["position_side"] = position_side
+        kwargs = _chase_place_kwargs(chase_info)
 
         try:
             market_order = self.executor.place_order(
