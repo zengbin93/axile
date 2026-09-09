@@ -1,0 +1,61 @@
+SKZ-737 verification evidence
+Date: 2026-09-09, Asia/Shanghai
+Source baseline: 0e1eaa6badd45e388c1d19e92fbac9d4cbf78fbe
+Environment: macOS arm64; CPython 3.13.12; pytest 9.1.1
+Scope: audit artifacts and offline tests only; no production changes or live SDK calls.
+
+Dependency setup:
+  uv sync --frozen --group dev --extra ctp --extra tqsdk
+  Installed openctp-ctp 6.7.7.1 and tqsdk 3.10.2.
+  Initial baseline collection without the CTP extra failed with ModuleNotFoundError.
+  Reran successfully after installing the declared extra.
+  uv run refreshed the existing stale axile version entry in uv.lock; that incidental
+  change was reverted. Final validation uses .venv/bin tools without lock updates.
+
+Existing focused baseline:
+  account_control guard/models/decorators/registry, public wrappers, GM,
+  store and persistence: 79 passed in 2.82s.
+
+Unmasked safety-invariant reproductions:
+  .venv/bin/pytest tests/unit/executor/test_account_control_audit_regressions.py tests/unit/server/test_account_control_audit_regressions.py --runxfail -q
+  Result: 10 failed, 4 passed in 0.22s.
+  All failures were expected AssertionError, not import/setup failures:
+  - R1 query_account=0/day still calls GM get_cash SDK stub.
+  - R1 query_positions=0/day still calls GM get_position SDK stub.
+  - R3 incremental flush retains count 1 instead of 2.
+  - R3 incremental flush retains pending instead of fetched.
+  - R4 async quota wait does not yield to a ready event-loop callback.
+  - R5 unknown operation runs downstream.
+  - R5 frozen registry does not reject an unknown late declaration.
+  - R6 zero daily wait enters waiting instead of blocking.
+  - R7 CancelledError leaves the allowed event pending.
+  - R8 preparation delay permits adjacent simulated actual sends.
+
+Related regression suite:
+  .venv/bin/pytest tests/unit/executor/test_account_control_*.py tests/unit/executor/test_base_executor_account_control_wrappers.py tests/unit/executor/test_gm_account_control.py tests/unit/executor/ctp tests/unit/executor/tq tests/unit/server/test_account_control_*.py tests/unit/server/test_ctp_channels.py -q
+  Result: 252 passed, 10 xfailed, 5 warnings in 3.04s.
+  The 10 strict xfails document unfixed findings and only accept AssertionError.
+  Fixing an invariant makes XPASS fail CI until its xfail marker is removed.
+  Four passing characterization cases describe current policy/deployment behavior.
+  Warnings: existing Starlette/FastAPI httpx TestClient and HTTP 422 constant deprecations.
+
+Static checks:
+  .venv/bin/ruff check tests/unit/executor/test_account_control_audit_regressions.py tests/unit/server/test_account_control_audit_regressions.py
+  Result: All checks passed!
+  .venv/bin/ruff format --check tests/unit/executor/test_account_control_audit_regressions.py tests/unit/server/test_account_control_audit_regressions.py
+  Result: 2 files already formatted.
+  git diff --check
+  Result: no whitespace errors.
+
+HTML:
+  Local Chromium headless with Playwright; file opened directly, no server required.
+  Checked title, 11 findings, 11 core module rows, 7 valid navigation anchors.
+  No script elements or page errors. No page-level horizontal overflow at 1440x1100
+  and 390x844. Desktop/mobile screenshots visually inspected; tables scroll locally.
+  A first mobile check caught long-text overflow; wrapping was fixed and rechecked.
+
+Not verified:
+  No live trading, broker-specific QPS certification, process-kill experiment,
+  sustained capacity benchmark, full repository suite, full type check or CI result.
+  GM SDK calls use existing project stubs; storage tests use isolated in-memory SQLite.
+  TQ Entity read classification checks installed tqsdk 3.10.2 primary implementation.

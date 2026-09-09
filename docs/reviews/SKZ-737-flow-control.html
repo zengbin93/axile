@@ -1,0 +1,295 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="Axile 统一账户流控设计、API 使用、CTP/GM/TQ 覆盖矩阵及可复现风险审查。">
+<title>SKZ-737 · Axile 统一流控深度审查</title>
+<style>
+:root{color-scheme:light;--ink:#172b42;--muted:#51627a;--line:#dce4ee;--blue:#165ea6;--paper:#fff;--bg:#f2f5fa}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.8 system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif}header{background:#142d4e;color:#fff;padding:52px max(24px,calc((100vw - 1160px)/2))}header p{color:#d7e6f8}h1{font-size:36px;line-height:1.4;margin:10px 0 20px}h2{font-size:26px;margin:0 0 18px;border-bottom:2px solid var(--line);padding-bottom:12px}h3{font-size:20px;margin:26px 0 10px}h4{margin:18px 0 6px}p{margin:10px 0}main{max-width:1200px;margin:auto;padding:24px 20px 60px}section{background:var(--paper);border:1px solid var(--line);border-radius:12px;margin:22px 0;padding:28px;scroll-margin-top:22px}nav{display:flex;gap:10px;flex-wrap:wrap}nav a{color:#fff;border:1px solid #7694b7;padding:5px 12px;border-radius:6px;text-decoration:none}a{color:var(--blue)}code,pre{font-family:ui-monospace,SFMono-Regular,Consolas,monospace}code{background:#edf2f8;padding:2px 4px;border-radius:3px;font-size:.88em;overflow-wrap:anywhere}pre{background:#14273f;color:#e5efff;padding:20px;border-radius:8px;white-space:pre-wrap;overflow-wrap:anywhere;font-size:13px;line-height:1.7}pre code{background:none;padding:0;color:inherit;font-size:inherit}.table-wrap{overflow-x:auto}table{width:100%;border-collapse:collapse;font-size:14px;margin:16px 0}th,td{padding:12px 10px;text-align:left;vertical-align:top;border:1px solid var(--line)}th{background:#eaf0f8}tbody tr:nth-child(even){background:#f8fafd}.note{border-left:4px solid #2b79b8;background:#eef6ff;padding:14px 18px;margin:16px 0}.warning{border-left-color:#b45309;background:#fff7e8}.danger{border-left-color:#b42318;background:#fff1f0}.muted,small{color:var(--muted)}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:14px}.card{border:1px solid var(--line);border-radius:8px;padding:16px}.card strong{font-size:24px;display:block}.flow{display:flex;gap:9px;flex-wrap:wrap;align-items:center}.flow span{padding:12px;background:#eaf2fc;border:1px solid #c5d7ef;border-radius:6px}.tag{display:inline-block;font-size:12px;border-radius:4px;padding:2px 7px;background:#e8eff8;font-weight:600}.high{background:#ffe4df;color:#9e251a}.medium{background:#fff0cf;color:#885000}.ok{background:#e1f4e9;color:#13683b}.finding{border-top:1px solid var(--line);padding-top:16px;margin-top:24px}.finding h3{margin-top:8px}details{padding:12px 0;border-top:1px solid var(--line)}summary{cursor:pointer;font-weight:600}ul,ol{padding-left:24px}.source{font-size:13px;color:var(--muted)}footer{text-align:center;font-size:13px;color:var(--muted);padding:20px}.nowrap{white-space:nowrap}
+body{overflow-wrap:anywhere}.nowrap{white-space:normal;overflow-wrap:anywhere}
+@media(max-width:680px){header{padding:30px 20px}h1{font-size:27px}main{padding:12px}section{padding:18px}table{font-size:12px}th,td{padding:8px}h2{font-size:22px}}
+@media print{body{background:white;font-size:11pt}header{background:white;color:#172b42;padding:12px}header p{color:#51627a}nav{display:none}main{padding:0;max-width:none}section{border:none;padding:12px 0;break-inside:auto}h2,h3,h4{break-after:avoid}tr,.card{break-inside:avoid}.table-wrap{overflow:visible}pre{background:#eef2f8;color:#172b42}a{color:inherit}}
+</style>
+</head>
+<body>
+<header>
+<div>ENGINEERING REVIEW / SKZ-737</div>
+<h1>Axile 统一流控模块<br>设计、渠道覆盖与潜在风险</h1>
+<p>审查日期：2026-09-09（Asia/Shanghai） · 基线：<span class="nowrap">0e1eaa6badd45e388c1d19e92fbac9d4cbf78fbe</span><br>交付类型：只读审查 + 离线风险复现；不修改生产流控行为，不连接实盘。</p>
+<nav aria-label="报告目录"><a href="#design">整体设计</a><a href="#api">公开 API 与用法</a><a href="#coverage">渠道矩阵</a><a href="#findings">风险清单</a><a href="#verification">验证证据</a><a href="#actions">整改与回滚</a><a href="#inventory">审查范围</a></nav>
+</header>
+<main>
+<section id="design">
+<h2>01 · 整体设计：账户控制，不只是“每秒限流”</h2>
+<p>核心目录为 <code>axile/executor/account_control/</code>。模块把<strong>操作声明、策略配置、运行时准入、行为留痕与持久化恢复</strong>分开，服务于单次 execution。它采用<strong>固定分钟/自然日计数桶 + 上次放行时间间隔</strong>，不是令牌桶，也不是分布式限流服务。</p>
+<div class="flow" aria-label="流控处理链"><span>注册 operation / group</span>→<span>默认空规则 + preset + override</span>→<span>加载数据库快照</span>→<span>绑定 guard</span>→<span>排队 / 检查 / 预占</span>→<span>调用 SDK</span>→<span>回填 outcome</span>→<span>请求结束时刷盘</span></div>
+<h3>1.1 定义层与配置层</h3>
+<ul>
+<li><code>AccountControlRegistry</code> 保存操作键及其共享组。装饰器在函数定义时登记；CTP 专用叶子操作由 <code>ctp_operations.py</code> 显式登记。bootstrap 用于恢复导入声明。</li>
+<li><code>resolve_account_control_policy(preset_key, override)</code> 先为注册操作生成空规则，再叠加 preset，最后逐字段叠加账户 override。注册本身<strong>不意味着存在有限额度</strong>。</li>
+<li>作用域是 <code>operations.&lt;op&gt;.account</code>、<code>operations.&lt;op&gt;.symbol</code> 和 <code>groups.&lt;group&gt;</code>；规则为 <code>per_minute</code>、<code>per_day</code>、<code>min_interval_ms</code>。任一 scope 阻断则整体阻断；多个等待规则取最长等待。</li>
+<li>CTP 共享组成员不是写在所有操作的注册定义里，而由 <code>EffectiveAccountControlPolicy.operation_groups</code> 补充。guard 取注册组与策略组的并集。切换 preset 会改变成员关系。</li>
+<li>数字采用严格整数与非负校验；时区校验基于 <code>ZoneInfo</code>；最小间隔必须为正数。<code>unlimited=true</code> 只允许解除分钟/日额度，与 limit/on_trigger 互斥。省略或 null 表示继承，不表示解除。最小间隔不允许 unlimited，但可以下调到 1ms。</li>
+</ul>
+<h3>1.2 运行时、调度与计数语义</h3>
+<p><code>begin_operation()</code> 在 guard 内部使用 <code>RLock</code> 将“检查 + 预占”做成临界区。排队键是 <code>(priority, seq)</code>，数字越小优先级越高，同级 FIFO；只有队头评估额度。等待时释放状态锁，默认每 100ms 轮询，并调用 termination checkpoint。</p>
+<div class="grid"><div class="card"><strong>allow</strong>立即增加 account 的分钟/日计数；配置了 symbol scope 才存 symbol 计数；记录 pending 事件，返回 Attempt。</div><div class="card"><strong>wait</strong>不扣次数，不立即写事件；轮询直到允许或阻断。放行后记录累计 waited_ms、命中 rules、priority、groups。</div><div class="card"><strong>block</strong>记录 blocked / counted=false / policy_blocked；抛出 AccountControlBlockedError，SDK 不被调用。</div></div>
+<p>装饰器和 <code>run_controlled_call</code> 在真实方法返回后回填 outcome；普通异常记录 downstream_error 并原样抛出。<strong>已经放行的失败请求不退额度</strong>，所以计数代表“准入尝试”，不等同于成交、柜台受理或实际网络发包次数。参数验证也可能在准入后才失败。</p>
+<p class="source">依据：<code>guard.py:377</code>、<code>guard.py:610</code>、<code>guard.py:776</code>、<code>decorators.py:39</code>（本节短路径均位于核心目录）。</p>
+<h3>1.3 生命周期与持久化</h3>
+<ul>
+<li>服务端构造 guard 时读取当天累计计数，以及历史最近一次 allowed+counted 时间。account_id、execution_id、policy 任一为 None 时 guard 是 no-op；包装器 guard=None 也直接调用下游。</li>
+<li>内置 CTP、GM、TQ 均声明 process 后端。worker 逐请求重绑 guard、审计与 runtime；资产查询使用 request_id 作为 execution_id。CTP 支持先绑定 guard 再建立连接；不要把专用 worker 资产查询误判成漏绑定。</li>
+<li>普通执行路径的 <code>initialize_executor_runtime</code> 同样先挂 guard，再初始化需要 pre-connect guard 的渠道。<code>set_account_control_guard</code> 同时注入终止检查点。</li>
+<li><code>flush_records()</code> 返回<strong>本次 execution 的累计快照</strong>，不清空内存。每个 bucket/scope/operation 的 delta_uid 固定，event_uid 由 execution/seq/operation/symbol/decision 组成。</li>
+<li><code>AccountControlStore.flush_execution_records</code> 在一个 SQLite 事务中批量 <code>INSERT OR IGNORE</code>。重复同一最终快照是幂等的；持续增长的快照重复刷盘不是正确的增量协议（R3）。当前主要刷盘点是结束、清理和初始化失败。</li>
+</ul>
+<p class="source">依据：<code>axile/server/execution/execution_account_control.py:17</code>、<code>axile/server/execution/lifecycle.py:382</code>、<code>axile/server/execution/worker_backend/worker_state.py:242</code>、<code>axile/server/execution/worker_backend/worker.py:134</code>、<code>axile/server/account_control/store.py:146</code>。</p>
+<h3>1.4 时间语义与边界</h3>
+<p>默认使用 Asia/Shanghai 的自然日午夜和整分钟边界，不使用 CTP TradingDay，不实现滚动 60 秒窗口。夜盘与次日日盘可能属于同一交易日，却处于不同 control_date。跨 execution 的最小间隔能从事件恢复；共享组通过成员操作的最近放行时间恢复，不依赖独立持久化组计数。墙上时钟的前跳/回拨会影响间隔；允许切换时区，但桶键不含 UTC offset，夏令时回拨地区存在重名分钟。</p>
+</section>
+
+<section id="api">
+<h2>02 · 公开 API 与正确使用方式</h2>
+<div class="table-wrap"><table><thead><tr><th>入口</th><th>职责 / 返回</th><th>正确使用与约束</th></tr></thead><tbody>
+<tr><td><code>resolve_account_control_policy</code><br><code>get_account_control_preset</code><br><code>ACCOUNT_CONTROL_PRESETS</code></td><td>解析最终策略 / 获取 preset 定义。</td><td>优先使用 Effective 类型，不能把它降成基础 Policy 后丢弃 operation_groups。完整有效策略在执行开始时确定，不应在执行中原地改 dict。</td></tr>
+<tr><td><code>ensure_account_control_preset_compatible</code></td><td>验证 preset 与 channel 兼容性。</td><td>显式在绑定前调用。resolve 本身没有 channel 参数，不能替代兼容性检查。default 对所有渠道兼容，并不保证 CTP 硬限制。</td></tr>
+<tr><td><code>AccountControlOverride</code><br><code>AccountControlPolicy</code><br><code>EffectiveAccountControlPolicy</code><br><code>AccountControlPresetDefinition</code></td><td>覆盖、完整规则、含 preset/组成员的有效规则、preset 定义。</td><td>使用 model_validate；未知 operation/group 在配置入口被拒绝。不要直接写模型内部映射绕过校验。</td></tr>
+<tr><td><code>AccountControlScopeOverride</code><br><code>AccountControlScopePolicy</code></td><td>account、symbol、group 规则集合。</td><td>per_day / per_minute 支持 wait 或 block；生产应避免 per_day=0 且 wait。紧急撤单不应随意解除所有保护。</td></tr>
+<tr><td><code>controlled_operation(operation, *, groups=(), symbol_arg=None, metadata_resolver=None, success_outcome="succeeded", result_metadata_resolver=None)</code></td><td>包装同步/异步方法，解析宿主 guard、symbol 和元数据，记录结果。</td><td>常规使用实例方法并提供 get_account_control_guard；symbol_arg 必须匹配参数名。包装器只 bind_partial，不 apply_defaults；默认参数、全关键字 self 调用及自由函数要谨慎。</td></tr>
+<tr><td><code>run_controlled_call</code><br><code>run_controlled_async_call</code></td><td>显式 guard、operation、call 的包装函数；返回原结果。</td><td>位于 decorators 子模块，不在包 __all__。适合叶子请求与动态调用；async 版本当前仍同步等待额度，不能视为事件循环安全（R4）。</td></tr>
+<tr><td><code>AccountControlGuard(...)</code><br><code>begin_operation(op, symbol=..., metadata=...)</code></td><td>构造执行态守卫；返回 AccountControlAttempt 或抛阻断异常。</td><td>位于 guard 子模块。真实账户 ID + 唯一 execution ID + 已恢复 baseline/recent snapshot + 正确 channel/policy。先准入再发送；同一外部请求避免对同一 operation 双包。</td></tr>
+<tr><td><code>AccountControlAttempt.record_outcome</code><br><code>guard.update_event_outcome</code></td><td>回填放行事件的 outcome/metadata。</td><td>优先用 Attempt，不保存裸 event_index 到其他 guard；submitted/accepted 不是成交成功。业务回报必须另行关联。</td></tr>
+<tr><td><code>guard.set_termination_checkpoint</code><br><code>current_waited_ms / current_wait_hits</code><br><code>flush_records</code></td><td>中断等待、获取线程内等待诊断、导出累计记录。</td><td>终止回调抛异常退出；本身没有总等待超时。waited_ms 是申请的 sleep 累计，不是精确墙钟延迟。最终完成且无后续操作时刷盘。</td></tr>
+<tr><td><code>AccountControlCounterSnapshot.add/get_count</code><br><code>AccountControlRecentAllowedSnapshot.add/get_last_allowed_at_ms</code></td><td>内存计数基线 / 最近时间快照。</td><td>前者 add 累加，后者取最大时间；需同时恢复两者。快照不是实时数据库锁，不能解决跨进程竞争。</td></tr>
+<tr><td><code>AccountControlRegistry</code><br><code>RegisteredAccountControlOperation</code><br><code>RegisteredThrottleGroup</code></td><td>register/get/require operation/group、freeze、只读类型映射。</td><td>先注册组再声明操作，启动期完成注册。freeze 是显式能力，仓库没有生产调用点；不能依据模块注释假设已自动冻结。返回的 Mapping 实际暴露内部 dict。</td></tr>
+<tr><td><code>get_default_account_control_registry</code><br><code>register_default_registry_bootstrap</code><br><code>ensure_default_account_control_registry_bootstrapped</code><br><code>reset_default_account_control_registry_for_tests</code></td><td>默认注册表及引导生命周期。</td><td>bootstrap 需幂等，业务不要调用 reset；确保插件在策略解析前已被导入。迟到声明要 fail-fast（R5）。</td></tr>
+<tr><td><code>AccountControlBlockedError</code><br><code>AccountControlDecision / BucketType / ScopeType</code><br><code>CounterDeltaWrite / EventWrite</code></td><td>阻断上下文、枚举和持久化载荷。</td><td>阻断异常保留 account/execution/channel/operation/symbol；区分 allowed 与业务 outcome；事件序列不能当全局序列。</td></tr>
+</tbody></table></div>
+<h3>2.1 服务端调用范式</h3>
+<pre><code>from axile.executor.account_control import ensure_account_control_preset_compatible
+from axile.server.execution.execution_account_control import (
+    build_account_control_guard, flush_account_control_records,
+)
+from axile.server.execution.factory import create_executor_instance, initialize_executor_instance
+
+ensure_account_control_preset_compatible(account.account_control_preset, account.trade_channel)
+executor = create_executor_instance(account, initialize=False)
+try:
+    guard = await build_account_control_guard(account, execution_id)
+    executor.set_account_control_guard(guard)
+    if getattr(executor, "_requires_connection_initialization", False):
+        initialize_executor_instance(executor)
+    # 交易生命周期应交给现有 server/worker 编排；同步调用在其工作线程执行。
+    # 通过 executor.place_order / cancel_order / query_trades 调用，勿绕至 _impl。
+finally:
+    try:
+        await flush_account_control_records(executor)
+    finally:
+        executor.stop()</code></pre>
+<p>此片段说明绑定顺序，不是另造一条并发执行通道。生产应复用 <code>initialize_executor_runtime</code> / <code>_resolve_prepared_executor</code>，连同账户占用、termination controller、审计、失败清理一起使用。直接构造执行器不会自动恢复额度。</p>
+<h3>2.2 覆盖配置示例</h3>
+<pre><code>{
+  "operations": {
+    "query_trades": {
+      "account": {
+        "per_minute": {"limit": 60, "on_trigger": "wait"},
+        "per_day": {"limit": 3000, "on_trigger": "block"},
+        "min_interval_ms": {"limit": 1000, "on_trigger": "wait"}
+      }
+    }
+  }
+}</code></pre>
+<p>仅为配置结构示例，数值不是 GM/TQ 柜台官方限额。新增操作应先注册，再配置，再覆盖所有真实 SDK 调用路径；仅在编辑器里添加一条 query_account 规则，不能让未经过 guard 的 GM get_cash 自动受控。</p>
+<h3>2.3 对外 HTTP 与用户界面</h3>
+<p>账户路由相对路径 <code>/{account_id}/control/policy</code> 是只读预览，返回兼容 preset、override、preset/effective policy、操作及共享组元信息。修改通过已有账户创建/更新接口完成。审计提供 <code>/{account_id}/control/audit/summary</code>、<code>/{account_id}/control/audit/executions</code> 和 <code>/executions/{execution_id}/control/events</code>。预览接口通过操作元信息保留组成员，但返回的基础 Policy 本身不含 operation_groups；不要拿它直接构造执行 guard。</p>
+<p class="note">四个常见误用：注册即限流；recorded 即受限；accepted 即成交；重复 flush 即可靠增量。四者在当前代码中均不成立。</p>
+</section>
+
+<section id="coverage">
+<h2>03 · 全渠道调用覆盖矩阵</h2>
+<p>“覆盖”分四类：<span class="tag ok">受有限规则保护</span> <span class="tag medium">仅记录 / 无有限规则</span> <span class="tag high">未进入统一 guard</span> <span class="tag">本地读取 / 独立控制面</span>。下表针对正常公开调用及 worker 生命周期；直接调用私有方法不属于安全公开入口。</p>
+<h3>3.1 CTP：TraderApi 基本完整，策略选择与准入位置仍有缺口</h3>
+<div class="table-wrap"><table><thead><tr><th>接口 / 实际请求</th><th>路径与 operation</th><th>ctp preset 结论</th></tr></thead><tbody>
+<tr><td>认证、交易登录</td><td>_send_trader_request → authenticate / trader_login → ReqAuthenticate / ReqUserLogin</td><td>共享组 1500ms；优先级 20。普通 worker 冷启动 guard 在前，未发现这两项漏包。</td></tr>
+<tr><td>结算确认查询 / 确认</td><td>_query → query_settlement_status → ReqQrySettlementInfoConfirm；confirm_settlement → ReqSettlementInfoConfirm</td><td>共享组；查询另有分钟/日额度。不是 query_settlement_info。</td></tr>
+<tr><td>合约、资金、持仓、委托、成交查询</td><td>_query 映射 ReqQryInstrument / ReqQryTradingAccount / ReqQryInvestorPosition / ReqQryOrder / ReqQryTrade → query_instruments / query_account / query_positions / query_orders / ctp_query_trades</td><td>五项均有叶子包装、共享组与 60/min、2000/day；_query_lock 串行查询。资产查询是资金 + 持仓两个真实请求。</td></tr>
+<tr><td>下单 ReqOrderInsert</td><td>facade.place_order → place_order → _place_order_impl → _call_trader_request</td><td>统一行为层扣一次额度，并已加入 ctp_td_global；叶子刻意不再扣第二次。不是完全漏流控，但预占到发送之间存在本地处理/调度间隙（R8）。</td></tr>
+<tr><td>撤单 ReqOrderAction</td><td>facade.cancel_order → cancel_order；叶子 _send_trader_request → cancel_order_ctp</td><td>业务撤单额度 + 叶子共享组；两种 operation 的双层事件有意区分语义，不是同一额度双扣；外层和叶子优先级均为 0。</td></tr>
+<tr><td>公开挂单 / 成交查询</td><td>query_order / query_trades → query_orders / ctp_query_trades</td><td>外层逻辑与内层物理请求各一条。query_trades 无公共有限规则，但 CTP 叶子仍有限制，不能据此认定 CTP 成交查询漏控。</td></tr>
+<tr><td>期权行权 / 放弃 / 自对冲</td><td>submit_option_action → option_exercise / option_abandon / option_self_close → ReqExecOrderInsert / ReqOptionSelfCloseInsert</td><td>均经过 _send_trader_request；账号 10/min、200/day、1000ms，标的 5/min、500ms；self_close 改为 100/day、3/min；共享组仍更严格。</td></tr>
+<tr><td>撤销三类期权动作</td><td>cancel_option_action → cancel_option_exercise / cancel_option_abandon / cancel_option_self_close → ReqExecOrderAction / ReqOptionSelfCloseAction</td><td>优先级 0 + 共享组；默认无独立分钟/日额度，属于设计选择，业务需确认是否增加异常撤销总量保护。</td></tr>
+<tr><td>行情登录 / 行情订阅</td><td>_market_api.ReqUserLogin / SubscribeMarketData</td><td>未进入统一 guard；这是 MarketApi，不应盲目并入 TraderApi 组。需单独确认重连/订阅频率需求，不当作交易发单遗漏。</td></tr>
+<tr><td>行情快照、tick、期权状态、回调、组合拆腿</td><td>_quotes / _instruments / _option_actions；SPI 回报；combination 纯函数</td><td>本地读取/入站事件，不应按每次读取扣柜台请求额度。组合代码没有额外交易请求。</td></tr>
+<tr><td>query_settlement_info</td><td>只有 operation 声明、preset、UI 文案，无当前 ReqQrySettlementInfo 发送路径</td><td>预留/陈旧配置，不是一个已实现但漏包装的接口；应在 UI 标明未接入或去掉无效承诺。</td></tr>
+</tbody></table></div>
+<p class="source">依据：<code>axile/executor/ctp/ctp_execute.py:226</code>、<code>:387</code>、<code>:547</code>、<code>:827</code>；<code>axile/executor/ctp/options.py:49</code>；<code>axile/executor/account_control/presets.py:148</code>。</p>
+<h3>3.2 GM：交易主路径受控，资金/持仓/行情和成交规则存在遗漏</h3>
+<div class="table-wrap"><table><thead><tr><th>实际 SDK 入口</th><th>调用与包装</th><th>default preset 结论</th></tr></thead><tbody>
+<tr><td>order_volume</td><td>place_order → _place_order_impl → OrderVolumeRequest → bridge</td><td>20/min、500/day、300ms；symbol 10/min、300ms。受控，但查询卖出可用持仓也是下单方法内的额外 SDK 读取。</td></tr>
+<tr><td>order_cancel</td><td>cancel_order → _submit_cancel_request → OrderCancelRequest</td><td>30/min、800/day、200ms；symbol 10/min、200ms。无额外叶子扣次；独立调用私有 _submit_cancel_request 可绕开，不是对外保证。</td></tr>
+<tr><td>get_unfinished_orders</td><td>公开 get_pending_orders；execution 内部由 shared leader fetch 包 query_order</td><td>account 120/min、5000/day、100ms；symbol 10/min、300ms；同一共享快照 follower 不重复取 SDK。这项已覆盖，不能因叶子注释“不处理账户控制”误报。</td></tr>
+<tr><td>get_orders</td><td>最近订单过滤等路径 → 受控 query_order fetch → _query_order_records</td><td>现有测试验证 query_order 消费。bridge 使用 SDK 全量订单后本地 account_id 过滤；账户级额度不等于 SDK 进程全局额度。</td></tr>
+<tr><td>get_execution_reports</td><td>query_trades 或共享 leader → _query_trade_records</td><td><strong>仅记录：</strong>query_trades 已注册，但 default 没有任何有限规则；反复查询/缓存失效仍可高频触达 SDK（R1）。</td></tr>
+<tr><td>get_cash</td><td>get_account_assets → GetCashRequest → bridge</td><td><strong>遗漏：</strong>不经过 query_account 或其它准入包装。即便配置 query_account 额度也不生效。</td></tr>
+<tr><td>get_position</td><td>get_account_assets；_get_available_long_volume（卖出检查）→ GetPositionRequest</td><td><strong>遗漏：</strong>没有独立 query_positions 控制；卖出检查仅间接受 place_order 频次上界约束，资产查询没有该上界。</td></tr>
+<tr><td>current</td><td>get_market_data → CurrentRequest → bridge</td><td><strong>遗漏：</strong>未注册并绑定独立行情快照操作；每次调用都到 SDK bridge，批量 symbols 的成本也未建模。</td></tr>
+<tr><td>set_token / set_account_id / set_serv_addr / run / 状态检查 / subscribe / timer</td><td>连接设置、strategy runtime、gm_strategy 订阅和定时器</td><td>没有统一流控；配置/定时器不是交易请求，SDK 驱动循环不应包通用下单规则。订阅与重连应按真实服务边界另设去重/退避策略。</td></tr>
+</tbody></table></div>
+<p class="source">依据：<code>axile/executor/gm/gm_execute.py:294</code>、<code>:350</code>、<code>:417</code>、<code>:462</code>、<code>:562</code>、<code>:664</code>；<code>axile/executor/gm/core/api_bridge.py:333</code>；<code>tests/unit/executor/test_gm_account_control.py:527</code>。</p>
+<h3>3.3 TQ：必须区分 Entity 本地读取和真正的网络操作</h3>
+<div class="table-wrap"><table><thead><tr><th>入口</th><th>实现与覆盖</th><th>合理性 / 缺口</th></tr></thead><tbody>
+<tr><td>insert_order / cancel_order</td><td>公开 facade place_order/cancel_order 受 default 规则约束；runtime.call 在 owner thread 调 SDK</td><td>交易主路径已覆盖；单线程桥不是限速器。排队和本地下单前检查会拉大“准入—发送”间隙（R8）。</td></tr>
+<tr><td>get_order / get_trade</td><td>公开 query_order/query_trades 或 execution leader；从 SDK Entity 复制订单/成交</td><td>query_order 消耗通用有限额度，query_trades 仅记录。TqSdk 3.10.2 实现从 _data 读对象，不能当成每次都向柜台查单；频繁本地读取被等待可能延迟撤单判断（R10）。</td></tr>
+<tr><td>get_account / get_position</td><td>get_account_assets → runtime.call → Entity snapshot</td><td>不经统一 guard，但锁定 SDK 中是本地状态读取。与 GM 的实际 SDK 请求入口不同，不认定为柜台查询漏控。</td></tr>
+<tr><td>get_quote / subscribe</td><td>get_market_data、_quote_snapshot、get_tick_size、initialize_websocket → runtime.subscribe / get_quote</td><td>没有统一行情操作；新 symbol 的订阅与后续缓存读取应分开。runtime 用 dict 保存订阅，但 setdefault 的 get_quote 实参仍会求值；实际是否发包依赖 SDK 去重，不能按函数调用数推算网络负载。</td></tr>
+<tr><td>query_quotes</td><td>runtime._build_catalog 按 3 种类别×过期标志，再补 2 次全集查询</td><td>启动期最多 8 次主要查询（另有兼容 TypeError 分支），不受统一 guard；应按目录查询/初始化成本设计，不能套 TraderApi 组。</td></tr>
+<tr><td>get_trading_calendar</td><td>_check_tq_symbol_trading_time / 日历缓存</td><td>未单独包装；3.10.2 委托给日历辅助函数，本报告不把它认定为每次远端请求。缓存、首次加载与失败策略需独立约束。</td></tr>
+<tr><td>TqApi 构造、wait_update、is_changing、close</td><td>认证连接 / 事件泵 / 快照变更 / 资源释放</td><td>不应把每次 wait_update 算交易请求；连接重试、首次订阅和目录加载需要独立控制面预算与观测。</td></tr>
+</tbody></table></div>
+<p class="source">依据：<code>axile/executor/tq/tq_execute.py:363</code>、<code>:407</code>、<code>:459</code>；<code>axile/executor/tq/runtime.py:120</code>、<code>:144</code>、<code>:165</code>；已安装且锁定的 <code>tqsdk 3.10.2 / api.py:get_account,get_position,get_order,get_trade,get_quote</code> 原始实现。</p>
+<h3>3.4 跨渠道入口、批量操作与扩展</h3>
+<p>ExecutionSession 调用 owner 的公开 facade，内部共享查询只有 leader 包装，回调失效会触发下一次真实抓取；不能只统计装饰器数量。<code>cancel_all_orders</code> 通过公共查单和逐单撤单；清仓进入既有执行引擎而非新的 SDK 批量下单入口。仓库只内置 CTP、GM、TQ；外部 ChannelPlugin 必须遵守 facade/guard 约定，不能声称其实现已审查。</p>
+<p>通用 inline 资产服务 <code>axile/server/account_assets.py:19</code> 直接构造执行器且未挂 guard，是<strong>thread 后端扩展风险</strong>。三个当前内置插件全走 process，worker 对资产请求已绑定有效 request_id，因此不是三个内置渠道当前普遍漏绑定。</p>
+</section>
+
+<section id="findings">
+<h2>04 · 风险清单与可复现证据</h2>
+<div class="grid"><div class="card"><strong>11 项</strong>合并后的风险主题；含已证实缺陷、配置缺口、条件性风险。</div><div class="card"><strong>10 项失败断言</strong>运行 --runxfail 直接观察失败，不以“已有测试通过”推断安全。</div><div class="card"><strong>252 passed</strong>相关回归套件；另有 10 strict xfailed，代表尚未修复。</div></div>
+<p class="note warning">优先级不是柜台事故概率预测。P1＝可能绕过预期安全边界或丢失计数；P2＝可靠性/扩展/审计问题。真实柜台 QPS、前置并发窗口和监管日额度没有本地实盘证据；1500ms 是项目 preset，不是对所有柜台的合规保证。</p>
+
+<article class="finding" id="r1"><span class="tag high">P1 · 覆盖遗漏 / 已证实</span><h3>R1 · GM 的资金、持仓、行情未走 guard，成交查询只有记录没有限额</h3>
+<p><strong>根因：</strong>GM 的 _call_bridge 只转发 SDK；get_account_assets/current/卖出持仓检查未包相应 operation。query_trades 则有包装，但注册默认 scope 全空，default preset 未补规则。用户给 query_account 配置限制，也拦不住实际 GetCashRequest。</p>
+<p><strong>触发与影响：</strong>主动资产刷新、频繁行情快照或成交缓存失效可持续调用 SDK；统一策略 UI 的配置与实际保护不一致。SDK 自身是否缓存、是否另有限额不能消除“Axile 没有此项控制”的事实，但本报告不据此断言一定发生网络超限。</p>
+<p><strong>证据：</strong>渠道矩阵所列 GM 三处调用路径；新增参数化测试 <code>test_gm_asset_queries_obey_zero_operation_quota</code> 在 query_account/query_positions 设置 0/day 时，真实公开 get_account_assets 仍调用 SDK stub 的 get_cash/get_position。<code>test_default_trade_queries_are_recorded_without_a_finite_rule</code> 证实成交三个规则均为 None。原有成交查询测试仅验证预算事件，而非有限额度。</p>
+<p><strong>建议与验收：</strong>明确 GM 物理请求操作与业务操作的分层，在唯一叶子桥接入口加准确映射和合理 preset；对资金/持仓/current/get_execution_reports 做“阻断后 SDK stub 调用次数为 0”的测试。行情请求需考虑批量 symbol 成本。TQ 本地快照不应被同一修复误伤。</p></article>
+
+<article class="finding" id="r2"><span class="tag high">P1 · 配置逃逸 / 已证实</span><h3>R2 · CTP 总间隔依赖可选 preset，所谓“硬保护”仍可下调到 1ms</h3>
+<p><strong>根因：</strong>default 对 CTP 兼容，而 CTP TraderApi 操作注册的 groups 为空；只有 ctp preset 赋予 ctp_td_global 成员。账户 override 又可覆盖 min_interval_ms 为任意正整数。</p>
+<p><strong>复现：</strong><code>test_default_preset_on_ctp_does_not_attach_trader_group</code> 中 query_account、query_positions 在同一时间放行；<code>test_ctp_group_interval_can_be_lowered_to_one_millisecond</code> 中最终间隔为 1。两项为刻画现状的通过测试，不是假装整改完成。</p>
+<p><strong>边界：</strong>内置 CTP 新账户默认选 ctp，已有迁移也设置该 preset；风险在合法选择 default 或显式降低配置时出现，而不是默认路径完全没有流控。</p>
+<p><strong>建议与验收：</strong>产品确认这是可调建议值还是柜台安全底线；若是底线，分离不可解除的渠道 envelope 与可覆盖的业务额度，并在账户更新、worker 装配和预览层一致校验。最低值需按柜台配置确认，不能凭本报告硬编码。</p></article>
+
+<article class="finding" id="r3"><span class="tag high">P1 · 持久化协议 / 已复现</span><h3>R3 · 增长中的累计快照重复 flush，后续计数和 outcome 被忽略</h3>
+<p><strong>根因：</strong><code>guard.py:717</code> 为同一 bucket 生成固定 delta_uid；<code>store.py:146</code> 的 OR IGNORE 对已有记录不更新。第 1 次 flush 写 delta=1 与 pending；再发生请求并更新 outcome 后，第 2 次 flush 的 delta=2 和 fetched 被忽略。</p>
+<p><strong>复现：</strong>隔离 SQLite 的两项参数化安全测试分别得到 <code>count=1（应为 2）</code> 与 <code>outcome=pending（应为 fetched）</code>。当前主要是最后刷盘，故正常一次最终 flush 不触发此问题；未来周期刷盘、并发清理或先导出再继续使用 guard 会触发。</p>
+<p><strong>建议与验收：</strong>选择单调累计 upsert（防止旧快照回退）或带独立 UID 的真正增量/watermark 协议，事件 outcome 也需定义终态更新顺序；覆盖相同快照重试、增长快照、乱序快照、并发 flush、事务失败重试。不能直接改为每次累加完整 delta，否则会重复计数。</p></article>
+
+<article class="finding" id="r4"><span class="tag medium">P2 · 异步公共 API / 已复现</span><h3>R4 · async 包装器在 await 前同步等待，阻塞事件循环</h3>
+<p><strong>根因：</strong><code>decorators.py:105</code> 直接调用同步 <code>guard.begin_operation</code>，后者使用 sleep 轮询。async 只体现在执行 downstream 时的 await。</p>
+<p><strong>复现：</strong>先耗用 CTP 组额度，再将 heartbeat 用 loop.call_soon 排入队列。第二次异步查询等待结束并进入下游时，heartbeat 尚未执行；await sleep(0) 后才执行。测试用虚拟时钟，无真实长时间等待。</p>
+<p><strong>影响边界：</strong>当前三个 SDK 主路径多在同步 worker，不代表现有全部交易都会卡 FastAPI；直接使用该公开 async API 的插件或协程任务会阻塞同 loop 的取消、心跳和其他请求。</p>
+<p><strong>建议与验收：</strong>实现异步原生等待队列/条件唤醒，并共享原子准入；若使用线程桥接，必须处理取消后后台线程继续申请额度甚至发送的问题。测试 heartbeat、公平性、取消移除、无 orphan send。</p></article>
+
+<article class="finding" id="r5"><span class="tag medium">P2 · 扩展 fail-open / 已复现</span><h3>R5 · 未知 operation 静默放行；冻结后的迟到声明也不报错</h3>
+<p><strong>根因：</strong><code>guard.py:412</code>、<code>:784</code> 对不存在 operation 使用空 AccountControlOperationPolicy；配置入口虽然 require_operation，但运行时不执行相同校验。<code>decorator_registry.py:59</code> 在 frozen 且未知时直接返回描述，不注册也不拒绝。</p>
+<p><strong>复现：</strong><code>query_acount_typo</code> 下游正常执行且记 allowed；隔离冻结注册表后提交 late_audit_operation 未抛异常。两项严格 xfail 分别覆盖。</p>
+<p><strong>附带静态发现：</strong>registry 文档声称执行前冻结，但生产没有调用 freeze；operations/groups 返回内部 dict。内置固定字符串暂未发现拼错，但插件迟到导入、规则快照形成后再增操作会扩大风险。</p>
+<p><strong>建议与验收：</strong>在准入前 require_operation；启动完成时校验 registry/policy 一致性；冻结后未知声明必须报错；只读映射或副本保护注册表。隔离测试覆盖不同导入顺序和动态插件启动失败。</p></article>
+
+<article class="finding" id="r6"><span class="tag medium">P2 · 等待活性 / 已复现 + 静态推导</span><h3>R6 · 0/day + wait 永远无法满足；队头等待牵连无关操作</h3>
+<p><strong>根因：</strong><code>guard.py:862</code> 日规则没有“limit=0 立即 block”的特殊处理，分钟规则却有；0/day 在每个自然日都满足 count≥0，因此无法放行。guard 没有内置总等待上限。</p>
+<p><strong>复现：</strong>合法 policy 设置 0/day+wait；测试用第 3 次 checkpoint 主动中止，观察到没有 AccountControlBlockedError。不是让测试无限挂起，而是验证始终进入等待路径。</p>
+<p><strong>队头影响：</strong>同一 guard 只有全局队头评估；同级先来的 place_order 在等待自己的独立规则时，后到的 cancel_order 不能利用自己的空闲额度。default 的两者 priority=100；ctp 的 cancel=0 优先于 place=10，部分缓解。持续高优先级也可能饿死低优先级。</p>
+<p><strong>建议与验收：</strong>配置拒绝不可能等待的规则，或一致地立即阻断；对独立可满足规则做 ready-aware 调度/分组排队，加入 aging 与总 deadline。测试无关组并发、撤单应急优先级、终止中断和无限高优先级流量。</p></article>
+
+<article class="finding" id="r7"><span class="tag medium">P2 · 审计失真 / 已复现</span><h3>R7 · 取消、回填失败和异步柜台拒绝未统一闭合事件</h3>
+<p><strong>根因：</strong>包装器只捕获 Exception；async CancelledError 不在此捕获范围，记录保留 pending。success_outcome/result_metadata_resolver 在调用 try 块之外运行，resolver 失败也可能让成功发单后的流控事件停留 pending。CTP accepted 是同步请求 return_code=0，之后的拒绝回报更新订单/期权状态，不会自动回写流控事件。</p>
+<p><strong>复现：</strong>异步下游抛 CancelledError 后，已放行事件 outcome 仍为 pending。另两条为静态路径核查，未模拟真实柜台拒绝。取消异常必须仍向上传播，不能为了记事件吞掉取消。</p>
+<p><strong>建议与验收：</strong>区分 quota_decision、dispatch_status、business_status；明确 cancelled/unknown_send/outcome_record_error，使用稳定 request/order 关联。验证 SDK 已发送但回填失败不会诱发业务盲目重试；结合 R3 修正重复 flush 的终态更新。</p></article>
+
+<article class="finding" id="r8"><span class="tag medium">P2 · 发包边界 / 条件性已复现</span><h3>R8 · 限制的是“准入时刻”，不是相邻真实 SDK 发送时刻</h3>
+<p><strong>根因：</strong>guard 在进入 call 前记录 last_allowed。CTP place_order 额度位于 facade，后面还有校验、订单构造、线程调度；GM/TQ 还有 bridge 排队。若第一个调用在本地停顿超过间隔，第二次准入可以紧接第一次真正发送。</p>
+<p><strong>复现：</strong>共享组要求 1.5 秒；第一个受控 call 在发送前用虚拟时钟推进 2 秒，第二个调用立即发送。两次记录的“发送时刻”间隔为 0。该复现证明包装器不保证物理发送间距，不声称生产柜台已出现超限。</p>
+<p><strong>建议与验收：</strong>业务准入和物理发包节流分层，SDK owner/发送仲裁器在唯一发送边界预占物理请求预算；不要粗暴把所有 facade+叶子重复绑定同组。测试本地准备延迟、owner 队列拥塞、多线程抢占、连接回调与交易并发。</p></article>
+
+<article class="finding" id="r9"><span class="tag high">P1 · 崩溃恢复 / 多实例边界</span><h3>R9 · 内存预占与结束刷盘不是跨进程、跨应用实例的账户总量保证</h3>
+<p><strong>证据：</strong>每个 guard 拥有独立锁和 baseline；两个相同账户空基线 guard 在 1/day 限额下都能放行（新增刻画测试）。实际服务器的账户占用注册和每账户 worker 降低同进程并发，不等于跨两个 Axile 进程、两条账户配置指向同一柜台账户、或其他交易终端的统一锁。</p>
+<p><strong>崩溃窗口：</strong>下游发单成功后若进程在最终 flush 前被 kill，内存计数和事件丢失；重启按旧数据库恢复，可能重复获得当天额度。此项由写入时点推导，未执行进程 kill 或实盘事故实验。</p>
+<p><strong>建议与验收：</strong>先明确部署不变量：单实例/账户唯一身份映射/worker 串行。若要求强账户级保证，需要持久化预占或单一账户仲裁服务、故障恢复/幂等令牌和 unknown-send 状态。周期 flush 只能缩短窗口，且必须先修 R3；本地总量仍无法涵盖其他软件的柜台操作。</p></article>
+
+<article class="finding" id="r10"><span class="tag medium">P2 · 渠道语义不匹配</span><h3>R10 · TQ 本地查单被限成远端查询；共享 UI 暴露未接入操作</h3>
+<p>TqSdk 锁定版本的 get_order/get_trade/account/position 从内存 Entity 取值。公共 query_order 仍会扣 default 的分钟/日额度，并受 account 100ms、symbol 300ms 间隔约束，可能延迟纯本地监控而不降低柜台压力。query_trades 却不限，说明公共查询策略并未按请求成本统一设计。</p>
+<p>策略预览列举所有 registry 操作，不按当前 channel 的真实实现过滤；GM/TQ 能看到 CTP 专属操作，CTP 的 query_settlement_info 当前没有实际调用。配置看似成功，不代表业务已接入。</p>
+<p><strong>建议与验收：</strong>分离本地 query snapshot 与 remote request 额度；channel contribution 声明支持的操作、真实成本和适用组。UI 显示“不支持 / 仅审计 / 远端限速”状态。不要简单移除全部查询控制，CPU/内存负载需要另一类保护。</p></article>
+
+<article class="finding" id="r11"><span class="tag medium">P2 · 时间、容量与可观测性边界</span><h3>R11 · 固定自然日、墙钟与无界记录需要明确运行上限</h3>
+<ul>
+<li>自然日与期货交易日不同；如果 per_day 的产品承诺是 TradingDay，则夜盘跨午夜会提前恢复额度。当前模型文字明确自然日，是否改动属于需求确认，不直接判作算法 bug。</li>
+<li>min_interval 使用 wall time；前跳可提前准入，回拨拉长等待。非上海时区的 DST 重复分钟会使用同名 naive bucket。需要 wall time 分桶 + monotonic elapsed，恢复时明确两者换算。</li>
+<li>事件、历史 bucket、队列在 execution 内无独立容量限制；每次 flush 导出所有记录，并单条多值 INSERT。长会话/无限额度可能增加内存、锁占用及 SQLite 参数数量压力；具体参数上限取决于 SQLite 构建，本次未做大规模压测。</li>
+<li>等待取消时没有必然的专属等待事件；waited_ms 是计划 sleep 累加，含非队头排队但不含全部真实延迟。仅看最终 allowed 日志可能看不到一直等待后取消的请求。</li>
+</ul>
+<p><strong>建议与验收：</strong>约定交易日/自然日合同；注入时钟测试前跳、回拨、DST、跨日恢复；设置合理 execution/队列/事件上限与归档；分批事务写入同时保留幂等语义。容量、时间与中断问题分别测试，不用一个“慢测试”替代。</p></article>
+</section>
+
+<section id="verification">
+<h2>05 · 验证证据与未验证事项</h2>
+<p>环境：独立 git worktree；macOS arm64；CPython 3.13.12；pytest 9.1.1；openctp-ctp 6.7.7.1；tqsdk 3.10.2。GM 使用仓库已有 SDK stub，不连接账号。SQLite 风险测试使用内存数据库，不读取生产数据。</p>
+<div class="table-wrap"><table><thead><tr><th>验证</th><th>命令 / 范围</th><th>观察结果</th></tr></thead><tbody>
+<tr><td>既有关键测试基线</td><td>guard、models、decorators、registry、facade wrappers、GM、store、persistence</td><td>79 passed，2.82s。初次收集缺 openctp_ctp，安装项目 ctp extra 后重新运行成功。</td></tr>
+<tr><td>失败复现</td><td><code>.venv/bin/pytest tests/unit/executor/test_account_control_audit_regressions.py tests/unit/server/test_account_control_audit_regressions.py --runxfail -q</code></td><td><strong>10 failed, 4 passed</strong>，0.22s；失败全部是目标安全断言，不是导入错误或测试超时。</td></tr>
+<tr><td>相关回归</td><td>下方完整命令：核心、CTP、TQ、GM、账户/策略/审计路由、持久化</td><td><strong>252 passed, 10 xfailed, 5 warnings</strong>，3.04s。strict xfail 只接受 AssertionError；修复后 XPASS 会让套件失败，提示移除已修问题标记。</td></tr>
+<tr><td>静态检查</td><td><code>.venv/bin/ruff check</code> 和 <code>ruff format --check</code>，只检查两个新增测试文件</td><td>见随报告交付的验证日志。无生产代码改动；未声称整个仓库 lint/type-check 或全部测试通过。</td></tr>
+</tbody></table></div>
+<pre><code>.venv/bin/pytest \
+  tests/unit/executor/test_account_control_*.py \
+  tests/unit/executor/test_base_executor_account_control_wrappers.py \
+  tests/unit/executor/test_gm_account_control.py \
+  tests/unit/executor/ctp tests/unit/executor/tq \
+  tests/unit/server/test_account_control_*.py \
+  tests/unit/server/test_ctp_channels.py -q</code></pre>
+<p>复现测试保留 strict xfail 是因为本任务只要求审查，不授权擅自调整柜台限制或执行策略；<strong>10 xfailed 不代表问题已修复</strong>。4 个通过的刻画测试用于固定配置边界，后续改变产品契约时也必须更新其期望。</p>
+<p>HTML 已通过本地 Chromium headless 验证：11 项风险、11 个核心文件条目、7 个导航锚点；无脚本及页面错误；1440px 桌面与 390px 移动视口无整页横向溢出，并人工查看截图。宽表格在容器内独立滚动。</p>
+<h3>明确未验证</h3>
+<ul><li>未使用真实 CTP/GM/TQ 凭据，未发单、撤单或运行 live 测试；不保证券商实际 QPS、流控返回码和前置队列行为。</li><li>没有完整仓库回归/覆盖率门槛结果，没有 Linux + Python 3.12 的本地结果；PR CI 独立执行，不在本报告预填结果。</li><li>未进行长期内存压测、真实进程 kill/掉电、NTP 跳时、DST 生产实验；相应风险标注为静态或条件性。</li><li>GM bridge 之后的网络/缓存行为不在 stub 证明范围。TQ 本地 Entity 判断参考已安装锁定版本的原始实现，而非推测所有 SDK 版本相同。</li><li>报告是单文件离线 HTML，无脚本、远程字体或 CDN；不依赖网络即可阅读和打印。</li></ul>
+<p class="muted">5 条警告为现有 Starlette/FastAPI 的 httpx TestClient 与 HTTP_422_UNPROCESSABLE_ENTITY 弃用提示；未为本审查顺带修改依赖。</p>
+</section>
+
+<section id="actions">
+<h2>06 · 建议整改顺序、验收与回滚</h2>
+<div class="table-wrap"><table><thead><tr><th>阶段</th><th>范围</th><th>验收 / 风险控制</th></tr></thead><tbody>
+<tr><td>先确认产品契约</td><td>CTP 底线可否调低？per_day 是自然日还是交易日？哪些额度是业务保护、哪些是柜台物理请求保护？是否承诺多实例同账户？</td><td>不能未经确认直接给全渠道套一个固定 QPS，或为撤单全面禁用风控。文档与配置编辑器同步契约。</td></tr>
+<tr><td>第一批：覆盖与可靠记录</td><td>R1 GM 请求映射；R2 渠道 envelope；R3 累计持久化协议；R5 unknown operation 校验</td><td>阻断后 SDK 0 调用；同一快照重试不翻倍；增长/乱序刷盘不丢数；未知操作 fail-fast。保留旧账户配置解析和迁移校验。</td></tr>
+<tr><td>第二批：调度与发送边界</td><td>R4 async；R6 公平性/零额度；R8 SDK owner 发包仲裁</td><td>取消不会留后台发送；应急撤单可抢占但不能突破物理间隔；通过虚拟时钟与确定性事件同步验证，避免 sleep 猜时间。</td></tr>
+<tr><td>第三批：审计与系统边界</td><td>R7 状态关联；R9 持久化预占/多实例；R10 渠道 UI；R11 时间和容量</td><td>定义 unknown-send 恢复、时间基准、容量上限；故障注入和沙箱压力测试，最后才在获授权的券商测试环境核对真实限额。</td></tr>
+</tbody></table></div>
+<p><strong>兼容性：</strong>本 PR 只增加测试和报告，无 schema、API 或 preset 行为变化。后续 R3 改写持久化协议时必须考虑旧 UID/旧数据与回滚读取；渠道硬规则若收紧可能使既有账户开始拒单，应先做配置预检与只读差异预览。</p>
+<p><strong>回滚：</strong>本报告/测试 PR 可整体 revert，不涉及数据迁移。后续修复应分小 PR；一旦写入新持久化协议，不得只回滚应用而不确认旧版本能否读取。任何实盘 rollout、阈值下调或批量账户修改另行审批。</p>
+<p><strong>交接给审核者：</strong>重点复核 R1 的真实 SDK 调用链、R2 的产品意图、R3 两个失败用例和 R8 的发送边界；确认报告没有把 TQ 本地快照或 CTP 双层不同 operation 误判为漏控/双扣。合并本 PR 仅接受审查产物，不等于接受或修复其中全部风险。</p>
+</section>
+
+<section id="inventory">
+<h2>07 · 审查范围与证据索引</h2>
+<p>基于上述固定基线逐模块检查核心目录的全部 11 个 Python 文件，包括公开入口、内部评估/计数/等待函数、模型 validator、默认注册和 snapshot。周边检查沿真实渠道调用链向下延伸到 SDK bridge，向上延伸到 facade、execution/worker、持久化和策略/审计 API。没有把“搜索命中”当成运行覆盖率。</p>
+<div class="table-wrap"><table><thead><tr><th>核心文件（axile/executor/account_control/）</th><th>检查内容与结论</th></tr></thead><tbody>
+<tr><td><code>__init__.py</code></td><td>__all__ 和 lazy preset 导出；区分包公开导出与 guard/decorators 子模块 API。</td></tr>
+<tr><td><code>models.py</code></td><td>严格字段、extra 禁止、时区、注册键、覆盖合并输入、组成员和写入载荷；0/day+wait、可变策略边界（R2/R6/R11）。</td></tr>
+<tr><td><code>presets.py</code></td><td>两个 preset 全部规则、CTP 期权额度、operation_groups、overlay/unlimited/兼容性；query_trades 空规则和 default 逃逸（R1/R2）。</td></tr>
+<tr><td><code>registry.py</code></td><td>注册/冲突/require/freeze/bootstrap/reset；冻结未在生产启用、可变映射和迟到导入（R5）。</td></tr>
+<tr><td><code>ctp_operations.py</code></td><td>17 个 CTP 叶子操作与 ctp_td_global；place_order 由 facade 注册，再由 preset 补组；预留结算单操作。</td></tr>
+<tr><td><code>decorator_registry.py</code></td><td>操作标准化、group 存在性、冻结分支和幂等 bootstrap；未知冻结声明静默接受（R5）。</td></tr>
+<tr><td><code>decorator_support.py</code></td><td>宿主/参数/symbol/metadata 解析，成功失败回填；默认参数和 resolver 异常边界（R7）。</td></tr>
+<tr><td><code>decorators.py</code></td><td>同步/异步包装、显式 call、异常回填、bind_partial、guard=None；阻塞、取消和发送时刻（R4/R7/R8）。</td></tr>
+<tr><td><code>guard.py</code></td><td>完整准入主线、RLock/priority FIFO、scope/group 合并、自然日/分钟、等待/终止、baseline/recent 恢复、累计导出；R3/R5/R6/R8/R9/R11。</td></tr>
+<tr><td><code>snapshot.py</code></td><td>account/symbol 计数累计与最大时间恢复；组恢复经操作反推，无额外独立数据库组记录。</td></tr>
+<tr><td><code>exceptions.py</code></td><td>结构化阻断字段；不混同 SDK 拒绝、终止与流控阻断。</td></tr>
+</tbody></table></div>
+<details open><summary>渠道与运行时外围证据</summary><ul>
+<li><code>axile/channels/builtins.py</code>、<code>contracts.py</code>、<code>registry.py</code>：三个内置插件、默认 preset、process 后端与 pre-connect 约定。</li>
+<li><code>axile/executor/abstract_executor/facade.py</code>、<code>execution_lifecycle.py</code>、<code>execution_runtime_account_control.py</code>；<code>execution_session.py</code>、<code>execution_runtime.py</code>、<code>execution_query_runtime/runtime.py</code>：公开行为、共享 leader、绑定和记录导出。</li>
+<li><code>axile/executor/ctp/ctp_execute.py</code>、<code>requests.py</code>、<code>spi.py</code>、<code>options.py</code>、<code>combination.py</code>：全部现有 TraderApi 发送、MarketApi 例外、期权回报和纯函数。</li>
+<li><code>axile/executor/gm/gm_execute.py</code>、<code>core/api_bridge.py</code>、<code>core/strategy_bridge.py</code>、<code>core/gm_strategy.py</code>：请求入口、运行线程、订阅和 API 映射。</li>
+<li><code>axile/executor/tq/tq_execute.py</code>、<code>runtime.py</code>：owner thread、下单/撤单、只读 Entity、初始化/订阅/目录。</li>
+<li><code>axile/server/execution/execution_account_control.py</code>、<code>lifecycle.py</code>、<code>factory.py</code>、<code>registry.py</code>、<code>worker_backend/worker_state.py</code>、<code>worker_backend/worker.py</code>、<code>worker_backend/manager.py</code>、<code>axile/server/account_assets.py</code>：基线装载、并发边界、两阶段连接和清理。</li>
+<li><code>axile/server/account_control/store.py</code>、<code>db/models/account_control.py</code>、<code>account_control_audit.py</code>、<code>api/routes/account_control_policy_routes.py</code>、<code>api/routes/account_control_audit_routes.py</code>、<code>alembic/versions/0009_ctp_account_control_preset.py</code>：持久化 UID、查询索引、预览/审计和 CTP 默认迁移。</li>
+</ul></details>
+<details><summary>本次新增可复现测试</summary><p><code>tests/unit/executor/test_account_control_audit_regressions.py</code>：8 个安全断言 xfail + 4 个现状刻画。<br><code>tests/unit/server/test_account_control_audit_regressions.py</code>：累计 flush 的两个安全断言 xfail。运行 --runxfail 可直接看到尚未修复的断言失败。</p></details>
+<p class="muted">阅读定位以固定 SHA 为准。报告中的行号引用基线生产源码，不受本 PR 新增文档/测试影响。第三方 SDK 结论限定于本次安装版本；没有以搜索摘要替代源码或柜台实测。</p>
+</section>
+</main>
+<footer>SKZ-737 · 审查产物，不是实盘安全认证 · 2026-09-09</footer>
+</body>
+</html>
