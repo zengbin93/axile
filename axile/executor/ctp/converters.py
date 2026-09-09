@@ -161,18 +161,14 @@ def account_to_unified(
         group = groups.setdefault(
             key, {"volume": 0.0, "today": 0.0, "yesterday": 0.0, "frozen": 0.0, "cost": 0.0, "origin": None}
         )
-        volume = _float(row, "Position")
-        today = _float(row, "TodayPosition")
-        yesterday = _float(row, "YdPosition")
-        if not today and not yesterday:
-            (
-                group.__setitem__("today", group["today"] + volume)
-                if _value(row, "PositionDate") == td.THOST_FTDC_PSD_Today
-                else group.__setitem__("yesterday", group["yesterday"] + volume)
-            )
-        else:
-            group["today"] += today
-            group["yesterday"] += yesterday
+        volume = _position_quantity(row, "Position")
+        today = _position_quantity(row, "TodayPosition")
+        if today > volume:
+            raise ValueError(f"{symbol}: 今仓与总持仓不一致")
+        # YdPosition 是昨结持仓，平昨后不会代表当前剩余昨仓。
+        # 每条记录按当前 Position 拆分，避免跨今昨记录重复累计昨结数量。
+        group["today"] += today
+        group["yesterday"] += volume - today
         group["volume"] += volume
         group["frozen"] += (
             _float(row, "LongFrozen") if direction is PositionDirection.LONG else _float(row, "ShortFrozen")
@@ -213,6 +209,17 @@ def account_to_unified(
             "trading_day": str(_value(account, "TradingDay", "") or ""),
         },
     )
+
+
+def _position_quantity(row: object, name: str) -> float:
+    """拒绝损坏的持仓数量，避免通用数值转换把异常静默变成零仓。"""
+    raw = _value(row, name, 0)
+    if isinstance(raw, bool) or not isinstance(raw, (int, float)):
+        raise ValueError(f"{name}: 持仓数量必须是非负整数")
+    value = float(raw)
+    if not math.isfinite(value) or value < 0 or not value.is_integer():
+        raise ValueError(f"{name}: 持仓数量必须是非负整数")
+    return value
 
 
 __all__ = ["account_to_unified", "order_to_unified", "quote_to_unified", "stable_order_id", "trade_to_unified"]

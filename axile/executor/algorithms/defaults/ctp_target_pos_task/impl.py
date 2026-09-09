@@ -12,7 +12,8 @@ Notes
 当昨仓 / 今仓精确腿不足时，才退回通用平仓标记作为最后补偿。
 """
 
-from typing import Any, Dict, List, Literal, Tuple
+import math
+from typing import Any, Dict, List, Literal, Tuple, cast
 
 from pydantic import Field
 
@@ -29,7 +30,7 @@ from axile.executor.algorithms.core.base import (
 from axile.executor.algorithms.utils import setup_order_tracker, teardown_order_tracker
 from axile.executor.algorithms.utils.order_tracker import ChaseConfig
 from axile.executor.models.execution_result import ExecutionStatus
-from axile.executor.models.unified_account_assets import UnifiedAccountAssets
+from axile.executor.models.unified_account_assets import Position, PositionDirection, UnifiedAccountAssets
 from axile.executor.models.unified_order import UnifiedOrder
 from axile.executor.models.unified_price import clone_price_data
 
@@ -118,7 +119,7 @@ class CTPPositionDetail:
     -----
     该对象是算法内部的归一化视图，用于屏蔽不同通道实现或历史数据
     结构在字段命名上的差异。实例构建完成后，各字段应保持自洽：
-    ``*_total`` 至少覆盖对应的昨仓与今仓之和。
+    ``*_total`` 等于对应的剩余昨仓与今仓之和。
     """
 
     def __init__(self, symbol: str) -> None:
@@ -138,56 +139,6 @@ class CTPPositionDetail:
         self.long_total = 0  # 多头总持仓
         self.short_total = 0  # 空头总持仓
         self.net_position = 0  # 净持仓
-
-    def update_from_extra(self, position_extra: Dict[str, Any]) -> None:
-        """
-        从 ``UnifiedPosition.extra`` 中归一化更新 CTP 持仓字段。
-
-        Parameters
-        ----------
-        position_extra : Dict[str, Any]
-            持仓扩展字段。该映射可能来自不同版本的通道适配层，因此
-            字段命名并不完全一致。
-        """
-
-        def _get_int(value: Any, default: int = 0) -> int:
-            if value is None:
-                return default
-            try:
-                return int(value)
-            except (TypeError, ValueError):
-                return default
-
-        def _get_first_value(*keys: str) -> object | None:
-            for key in keys:
-                value = position_extra.get(key)
-                if value is not None:
-                    return value
-            return None
-
-        # 兼容两类字段命名：new(yd/td) 与 legacy(_position/_today_position)。
-        self.long_yesterday = _get_int(_get_first_value("long_yd", "long_yd_position"))
-        self.short_yesterday = _get_int(_get_first_value("short_yd", "short_yd_position"))
-
-        long_total_raw = _get_first_value("long_total", "long_position")
-        short_total_raw = _get_first_value("short_total", "short_position")
-
-        # 某些旧通道只回传总仓和昨仓，不单独给今仓。这里用 total - yesterday
-        # 推导今仓，并把结果下限钳在 0，避免脏数据把可平今仓放大成负数。
-        self.long_today = _get_int(
-            _get_first_value("long_td", "long_today_position"),
-            max(_get_int(long_total_raw) - self.long_yesterday, 0) if long_total_raw is not None else 0,
-        )
-        self.short_today = _get_int(
-            _get_first_value("short_td", "short_today_position"),
-            max(_get_int(short_total_raw) - self.short_yesterday, 0) if short_total_raw is not None else 0,
-        )
-        self.long_total = _get_int(long_total_raw, self.long_yesterday + self.long_today)
-        self.short_total = _get_int(short_total_raw, self.short_yesterday + self.short_today)
-        self.net_position = _get_int(
-            _get_first_value("net_position"),
-            self.long_total - self.short_total,
-        )
 
     @property
     def total_yesterday(self) -> int:
@@ -233,20 +184,57 @@ def _extract_ctp_position_details(
     Dict[str, CTPPositionDetail]
         品种到 CTP 持仓详情的映射。
     """
-    position_details: Dict[str, CTPPositionDetail] = {}
-
-    for symbol in symbols:
-        detail = CTPPositionDetail(symbol)
-        position = account_assets.get_position(symbol)
-
-        if position and hasattr(position, "extra"):
-            detail.update_from_extra(position.extra)
-        else:
-            detail.update_from_extra({})
-
-        position_details[symbol] = detail
+    position_details = {symbol: CTPPositionDetail(symbol) for symbol in symbols}
+    for position in account_assets.positions:
+        if position.symbol not in position_details:
+            continue
+        side, total, today, yesterday = _position_quantities(position)
+        detail = position_details[position.symbol]
+        for suffix, quantity in (("total", total), ("today", today), ("yesterday", yesterday)):
+            field = f"{side}_{suffix}"
+            setattr(detail, field, getattr(detail, field) + quantity)
+        detail.net_position = detail.long_total - detail.short_total
 
     return position_details
+
+
+def _position_quantities(position: Position) -> tuple[str, int, int, int]:
+    """校验单方向拆分；总量只采用统一持仓数量，昨仓表示当前剩余量。"""
+    sides = {PositionDirection.LONG: "long", PositionDirection.SHORT: "short"}
+    if position.direction not in sides:
+        raise ValueError(f"{position.symbol}: CTP 持仓必须指定多空方向")
+    side = sides[position.direction]
+
+    def quantity(value: Any) -> int:
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise ValueError(f"{position.symbol}: 持仓数量必须是非负整数")
+        if not math.isfinite(value) or value < 0 or int(value) != value:
+            raise ValueError(f"{position.symbol}: 持仓数量必须是非负整数")
+        return int(value)
+
+    def extra_quantity(*keys: str) -> int | None:
+        values = [quantity(position.extra[key]) for key in keys if key in position.extra]
+        if len(set(values)) > 1:
+            raise ValueError(f"{position.symbol}: 持仓字段不一致 {keys}")
+        return values[0] if values else None
+
+    total = quantity(position.volume)
+    reported_total = extra_quantity(f"{side}_total", f"{side}_position")
+    today = extra_quantity(f"{side}_td", f"{side}_today_position")
+    yesterday = extra_quantity(f"{side}_yd", f"{side}_yd_position")
+    if reported_total is not None and reported_total != total:
+        raise ValueError(f"{position.symbol}: 持仓总量与 volume 不一致")
+    if today is None and yesterday is None:
+        if total:
+            raise ValueError(f"{position.symbol}: 缺少今昨持仓拆分")
+        return side, 0, 0, 0
+    if today is None:
+        today = total - cast(int, yesterday)
+    if yesterday is None:
+        yesterday = total - today
+    if today < 0 or yesterday < 0 or today + yesterday != total:
+        raise ValueError(f"{position.symbol}: 今昨持仓与总量不一致")
+    return side, total, today, yesterday
 
 
 def _calculate_order_price(
