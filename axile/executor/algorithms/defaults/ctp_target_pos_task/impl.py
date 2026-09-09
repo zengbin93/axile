@@ -673,7 +673,17 @@ def ctp_target_pos_task_algorithm(executor: ExecutorProtocol, algorithm_input: A
             )
 
             for order in symbol_orders:
-                tracker.add_order(order)
+                order_direction = order.direction
+                if not isinstance(order_direction, OrderDirection):
+                    order_direction = OrderDirection(order_direction)
+                tracker.add_order(
+                    order,
+                    direction=order_direction,
+                    target_volume=target_volume,
+                    current_volume=position_detail.net_position,
+                    offset_flag=str(order.extra.get("offset_flag")) if order.extra.get("offset_flag") is not None else None,
+                    trade_rule=trade_rule,
+                )
 
             execution_memory[f"{symbol}_adjustment"] = {
                 "current_net": position_detail.net_position,
