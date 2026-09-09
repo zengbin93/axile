@@ -26,13 +26,13 @@ class TraderSpi(td.CThostFtdcTraderSpi):
         self.owner._disconnected("交易", reason)
 
     def OnRspAuthenticate(self, row, info, request_id, is_last):
-        self.owner._authenticated(row, info)
+        self.owner._authenticated(row, info, request_id)
 
     def OnRspUserLogin(self, row, info, request_id, is_last):
-        self.owner._logged_in(row, info)
+        self.owner._logged_in(row, info, request_id)
 
     def OnRspSettlementInfoConfirm(self, row, info, request_id, is_last):
-        self.owner._settled(info)
+        self.owner._settled(info, request_id)
 
     def OnRspQrySettlementInfoConfirm(self, row, info, request_id, is_last):
         self.owner._query_response(row, info, request_id, is_last)
@@ -109,10 +109,10 @@ class MarketSpi(md.CThostFtdcMdSpi):
         self.owner._disconnected("行情", reason)
 
     def OnRspUserLogin(self, row, info, request_id, is_last):
-        self.owner._market_logged_in(info)
+        self.owner._market_logged_in(row, info, request_id)
 
     def OnRspSubMarketData(self, row, info, request_id, is_last):
-        self.owner._log_error(info, "行情订阅")
+        self.owner._market_subscribed(row, info)
 
     def OnRtnDepthMarketData(self, row):
         self.owner._on_quote(row)

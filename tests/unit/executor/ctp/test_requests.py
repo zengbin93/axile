@@ -144,23 +144,24 @@ def test_build_order_cancel_falls_back_to_exchange_key(config: CTPAccountConfig)
 
 
 def test_trader_login_uses_openctp_677_signature(config: CTPAccountConfig) -> None:
-    executor = CTPExecutor.__new__(CTPExecutor)
+    executor = CTPExecutor(TradeChannel.CTP)
     executor.account_config = config
     executor._trader_api = Mock()
     executor._trader_api.ReqUserLogin.return_value = 0
     executor._lock = threading.RLock()
     executor._request_id = 0
     executor._auth = _Stage(threading.Event())
+    executor._auth.request_id = 42
     executor._login = _Stage(threading.Event())
 
-    executor._authenticated(None, None)
+    executor._authenticated(None, None, 42)
 
     args = executor._trader_api.ReqUserLogin.call_args.args
     assert args[1:] == (1,)
 
 
 def test_query_response_copies_reused_swig_frame() -> None:
-    executor = CTPExecutor.__new__(CTPExecutor)
+    executor = CTPExecutor(TradeChannel.CTP)
     pending = _PendingQuery([], threading.Event())
     executor._pending_queries = {7: pending}
     row = td.CThostFtdcInstrumentField()
@@ -239,7 +240,8 @@ def test_rejects_conflicting_czce_alias_values(config: CTPAccountConfig) -> None
 
 
 def test_market_subscription_encodes_instrument_ids() -> None:
-    executor = CTPExecutor.__new__(CTPExecutor)
+    executor = CTPExecutor(TradeChannel.CTP)
+    executor._ready = executor._trader_connected = executor._market_connected = True
     executor._instruments = {"rb2610": object()}
     executor._market_api = Mock()
     executor._market_api.SubscribeMarketData.return_value = 0
@@ -259,7 +261,7 @@ def test_query_settlement_confirm_populates_account_key(config: CTPAccountConfig
 
 
 def _settlement_executor(config: CTPAccountConfig) -> CTPExecutor:
-    executor = CTPExecutor.__new__(CTPExecutor)
+    executor = CTPExecutor(TradeChannel.CTP)
     executor.account_config = config
     executor._trading_day = "20260824"
     executor._trader_api = Mock()
@@ -284,7 +286,7 @@ def test_settlement_query_confirms_when_current_day_is_missing(config: CTPAccoun
     executor._query = Mock(return_value=[SimpleNamespace(ConfirmDate="20260821")])
 
     def confirm(_request: object, _request_id: int) -> int:
-        executor._settled(None)
+        executor._settled(None, _request_id)
         return 0
 
     executor._trader_api.ReqSettlementInfoConfirm.side_effect = confirm
@@ -306,7 +308,10 @@ class _CalendarStub:
 
 
 def _submit_point_executor(config: CTPAccountConfig) -> CTPExecutor:
-    executor = CTPExecutor.__new__(CTPExecutor)
+    executor = CTPExecutor(TradeChannel.CTP)
+    executor._ready = executor._trader_connected = executor._market_connected = True
+    executor._quotes = {"ag2612": object(), "bu2612": object()}
+    executor._subscription_acks = {"ag2612", "bu2612"}
     executor.account_config = config
     executor.channel_type = TradeChannel.CTP
     executor._trading_calendar = _CalendarStub()
@@ -450,7 +455,7 @@ def test_place_order_does_not_retry_rate_limit(config: CTPAccountConfig, monkeyp
     ],
 )
 def test_query_sync_rejection_is_not_retried(code: int, error_type: type[Exception], meaning: str) -> None:
-    executor = CTPExecutor.__new__(CTPExecutor)
+    executor = CTPExecutor(TradeChannel.CTP)
     executor._trader_api = Mock()
     executor._trader_api.ReqQryTradingAccount.return_value = code
     executor._lock = threading.RLock()
@@ -467,7 +472,7 @@ def test_query_sync_rejection_is_not_retried(code: int, error_type: type[Excepti
 
 
 def test_cancel_with_missing_key_propagates_single_query_queue_rejection(config: CTPAccountConfig) -> None:
-    executor = CTPExecutor.__new__(CTPExecutor)
+    executor = CTPExecutor(TradeChannel.CTP)
     executor.account_config = config
     executor._trader_api = Mock()
     executor._trader_api.ReqQryOrder.return_value = -2
