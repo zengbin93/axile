@@ -164,6 +164,10 @@ class CTPAccountConfig(BaseAccountConfig):
         登录密码。
     """
 
+    quote_max_age_seconds: float = Field(
+        default=5.0, gt=0, allow_inf_nan=False, description="行情最大年龄（秒），同时校验交易所时间和本地接收时间"
+    )
+
     broker_id: str = Field(..., description="经纪公司代码")
     investor_id: str = Field(..., description="投资者代码")
     password: str = Field(..., description="密码")

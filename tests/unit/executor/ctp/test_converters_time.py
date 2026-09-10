@@ -48,7 +48,7 @@ def test_trade_natural_date_is_separate_from_trading_day(day, clock, expected):
         session_id=2,
     )
     assert trade.trade_time == expected
-    assert trade.order_id == "20260907:1:2:1"
+    assert trade.order_id == ""  # 原生成交缺少会话字段，转换器不得冒用当前会话。
     assert trade.extra["trading_day"] == "20260907"
     assert trade.extra["event_time_source"] == "TradeDate"
     assert trade.extra["event_time_status"] == "native"

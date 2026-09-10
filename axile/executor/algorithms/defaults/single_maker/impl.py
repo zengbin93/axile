@@ -42,6 +42,7 @@ from axile.executor.algorithms.utils import (
     teardown_order_tracker,
 )
 from axile.executor.algorithms.utils.order_tracker import ChaseConfig
+from axile.executor.algorithms.utils.outcome import summarize_outcome
 from axile.executor.models.execution_result import ExecutionStatus
 from axile.executor.models.unified_price import UnifiedPriceData, clone_price_data
 
@@ -191,7 +192,8 @@ def single_maker_callback(
                     account_assets=account_assets,
                     target_volume=target_volume,
                     first_tick=first_tick,
-                    status=ExecutionStatus.NOOP,
+                    status=ExecutionStatus.BLOCKED,
+                    error="missing_book: 目标未完成",
                     memory={
                         "algorithm": algorithm_name,
                         "target_volume": algorithm_input.target_volume,
@@ -240,6 +242,8 @@ def single_maker_callback(
                 executor.logger.exception(f"{symbol} 下单遇到不可恢复异常")
                 raise
             except RECOVERABLE_ALGORITHM_EXCEPTIONS as e:
+                if getattr(e, "requires_session_recovery", False):
+                    raise
                 error_message = format_exception_message(e)
                 executor.logger.error(f"{symbol} 下单失败: {error_message}")
                 execution_memory[f"{symbol}_error"] = error_message
@@ -257,7 +261,9 @@ def single_maker_callback(
     orders = tracker.get_all_orders()
     trades = tracker.get_all_trades()
 
+    final_volume = executor.get_current_volume(account_assets)
     return AlgorithmResult(
+        **summarize_outcome(current_volume, final_volume, target_volume, orders, trades, execution_memory),
         orders=orders,
         trades=trades,
         account_assets=account_assets,
@@ -267,6 +273,9 @@ def single_maker_callback(
             "algorithm": algorithm_name,
             "target_volume": algorithm_input.target_volume,
             "execution_details": execution_memory,
+            "start_volume": current_volume,
+            "final_volume": final_volume,
+            "remaining_volume": target_volume - final_volume,
             "symbols_processed": 1,
             "orders_generated": len(orders),
             "trades_generated": len(trades),

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import math
 import shutil
 import tempfile
 import threading
@@ -45,6 +44,7 @@ from axile.executor.ctp.options import (
     finish_option_action,
     option_ref,
 )
+from axile.executor.ctp.quote_validation import price_in_bounds, quote_error
 from axile.executor.ctp.requests import (
     build_authenticate,
     build_market_login,
@@ -90,6 +90,10 @@ class CtpRequestError(RuntimeError):
     def __init__(self, message: str, *, return_code: int | None = None) -> None:
         super().__init__(message)
         self.return_code = return_code
+
+
+class _TradeAssociationPending(CtpRequestError):
+    """同交易日成交暂缺订单映射，可由后到订单补关联。"""
 
 
 class CtpSessionRecoveryRequired(CtpRequestError):
@@ -213,6 +217,9 @@ class CTPExecutor(AbstractExecutor, UnifiedCallbackClient):
         self._subscription_acks = set()
         self._subscription_errors = {}
         self._exchange_orders = {}
+        self._ambiguous_exchange_orders = set()
+        self._unassociated_trades = {}
+        self._dispatched_trades = set()
         self._startup_trades = []
         self._recovery_snapshot = None
         self._monitoring = False
@@ -252,7 +259,9 @@ class CTPExecutor(AbstractExecutor, UnifiedCallbackClient):
         with self._lock:
             self._require_active_connection()
             if name in {"ReqOrderInsert", "ReqExecOrderInsert", "ReqOptionSelfCloseInsert"}:
-                self._require_session_ready(str(req.InstrumentID))
+                self._require_new_order_ready(str(req.InstrumentID))
+                if name == "ReqOrderInsert":
+                    self._validate_order_quote(str(req.InstrumentID), req.LimitPrice, req.OrderPriceType)
             elif name in {"ReqOrderAction", "ReqExecOrderAction", "ReqOptionSelfCloseAction"}:
                 self._require_session_ready()
             if before_send is not None:
@@ -459,6 +468,14 @@ class CTPExecutor(AbstractExecutor, UnifiedCallbackClient):
         ):
             raise CtpRequestError(f"CTP {symbol} 尚未收到本会话订阅的新行情")
 
+    def _require_new_order_ready(self, symbol=None):
+        """未归属成交只阻止新增委托，不阻止健康会话撤销已知订单。"""
+        self._require_session_ready()
+        if self._unassociated_trades or self._ambiguous_exchange_orders:
+            raise CtpRequestError("CTP 存在未归属成交或歧义订单关联，禁止新单")
+        if symbol:
+            self._require_session_ready(symbol)
+
     def _send_stage(self, stage, operation, name, req):
         """在原生发送前绑定阶段请求编号，兼容同步回调的 SDK 替身。"""
         try:
@@ -595,8 +612,12 @@ class CTPExecutor(AbstractExecutor, UnifiedCallbackClient):
                 k: order.extra.get(k, "")
                 for k in ("order_ref", "front_id", "session_id", "exchange_id", "order_sys_id")
             }
-            key = (order.extra.get("exchange_id"), order.extra.get("order_sys_id"))
+            key = (self._trading_day, order.extra.get("exchange_id"), order.extra.get("order_sys_id"))
             if all(key):
+                previous = self._exchange_orders.get(key)
+                if previous is not None and previous.order_id != order.order_id:
+                    self._ambiguous_exchange_orders.add(key)
+                    raise CtpRequestError(f"CTP 订单关联有歧义: {key}")
                 self._exchange_orders[key] = order
         return order
 
@@ -605,16 +626,25 @@ class CTPExecutor(AbstractExecutor, UnifiedCallbackClient):
         day = str(getattr(row, "TradingDay", "") or "")
         if day and day != self._trading_day:
             raise CtpRequestError("成交交易日与当前 CTP 会话不一致")
-        key = (str(getattr(row, "ExchangeID", "")), str(getattr(row, "OrderSysID", "")).strip())
+        key = (
+            day or self._trading_day,
+            str(getattr(row, "ExchangeID", "")),
+            str(getattr(row, "OrderSysID", "")).strip(),
+        )
         with self._lock:
             order = self._exchange_orders.get(key)
-        if order is None:
-            raise CtpRequestError(f"CTP 成交缺少可验证的订单关联: exchange={key[0]}, order_sys_id={key[1]}")
+        if order is None or key in self._ambiguous_exchange_orders:
+            with self._lock:
+                self._unassociated_trades[self._native_trade_key(row)] = _copy_native_row(row)
+            if key in self._ambiguous_exchange_orders:
+                raise CtpRequestError(f"CTP 成交缺少唯一可验证的订单关联: {key}")
+            raise _TradeAssociationPending(f"CTP 成交缺少唯一可验证的订单关联: {key}")
         trade = trade_to_unified(
             row,
             trading_day=self._trading_day,
             front_id=int(order.extra["front_id"]),
             session_id=int(order.extra["session_id"]),
+            resolved_order_id=order.order_id,
         )
         return trade.model_copy(update={"order_id": order.order_id})
 
@@ -722,11 +752,35 @@ class CTPExecutor(AbstractExecutor, UnifiedCallbackClient):
                 errors = {x: self._subscription_errors[x] for x in symbols if x in self._subscription_errors}
                 if errors:
                     raise CtpRequestError(f"行情订阅失败: {errors}")
-                if all(x in self._quotes and x in self._subscription_acks for x in symbols):
+                if all(x in self._subscription_acks and self._quote_error(x) is None for x in symbols):
                     return {x: self._quotes[x] for x in symbols}
             threading.Event().wait(0.05)
-        self._invalidate_connection(f"行情恢复超时: {symbols}")
         raise TimeoutError(f"行情等待超时: {symbols}")
+
+    def _quote_error(self, symbol):
+        return self._snapshot_quote_error(symbol, self._quotes.get(symbol))
+
+    def _snapshot_quote_error(self, symbol, quote):
+        return quote_error(
+            quote,
+            now=time.time(),
+            trading_day=self._trading_day,
+            max_age=self._config().quote_max_age_seconds,
+            tick=self.get_tick_size(symbol),
+        )
+
+    def _validate_order_quote(self, symbol, price, native_price_type):
+        error = self._quote_error(symbol)
+        if error is not None:
+            raise CtpRequestError(f"CTP 行情不可用于新单: {symbol}: {error}")
+        quote = self._quotes[symbol]
+        if native_price_type == td.THOST_FTDC_OPT_LimitPrice and not price_in_bounds(
+            price,
+            tick=self.get_tick_size(symbol),
+            lower=quote.extra["lower_limit_price"],
+            upper=quote.extra["upper_limit_price"],
+        ):
+            raise ValueError(f"限价 {price} 不符合 tick 或涨跌停")
 
     def _new_ref(self):
         with self._lock:
@@ -737,7 +791,7 @@ class CTPExecutor(AbstractExecutor, UnifiedCallbackClient):
     @override
     def _place_order_impl(self, symbol, direction, order_type, volume, price=0, **kwargs):
         with self._lock:
-            self._require_session_ready(symbol)
+            self._require_new_order_ready(symbol)
         if symbol not in self._instruments:
             raise ValueError(f"未知 CTP 合约: {symbol}")
         trade_rule = kwargs.get("trade_rule")
@@ -749,11 +803,8 @@ class CTPExecutor(AbstractExecutor, UnifiedCallbackClient):
             order_type=order_type,
             trade_rule=trade_rule if isinstance(trade_rule, dict) else None,
         )
-        tick = self.get_tick_size(symbol)
-        if order_type == OrderType.LIMIT and (
-            not tick or price <= 0 or not math.isclose(price / tick, round(price / tick), abs_tol=1e-7)
-        ):
-            raise ValueError(f"限价 {price} 不符合 tick {tick}")
+        native_price_type = td.THOST_FTDC_OPT_LimitPrice if order_type == OrderType.LIMIT else ""
+        self._validate_order_quote(symbol, price, native_price_type)
         raw = kwargs.get("offset_flag", kwargs.get("offset", "open"))
         offset = resolve_offset(raw)
         reason_code = self._get_ctp_session_block_reason(symbol)
@@ -814,6 +865,9 @@ class CTPExecutor(AbstractExecutor, UnifiedCallbackClient):
             except CtpRequestError as exc:
                 self._invalidate_connection(str(exc))
                 return
+        # 订单回调可能同步触发撤单后的补单；先交付成交并解除待关联门禁，
+        # 使跟踪器按完整成交量计算剩余量，再允许订单终态驱动下一步。
+        self._replay_unassociated_trades()
         self._dispatch(self._order_callbacks, o)
 
     def _on_trade(self, row):
@@ -825,11 +879,45 @@ class CTPExecutor(AbstractExecutor, UnifiedCallbackClient):
                 return
             try:
                 trade = self._convert_trade(row)
+            except _TradeAssociationPending as exc:
+                # 保留原始帧并阻断新单，允许后到报单补关联。
+                self.logger.error(str(exc))
+                return
             except CtpRequestError as exc:
-                # 不猜测归属；下一实例通过完整查询恢复，当前任务不得继续发单。
                 self._invalidate_connection(str(exc))
                 return
+        self._dispatch_trade_once(row, trade)
+
+    def _native_trade_key(self, row):
+        """交易日与交易所隔离成交身份；无 TradeID 时保留完整原生证据。"""
+        day = str(getattr(row, "TradingDay", "") or self._trading_day)
+        exchange = str(getattr(row, "ExchangeID", ""))
+        trade_id = str(getattr(row, "TradeID", "")).strip()
+        if trade_id:
+            return (day, exchange, trade_id)
+        return (day, exchange, repr(sorted(vars(_copy_native_row(row)).items())))
+
+    def _dispatch_trade_once(self, row, trade):
+        with self._lock:
+            key = self._native_trade_key(row)
+            self._unassociated_trades.pop(key, None)
+            if key in self._dispatched_trades:
+                return
+            self._dispatched_trades.add(key)
         self._dispatch(self._trade_callbacks, trade)
+
+    def _replay_unassociated_trades(self):
+        with self._lock:
+            rows = list(self._unassociated_trades.values())
+        for row in rows:
+            try:
+                trade = self._convert_trade(row)
+            except _TradeAssociationPending:
+                continue
+            except CtpRequestError as exc:
+                self._invalidate_connection(str(exc))
+                return
+            self._dispatch_trade_once(row, trade)
 
     def _log_error(self, info, name):
         e = self._error(info, name)
@@ -935,6 +1023,7 @@ class CTPExecutor(AbstractExecutor, UnifiedCallbackClient):
     def _get_pending_orders_impl(self, symbol=None):
         r = build_query_orders(self._config(), symbol)
         orders = [self._remember_order(x) for x in self._query("ReqQryOrder", r)]
+        self._replay_unassociated_trades()
         return [o for o in orders if o.is_active() and (not symbol or o.symbol == symbol)]
 
     @override
@@ -989,7 +1078,13 @@ class CTPExecutor(AbstractExecutor, UnifiedCallbackClient):
                 quantity_step=step,
                 min_quantity=step,
             )
-        if price <= 0:
+        # 通用规划只传入价格标量，无法证明原快照的新鲜度；在此显式选取
+        # 最新快照，校验和定量始终使用同一个对象，避免回调更新造成价格竞态。
+        quote = self._quotes.get(symbol) if symbol else None
+        invalid_quote = bool(symbol) and self._snapshot_quote_error(symbol, quote) is not None
+        if quote is not None:
+            price = quote.last_price
+        if invalid_quote or not 0 < price < 1.7976931348623157e308:
             return TargetSizingDecision(
                 symbol=symbol or "",
                 status="UNAVAILABLE",
@@ -1072,6 +1167,10 @@ class CTPExecutor(AbstractExecutor, UnifiedCallbackClient):
             if q.extra.get("trading_day") != self._trading_day:
                 self._invalidate_connection("行情交易日变化，请重建 CTP 会话")
                 return
+            previous = self._quotes.get(q.symbol)
+            if previous is not None and q.timestamp <= previous.timestamp <= time.time() * 1000:
+                return
+            q.extra["received_at"] = time.time()
             self._quotes[q.symbol] = q
         self._dispatch(self._price_callbacks, q)
 

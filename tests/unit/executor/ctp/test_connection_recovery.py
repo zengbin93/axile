@@ -1,7 +1,9 @@
 """通过实际 SPI 和执行器回放连接边界，不连接柜台、不发送真实订单。"""
 
+from datetime import datetime
 from types import SimpleNamespace
 from unittest.mock import Mock
+from zoneinfo import ZoneInfo
 
 import pytest
 from openctp_ctp import thostmduserapi as md
@@ -127,12 +129,18 @@ class ScriptedBroker:
         return 0
 
     def quote(self, *, day=None):
+        now = datetime.now(ZoneInfo("Asia/Shanghai"))
         self.market_spi.OnRtnDepthMarketData(
             SimpleNamespace(
                 InstrumentID="ag2612",
                 TradingDay=day or self.day,
-                ActionDay=self.day,
-                UpdateTime="09:30:00",
+                ActionDay=now.strftime("%Y%m%d"),
+                UpdateTime=now.strftime("%H:%M:%S"),
+                UpdateMillisec=now.microsecond // 1000,
+                BidVolume1=1,
+                AskVolume1=1,
+                LowerLimitPrice=8000,
+                UpperLimitPrice=10000,
                 LastPrice=9000,
                 BidPrice1=8999,
                 AskPrice1=9001,
@@ -225,7 +233,10 @@ def test_disconnect_is_permanent_even_after_reconnect_and_late_callbacks(broker,
     assert broker.trader.ReqAuthenticate.call_count == 1
     assert broker.market.ReqUserLogin.call_count == 1
     with pytest.raises(CtpSessionRecoveryRequired, match="前置断线"):
-        executor._call_trader_request("ReqOrderInsert", SimpleNamespace(InstrumentID="ag2612"))
+        executor._call_trader_request(
+            "ReqOrderInsert",
+            SimpleNamespace(InstrumentID="ag2612", LimitPrice=9000, OrderPriceType=td.THOST_FTDC_OPT_LimitPrice),
+        )
     broker.trader.ReqOrderInsert.assert_not_called()
 
 
@@ -279,12 +290,18 @@ def test_disconnect_during_last_query_cannot_publish_ready(broker):
 def test_new_instance_needs_explicit_subscription_and_new_quote_before_submit(broker):
     executor = broker.start()
     with pytest.raises(CtpRequestError, match="新行情"):
-        executor._call_trader_request("ReqOrderInsert", SimpleNamespace(InstrumentID="ag2612"))
+        executor._call_trader_request(
+            "ReqOrderInsert",
+            SimpleNamespace(InstrumentID="ag2612", LimitPrice=9000, OrderPriceType=td.THOST_FTDC_OPT_LimitPrice),
+        )
     broker.quote()  # 未订阅的数据不能作为恢复证据。
     assert executor._quotes == {}
     executor.initialize_websocket(["ag2612"])
     broker.quote()
-    executor._call_trader_request("ReqOrderInsert", SimpleNamespace(InstrumentID="ag2612"))
+    executor._call_trader_request(
+        "ReqOrderInsert",
+        SimpleNamespace(InstrumentID="ag2612", LimitPrice=9000, OrderPriceType=td.THOST_FTDC_OPT_LimitPrice),
+    )
 
     broker.market.SubscribeMarketData.assert_called_once_with([b"ag2612"], 1)
     broker.trader.ReqOrderInsert.assert_called_once()
@@ -323,7 +340,10 @@ def test_quote_without_subscription_ack_cannot_allow_native_submit(broker):
     broker.quote()
 
     with pytest.raises(CtpRequestError, match="新行情"):
-        executor._call_trader_request("ReqOrderInsert", SimpleNamespace(InstrumentID="ag2612"))
+        executor._call_trader_request(
+            "ReqOrderInsert",
+            SimpleNamespace(InstrumentID="ag2612", LimitPrice=9000, OrderPriceType=td.THOST_FTDC_OPT_LimitPrice),
+        )
     broker.trader.ReqOrderInsert.assert_not_called()
 
 
@@ -380,15 +400,16 @@ def test_market_login_day_mismatch_blocks_startup(broker):
     assert not broker.executor._verify_connection()
 
 
-def test_quote_recovery_timeout_cannot_be_repaired_by_late_quote(broker):
+def test_quote_timeout_can_recover_with_fresh_quote_without_disconnect(broker):
     executor = broker.start()
     executor._timeout = 0
     with pytest.raises(TimeoutError, match="行情等待超时"):
         executor.get_market_data(["ag2612"])
     broker.quote()
 
-    assert not executor._verify_connection()
-    assert executor._quotes == {}
+    assert executor._verify_connection()
+    executor._timeout = 0.1
+    assert executor.get_market_data(["ag2612"])["ag2612"].last_price == 9000
 
 
 @pytest.mark.parametrize(("day", "session"), [("20260909", 3), ("20260910", 4)])

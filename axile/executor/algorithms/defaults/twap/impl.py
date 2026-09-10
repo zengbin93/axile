@@ -52,6 +52,7 @@ from axile.executor.algorithms.utils import (
     teardown_order_tracker,
 )
 from axile.executor.algorithms.utils.order_tracker import OrderTracker
+from axile.executor.algorithms.utils.outcome import summarize_outcome
 from axile.executor.algorithms.utils.trading import cancel_pending_orders_via_query, create_empty_result
 from axile.executor.models.unified_account_assets import UnifiedAccountAssets
 from axile.executor.models.unified_price import clone_price_data
@@ -269,13 +270,17 @@ def _execute_one_slice(
         executor.logger.exception(f"{executor.symbol} 下单遇到不可恢复异常")
         raise
     except RECOVERABLE_ALGORITHM_EXCEPTIONS as exc:
+        if getattr(exc, "requires_session_recovery", False):
+            raise
         error_message = format_exception_message(exc)
         executor.logger.error(f"{executor.symbol} 下单失败: {error_message}")
         detail["error"] = error_message
         return detail
 
     tracker.wait_for_completion(timeout=fill_wait_seconds)
-    cancel_pending_orders_via_query(executor)
+    failed_cancels = cancel_pending_orders_via_query(executor)
+    if failed_cancels:
+        detail["cancel_error"] = f"撤单失败: {failed_cancels}"
     return detail
 
 
@@ -388,6 +393,7 @@ def twap(
     )
 
     return AlgorithmResult(
+        **summarize_outcome(start_volume, final_volume, target_volume, orders, trades, slice_details),
         orders=orders,
         trades=trades,
         account_assets=account_assets,
@@ -398,6 +404,7 @@ def twap(
             "target_volume": target_volume,
             "start_volume": start_volume,
             "final_volume": final_volume,
+            "remaining_volume": target_volume - final_volume,
             "total_quantity": total_qty,
             "slices": params.slices,
             "total_duration": params.total_duration,

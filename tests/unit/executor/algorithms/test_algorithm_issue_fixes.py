@@ -909,7 +909,7 @@ def test_single_maker_skips_on_invalid_book_by_default(
     )
 
     assert submit_calls == []
-    assert result.status == ExecutionStatus.NOOP
+    assert result.status == ExecutionStatus.BLOCKED
     result_memory = cast("dict[str, Any]", result.memory)
     execution_details = cast("dict[str, Any]", result_memory["execution_details"])
     assert execution_details["rb2610_skipped"] == "missing_book"

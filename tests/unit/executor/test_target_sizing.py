@@ -13,6 +13,7 @@ from axile.executor.models.execution_result import TargetSizingStatus
 from axile.executor.models.unified_account_assets import UnifiedAccountAssets
 from axile.executor.models.unified_price import UnifiedPriceData
 from axile.executor.tq.tq_execute import TQExecutor
+from tests.unit.executor.ctp._quote_test_support import fresh_quote
 
 
 def _assets(equity: float = 100_000.0) -> UnifiedAccountAssets:
@@ -24,9 +25,17 @@ def _assets(equity: float = 100_000.0) -> UnifiedAccountAssets:
     )
 
 
+def _with_sizing_quote(executor):
+    # 此处只验证数量换算；新鲜度门禁由 CTP F12 入口回归覆盖。
+    executor._snapshot_quote_error = lambda symbol, quote: None
+    executor._quotes = {"m2701": fresh_quote("m2701", "")}
+    executor._quotes["m2701"].last_price = 3000
+
+
 def test_ctp_weight_below_one_contract_is_structured_quantization() -> None:
     executor = object.__new__(CTPExecutor)
-    executor._instruments = {"m2701": SimpleNamespace(VolumeMultiple=10)}
+    executor._instruments = {"m2701": SimpleNamespace(VolumeMultiple=10, PriceTick=1)}
+    _with_sizing_quote(executor)
 
     sizing = executor._calculate_generic_sizing(0.01, 3_000.0, _assets(), {}, symbol="m2701")
 
@@ -57,7 +66,8 @@ def test_ctp_direct_lots_mode_does_not_treat_input_as_weight() -> None:
 
 def test_ctp_missing_contract_multiplier_is_unavailable() -> None:
     executor = object.__new__(CTPExecutor)
-    executor._instruments = {}
+    executor._instruments = {"m2701": SimpleNamespace(PriceTick=1)}
+    _with_sizing_quote(executor)
 
     sizing = executor._calculate_generic_sizing(0.2, 3_000.0, _assets(), {}, symbol="m2701")
 

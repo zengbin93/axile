@@ -15,7 +15,9 @@ class _Exec:
     symbol = "rb2610"
 
     def __init__(self) -> None:
-        self.logger = type("L", (), {n: lambda *a, **k: None for n in ("debug", "info", "warning", "error", "exception")})()
+        self.logger = type(
+            "L", (), {n: lambda *a, **k: None for n in ("debug", "info", "warning", "error", "exception")}
+        )()
         self.audit_context: dict[str, Any] = {}
 
     def place_order(self, *a, **k):

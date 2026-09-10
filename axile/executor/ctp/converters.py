@@ -31,6 +31,12 @@ def _float(row: object, name: str) -> float:
     return value if math.isfinite(value) else 0.0
 
 
+def _price(row: object, name: str) -> float:
+    """CTP 价格缺失使用 DBL_MAX；与数量等数值字段分开清洗。"""
+    value = _float(row, name)
+    return value if 0 < value < 1.7976931348623157e308 else 0.0
+
+
 _SHANGHAI = ZoneInfo("Asia/Shanghai")
 
 
@@ -92,11 +98,11 @@ def order_to_unified(row: object, *, trading_day: str, front_id: int, session_id
         direction=direction.value,
         order_type=price_type.value,
         volume=volume,
-        price=_float(row, "LimitPrice"),
+        price=_price(row, "LimitPrice"),
         channel_type=TradeChannel.CTP,
         status=_ORDER_STATUS.get(_value(row, "OrderStatus"), OrderStatus.REJECTED),
         filled_volume=traded,
-        avg_price=_float(row, "LimitPrice") if traded else 0.0,
+        avg_price=_price(row, "LimitPrice") if traded else 0.0,
         create_time=create_time,
         update_time=datetime.now(_SHANGHAI).isoformat(),
         trading_day=day,
@@ -111,13 +117,13 @@ def order_to_unified(row: object, *, trading_day: str, front_id: int, session_id
     )
 
 
-def trade_to_unified(row: object, *, trading_day: str, front_id: int, session_id: int) -> TradeRecord:
+def trade_to_unified(
+    row: object, *, trading_day: str, front_id: int, session_id: int, resolved_order_id: str = ""
+) -> TradeRecord:
     """转换原生成交帧并保持稳定订单关联。"""
     day = str(_value(row, "TradingDay", trading_day) or trading_day)
     order_ref = str(_value(row, "OrderRef", "") or "")
-    row_front = int(_value(row, "FrontID", front_id) or front_id)
-    row_session = int(_value(row, "SessionID", session_id) or session_id)
-    price = _float(row, "Price")
+    price = _price(row, "Price")
     volume = _float(row, "Volume")
     trade_day = str(_value(row, "TradeDate", "") or "")
     trade_clock = str(_value(row, "TradeTime", "") or "")
@@ -125,7 +131,7 @@ def trade_to_unified(row: object, *, trading_day: str, front_id: int, session_id
     return TradeRecord.create(
         trade_id=str(_value(row, "TradeID", "") or ""),
         symbol=str(_value(row, "InstrumentID", "") or ""),
-        order_id=stable_order_id(day, row_front, row_session, order_ref),
+        order_id=resolved_order_id,
         trade_time=trade_time,
         trading_day=day,
         **_time_evidence(trade_day, trade_clock, "TradeDate", trade_time),
@@ -136,7 +142,7 @@ def trade_to_unified(row: object, *, trading_day: str, front_id: int, session_id
         order_sys_id=str(_value(row, "OrderSysID", "") or "").strip(),
         direction=str(_value(row, "Direction", "") or ""),
         offset_flag=str(_value(row, "OffsetFlag", "") or ""),
-    )
+    ).model_copy(update={"order_id": resolved_order_id})
 
 
 def quote_to_unified(row: object) -> UnifiedPriceData:
@@ -149,11 +155,11 @@ def quote_to_unified(row: object) -> UnifiedPriceData:
         millisec = -1
     update_time = _time(day, clock, millisec)
     timestamp = int(datetime.fromisoformat(update_time).timestamp() * 1000) if update_time else 0
-    bid = _float(row, "BidPrice1")
-    ask = _float(row, "AskPrice1")
+    bid = _price(row, "BidPrice1")
+    ask = _price(row, "AskPrice1")
     return UnifiedPriceData(
         symbol=str(_value(row, "InstrumentID", "") or ""),
-        last_price=_float(row, "LastPrice"),
+        last_price=_price(row, "LastPrice"),
         bid_price=bid,
         ask_price=ask,
         bid_volume=_float(row, "BidVolume1"),
@@ -162,12 +168,14 @@ def quote_to_unified(row: object) -> UnifiedPriceData:
         turnover=_float(row, "Turnover"),
         timestamp=timestamp,
         update_time=update_time,
-        book_valid=bid > 0 and ask > 0,
-        **{f"bid_price_{level}": _float(row, f"BidPrice{level}") for level in range(2, 6)},
-        **{f"ask_price_{level}": _float(row, f"AskPrice{level}") for level in range(2, 6)},
+        book_valid=0 < bid <= ask and _float(row, "BidVolume1") > 0 and _float(row, "AskVolume1") > 0,
+        **{f"bid_price_{level}": _price(row, f"BidPrice{level}") for level in range(2, 6)},
+        **{f"ask_price_{level}": _price(row, f"AskPrice{level}") for level in range(2, 6)},
         **{f"bid_volume_{level}": _float(row, f"BidVolume{level}") for level in range(2, 6)},
         **{f"ask_volume_{level}": _float(row, f"AskVolume{level}") for level in range(2, 6)},
         extra={
+            "lower_limit_price": _price(row, "LowerLimitPrice"),
+            "upper_limit_price": _price(row, "UpperLimitPrice"),
             "exchange_id": str(_value(row, "ExchangeID", "") or ""),
             "trading_day": str(_value(row, "TradingDay", "") or ""),
             **_time_evidence(day, clock, "ActionDay", update_time),

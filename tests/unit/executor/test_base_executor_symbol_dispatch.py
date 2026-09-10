@@ -1332,8 +1332,12 @@ def test_execute_aborts_before_dispatch_when_cancel_all_orders_fails(
     assert algorithm_calls == []
 
 
+@pytest.mark.parametrize(
+    "reduce_status", [None, ExecutionStatus.FAILED, ExecutionStatus.PARTIAL, ExecutionStatus.BLOCKED]
+)
 def test_execute_blocks_open_phase_when_reduce_phase_has_failure(
     monkeypatch: pytest.MonkeyPatch,
+    reduce_status: ExecutionStatus | None,
 ) -> None:
     """第一阶段失败时，不应继续执行第二阶段。"""
     from axile.executor import execution_engine as execution_engine_module
@@ -1360,7 +1364,9 @@ def test_execute_blocks_open_phase_when_reduce_phase_has_failure(
         def _algorithm(_exec: AbstractExecutor, algorithm_input: AlgorithmInput) -> AlgorithmResult:
             calls.append(algorithm_input.symbol)
             if algorithm_input.symbol == "rb2610":
-                raise RuntimeError("rb2610 reduce failed")
+                if reduce_status is None:
+                    raise RuntimeError("rb2610 reduce failed")
+                return AlgorithmResult(status=reduce_status, error="rb2610 reduce failed")
             return AlgorithmResult(
                 orders=[],
                 account_assets=_assets(positions=[]),
@@ -1396,8 +1402,8 @@ def test_execute_blocks_open_phase_when_reduce_phase_has_failure(
     assert calls == ["rb2610"]
     assert output.success is False
     # 减仓失败 + 开仓阻塞、无任何品种成功 → 整体判 FAILED（不再被 BLOCKED 稀释成 PARTIAL）。
-    assert output.status == ExecutionStatus.FAILED
-    assert output.symbol_results["rb2610"].status == ExecutionStatus.FAILED
+    assert not output.success
+    assert output.symbol_results["rb2610"].status == (reduce_status or ExecutionStatus.FAILED)
     assert output.symbol_results["ag2612"].status == ExecutionStatus.BLOCKED
     assert output.symbol_results["ag2612"].error == "第一阶段存在未成功的 symbol，已跳过后续开仓阶段"
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from typing import Any
 
 import pytest
@@ -205,7 +206,7 @@ def test_check_and_chase_emits_chase_event() -> None:
         bid_volume=100.0,
         ask_volume=100.0,
         volume=1000.0,
-        timestamp=0,
+        timestamp=int(time.time() * 1000),
         update_time="2026-07-14T23:00:00",
     )
 
@@ -242,7 +243,7 @@ def test_passive_order_at_best_bid_does_not_chase_on_wide_spread() -> None:
         bid_volume=100.0,
         ask_volume=100.0,
         volume=1000.0,
-        timestamp=0,
+        timestamp=int(time.time() * 1000),
         update_time="2026-07-14T23:00:00",
     )
 
@@ -571,7 +572,7 @@ def test_rest_refresh_is_rate_limited() -> None:
 
 
 def test_rest_refresh_skipped_for_other_symbol() -> None:
-    """非当前品种不走 REST 兜底（executor 只代理自身 symbol），保持既有陈旧快照。"""
+    """非当前品种不走 REST 兜底（executor 只代理自身 symbol），返回不可用。"""
     clock = _FixedClock(now=1000.0)
     executor = _MarketDataExecutor(_price("OTHER", 11.0, 11.02, timestamp_ms=int(1000.0 * 1000)))
     tracker = OrderTracker(executor=executor, clock=clock, price_stale_after=5.0)
@@ -580,12 +581,12 @@ def test_rest_refresh_skipped_for_other_symbol() -> None:
 
     result = tracker._usable_price("OTHER")
 
-    assert result is stale
+    assert result is None
     assert executor.market_data_calls == 0
 
 
-def test_rest_refresh_invalid_snapshot_keeps_stale() -> None:
-    """REST 返回无效快照时保留原陈旧快照，不写回、不崩溃。"""
+def test_rest_refresh_invalid_snapshot_rejects_stale() -> None:
+    """REST 返回无效快照时不返回陈旧缓存，不写回、不崩溃。"""
     clock = _FixedClock(now=1000.0)
     invalid = _price("SHSE.600000", 0.0, 10.02, timestamp_ms=int(1000.0 * 1000))  # bid=0 → is_valid False
     executor = _MarketDataExecutor(invalid)
@@ -595,7 +596,7 @@ def test_rest_refresh_invalid_snapshot_keeps_stale() -> None:
 
     result = tracker._usable_price("SHSE.600000")
 
-    assert result is stale
+    assert result is None
     assert tracker.latest_prices["SHSE.600000"] is stale
     assert executor.market_data_calls == 1
 
@@ -636,7 +637,7 @@ def _wide_spread_price(symbol: str) -> UnifiedPriceData:
         bid_volume=100.0,
         ask_volume=100.0,
         volume=1000.0,
-        timestamp=0,
+        timestamp=int(time.time() * 1000),
         update_time="2026-07-14T23:00:00",
     )
 
@@ -807,3 +808,15 @@ def test_chase_uses_post_cancel_fill_for_remaining_volume() -> None:
     assert len(chase) == 1
     # 总量 100，撤单确认时已成交 40 → 新单应为 60，而非按旧快照的 100
     assert chase[0]["details"]["chase"]["remaining_volume"] == 60.0
+
+
+@pytest.mark.parametrize("timestamp", [990_000, 1_001_000])
+def test_rest_refresh_rejects_old_or_future_snapshot(timestamp):
+    clock = _FixedClock(now=1000.0)
+    quote = _price("SHSE.600000", 10, 11, timestamp_ms=timestamp)
+    executor = _MarketDataExecutor(quote)
+    tracker = OrderTracker(executor=executor, clock=clock, price_stale_after=5)
+    tracker.latest_prices["SHSE.600000"] = quote
+    assert tracker._usable_price("SHSE.600000") is None
+    assert quote.timestamp == timestamp
+    assert tracker._usable_price("SHSE.600000") is None

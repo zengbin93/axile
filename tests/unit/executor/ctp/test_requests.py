@@ -31,6 +31,7 @@ from axile.executor.ctp.requests import (
 from axile.executor.models.unified_account_assets import UnifiedAccountAssets
 from axile.executor.models.unified_input import CTPAccountConfig, UnifiedStandardInput
 from axile.executor.models.unified_order import OrderDirection, OrderType
+from tests.unit.executor.ctp._quote_test_support import fresh_quote
 
 
 @pytest.fixture
@@ -86,9 +87,11 @@ def test_build_order_insert_populates_native_fields(config: CTPAccountConfig) ->
     assert request.LimitPrice == 3210.0
 
 
-def test_target_weight_uses_contract_multiplier_and_integer_lots() -> None:
-    executor = CTPExecutor.__new__(CTPExecutor)
-    executor._instruments = {"rb2610": SimpleNamespace(VolumeMultiple=10)}
+def test_target_weight_uses_contract_multiplier_and_integer_lots(config) -> None:
+    executor = CTPExecutor(TradeChannel.CTP)
+    executor.account_config = config
+    executor._instruments = {"rb2610": SimpleNamespace(VolumeMultiple=10, PriceTick=1)}
+    executor._quotes = {"rb2610": fresh_quote("rb2610", "")}
     assets = UnifiedAccountAssets(available_cash=21_000_000, total_asset=21_000_000, market_value=0, positions=[])
 
     volume = executor._calculate_generic_volume(0.0001, 3036.0, assets, {}, symbol="rb2610")
@@ -310,7 +313,7 @@ class _CalendarStub:
 def _submit_point_executor(config: CTPAccountConfig) -> CTPExecutor:
     executor = CTPExecutor(TradeChannel.CTP)
     executor._ready = executor._trader_connected = executor._market_connected = True
-    executor._quotes = {"ag2612": object(), "bu2612": object()}
+    executor._quotes = {symbol: fresh_quote(symbol, "20260824") for symbol in ("ag2612", "bu2612")}
     executor._subscription_acks = {"ag2612", "bu2612"}
     executor.account_config = config
     executor.channel_type = TradeChannel.CTP

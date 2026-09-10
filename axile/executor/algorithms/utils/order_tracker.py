@@ -362,7 +362,7 @@ class OrderTracker:
         """
         if price_data.timestamp <= 0:
             return False
-        return now - price_data.timestamp / 1000.0 <= self.price_stale_after
+        return 0 <= now - price_data.timestamp / 1000.0 <= self.price_stale_after
 
     def _rest_refresh_price(self, symbol: str, now: float) -> UnifiedPriceData | None:
         """盘口陈旧时用 REST 现价快照兜底刷新（限频、仅当前品种）.
@@ -395,9 +395,11 @@ class OrderTracker:
         try:
             refreshed = self.executor.get_market_data()
         except RECOVERABLE_ALGORITHM_EXCEPTIONS as exc:
+            if getattr(exc, "requires_session_recovery", False):
+                raise
             self._logger.warning(f"盘口陈旧，REST 兜底刷新 {symbol} 失败: {format_exception_message(exc)}")
             return None
-        if refreshed is None or not refreshed.is_valid():
+        if refreshed is None or not refreshed.is_valid() or not self._price_is_fresh(refreshed, self.clock.time()):
             return None
         self._logger.info(f"盘口陈旧超 {self.price_stale_after}s，已用 REST 现价兜底刷新 {symbol}")
         return refreshed
@@ -413,8 +415,7 @@ class OrderTracker:
         Returns
         -------
         UnifiedPriceData | None
-            新鲜的 WS 快照或 REST 兜底后的快照；两者皆不可得时返回已有的陈旧快照
-            （聊胜于无，调用方仍会用 tick / 价差阈值二次把关），无任何快照则 ``None``。
+            新鲜的 WS 快照或 REST 兜底后的快照；两者皆不可得时返回 ``None``。
         """
         price = self.latest_prices.get(symbol)
         now = self.clock.time()
@@ -424,7 +425,7 @@ class OrderTracker:
         if refreshed is not None:
             self.latest_prices[symbol] = refreshed
             return refreshed
-        return price
+        return None
 
     def _pending_chase_symbols(self) -> list[str]:
         """快照当前待追单订单涉及的品种（去重保序）.
