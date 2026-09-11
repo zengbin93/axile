@@ -350,7 +350,7 @@ def test_place_order_blocks_at_submit_during_lunch_break(
     _at_clock(monkeypatch, datetime(2026, 8, 25, 12, 0, tzinfo=_SHANGHAI))
 
     with pytest.raises(AccountControlBlockedError, match="CTP.SESSION.CLOSED"):
-        executor._place_order_impl("ag2612", OrderDirection.BUY, OrderType.LIMIT, 1, 9000)
+        executor._place_order_impl("ag2612", OrderDirection.BUY, OrderType.LIMIT, 1, 9000, offset_flag="open")
 
     executor._trader_api.ReqOrderInsert.assert_not_called()
     assert executor._order_keys == {}
@@ -363,7 +363,7 @@ def test_place_order_blocks_at_submit_after_session_end(
     _at_clock(monkeypatch, datetime(2026, 8, 25, 20, 0, tzinfo=_SHANGHAI))
 
     with pytest.raises(AccountControlBlockedError, match="CTP.SESSION.CLOSED"):
-        executor._place_order_impl("ag2612", OrderDirection.BUY, OrderType.LIMIT, 1, 9000)
+        executor._place_order_impl("ag2612", OrderDirection.BUY, OrderType.LIMIT, 1, 9000, offset_flag="open")
 
     executor._trader_api.ReqOrderInsert.assert_not_called()
     assert executor._order_keys == {}
@@ -377,7 +377,7 @@ def test_place_order_blocks_when_calendar_day_is_closed(
     _at_clock(monkeypatch, datetime(2026, 8, 22, 21, 29, tzinfo=_SHANGHAI))
 
     with pytest.raises(AccountControlBlockedError, match="CTP.SESSION.CLOSED"):
-        executor._place_order_impl("ag2612", OrderDirection.BUY, OrderType.LIMIT, 1, 9000)
+        executor._place_order_impl("ag2612", OrderDirection.BUY, OrderType.LIMIT, 1, 9000, offset_flag="open")
 
     executor._trader_api.ReqOrderInsert.assert_not_called()
 
@@ -391,7 +391,7 @@ def test_place_order_recheck_blocks_after_planning_crosses_session_boundary(
 
     _at_clock(monkeypatch, datetime(2026, 8, 24, 23, 0, tzinfo=_SHANGHAI))
     with pytest.raises(AccountControlBlockedError, match="CTP.SESSION.CLOSED"):
-        executor._place_order_impl("bu2612", OrderDirection.BUY, OrderType.LIMIT, 1, 3600)
+        executor._place_order_impl("bu2612", OrderDirection.BUY, OrderType.LIMIT, 1, 3600, offset_flag="open")
 
     executor._trader_api.ReqOrderInsert.assert_not_called()
     assert executor._order_keys == {}
@@ -401,7 +401,7 @@ def test_place_order_submits_when_session_open(config: CTPAccountConfig, monkeyp
     executor = _submit_point_executor(config)
     _at_clock(monkeypatch, datetime(2026, 8, 24, 21, 29, tzinfo=_SHANGHAI))
 
-    executor._place_order_impl("ag2612", OrderDirection.BUY, OrderType.LIMIT, 1, 9000)
+    executor._place_order_impl("ag2612", OrderDirection.BUY, OrderType.LIMIT, 1, 9000, offset_flag="open")
 
     executor._trader_api.ReqOrderInsert.assert_called_once()
     assert len(executor._order_keys) == 1
@@ -425,7 +425,7 @@ def test_public_place_order_controls_ctp_submit_once(
     executor._send_trader_request = Mock(side_effect=AssertionError("不应进入 insert_order guard"))
     _at_clock(monkeypatch, datetime(2026, 8, 24, 21, 29, tzinfo=_SHANGHAI))
 
-    order = executor.place_order("ag2612", OrderDirection.BUY, OrderType.LIMIT, 1, 9000)
+    order = executor.place_order("ag2612", OrderDirection.BUY, OrderType.LIMIT, 1, 9000, offset_flag="open")
 
     assert order.symbol == "ag2612"
     executor._trader_api.ReqOrderInsert.assert_called_once()
@@ -442,7 +442,7 @@ def test_place_order_does_not_retry_rate_limit(config: CTPAccountConfig, monkeyp
     executor.logger = Mock()
     _at_clock(monkeypatch, datetime(2026, 8, 24, 21, 29, tzinfo=_SHANGHAI))
     with pytest.raises(CtpRequestError, match="返回码=-3"):
-        executor._place_order_impl("ag2612", OrderDirection.BUY, OrderType.LIMIT, 1, 9000)
+        executor._place_order_impl("ag2612", OrderDirection.BUY, OrderType.LIMIT, 1, 9000, offset_flag="open")
 
     executor._trader_api.ReqOrderInsert.assert_called_once()
     assert executor._order_keys == {}

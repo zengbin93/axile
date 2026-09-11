@@ -805,7 +805,13 @@ class CTPExecutor(AbstractExecutor, UnifiedCallbackClient):
         )
         native_price_type = td.THOST_FTDC_OPT_LimitPrice if order_type == OrderType.LIMIT else ""
         self._validate_order_quote(symbol, price, native_price_type)
-        raw = kwargs.get("offset_flag", kwargs.get("offset", "open"))
+        raw = kwargs.get("offset_flag", kwargs.get("offset"))
+        if raw is None:
+            # 缺失 offset_flag 时按 position_side 推导（平仓标志）；两者皆缺则拒绝下单——
+            # 期货渠道默认开仓会把平仓单发成反向开仓，形成多空双向锁仓（issue #53）。
+            raw = "close" if kwargs.get("position_side") else None
+        if raw is None:
+            raise ValueError(f"CTP 期货订单必须显式携带 offset_flag 开平标志: {symbol}")
         offset = resolve_offset(raw)
         reason_code = self._get_ctp_session_block_reason(symbol)
         if reason_code is not None:

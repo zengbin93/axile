@@ -63,7 +63,7 @@ class TestDeterminePositionSide:
             account_assets_with_long,
         )
 
-        assert result == {"position_side": "LONG"}
+        assert result == {"position_side": "LONG", "offset_flag": "close"}
         assert executor.logger.debug.called
 
     def test_buy_closing_short_position(self, executor, account_assets_with_short):
@@ -77,7 +77,7 @@ class TestDeterminePositionSide:
             account_assets_with_short,
         )
 
-        assert result == {"position_side": "SHORT"}
+        assert result == {"position_side": "SHORT", "offset_flag": "close"}
         assert executor.logger.debug.called
 
     def test_sell_no_long_position(self, executor, account_assets_empty):
@@ -91,7 +91,7 @@ class TestDeterminePositionSide:
             account_assets_empty,
         )
 
-        assert result == {}
+        assert result == {"offset_flag": "open"}
         assert not executor.logger.debug.called
 
     def test_buy_no_short_position(self, executor, account_assets_empty):
@@ -105,7 +105,7 @@ class TestDeterminePositionSide:
             account_assets_empty,
         )
 
-        assert result == {}
+        assert result == {"offset_flag": "open"}
         assert not executor.logger.debug.called
 
     def test_get_positions_error_handling(self, executor):

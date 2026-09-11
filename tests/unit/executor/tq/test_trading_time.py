@@ -452,7 +452,7 @@ def test_place_order_rechecks_current_symbol_before_submitting(
     )
 
     with pytest.raises(Exception, match="CLOSED"):
-        instance._place_order_impl("rb2610", OrderDirection.BUY, OrderType.LIMIT, 1, 3200)
+        instance._place_order_impl("rb2610", OrderDirection.BUY, OrderType.LIMIT, 1, 3200, offset_flag="0")
 
     assert api.insert_calls == 0
 
@@ -476,7 +476,7 @@ def test_place_order_checks_and_submits_in_one_runtime_command(
         "_check_tq_symbol_trading_time",
         lambda _api, _sessions, _now: TQTradingTimeCheck(TQTradingTimeStatus.OPEN),
     )
-    instance._place_order_impl("rb2610", OrderDirection.BUY, OrderType.LIMIT, 1, 3200)
+    instance._place_order_impl("rb2610", OrderDirection.BUY, OrderType.LIMIT, 1, 3200, offset_flag="0")
 
     assert calls == 1
     assert api.insert_calls == 1
@@ -503,6 +503,6 @@ def test_place_order_rejects_no_night_session_product_at_night(
     )
 
     with pytest.raises(Exception, match="CLOSED"):
-        instance._place_order_impl("v_f2609", OrderDirection.BUY, OrderType.LIMIT, 1, 3000)
+        instance._place_order_impl("v_f2609", OrderDirection.BUY, OrderType.LIMIT, 1, 3000, offset_flag="0")
 
     assert api.insert_calls == 0

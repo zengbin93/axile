@@ -25,7 +25,17 @@ from axile.executor.models.unified_price import UnifiedPriceData
 from axile.executor.tq.converters import account_to_unified, order_to_unified, quote_to_unified, trade_to_unified
 from axile.executor.tq.runtime import TQRuntime, snapshot_entity
 
-_OFFSET_MAP = {"0": "OPEN", "1": "CLOSE", "3": "CLOSETODAY", "4": "CLOSE"}
+# TqSdk 数值标志 + CTP 风格语义标志（算法层统一按 CTP 语义传递）。
+_OFFSET_MAP = {
+    "0": "OPEN",
+    "1": "CLOSE",
+    "3": "CLOSETODAY",
+    "4": "CLOSE",
+    "open": "OPEN",
+    "close": "CLOSE",
+    "close_today": "CLOSETODAY",
+    "close_yesterday": "CLOSE",
+}
 _SHANGHAI = ZoneInfo("Asia/Shanghai")
 
 _DAY = ((9 * 3600, 10 * 3600 + 15 * 60), (10 * 3600 + 30 * 60, 11 * 3600 + 30 * 60), (13 * 3600 + 30 * 60, 15 * 3600))
@@ -418,7 +428,14 @@ class TQExecutor(AbstractExecutor):
         runtime = self._require_runtime()
         tq_symbol = runtime.resolver.to_tq(symbol, for_trade=True)
         sessions = self._trading_sessions(tq_symbol)
-        offset_flag = str(kwargs.get("offset_flag", "0"))
+        offset_flag = kwargs.get("offset_flag")
+        if offset_flag is None:
+            # 缺失 offset_flag 时按 position_side 推导（平仓标志）；两者皆缺则拒绝下单——
+            # 期货渠道默认开仓会把平仓单发成反向开仓，形成多空双向锁仓（issue #53）。
+            offset_flag = "1" if kwargs.get("position_side") else None
+        if offset_flag is None:
+            raise ValueError(f"TQ 期货订单必须显式携带 offset_flag 开平标志: {symbol}")
+        offset_flag = str(offset_flag)
         offset = _OFFSET_MAP.get(offset_flag)
         if offset is None:
             raise ValueError(f"TqSdk 不支持开平标志: {offset_flag}")
