@@ -79,7 +79,6 @@ def _submit(executor, tracker, direction, volume, target, current, price=100.0):
         price,
         target_volume=float(target),
         current_volume=float(current),
-        account_assets=_ASSETS,
         leg_timeout_seconds=1.0,
     )
 

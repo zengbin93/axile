@@ -301,7 +301,6 @@ def _place_participation_slice(
             price,
             target_volume=float(target_volume),
             current_volume=float(current_volume),
-            account_assets=account_assets,
             leg_timeout_seconds=fill_wait_seconds,
             deadline=deadline,
         )

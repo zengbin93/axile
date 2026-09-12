@@ -667,7 +667,6 @@ def submit_and_track_split_orders(
     price: float,
     target_volume: float,
     current_volume: float,
-    account_assets: UnifiedAccountAssets,
     leg_timeout_seconds: float = 60.0,
     deadline: float | None = None,
     **kwargs: object,
@@ -692,9 +691,8 @@ def submit_and_track_split_orders(
     target_volume : float
         本轮执行规划出的目标持仓量。
     current_volume : float
-        下单前的当前持仓量。
-    account_assets : UnifiedAccountAssets
-        下单前的账户资产快照，用于推导平仓意图。
+        本片下单规划依据的当前持仓量，用于锁定本片额度；实际下单前会在
+        旧单终态确认后重新拉取账户快照并复核持仓。
     leg_timeout_seconds : float, default=60.0
         本次拆单共享的等待时间额度，后续腿仅使用剩余时间。
     deadline : float | None, default=None

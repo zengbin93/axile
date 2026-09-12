@@ -33,7 +33,9 @@ def plan_futures_close_orders(
             continue
         td = float(position.extra.get(f"{prefix}_td", float("nan")))
         yd = float(position.extra.get(f"{prefix}_yd", float("nan")))
-        if not all(math.isfinite(v) and v >= 0 for v in (td, yd)) or td + yd != position.volume:
+        if not all(math.isfinite(v) and v >= 0 for v in (td, yd)) or not math.isclose(
+            td + yd, position.volume, rel_tol=0.0, abs_tol=1e-6
+        ):
             raise ValueError(f"{symbol}: 今昨仓明细缺失或不一致，拒绝猜测平仓标志")
         # 统一快照只有总冻结量，无法确定冻结的是今仓还是昨仓。
         if position.available_volume < position.volume:
