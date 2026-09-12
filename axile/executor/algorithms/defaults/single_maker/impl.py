@@ -26,6 +26,7 @@ from pydantic import Field
 
 from axile.executor.algorithms.common.params import BaseAlgorithmParams, ChaseParamsMixin
 from axile.executor.algorithms.core.base import (
+    ALL_ORDER_PARAM_MODELS,
     AlgorithmInput,
     AlgorithmResult,
     ExecutorProtocol,
@@ -123,6 +124,7 @@ def _resolve_pricing_on_book(
 
 @register_algorithm(
     "SINGLE-MAKER",
+    order_param_models=ALL_ORDER_PARAM_MODELS,
     params_class=SingleMakerParams,
     label="单边挂单",
     description="按本方或对手价下单，可撤单追价。适合不需要分时拆单的调仓；主动报价也可能剩量。",

@@ -36,6 +36,7 @@ from axile.server.db.models import (
     PortfolioAccountListPublic,
     PortfolioAccountPublic,
 )
+from axile.server.db.models.account import _check_algorithm_channel_compat
 from axile.server.execution.account_runtime_sync import enqueue_account_runtime_sync, reconcile_account_runtime
 from axile.server.execution.ctp_channels import drop_account_worker
 from axile.server.execution.live import live_hub
@@ -300,6 +301,8 @@ async def create_account(
                 return _account_public_with_runtime_sync(existing_account, existing_sync)
         account_routes._validate_account_control_binding(account.trade_channel, account.account_control_preset)
         account_config = _validate_channel_account_config(account.trade_channel, account.account_config)
+        _check_algorithm_channel_compat(account.algorithm, str(account.trade_channel), "下单算法")
+        _check_algorithm_channel_compat(account.empty_positions_algorithm, str(account.trade_channel), "清仓算法")
         parse_cron_expr(account.cron_expr)
         db_account = await _create_account_record(session, account, account_config)
         await enqueue_account_runtime_sync(
@@ -583,6 +586,15 @@ async def update_account(
             else {**db_account.account_config, **account.account_config}
         )
         normalized_account_config = _validate_channel_account_config(next_trade_channel, next_account_config)
+        # 算法与渠道按"更新后的目标状态"配对校验:PATCH 可能只改其一,必须取生效后的组合。
+        next_algorithm = account.algorithm if account.algorithm is not None else db_account.algorithm
+        next_empty_algorithm = (
+            account.empty_positions_algorithm
+            if account.empty_positions_algorithm is not None
+            else db_account.empty_positions_algorithm
+        )
+        _check_algorithm_channel_compat(next_algorithm, str(next_trade_channel), "下单算法")
+        _check_algorithm_channel_compat(next_empty_algorithm, str(next_trade_channel), "清仓算法")
 
         data = _build_account_update_data(account)
         if account.account_config is not None or account.trade_channel is not None:

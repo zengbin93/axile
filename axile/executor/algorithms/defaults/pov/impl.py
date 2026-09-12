@@ -40,6 +40,7 @@ from pydantic import Field, model_validator
 
 from axile.executor.algorithms.common.params import BaseAlgorithmParams
 from axile.executor.algorithms.core.base import (
+    ALL_ORDER_PARAM_MODELS,
     AlgorithmInput,
     AlgorithmResult,
     ExecutorProtocol,
@@ -327,6 +328,7 @@ def _place_participation_slice(
 
 @register_algorithm(
     ALGORITHM_NAME,
+    order_param_models=ALL_ORDER_PARAM_MODELS,
     params_class=PovParams,
     label="成交量参与率",
     description="按收到的市场增量成交量乘参与率跟单，无量等待。到期补单不再受参与率约束，仍可能剩量。",

@@ -169,6 +169,70 @@ def _validate_algorithm_config(config: Optional[Dict[str, Any]], field_label: st
     return config
 
 
+def _check_algorithm_channel_compat(
+    config: Optional[Dict[str, Any]],
+    channel: Optional[str],
+    field_label: str,
+) -> Optional[Dict[str, Any]]:
+    """
+    校验算法的订单参数模型与渠道声明是否兼容.
+
+    Parameters
+    ----------
+    config : dict | None
+        算法配置，形如 ``{"method": ..., "params": {...}}``；``None`` 直接放行。
+    channel : str | None
+        生效后的渠道标识；``None`` 直接放行。
+    field_label : str
+        字段中文名，用于错误信息（如「下单算法」「清仓算法」）。
+
+    Returns
+    -------
+    dict | None
+        原样返回入参，校验通过。
+
+    Raises
+    ------
+    ValueError
+        算法声明了具体参数模型而渠道模型不在其适配集合内时抛出，
+        经 Pydantic/路由包装为 422。
+
+    Notes
+    -----
+    与 ``channels`` 限制正交：channels 约束"能不能跑",本校验约束"跑的时候
+    下单参数语义能不能被渠道满足"。未知算法、未注册渠道、渠道未声明模型
+    （UNKNOWN）一律放行,交由执行期校验/兜底,避免误伤插件。
+    """
+    if config is None or channel is None:
+        return config
+    method = config.get("method") if isinstance(config, dict) else None
+    if not method:
+        return config
+
+    from axile.channels import get_channel
+    from axile.common.order_param_model import OrderParamModel
+    from axile.executor.algorithms.core.base import get_algorithm_metadata
+
+    try:
+        meta = get_algorithm_metadata(str(method))
+    except ValueError:
+        return config
+    if meta.order_param_models is None:
+        return config
+    try:
+        channel_model = get_channel(str(channel)).order_param_model
+    except KeyError:
+        return config
+    if channel_model is OrderParamModel.UNKNOWN:
+        return config
+    if str(channel_model) not in meta.order_param_models:
+        supported = sorted(meta.order_param_models)
+        raise ValueError(
+            f"{field_label}{method} 未适配渠道 {channel} 的订单参数模型({channel_model})，该算法仅适配: {supported}"
+        )
+    return config
+
+
 class AccountBase(SQLModel):
     """账户模型共用字段."""
 

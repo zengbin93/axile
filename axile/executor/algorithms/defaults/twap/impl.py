@@ -36,6 +36,7 @@ from pydantic import Field, model_validator
 
 from axile.executor.algorithms.common.params import BaseAlgorithmParams
 from axile.executor.algorithms.core.base import (
+    ALL_ORDER_PARAM_MODELS,
     AlgorithmInput,
     AlgorithmResult,
     ExecutorProtocol,
@@ -285,6 +286,7 @@ def _execute_one_slice(
 
 @register_algorithm(
     ALGORITHM_NAME,
+    order_param_models=ALL_ORDER_PARAM_MODELS,
     params_class=TwapParams,
     label="时间加权",
     description="按设定时长分片下单，前片欠量滚入后片。尾片可能集中补量，不保证全部成交。",
