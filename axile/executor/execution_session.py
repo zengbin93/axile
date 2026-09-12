@@ -103,6 +103,15 @@ class ExecutionSession:
         """获取当前 symbol 的全部方向持仓."""
         return self._owner.get_positions_for_symbol(self.symbol, account_assets)
 
+    def plan_close_orders(
+        self, direction: OrderDirection, volume: float, account_assets: UnifiedAccountAssets
+    ) -> list[tuple[float, dict[str, object]]]:
+        """转发渠道平仓拆单计划；未提供该能力的渠道保持单笔意图。"""
+        planner = getattr(self._owner, "plan_close_orders", None)
+        if callable(planner):
+            return planner(self.symbol, direction, volume, account_assets)
+        return [(volume, {})]
+
     def place_order(
         self,
         direction: OrderDirection,

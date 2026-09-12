@@ -4,6 +4,7 @@
 """
 
 from dataclasses import dataclass
+from typing import cast
 
 from axile.common.order_param_model import OrderParamModel
 from axile.domain.execution import ExecutionEventStatus, ExecutionEventType, ExecutionReasonFamily
@@ -556,6 +557,7 @@ def _place_offset_leg(
     current_volume: float,
     leg_kwargs: dict[str, object],
     deadline: float,
+    account_assets: UnifiedAccountAssets,
 ) -> list[UnifiedOrder]:
     """
     提交单条拆单腿；超过渠道单笔上限时按上限分段顺序提交.
@@ -567,7 +569,12 @@ def _place_offset_leg(
         调用方据此停止拆单,不补反向腿。
     """
     orders: list[UnifiedOrder] = []
-    for chunk in _leg_chunks(executor, order_type, volume):
+    planner = getattr(executor, "plan_close_orders", None)
+    plan: list[tuple[float, dict[str, object]]] = [(volume, {})]
+    if leg_kwargs.get("position_side") and callable(planner) and "offset_flag" not in leg_kwargs:
+        plan = cast("list[tuple[float, dict[str, object]]]", planner(direction, volume, account_assets))
+    chunks = [(chunk, extra) for quantity, extra in plan for chunk in _leg_chunks(executor, order_type, quantity)]
+    for chunk, extra in chunks:
         order = submit_and_track_order(
             executor,
             tracker,
@@ -578,7 +585,7 @@ def _place_offset_leg(
             target_volume=target_volume,
             current_volume=current_volume,
             deadline=deadline,
-            **leg_kwargs,
+            **{**leg_kwargs, **extra},
         )
         if order is None:
             break
@@ -631,6 +638,7 @@ def _submit_close_open_orders(
             current_volume,
             {**kwargs, **intent.kwargs},
             deadline,
+            account_assets,
         )
         if not leg_orders:
             executor.logger.info(f"{symbol} 拆单第 {leg_index + 1} 腿无可执行量,停止拆单")

@@ -16,6 +16,7 @@ from axile.executor.abstract_executor.base import AbstractExecutor
 from axile.executor.account_control.exceptions import AccountControlBlockedError
 from axile.executor.china_futures_session import is_within_possible_china_futures_session
 from axile.executor.execution_engine import ExecutionEngine, _DispatchPlanningResult
+from axile.executor.futures_order_intent import is_close_intent, plan_futures_close_orders, single_close_offset
 from axile.executor.models.execution_result import AlgorithmResult, ExecutionStatus, TargetSizingDecision
 from axile.executor.models.unified_account_assets import UnifiedAccountAssets
 from axile.executor.models.unified_callback import OrderUpdateCallback, PriceDataCallback, TradeRecordCallback
@@ -413,6 +414,13 @@ class TQExecutor(AbstractExecutor):
             result[quote.symbol] = quote
         return result
 
+    def plan_close_orders(
+        self, symbol: str, direction: OrderDirection, volume: float, account_assets: UnifiedAccountAssets
+    ) -> list[tuple[float, dict[str, object]]]:
+        """使用渠道交易所信息与持仓快照拆分平今、平昨订单。"""
+        exchange = self._require_runtime().resolver.to_tq(symbol, for_trade=True).split(".", 1)[0]
+        return plan_futures_close_orders(symbol, direction, volume, account_assets, exchange)
+
     @override
     def _place_order_impl(
         self,
@@ -430,10 +438,11 @@ class TQExecutor(AbstractExecutor):
         sessions = self._trading_sessions(tq_symbol)
         offset_flag = kwargs.get("offset_flag")
         if offset_flag is None:
-            # 意图翻译:算法层保证平仓意图必带 position_side(SELL+LONG / BUY+SHORT),
-            # 全无 position_side 即为开仓默认。issue #53 的防护在算法层落地——
-            # 平仓意图不可缺失,开仓缺省不歧义。
-            offset_flag = "1" if kwargs.get("position_side") else "0"
+            offset_flag = "0"
+            if is_close_intent(direction, kwargs.get("position_side")):
+                offset_flag = single_close_offset(
+                    self.plan_close_orders(symbol, direction, volume, self.get_account_assets())
+                )
         offset_flag = str(offset_flag)
         offset = _OFFSET_MAP.get(offset_flag)
         if offset is None:

@@ -39,6 +39,7 @@ class _FakeTracker:
 
 def _make_executor(model: OrderParamModel) -> MagicMock:
     executor = MagicMock()
+    executor.plan_close_orders = None
     executor.symbol = "rb2610"
     executor.order_param_model = model
     executor.get_min_notional.return_value = None
@@ -461,3 +462,27 @@ def test_chunk_submission_stops_when_budget_expires(monkeypatch) -> None:
 
     assert [order.volume for order in orders] == [1, 1]
     assert executor.place_order.call_count == 2
+
+
+@pytest.mark.parametrize("direction,side,sign", [(OrderDirection.SELL, "LONG", 1), (OrderDirection.BUY, "SHORT", -1)])
+def test_mixed_today_yesterday_close_before_crossing_zero(direction, side, sign):
+    from axile.executor.futures_order_intent import plan_futures_close_orders
+    from tests.unit.executor.test_futures_order_intent import _assets
+
+    executor = _make_executor(OrderParamModel.OFFSET)
+    assets = _assets("rb2610", side, 3, 2)
+    executor.get_account_assets.return_value = assets
+    executor.get_current_volume.side_effect = [sign * 5, 0, -sign * 2]
+    pos_dir = PositionDirection.LONG if side == "LONG" else PositionDirection.SHORT
+    executor.get_positions.side_effect = [[(5, pos_dir)], []]
+    executor.get_order_volume_bounds.return_value = (1, 2)
+    executor.plan_close_orders = lambda d, v, a: plan_futures_close_orders("rb2610", d, v, a, "SHFE")
+    tracker = _FakeTracker()
+
+    orders = _submit(executor, tracker, direction, 7, target=-sign * 2, current=sign * 5)
+
+    calls = executor.place_order.call_args_list
+    assert [c.args[2] for c in calls] == [2, 2, 1, 2]
+    assert [c.kwargs.get("offset_flag") for c in calls] == ["close_yesterday", "close_today", "close_today", None]
+    assert len(orders) == 4
+    assert tracker.wait_calls == 2
