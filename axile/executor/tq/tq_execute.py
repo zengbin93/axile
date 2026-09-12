@@ -430,11 +430,10 @@ class TQExecutor(AbstractExecutor):
         sessions = self._trading_sessions(tq_symbol)
         offset_flag = kwargs.get("offset_flag")
         if offset_flag is None:
-            # 缺失 offset_flag 时按 position_side 推导（平仓标志）；两者皆缺则拒绝下单——
-            # 期货渠道默认开仓会把平仓单发成反向开仓，形成多空双向锁仓（issue #53）。
-            offset_flag = "1" if kwargs.get("position_side") else None
-        if offset_flag is None:
-            raise ValueError(f"TQ 期货订单必须显式携带 offset_flag 开平标志: {symbol}")
+            # 意图翻译:算法层保证平仓意图必带 position_side(SELL+LONG / BUY+SHORT),
+            # 全无 position_side 即为开仓默认。issue #53 的防护在算法层落地——
+            # 平仓意图不可缺失,开仓缺省不歧义。
+            offset_flag = "1" if kwargs.get("position_side") else "0"
         offset_flag = str(offset_flag)
         offset = _OFFSET_MAP.get(offset_flag)
         if offset is None:
@@ -470,7 +469,10 @@ class TQExecutor(AbstractExecutor):
                 operation="place_order",
                 symbol=symbol,
             )
-        return order_to_unified(result, runtime.resolver)
+        order = order_to_unified(result, runtime.resolver)
+        # 意图翻译结果落进 extra,供订单跟踪器追价重报时回读开平标志。
+        order.extra["offset_flag"] = offset_flag
+        return order
 
     @override
     def _cancel_order_impl(self, symbol: str, order_id: str) -> bool:

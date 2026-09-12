@@ -5,6 +5,7 @@
 
 from dataclasses import dataclass
 
+from axile.common.order_param_model import OrderParamModel
 from axile.domain.execution import ExecutionEventStatus, ExecutionEventType, ExecutionReasonFamily
 from axile.executor.algorithms.core.base import ExecutorProtocol
 from axile.executor.algorithms.exceptions import SubMinQuantityError
@@ -34,17 +35,16 @@ def determine_position_side(
     Returns
     -------
     dict[str, str]
-        下单附加参数。涉及平已有仓位时同时包含 ``position_side`` 与
-        ``offset_flag="close"``；纯开仓时仅包含 ``offset_flag="open"``。
+        下单附加参数。涉及平已有仓位时包含 ``position_side``（指明平哪一侧），
+        否则返回空字典（纯开仓意图，由渠道按自身参数模型翻译）。
 
     Notes
     -----
     该函数只在双向持仓语义下有意义。算法层不直接
     关心账户模式细节，而是根据当前持仓方向推导应平掉哪一边仓位。
 
-    ``offset_flag`` 按 CTP 语义推导：存在反向持仓即为平仓单，否则为开仓单。
-    期货渠道（CTP/TQ）在缺失该标志时会把订单当成开仓处理，平仓单被发成反向
-    开仓、形成多空双向锁仓，因此这里必须显式携带。
+    函数只表达渠道无关的意图词汇；期货开平标志等渠道母语由各渠道的
+    ``place_order`` 翻译层负责推导，算法层不主动产生。
     """
     position_side_kwargs: dict[str, str] = {}
     symbol = executor.symbol
@@ -52,6 +52,10 @@ def determine_position_side(
     try:
         positions = executor.get_positions(account_assets)
     except Exception as e:
+        if executor.order_param_model is OrderParamModel.OFFSET:
+            # 期货渠道上读不出持仓就无法判断本单是不是平仓意图;此时静默放行会把
+            # 平仓单发成反向开仓、形成多空锁仓(issue #53),宁可失败也不猜测。
+            raise RuntimeError(f"期货渠道无法读取 {symbol} 持仓,拒绝猜测开平语义") from e
         executor.logger.warning(f"获取 {symbol} 持仓失败: {e}")
         return position_side_kwargs
 
@@ -68,7 +72,6 @@ def determine_position_side(
                 executor.logger.debug(f"{symbol} 买入将平空头持仓")
                 break
 
-    position_side_kwargs["offset_flag"] = "close" if "position_side" in position_side_kwargs else "open"
     return position_side_kwargs
 
 

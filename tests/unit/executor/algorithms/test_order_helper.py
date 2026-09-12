@@ -63,7 +63,7 @@ class TestDeterminePositionSide:
             account_assets_with_long,
         )
 
-        assert result == {"position_side": "LONG", "offset_flag": "close"}
+        assert result == {"position_side": "LONG"}
         assert executor.logger.debug.called
 
     def test_buy_closing_short_position(self, executor, account_assets_with_short):
@@ -77,7 +77,7 @@ class TestDeterminePositionSide:
             account_assets_with_short,
         )
 
-        assert result == {"position_side": "SHORT", "offset_flag": "close"}
+        assert result == {"position_side": "SHORT"}
         assert executor.logger.debug.called
 
     def test_sell_no_long_position(self, executor, account_assets_empty):
@@ -91,7 +91,7 @@ class TestDeterminePositionSide:
             account_assets_empty,
         )
 
-        assert result == {"offset_flag": "open"}
+        assert result == {}
         assert not executor.logger.debug.called
 
     def test_buy_no_short_position(self, executor, account_assets_empty):
@@ -105,7 +105,7 @@ class TestDeterminePositionSide:
             account_assets_empty,
         )
 
-        assert result == {"offset_flag": "open"}
+        assert result == {}
         assert not executor.logger.debug.called
 
     def test_get_positions_error_handling(self, executor):
@@ -127,6 +127,18 @@ class TestDeterminePositionSide:
         # 验证调用包含错误信息
         call_args = str(executor.logger.warning.call_args)
         assert "获取 rb2610 持仓失败" in call_args
+
+    def test_get_positions_error_fails_loud_on_offset_channel(self, executor):
+        """测试期货渠道读取持仓失败时拒绝猜测开平语义(issue #53 防护)."""
+        from axile.common.order_param_model import OrderParamModel
+
+        assets = MagicMock()
+        executor.symbol = "rb2610"
+        executor.get_positions = Mock(side_effect=Exception("Connection error"))
+        executor.order_param_model = OrderParamModel.OFFSET
+
+        with pytest.raises(RuntimeError, match="拒绝猜测开平语义"):
+            determine_position_side(executor, OrderDirection.SELL, assets)
 
 
 class TestSetupOrderTracker:
