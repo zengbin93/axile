@@ -10,6 +10,7 @@ from typing import Any, Callable, Literal, Protocol, Type, overload, runtime_che
 
 from pydantic import BaseModel
 
+from axile.common.order_param_model import OrderParamModel
 from axile.common.trade_channel import TradeChannel
 from axile.executor.models.execution_result import AlgorithmResult
 from axile.executor.models.unified_account_assets import PositionDirection, UnifiedAccountAssets
@@ -93,6 +94,11 @@ class ExecutorProtocol(Protocol):
     @property
     def channel_type(self) -> TradeChannel:
         """当前执行会话所属交易渠道."""
+        ...
+
+    @property
+    def order_param_model(self) -> OrderParamModel:
+        """当前渠道的订单参数模型(未声明时为 UNKNOWN)."""
         ...
 
     @property

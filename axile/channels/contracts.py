@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Literal
 import pandas as pd
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from axile.common.order_param_model import OrderParamModel
 from axile.executor.models.unified_input_accounts import BaseAccountConfig
 
 if TYPE_CHECKING:
@@ -385,6 +386,9 @@ class ChannelPlugin:
     max_parallel_symbols : int | None
         单次执行允许并行处理的最大品种数；``None`` 表示渠道不附加上限，
         仅使用执行环境推导出的系统保护上限。
+    order_param_model : OrderParamModel
+        渠道表达下单意图的参数模型；未声明时为 ``UNKNOWN``，
+        算法在未知模型上按"歧义即失败"拒绝猜测下单语义。
     canonicalize_symbol : CanonicalizeSymbol
         把策略代码收到与持仓同一套标识；默认恒等。
     quantize_target_quantity : QuantizeTargetQuantity | None
@@ -400,6 +404,7 @@ class ChannelPlugin:
     required_modules: tuple[str, ...] = ()
     install_extra: str | None = None
     max_parallel_symbols: int | None = 1
+    order_param_model: OrderParamModel = OrderParamModel.UNKNOWN
     canonicalize_symbol: CanonicalizeSymbol = _identity_symbol
     quantize_target_quantity: QuantizeTargetQuantity | None = None
     requires_pre_connect_guard: bool = False

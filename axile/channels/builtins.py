@@ -27,6 +27,7 @@ from axile.channels.contracts import (
     ChannelUi,
     ChannelUnits,
 )
+from axile.common.order_param_model import OrderParamModel
 from axile.common.trade_channel import TradeChannel
 from axile.executor.models.unified_input_accounts import (
     BaseAccountConfig,
@@ -164,6 +165,7 @@ def _ctp_plugin() -> ChannelPlugin:
         required_modules=("openctp_ctp",),
         install_extra="ctp",
         max_parallel_symbols=None,
+        order_param_model=OrderParamModel.OFFSET,
         canonicalize_symbol=canonicalize_cn_futures_symbol,
         quantize_target_quantity=quantize_cn_futures_quantity,
         requires_pre_connect_guard=True,
@@ -268,6 +270,7 @@ def _gm_plugin() -> ChannelPlugin:
         required_modules=("gm",),
         install_extra="gm",
         max_parallel_symbols=None,
+        order_param_model=OrderParamModel.DIRECTIONAL,
     )
 
 
@@ -371,6 +374,7 @@ def _tq_plugin() -> ChannelPlugin:
         required_modules=("tqsdk",),
         install_extra="tqsdk",
         max_parallel_symbols=None,
+        order_param_model=OrderParamModel.OFFSET,
         canonicalize_symbol=canonicalize_cn_futures_symbol,
         quantize_target_quantity=quantize_cn_futures_quantity,
     )

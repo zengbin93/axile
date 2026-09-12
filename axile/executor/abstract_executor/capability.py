@@ -10,6 +10,7 @@ import os
 from typing import TYPE_CHECKING, cast
 
 from axile.channels import get_channel
+from axile.common.order_param_model import OrderParamModel
 from axile.executor.models.execution_result import (
     ExecutionStatus,
     TargetSizingDecision,
@@ -136,6 +137,22 @@ class AbstractExecutorCapabilityMixin:
             return 1
         system_limit = _system_max_parallel_symbol_workers()
         return system_limit if channel_limit is None else min(system_limit, channel_limit)
+
+    def order_param_model(self) -> OrderParamModel:
+        """
+        返回当前渠道的订单参数模型.
+
+        Returns
+        -------
+        OrderParamModel
+            渠道插件声明的模型；渠道未注册或插件未声明时安全回退为
+            ``UNKNOWN``,由算法层按"歧义即失败"处理。
+        """
+        executor = _executor(self)
+        try:
+            return get_channel(executor.channel_type).order_param_model
+        except KeyError:
+            return OrderParamModel.UNKNOWN
 
     def _normalize_symbol(self, symbol: str) -> str:
         """返回当前渠道在统一层使用的规范 symbol."""
