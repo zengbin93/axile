@@ -49,10 +49,9 @@ from axile.executor.algorithms.core.base import (
 from axile.executor.algorithms.exceptions import RECOVERABLE_ALGORITHM_EXCEPTIONS, format_exception_message
 from axile.executor.algorithms.utils import (
     determine_order_price,
-    determine_position_side,
     get_default_clock,
     setup_order_tracker,
-    submit_and_track_order,
+    submit_and_track_split_orders,
     teardown_order_tracker,
 )
 from axile.executor.algorithms.utils.order_tracker import OrderTracker
@@ -283,8 +282,6 @@ def _place_participation_slice(
         executor.get_market_data(),
         price_strategy=params.price_strategy,
     )
-    position_side_kwargs = determine_position_side(executor, direction, account_assets)
-
     detail: dict[str, Any] = {
         "direction": direction.value,
         "volume": slice_qty,
@@ -293,7 +290,7 @@ def _place_participation_slice(
     }
 
     try:
-        order = submit_and_track_order(
+        orders = submit_and_track_split_orders(
             executor,
             tracker,
             direction,
@@ -302,12 +299,14 @@ def _place_participation_slice(
             price,
             target_volume=float(target_volume),
             current_volume=float(current_volume),
-            **position_side_kwargs,
+            account_assets=account_assets,
+            leg_timeout_seconds=fill_wait_seconds,
         )
-        if order is None:
+        if not orders:
             detail["skipped"] = "sub_min_notional"
             return detail
-        detail["order_id"] = order.order_id
+        detail["order_id"] = orders[0].order_id
+        detail["order_ids"] = [order.order_id for order in orders]
     except MemoryError:
         executor.logger.exception(f"{executor.symbol} 下单遇到不可恢复异常")
         raise

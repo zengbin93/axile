@@ -57,7 +57,6 @@ def test_algorithm_outcome(monkeypatch, module, case, expected):
     tracker.get_all_trades.return_value = []
     monkeypatch.setattr(module, "setup_order_tracker", lambda *args: tracker)
     monkeypatch.setattr(module, "teardown_order_tracker", lambda *args: None)
-    monkeypatch.setattr(module, "determine_position_side", lambda *args: {})
 
     def submit(*args, **kwargs):
         if case == "reject":
@@ -81,7 +80,11 @@ def test_algorithm_outcome(monkeypatch, module, case, expected):
         orders.append(order)
         return order
 
-    monkeypatch.setattr(module, "submit_and_track_order", submit)
+    def split_submit(*args, **kwargs):
+        order = submit(*args, **kwargs)
+        return [order] if order is not None else []
+
+    monkeypatch.setattr(module, "submit_and_track_split_orders", split_submit)
     if module is maker:
         entry, params = maker.single_maker_callback, maker.SingleMakerParams(max_wait_seconds=1)
     else:

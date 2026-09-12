@@ -289,12 +289,11 @@ def _patch_single_maker_dependencies(
         "determine_order_price",
         lambda *_args, **_kwargs: (OrderType.LIMIT, 100.0),
     )
-    monkeypatch.setattr(single_maker_impl, "determine_position_side", lambda *_args, **_kwargs: {})
 
-    def _raise_submit(*_args: object, **_kwargs: object) -> UnifiedOrder:
+    def _raise_submit(*_args: object, **_kwargs: object) -> list[UnifiedOrder]:
         raise submit_side_effect
 
-    monkeypatch.setattr(single_maker_impl, "submit_and_track_order", _raise_submit)
+    monkeypatch.setattr(single_maker_impl, "submit_and_track_split_orders", _raise_submit)
     monkeypatch.setattr(single_maker_impl, "teardown_order_tracker", lambda *_args, **_kwargs: None)
 
 
@@ -745,7 +744,6 @@ def test_single_maker_defaults_to_active_price_strategy(
     captured: dict[str, object] = {}
 
     monkeypatch.setattr(single_maker_impl, "setup_order_tracker", lambda *_args, **_kwargs: tracker)
-    monkeypatch.setattr(single_maker_impl, "determine_position_side", lambda *_args, **_kwargs: {})
     monkeypatch.setattr(single_maker_impl, "teardown_order_tracker", lambda *_args, **_kwargs: None)
 
     def _capture_price_strategy(
@@ -761,16 +759,18 @@ def test_single_maker_defaults_to_active_price_strategy(
     monkeypatch.setattr(single_maker_impl, "determine_order_price", _capture_price_strategy)
     monkeypatch.setattr(
         single_maker_impl,
-        "submit_and_track_order",
-        lambda *_args, **_kwargs: UnifiedOrder(
-            order_id="rb-active-1",
-            symbol="rb2610",
-            direction=OrderDirection.BUY,
-            order_type=OrderType.LIMIT,
-            volume=1.0,
-            price=101.0,
-            status=OrderStatus.PENDING,
-        ),
+        "submit_and_track_split_orders",
+        lambda *_args, **_kwargs: [
+            UnifiedOrder(
+                order_id="rb-active-1",
+                symbol="rb2610",
+                direction=OrderDirection.BUY,
+                order_type=OrderType.LIMIT,
+                volume=1.0,
+                price=101.0,
+                status=OrderStatus.PENDING,
+            )
+        ],
     )
 
     executor = _SingleMakerExecutor()
@@ -890,7 +890,7 @@ def test_single_maker_skips_on_invalid_book_by_default(
     submit_calls: list[object] = []
     monkeypatch.setattr(
         single_maker_impl,
-        "submit_and_track_order",
+        "submit_and_track_split_orders",
         lambda *args, **kwargs: submit_calls.append((args, kwargs)),
     )
 
@@ -925,7 +925,6 @@ def test_single_maker_market_order_on_invalid_book(
     tracker.get_all_trades.return_value = []
     monkeypatch.setattr(single_maker_impl, "setup_order_tracker", lambda *_a, **_k: tracker)
     monkeypatch.setattr(single_maker_impl, "teardown_order_tracker", lambda *_a, **_k: None)
-    monkeypatch.setattr(single_maker_impl, "determine_position_side", lambda *_a, **_k: {})
 
     captured: dict[str, object] = {}
 
@@ -942,7 +941,10 @@ def test_single_maker_market_order_on_invalid_book(
             status=OrderStatus.PENDING,
         )
 
-    monkeypatch.setattr(single_maker_impl, "submit_and_track_order", _spy_submit)
+    def _spy_split_submit(*args: object, **_kwargs: object) -> list[UnifiedOrder]:
+        return [_spy_submit(*args, **_kwargs)]
+
+    monkeypatch.setattr(single_maker_impl, "submit_and_track_split_orders", _spy_split_submit)
 
     executor = _SingleMakerExecutor()
     monkeypatch.setattr(executor, "get_market_data", _invalid_book_tick)
@@ -972,7 +974,6 @@ def test_single_maker_active_price_on_invalid_book(
     tracker.get_all_trades.return_value = []
     monkeypatch.setattr(single_maker_impl, "setup_order_tracker", lambda *_a, **_k: tracker)
     monkeypatch.setattr(single_maker_impl, "teardown_order_tracker", lambda *_a, **_k: None)
-    monkeypatch.setattr(single_maker_impl, "determine_position_side", lambda *_a, **_k: {})
 
     captured: dict[str, object] = {}
 
@@ -988,16 +989,18 @@ def test_single_maker_active_price_on_invalid_book(
     monkeypatch.setattr(single_maker_impl, "determine_order_price", _capture)
     monkeypatch.setattr(
         single_maker_impl,
-        "submit_and_track_order",
-        lambda *_a, **_k: UnifiedOrder(
-            order_id="act-1",
-            symbol="rb2610",
-            direction=OrderDirection.BUY,
-            order_type=OrderType.LIMIT,
-            volume=1.0,
-            price=101.0,
-            status=OrderStatus.PENDING,
-        ),
+        "submit_and_track_split_orders",
+        lambda *_a, **_k: [
+            UnifiedOrder(
+                order_id="act-1",
+                symbol="rb2610",
+                direction=OrderDirection.BUY,
+                order_type=OrderType.LIMIT,
+                volume=1.0,
+                price=101.0,
+                status=OrderStatus.PENDING,
+            )
+        ],
     )
 
     executor = _SingleMakerExecutor()

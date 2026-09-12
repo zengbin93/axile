@@ -36,9 +36,8 @@ from axile.executor.algorithms.core.base import (
 from axile.executor.algorithms.exceptions import RECOVERABLE_ALGORITHM_EXCEPTIONS, format_exception_message
 from axile.executor.algorithms.utils import (
     determine_order_price,
-    determine_position_side,
     setup_order_tracker,
-    submit_and_track_order,
+    submit_and_track_split_orders,
     teardown_order_tracker,
 )
 from axile.executor.algorithms.utils.order_tracker import ChaseConfig
@@ -207,16 +206,13 @@ def single_maker_callback(
                 )
             order_type, price = pricing
 
-            # 使用工具函数确定 position_side
-            position_side_kwargs = determine_position_side(executor, direction, account_assets)
-
             executor.logger.info(
                 f"{symbol} {direction.value} {needed_volume}, 当前={current_volume}, 目标={target_volume}"
             )
 
             try:
-                # 使用工具函数提交和跟踪订单
-                order = submit_and_track_order(
+                # 使用工具函数提交和跟踪订单;期货渠道穿零调仓自动拆成先平后开两腿
+                orders = submit_and_track_split_orders(
                     executor,
                     tracker,
                     direction,
@@ -225,9 +221,10 @@ def single_maker_callback(
                     price,
                     target_volume=float(target_volume),
                     current_volume=float(current_volume),
-                    **position_side_kwargs,
+                    account_assets=account_assets,
+                    leg_timeout_seconds=max_wait_seconds,
                 )
-                if order is None:
+                if not orders:
                     execution_memory[f"{symbol}_skipped"] = "sub_min_notional"
                 else:
                     execution_memory[f"{symbol}_adjustment"] = {
@@ -236,7 +233,8 @@ def single_maker_callback(
                         "diff": target_volume - current_volume,
                         "direction": direction.value,
                         "volume": needed_volume,
-                        "order_id": order.order_id,
+                        "order_id": orders[0].order_id,
+                        "order_ids": [order.order_id for order in orders],
                     }
             except MemoryError:
                 executor.logger.exception(f"{symbol} 下单遇到不可恢复异常")
