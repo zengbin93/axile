@@ -16,6 +16,7 @@ from axile.executor.abstract_executor.base import AbstractExecutor
 from axile.executor.account_control.exceptions import AccountControlBlockedError
 from axile.executor.china_futures_session import is_within_possible_china_futures_session
 from axile.executor.execution_engine import ExecutionEngine, _DispatchPlanningResult
+from axile.executor.futures_order_intent import is_close_intent, plan_futures_close_orders, single_close_offset
 from axile.executor.models.execution_result import AlgorithmResult, ExecutionStatus, TargetSizingDecision
 from axile.executor.models.unified_account_assets import UnifiedAccountAssets
 from axile.executor.models.unified_callback import OrderUpdateCallback, PriceDataCallback, TradeRecordCallback
@@ -25,7 +26,17 @@ from axile.executor.models.unified_price import UnifiedPriceData
 from axile.executor.tq.converters import account_to_unified, order_to_unified, quote_to_unified, trade_to_unified
 from axile.executor.tq.runtime import TQRuntime, snapshot_entity
 
-_OFFSET_MAP = {"0": "OPEN", "1": "CLOSE", "3": "CLOSETODAY", "4": "CLOSE"}
+# TqSdk 数值标志 + CTP 风格语义标志（算法层统一按 CTP 语义传递）。
+_OFFSET_MAP = {
+    "0": "OPEN",
+    "1": "CLOSE",
+    "3": "CLOSETODAY",
+    "4": "CLOSE",
+    "open": "OPEN",
+    "close": "CLOSE",
+    "close_today": "CLOSETODAY",
+    "close_yesterday": "CLOSE",
+}
 _SHANGHAI = ZoneInfo("Asia/Shanghai")
 
 _DAY = ((9 * 3600, 10 * 3600 + 15 * 60), (10 * 3600 + 30 * 60, 11 * 3600 + 30 * 60), (13 * 3600 + 30 * 60, 15 * 3600))
@@ -403,6 +414,13 @@ class TQExecutor(AbstractExecutor):
             result[quote.symbol] = quote
         return result
 
+    def plan_close_orders(
+        self, symbol: str, direction: OrderDirection, volume: float, account_assets: UnifiedAccountAssets
+    ) -> list[tuple[float, dict[str, object]]]:
+        """使用渠道交易所信息与持仓快照拆分平今、平昨订单。"""
+        exchange = self._require_runtime().resolver.to_tq(symbol, for_trade=True).split(".", 1)[0]
+        return plan_futures_close_orders(symbol, direction, volume, account_assets, exchange)
+
     @override
     def _place_order_impl(
         self,
@@ -418,7 +436,14 @@ class TQExecutor(AbstractExecutor):
         runtime = self._require_runtime()
         tq_symbol = runtime.resolver.to_tq(symbol, for_trade=True)
         sessions = self._trading_sessions(tq_symbol)
-        offset_flag = str(kwargs.get("offset_flag", "0"))
+        offset_flag = kwargs.get("offset_flag")
+        if offset_flag is None:
+            offset_flag = "0"
+            if is_close_intent(direction, kwargs.get("position_side")):
+                offset_flag = single_close_offset(
+                    self.plan_close_orders(symbol, direction, volume, self.get_account_assets())
+                )
+        offset_flag = str(offset_flag)
         offset = _OFFSET_MAP.get(offset_flag)
         if offset is None:
             raise ValueError(f"TqSdk 不支持开平标志: {offset_flag}")
@@ -453,7 +478,10 @@ class TQExecutor(AbstractExecutor):
                 operation="place_order",
                 symbol=symbol,
             )
-        return order_to_unified(result, runtime.resolver)
+        order = order_to_unified(result, runtime.resolver)
+        # 意图翻译结果落进 extra,供订单跟踪器追价重报时回读开平标志。
+        order.extra["offset_flag"] = offset_flag
+        return order
 
     @override
     def _cancel_order_impl(self, symbol: str, order_id: str) -> bool:

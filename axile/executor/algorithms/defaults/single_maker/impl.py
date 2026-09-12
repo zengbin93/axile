@@ -26,6 +26,7 @@ from pydantic import Field
 
 from axile.executor.algorithms.common.params import BaseAlgorithmParams, ChaseParamsMixin
 from axile.executor.algorithms.core.base import (
+    ALL_ORDER_PARAM_MODELS,
     AlgorithmInput,
     AlgorithmResult,
     ExecutorProtocol,
@@ -36,9 +37,9 @@ from axile.executor.algorithms.core.base import (
 from axile.executor.algorithms.exceptions import RECOVERABLE_ALGORITHM_EXCEPTIONS, format_exception_message
 from axile.executor.algorithms.utils import (
     determine_order_price,
-    determine_position_side,
+    get_default_clock,
     setup_order_tracker,
-    submit_and_track_order,
+    submit_and_track_split_orders,
     teardown_order_tracker,
 )
 from axile.executor.algorithms.utils.order_tracker import ChaseConfig
@@ -124,6 +125,7 @@ def _resolve_pricing_on_book(
 
 @register_algorithm(
     "SINGLE-MAKER",
+    order_param_models=ALL_ORDER_PARAM_MODELS,
     params_class=SingleMakerParams,
     label="单边挂单",
     description="按本方或对手价下单，可撤单追价。适合不需要分时拆单的调仓；主动报价也可能剩量。",
@@ -207,16 +209,14 @@ def single_maker_callback(
                 )
             order_type, price = pricing
 
-            # 使用工具函数确定 position_side
-            position_side_kwargs = determine_position_side(executor, direction, account_assets)
-
             executor.logger.info(
                 f"{symbol} {direction.value} {needed_volume}, 当前={current_volume}, 目标={target_volume}"
             )
 
+            deadline = get_default_clock().time() + max_wait_seconds
             try:
-                # 使用工具函数提交和跟踪订单
-                order = submit_and_track_order(
+                # 使用工具函数提交和跟踪订单;期货渠道穿零调仓自动拆成先平后开两腿
+                orders = submit_and_track_split_orders(
                     executor,
                     tracker,
                     direction,
@@ -225,10 +225,11 @@ def single_maker_callback(
                     price,
                     target_volume=float(target_volume),
                     current_volume=float(current_volume),
-                    **position_side_kwargs,
+                    leg_timeout_seconds=max_wait_seconds,
+                    deadline=deadline,
                 )
-                if order is None:
-                    execution_memory[f"{symbol}_skipped"] = "sub_min_notional"
+                if not orders:
+                    execution_memory[f"{symbol}_skipped"] = "no_order_submitted"
                 else:
                     execution_memory[f"{symbol}_adjustment"] = {
                         "from": current_volume,
@@ -236,7 +237,8 @@ def single_maker_callback(
                         "diff": target_volume - current_volume,
                         "direction": direction.value,
                         "volume": needed_volume,
-                        "order_id": order.order_id,
+                        "order_id": orders[0].order_id,
+                        "order_ids": [order.order_id for order in orders],
                     }
             except MemoryError:
                 executor.logger.exception(f"{symbol} 下单遇到不可恢复异常")
@@ -249,7 +251,7 @@ def single_maker_callback(
                 execution_memory[f"{symbol}_error"] = error_message
 
             # 等待订单完成
-            tracker.wait_for_completion(timeout=max_wait_seconds)
+            tracker.wait_for_completion(timeout=max(0.0, deadline - get_default_clock().time()))
 
             # 重新获取账户资产
             account_assets = executor.get_account_assets()

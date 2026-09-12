@@ -128,6 +128,18 @@ class TestDeterminePositionSide:
         call_args = str(executor.logger.warning.call_args)
         assert "获取 rb2610 持仓失败" in call_args
 
+    def test_get_positions_error_fails_loud_on_offset_channel(self, executor):
+        """测试期货渠道读取持仓失败时拒绝猜测开平语义(issue #53 防护)."""
+        from axile.common.order_param_model import OrderParamModel
+
+        assets = MagicMock()
+        executor.symbol = "rb2610"
+        executor.get_positions = Mock(side_effect=Exception("Connection error"))
+        executor.order_param_model = OrderParamModel.OFFSET
+
+        with pytest.raises(RuntimeError, match="拒绝猜测开平语义"):
+            determine_position_side(executor, OrderDirection.SELL, assets)
+
 
 class TestSetupOrderTracker:
     """测试 setup_order_tracker 函数."""

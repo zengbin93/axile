@@ -190,7 +190,7 @@ def test_transport_connected_before_authentication_is_not_ready(broker):
     assert not executor._login.done.is_set()
     assert not executor._verify_connection()
     with pytest.raises(CtpRequestError, match="尚未完成"):
-        executor._place_order_impl("ag2612", OrderDirection.BUY, OrderType.LIMIT, 1, 9000)
+        executor._place_order_impl("ag2612", OrderDirection.BUY, OrderType.LIMIT, 1, 9000, offset_flag="open")
     broker.trader.ReqOrderInsert.assert_not_called()
 
 
@@ -359,7 +359,7 @@ def test_disconnect_between_order_validation_and_native_send_blocks_request(brok
 
     monkeypatch.setattr(executor, "_new_ref", disconnect_before_ref)
     with pytest.raises(CtpSessionRecoveryRequired, match="前置断线"):
-        executor._place_order_impl("ag2612", OrderDirection.BUY, OrderType.LIMIT, 1, 9000)
+        executor._place_order_impl("ag2612", OrderDirection.BUY, OrderType.LIMIT, 1, 9000, offset_flag="open")
 
     broker.trader.ReqOrderInsert.assert_not_called()
     assert "20260909:7:2:11" not in executor._order_keys

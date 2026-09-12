@@ -4,23 +4,44 @@
 """
 
 from dataclasses import dataclass
+from typing import cast
 
+from axile.common.order_param_model import OrderParamModel
 from axile.domain.execution import ExecutionEventStatus, ExecutionEventType, ExecutionReasonFamily
 from axile.executor.algorithms.core.base import ExecutorProtocol
 from axile.executor.algorithms.exceptions import SubMinQuantityError
+from axile.executor.algorithms.utils.clock import get_default_clock
 from axile.executor.algorithms.utils.order_tracker import ChaseConfig, OrderTracker
 from axile.executor.models.unified_account_assets import PositionDirection, UnifiedAccountAssets
 from axile.executor.models.unified_order import OrderDirection, OrderType, UnifiedOrder
 from axile.executor.models.unified_price import UnifiedPriceData
+from axile.executor.order_volume_limits import split_order_volumes
 
 
-def determine_position_side(
+@dataclass(frozen=True)
+class CloseIntent:
+    """
+    单向持仓下单的平仓意图裁决.
+
+    Attributes
+    ----------
+    kwargs : dict[str, str]
+        下单附加参数；涉及平已有仓位时包含 ``position_side``。
+    opposite_volume : float
+        当前可用于本单平仓的反向持仓总量；为 ``0`` 表示纯开仓。
+    """
+
+    kwargs: dict[str, str]
+    opposite_volume: float
+
+
+def determine_close_intent(
     executor: ExecutorProtocol,
     direction: OrderDirection,
     account_assets: UnifiedAccountAssets,
-) -> dict[str, str]:
+) -> CloseIntent:
     """
-    为双向持仓模式推导 ``position_side`` 参数。
+    推导本单的平仓意图与可平反向持仓量.
 
     Parameters
     ----------
@@ -33,37 +54,61 @@ def determine_position_side(
 
     Returns
     -------
-    dict[str, str]
-        包含 ``position_side`` 的下单附加参数；当前订单不涉及平已有仓位时返回空字典。
+    CloseIntent
+        下单附加参数与可平反向持仓量；不涉及平仓时参数为空、可平量为 0。
 
     Notes
     -----
     该函数只在双向持仓语义下有意义。算法层不直接
     关心账户模式细节，而是根据当前持仓方向推导应平掉哪一边仓位。
+
+    函数只表达渠道无关的意图词汇；期货开平标志等渠道母语由各渠道的
+    ``place_order`` 翻译层负责推导，算法层不主动产生。
     """
-    position_side_kwargs: dict[str, str] = {}
     symbol = executor.symbol
 
     try:
         positions = executor.get_positions(account_assets)
     except Exception as e:
+        if executor.order_param_model in (OrderParamModel.OFFSET, OrderParamModel.POSITION_SIDE):
+            # 期货渠道上读不出持仓就无法判断本单是不是平仓意图;此时静默放行会把
+            # 平仓单发成反向开仓、形成多空锁仓(issue #53),宁可失败也不猜测。
+            raise RuntimeError(f"渠道无法读取 {symbol} 持仓,拒绝猜测开平语义") from e
         executor.logger.warning(f"获取 {symbol} 持仓失败: {e}")
-        return position_side_kwargs
+        return CloseIntent(kwargs={}, opposite_volume=0.0)
 
+    intent = CloseIntent(kwargs={}, opposite_volume=0.0)
     if direction == OrderDirection.SELL:
         for pos_vol, pos_dir in positions:
             if pos_dir == PositionDirection.LONG and pos_vol > 0:
-                position_side_kwargs["position_side"] = "LONG"
+                intent = CloseIntent(kwargs={"position_side": "LONG"}, opposite_volume=float(pos_vol))
                 executor.logger.debug(f"{symbol} 卖出将平多头持仓")
                 break
     elif direction == OrderDirection.BUY:
         for pos_vol, pos_dir in positions:
             if pos_dir == PositionDirection.SHORT and pos_vol > 0:
-                position_side_kwargs["position_side"] = "SHORT"
+                intent = CloseIntent(kwargs={"position_side": "SHORT"}, opposite_volume=float(pos_vol))
                 executor.logger.debug(f"{symbol} 买入将平空头持仓")
                 break
 
-    return position_side_kwargs
+    return intent
+
+
+def determine_position_side(
+    executor: ExecutorProtocol,
+    direction: OrderDirection,
+    account_assets: UnifiedAccountAssets,
+) -> dict[str, str]:
+    """
+    为双向持仓模式推导 ``position_side`` 参数.
+
+    Returns
+    -------
+    dict[str, str]
+        下单附加参数。涉及平已有仓位时包含 ``position_side``（指明平哪一侧），
+        否则返回空字典（纯开仓意图，由渠道按自身参数模型翻译）。
+    """
+    return determine_close_intent(executor, direction, account_assets).kwargs
 
 
 @dataclass(frozen=True)
@@ -282,6 +327,7 @@ def submit_and_track_order(
     price: float,
     target_volume: float,
     current_volume: float,
+    deadline: float | None = None,
     **kwargs: object,
 ) -> UnifiedOrder | None:
     """
@@ -305,6 +351,8 @@ def submit_and_track_order(
         本轮执行规划出的目标持仓量。
     current_volume : float
         提交订单前的当前持仓量。
+    deadline : float | None, default=None
+        本单及其追单、兜底共用的绝对截止时间；为空时不额外限制。
     **kwargs : object
         额外的下单参数，例如 ``position_side``。
 
@@ -347,6 +395,9 @@ def submit_and_track_order(
     if decision.reduce_only:
         kwargs["reduce_only"] = True
 
+    if deadline is not None and get_default_clock().time() >= deadline:
+        executor.logger.info(f"{symbol} 下单时间额度已耗尽，停止提交")
+        return None
     try:
         order = executor.place_order(
             direction,
@@ -398,14 +449,330 @@ def submit_and_track_order(
     )
 
     position_side = kwargs.get("position_side")
+    offset_flag = kwargs.get("offset_flag")
     tracker.add_order(
         order,
         direction=direction,
         target_volume=float(target_volume),
         current_volume=float(current_volume),
         position_side=position_side if isinstance(position_side, str) else None,
+        offset_flag=offset_flag if isinstance(offset_flag, str) else None,
+        submission_deadline=deadline,
     )
 
     executor.logger.debug(f"订单已提交: {symbol} {direction.value} {volume} @{price}, 订单ID: {order.order_id}")
 
     return order
+
+
+_OFFSET_SPLIT_MAX_LEGS = 4
+
+
+def _resolve_order_param_model(executor: ExecutorProtocol) -> OrderParamModel:
+    """
+    归一化执行器声明的订单参数模型.
+
+    Parameters
+    ----------
+    executor : ExecutorProtocol
+        当前算法绑定的执行器会话。
+
+    Returns
+    -------
+    OrderParamModel
+        声明的模型；轻量替身未声明或取值非法时回退 ``UNKNOWN``,
+        由调用方按"歧义即失败"处理。
+    """
+    raw = getattr(executor, "order_param_model", None)
+    if isinstance(raw, OrderParamModel):
+        return raw
+    try:
+        return OrderParamModel(str(raw)) if raw is not None else OrderParamModel.UNKNOWN
+    except ValueError:
+        return OrderParamModel.UNKNOWN
+
+
+def _remaining_toward_target(direction: OrderDirection, target_volume: float, current_volume: float) -> float:
+    """
+    按下单方向计算距离目标还需推进的数量（恒为非负）.
+
+    Parameters
+    ----------
+    direction : OrderDirection
+        下单方向。
+    target_volume : float
+        目标净持仓。
+    current_volume : float
+        复核后的当前净持仓。
+
+    Returns
+    -------
+    float
+        仍需卖出的量（SELL）或仍需买入的量（BUY）；已越过目标时返回 0。
+    """
+    if direction == OrderDirection.SELL:
+        return max(0.0, current_volume - target_volume)
+    return max(0.0, target_volume - current_volume)
+
+
+def _leg_chunks(executor: ExecutorProtocol, order_type: OrderType, volume: float) -> list[float]:
+    """
+    按渠道单笔数量上限切分拆单腿.
+
+    Parameters
+    ----------
+    executor : ExecutorProtocol
+        当前算法绑定的执行器会话。
+    order_type : OrderType
+        订单类型。
+    volume : float
+        本腿总量。
+
+    Returns
+    -------
+    list[float]
+        切分后的各段数量；渠道未提供边界、数量非整数手或不超过上限时
+        原样返回单段。
+    """
+    if not float(volume).is_integer():
+        return [volume]
+    bounds_getter = getattr(executor, "get_order_volume_bounds", None)
+    bounds = bounds_getter(order_type) if callable(bounds_getter) else None
+    if not isinstance(bounds, tuple):
+        return [volume]
+    max_size = bounds[1]
+    if max_size is None or volume <= max_size:
+        return [volume]
+    return [float(chunk) for chunk in split_order_volumes(int(volume), max_size, min_size=bounds[0])]
+
+
+def _place_offset_leg(
+    executor: ExecutorProtocol,
+    tracker: OrderTracker,
+    direction: OrderDirection,
+    order_type: OrderType,
+    volume: float,
+    price: float,
+    target_volume: float,
+    current_volume: float,
+    leg_kwargs: dict[str, object],
+    deadline: float,
+    account_assets: UnifiedAccountAssets,
+) -> list[UnifiedOrder]:
+    """
+    提交单条拆单腿；超过渠道单笔上限时按上限分段顺序提交.
+
+    Returns
+    -------
+    list[UnifiedOrder]
+        本腿已提交的订单；某段被跳过（碎量/低于下限）时返回已提交的前段,
+        调用方据此停止拆单,不补反向腿。
+    """
+    orders: list[UnifiedOrder] = []
+    planner = getattr(executor, "plan_close_orders", None)
+    plan: list[tuple[float, dict[str, object]]] = [(volume, {})]
+    if leg_kwargs.get("position_side") and callable(planner) and "offset_flag" not in leg_kwargs:
+        plan = cast("list[tuple[float, dict[str, object]]]", planner(direction, volume, account_assets))
+    chunks = [(chunk, extra) for quantity, extra in plan for chunk in _leg_chunks(executor, order_type, quantity)]
+    for chunk, extra in chunks:
+        order = submit_and_track_order(
+            executor,
+            tracker,
+            direction,
+            order_type,
+            chunk,
+            price,
+            target_volume=target_volume,
+            current_volume=current_volume,
+            deadline=deadline,
+            **{**leg_kwargs, **extra},
+        )
+        if order is None:
+            break
+        orders.append(order)
+    return orders
+
+
+def _submit_close_open_orders(
+    executor: ExecutorProtocol,
+    tracker: OrderTracker,
+    direction: OrderDirection,
+    order_type: OrderType,
+    volume: float,
+    price: float,
+    target_volume: float,
+    current_volume: float,
+    account_assets: UnifiedAccountAssets,
+    deadline: float,
+    kwargs: dict[str, object],
+) -> list[UnifiedOrder]:
+    """
+    按持仓侧或开平标志先平后开，并遵守本次调用的数量额度.
+
+    Notes
+    -----
+    每张期货订单只能携带一种开平属性,穿零调仓必须拆成"平仓腿 + 开仓腿"。
+    逐腿门控:每腿成交后复核净持仓再决定下一腿,平仓腿被跳过或失败时绝不
+    补开仓,避免部分平仓后反向开仓形成多空锁仓(issue #53)。
+    """
+    symbol = executor.symbol
+    orders: list[UnifiedOrder] = []
+    remaining = float(volume)
+    # 分腿只能推进本次调用的额度，不能把 TWAP/POV 的整体目标当作本片目标。
+    slice_target = current_volume + (volume if direction == OrderDirection.BUY else -volume)
+    clock = get_default_clock()
+    for leg_index in range(_OFFSET_SPLIT_MAX_LEGS):
+        if remaining <= 0 or clock.time() >= deadline:
+            break
+        tracker.assert_ready_for_submission()
+        intent = determine_close_intent(executor, direction, account_assets)
+        leg_volume = min(remaining, intent.opposite_volume) if intent.opposite_volume > 0 else remaining
+        leg_orders = _place_offset_leg(
+            executor,
+            tracker,
+            direction,
+            order_type,
+            leg_volume,
+            price,
+            target_volume,
+            current_volume,
+            {**kwargs, **intent.kwargs},
+            deadline,
+            account_assets,
+        )
+        if not leg_orders:
+            executor.logger.info(f"{symbol} 拆单第 {leg_index + 1} 腿无可执行量,停止拆单")
+            break
+        orders.extend(leg_orders)
+        # 超时撤单仅表示请求已发出；绝不能据此重算余量并提交替代单。
+        if not tracker.wait_for_completion(timeout=max(0.0, deadline - clock.time())):
+            break
+        account_assets = executor.get_account_assets()
+        current_volume = executor.get_current_volume(account_assets)
+        remaining = min(
+            _remaining_toward_target(direction, target_volume, current_volume),
+            _remaining_toward_target(direction, slice_target, current_volume),
+        )
+    else:
+        executor.logger.warning(f"{symbol} 拆单达到最大腿数仍未完成,剩余 {remaining}")
+    return orders
+
+
+def submit_and_track_split_orders(
+    executor: ExecutorProtocol,
+    tracker: OrderTracker,
+    direction: OrderDirection,
+    order_type: OrderType,
+    volume: float,
+    price: float,
+    target_volume: float,
+    current_volume: float,
+    leg_timeout_seconds: float = 60.0,
+    deadline: float | None = None,
+    **kwargs: object,
+) -> list[UnifiedOrder]:
+    """
+    按渠道订单参数模型提交订单，必要时先平后开拆单.
+
+    Parameters
+    ----------
+    executor : ExecutorProtocol
+        当前算法绑定的执行器会话。
+    tracker : OrderTracker
+        负责收敛订单与成交状态的跟踪器。
+    direction : OrderDirection
+        下单方向。
+    order_type : OrderType
+        订单类型。
+    volume : float
+        本步下单总量。
+    price : float
+        下单价格；市价单通常传 ``0``。
+    target_volume : float
+        本轮执行规划出的目标持仓量。
+    current_volume : float
+        本片下单规划依据的当前持仓量，用于锁定本片额度；实际下单前会在
+        旧单终态确认后重新拉取账户快照并复核持仓。
+    leg_timeout_seconds : float, default=60.0
+        本次拆单共享的等待时间额度，后续腿仅使用剩余时间。
+    deadline : float | None, default=None
+        调用方提供的绝对截止时间，与外层等待共用；缺省时按时间额度计算。
+    **kwargs : object
+        额外的下单参数，例如 ``trade_rule``。
+
+    Returns
+    -------
+    list[UnifiedOrder]
+        已提交的订单列表；因名义价值/数量限制被跳过时返回空列表。
+
+    Raises
+    ------
+    RuntimeError
+        渠道未声明订单参数模型（UNKNOWN）时拒绝猜测下单语义。
+
+    Notes
+    -----
+    DIRECTIONAL 模型直接提交单笔；POSITION_SIDE 模型保留平仓侧，
+    穿零时与 OFFSET 模型一样由 :func:`_submit_close_open_orders`
+    拆成平仓腿和开仓腿，逐腿复核持仓且不超过本片额度。
+    """
+    if deadline is None:
+        deadline = get_default_clock().time() + leg_timeout_seconds
+    model = _resolve_order_param_model(executor)
+    if model is OrderParamModel.UNKNOWN:
+        raise RuntimeError(f"渠道未声明订单参数模型,拒绝猜测下单语义: {executor.symbol}")
+    tracker.assert_ready_for_submission()
+    # 快照必须在终态确认之后读取：回调也可能先于门控到达，此时 pending 已为空。
+    slice_target = current_volume + (volume if direction == OrderDirection.BUY else -volume)
+    account_assets = executor.get_account_assets()
+    current_volume = executor.get_current_volume(account_assets)
+    volume = min(
+        _remaining_toward_target(direction, target_volume, current_volume),
+        _remaining_toward_target(direction, slice_target, current_volume),
+    )
+    if volume <= 0 or get_default_clock().time() >= deadline:
+        return []
+    if model is OrderParamModel.POSITION_SIDE:
+        intent = determine_close_intent(executor, direction, account_assets)
+        if 0 < intent.opposite_volume < volume:
+            return _submit_close_open_orders(
+                executor,
+                tracker,
+                direction,
+                order_type,
+                volume,
+                price,
+                target_volume,
+                current_volume,
+                account_assets,
+                deadline,
+                kwargs,
+            )
+        kwargs = {**kwargs, **intent.kwargs}
+    if model in (OrderParamModel.POSITION_SIDE, OrderParamModel.DIRECTIONAL):
+        order = submit_and_track_order(
+            executor,
+            tracker,
+            direction,
+            order_type,
+            volume,
+            price,
+            target_volume=target_volume,
+            current_volume=current_volume,
+            deadline=deadline,
+            **kwargs,
+        )
+        return [order] if order is not None else []
+    return _submit_close_open_orders(
+        executor,
+        tracker,
+        direction,
+        order_type,
+        volume,
+        price,
+        target_volume,
+        current_volume,
+        account_assets,
+        deadline,
+        kwargs,
+    )

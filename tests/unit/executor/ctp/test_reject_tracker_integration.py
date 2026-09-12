@@ -41,7 +41,7 @@ def test_native_reject_replays_only_into_matching_session(monkeypatch, callback,
             return 0
 
         broker.trader.ReqOrderInsert.side_effect = reject
-        current = session.place_order(OrderDirection.BUY, OrderType.LIMIT, 1, 9000)
+        current = session.place_order(OrderDirection.BUY, OrderType.LIMIT, 1, 9000, offset_flag="open")
         old_id = stable_order_id(broker.day, 7, old_session, captured[0].OrderRef)
         old = current.model_copy(update={"order_id": old_id})
         tracker.add_order(old)
@@ -72,7 +72,7 @@ def test_native_reject_replays_only_into_matching_session(monkeypatch, callback,
         assert session.get_order_volume_bounds(OrderType.MARKET) == (1, 3)
         assert session.get_max_order_volume(OrderType.MARKET) == 3
         with pytest.raises(ValueError, match="最小"):
-            session.place_order(OrderDirection.BUY, OrderType.LIMIT, 2, 9000)
+            session.place_order(OrderDirection.BUY, OrderType.LIMIT, 2, 9000, offset_flag="open")
         assert len(captured) == 2
     finally:
         executor.close()

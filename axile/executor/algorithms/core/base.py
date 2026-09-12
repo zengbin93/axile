@@ -10,6 +10,7 @@ from typing import Any, Callable, Literal, Protocol, Type, overload, runtime_che
 
 from pydantic import BaseModel
 
+from axile.common.order_param_model import OrderParamModel
 from axile.common.trade_channel import TradeChannel
 from axile.executor.models.execution_result import AlgorithmResult
 from axile.executor.models.unified_account_assets import PositionDirection, UnifiedAccountAssets
@@ -93,6 +94,11 @@ class ExecutorProtocol(Protocol):
     @property
     def channel_type(self) -> TradeChannel:
         """当前执行会话所属交易渠道."""
+        ...
+
+    @property
+    def order_param_model(self) -> OrderParamModel:
+        """当前渠道的订单参数模型(未声明时为 UNKNOWN)."""
         ...
 
     @property
@@ -264,6 +270,10 @@ class AlgorithmMetadata:
         参数模型对应的 JSON Schema。
     channels : frozenset[str] | None
         支持的交易渠道集合；为 ``None`` 时表示全渠道通用。
+    order_param_models : frozenset[str] | None
+        算法适配的订单参数模型集合；为 ``None`` 时表示全模型通用。
+        与 ``channels`` 正交:channels 约束"能不能跑",本字段约束"跑的时候
+        下单参数语义能不能被渠道满足",供配置期配对校验。
     params_class : Type[BaseModel] | None
         参数模型类型；为 ``None`` 时表示算法自行处理原始参数对象。
     slots : frozenset[AlgorithmSlot] | None
@@ -278,6 +288,7 @@ class AlgorithmMetadata:
     default_params: dict[str, object]
     params_schema: dict[str, object]
     channels: frozenset[str] | None
+    order_param_models: frozenset[str] | None = None
     params_class: Type[BaseModel] | None = None
     slots: frozenset[AlgorithmSlot] | None = None
 
@@ -296,11 +307,19 @@ class AlgorithmMetadata:
 _algorithm_registry: dict[str, AlgorithmMetadata] = {}
 _algorithms_loaded: bool = False
 
+ALL_ORDER_PARAM_MODELS: list[OrderParamModel] = [
+    OrderParamModel.POSITION_SIDE,
+    OrderParamModel.DIRECTIONAL,
+    OrderParamModel.OFFSET,
+]
+"""通用算法声明全模型适配的便捷常量;新模型出现时需重新评估算法兼容性."""
+
 
 def register_algorithm(
     name: str,
     *,
     channels: list[str] | None = None,
+    order_param_models: list[OrderParamModel] | None = None,
     params_class: Type[BaseModel] | None = None,
     slots: list[AlgorithmSlot] | None = None,
     label: str | None = None,
@@ -316,6 +335,9 @@ def register_algorithm(
         算法名称。
     channels : list[str] | None, default=None
         支持的交易渠道列表；为空时表示所有渠道都可使用。
+    order_param_models : list[OrderParamModel] | None, default=None
+        算法适配的订单参数模型列表；为空时表示全模型通用。
+        供账户配置期与渠道的 ``ChannelPlugin.order_param_model`` 配对校验。
     params_class : Type[BaseModel] | None, default=None
         算法参数模型类型；为空时表示算法自行解释参数对象。
     slots : list[AlgorithmSlot] | None, default=None
@@ -365,6 +387,7 @@ def register_algorithm(
             default_params=resolved_defaults,
             params_schema=params_schema,
             channels=frozenset(str(channel) for channel in channels) if channels else None,
+            order_param_models=frozenset(str(model) for model in order_param_models) if order_param_models else None,
             params_class=params_class,
             slots=frozenset(slots) if slots is not None else None,
         )

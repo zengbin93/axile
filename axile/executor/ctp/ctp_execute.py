@@ -65,6 +65,7 @@ from axile.executor.ctp_product_sessions import (
     get_ctp_product_sessions,
 )
 from axile.executor.execution_engine import ExecutionEngine, _DispatchPlanningResult
+from axile.executor.futures_order_intent import is_close_intent, plan_futures_close_orders, single_close_offset
 from axile.executor.models.execution_result import AlgorithmResult, ExecutionStatus, TargetSizingDecision
 from axile.executor.models.unified_account_assets import UnifiedAccountAssets
 from axile.executor.models.unified_callback import (
@@ -788,6 +789,13 @@ class CTPExecutor(AbstractExecutor, UnifiedCallbackClient):
             self._order_ref += 1
             return r
 
+    def plan_close_orders(
+        self, symbol: str, direction: OrderDirection, volume: float, account_assets: UnifiedAccountAssets
+    ) -> list[tuple[float, dict[str, object]]]:
+        """使用渠道交易所信息与持仓快照拆分平今、平昨订单。"""
+        exchange = str(getattr(self._instruments.get(symbol), "ExchangeID", ""))
+        return plan_futures_close_orders(symbol, direction, volume, account_assets, exchange)
+
     @override
     def _place_order_impl(self, symbol, direction, order_type, volume, price=0, **kwargs):
         with self._lock:
@@ -805,7 +813,11 @@ class CTPExecutor(AbstractExecutor, UnifiedCallbackClient):
         )
         native_price_type = td.THOST_FTDC_OPT_LimitPrice if order_type == OrderType.LIMIT else ""
         self._validate_order_quote(symbol, price, native_price_type)
-        raw = kwargs.get("offset_flag", kwargs.get("offset", "open"))
+        raw = kwargs.get("offset_flag", kwargs.get("offset"))
+        if raw is None:
+            raw = "open"
+            if is_close_intent(direction, kwargs.get("position_side")):
+                raw = single_close_offset(self.plan_close_orders(symbol, direction, volume, self.get_account_assets()))
         offset = resolve_offset(raw)
         reason_code = self._get_ctp_session_block_reason(symbol)
         if reason_code is not None:

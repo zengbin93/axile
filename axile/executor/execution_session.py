@@ -10,6 +10,7 @@ import threading
 from typing import TYPE_CHECKING, cast
 
 from axile.common.logging import LogComponent, bind_log_context
+from axile.common.order_param_model import OrderParamModel
 from axile.executor.models.order_channel_health import OrderChannelHealth
 from axile.executor.models.unified_account_assets import PositionDirection, UnifiedAccountAssets
 from axile.executor.models.unified_callback import OrderUpdateCallback, PriceDataCallback, TradeRecordCallback
@@ -79,9 +80,37 @@ class ExecutionSession:
         """获取当前 symbol 的净持仓数量."""
         return self._owner.get_current_volume(self.symbol, account_assets)
 
+    @property
+    def order_param_model(self) -> OrderParamModel:
+        """
+        当前渠道的订单参数模型.
+
+        Returns
+        -------
+        OrderParamModel
+            owner 声明的模型；owner 未提供（如轻量测试替身）时回退
+            ``UNKNOWN``,由算法层按"歧义即失败"处理。
+        """
+        raw = getattr(self._owner, "order_param_model", None)
+        if isinstance(raw, OrderParamModel):
+            return raw
+        try:
+            return OrderParamModel(str(raw)) if raw is not None else OrderParamModel.UNKNOWN
+        except ValueError:
+            return OrderParamModel.UNKNOWN
+
     def get_positions(self, account_assets: UnifiedAccountAssets) -> list[tuple[float, PositionDirection]]:
         """获取当前 symbol 的全部方向持仓."""
         return self._owner.get_positions_for_symbol(self.symbol, account_assets)
+
+    def plan_close_orders(
+        self, direction: OrderDirection, volume: float, account_assets: UnifiedAccountAssets
+    ) -> list[tuple[float, dict[str, object]]]:
+        """转发渠道平仓拆单计划；未提供该能力的渠道保持单笔意图。"""
+        planner = getattr(self._owner, "plan_close_orders", None)
+        if callable(planner):
+            return planner(self.symbol, direction, volume, account_assets)
+        return [(volume, {})]
 
     def place_order(
         self,
