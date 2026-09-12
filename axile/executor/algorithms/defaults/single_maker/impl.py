@@ -37,6 +37,7 @@ from axile.executor.algorithms.core.base import (
 from axile.executor.algorithms.exceptions import RECOVERABLE_ALGORITHM_EXCEPTIONS, format_exception_message
 from axile.executor.algorithms.utils import (
     determine_order_price,
+    get_default_clock,
     setup_order_tracker,
     submit_and_track_split_orders,
     teardown_order_tracker,
@@ -212,6 +213,7 @@ def single_maker_callback(
                 f"{symbol} {direction.value} {needed_volume}, 当前={current_volume}, 目标={target_volume}"
             )
 
+            deadline = get_default_clock().time() + max_wait_seconds
             try:
                 # 使用工具函数提交和跟踪订单;期货渠道穿零调仓自动拆成先平后开两腿
                 orders = submit_and_track_split_orders(
@@ -225,9 +227,10 @@ def single_maker_callback(
                     current_volume=float(current_volume),
                     account_assets=account_assets,
                     leg_timeout_seconds=max_wait_seconds,
+                    deadline=deadline,
                 )
                 if not orders:
-                    execution_memory[f"{symbol}_skipped"] = "sub_min_notional"
+                    execution_memory[f"{symbol}_skipped"] = "no_order_submitted"
                 else:
                     execution_memory[f"{symbol}_adjustment"] = {
                         "from": current_volume,
@@ -249,7 +252,7 @@ def single_maker_callback(
                 execution_memory[f"{symbol}_error"] = error_message
 
             # 等待订单完成
-            tracker.wait_for_completion(timeout=max_wait_seconds)
+            tracker.wait_for_completion(timeout=max(0.0, deadline - get_default_clock().time()))
 
             # 重新获取账户资产
             account_assets = executor.get_account_assets()

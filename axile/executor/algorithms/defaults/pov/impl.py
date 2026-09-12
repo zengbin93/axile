@@ -290,6 +290,7 @@ def _place_participation_slice(
         "price": price,
     }
 
+    deadline = get_default_clock().time() + fill_wait_seconds
     try:
         orders = submit_and_track_split_orders(
             executor,
@@ -302,9 +303,10 @@ def _place_participation_slice(
             current_volume=float(current_volume),
             account_assets=account_assets,
             leg_timeout_seconds=fill_wait_seconds,
+            deadline=deadline,
         )
         if not orders:
-            detail["skipped"] = "sub_min_notional"
+            detail["skipped"] = "no_order_submitted"
             return detail
         detail["order_id"] = orders[0].order_id
         detail["order_ids"] = [order.order_id for order in orders]
@@ -319,7 +321,7 @@ def _place_participation_slice(
         detail["error"] = error_message
         return detail
 
-    tracker.wait_for_completion(timeout=fill_wait_seconds)
+    tracker.wait_for_completion(timeout=max(0.0, deadline - get_default_clock().time()))
     failed_cancels = cancel_pending_orders_via_query(executor)
     if failed_cancels:
         detail["cancel_error"] = f"撤单失败: {failed_cancels}"

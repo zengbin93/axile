@@ -211,6 +211,7 @@ class OrderTracker:
         offset_flag: str | None = None,
         trade_rule: dict[str, Any] | None = None,
         chase_enabled: bool = True,
+        submission_deadline: float | None = None,
     ) -> None:
         """
         将新订单纳入当前跟踪器。
@@ -233,6 +234,8 @@ class OrderTracker:
             原始交易规则；换单时必须原样带回，避免平仓变开仓或丢失单笔上限。
         chase_enabled : bool, default=True
             是否为本订单登记追单状态；市价兜底子单关闭追单。
+        submission_deadline : float | None, default=None
+            本单追价和市价兜底的绝对截止时间，换单后继续沿用。
         """
         buffered_trades: list[TradeRecord] = []
         buffered_order_updates: list[UnifiedOrder] = []
@@ -257,6 +260,7 @@ class OrderTracker:
                     "position_side": position_side,
                     "offset_flag": resolved_offset,
                     "trade_rule": dict(trade_rule) if trade_rule is not None else None,
+                    "submission_deadline": submission_deadline,
                 }
 
             self.all_done_event.clear()
@@ -447,6 +451,26 @@ class OrderTracker:
                 unique.append(symbol)
         return unique
 
+    def assert_ready_for_submission(self) -> None:
+        """先对账旧单，再拒绝仍未确认终态的下单、追单或兜底。"""
+        # 查询可能触发订单回调，必须在锁外执行；缺失终态回调时依靠 REST 恢复。
+        self._query_pending_orders()
+        with self.lock:
+            if self.pending_orders or self._chasing_order_id is not None or self._fallback_submitting:
+                raise RuntimeError("旧单尚未确认终态，拒绝继续下单")
+
+    def _restrict_submission_deadlines(self, deadline: float) -> None:
+        """等待只能缩短已登记订单的提交期限，不能给旧单续期。"""
+        with self.lock:
+            for info in self._chase_info.values():
+                existing = info.get("submission_deadline")
+                info["submission_deadline"] = min(existing, deadline) if existing is not None else deadline
+
+    def _submission_expired(self, chase_info: dict[str, Any]) -> bool:
+        """判断追价或兜底是否已过提交期限；缺省不额外限制。"""
+        deadline = chase_info.get("submission_deadline")
+        return deadline is not None and self.clock.time() >= deadline
+
     def wait_for_completion(self, timeout: float = 120) -> bool:
         """等待当前 tracker 内所有订单收敛到终态。"""
         return self._wait_callback(timeout)
@@ -477,6 +501,7 @@ class OrderTracker:
             return True
 
         start_time = self.clock.time()
+        self._restrict_submission_deadlines(start_time + timeout)
         check_interval = 1.0
         fallback_threshold = 30.0  # 超时前30秒开始使用市价单兜底
         fallback_triggered = False
@@ -496,13 +521,18 @@ class OrderTracker:
             elapsed = self.clock.time() - start_time
             remaining_time = timeout - elapsed
 
-            if self.clock.event_wait(self.all_done_event, check_interval):
+            if remaining_time <= 0:
+                break
+            if self.clock.event_wait(self.all_done_event, min(check_interval, remaining_time)):
                 summary = self.get_status_summary()
                 self._logger.info(
                     f"订单等待结束: result=completed, elapsed={elapsed:.1f}s, {self._format_status_summary(summary)}"
                 )
                 return True
             self.executor.handle_termination_checkpoint()
+
+            if self.clock.time() - start_time >= timeout:
+                break
 
             if self.chase_config:
                 self._check_and_chase()
@@ -520,7 +550,8 @@ class OrderTracker:
 
             # 市价兜底只在真正接近超时时触发，避免一开始就把“追单但仍想控制价格”
             # 的策略退化成无保护的立即扫单。
-            if not fallback_triggered and remaining_time <= fallback_threshold and self.chase_config:
+            remaining_time = timeout - (self.clock.time() - start_time)
+            if not fallback_triggered and 0 < remaining_time <= fallback_threshold and self.chase_config:
                 fallback_triggered = True
                 self._logger.info(f"距离超时还有 {remaining_time:.1f} 秒，对达到最大追单次数的订单使用市价单兜底")
                 self.executor.handle_termination_checkpoint()
@@ -542,11 +573,6 @@ class OrderTracker:
             f"等待订单完成超时: elapsed={timeout:.1f}s, "
             f"{self._format_status_summary(summary)}, timeout_summary={timeout_summary}"
         )
-        if self.chase_config:
-            self._logger.info("超时前最后一次尝试市价单兜底")
-            self.executor.handle_termination_checkpoint()
-            self._fallback_to_market_order()
-
         # 超时后仍要显式 query 再 cancel，一方面给下游一次最后的状态收敛机会，
         # 另一方面避免只清 tracker 内存态却把真实挂单留在交易通道里。
         self._logger.info(f"正在撤销所有未成交订单: pending={self.get_pending_count()}")
@@ -751,7 +777,7 @@ class OrderTracker:
 
             # 追价前取「可用盘口」：陈旧则 REST 兜底刷新，避免据冻住的 WS 快照追出越点差的 taker 价。
             latest_price = self._usable_price(symbol)
-            if latest_price is None:
+            if latest_price is None or self._submission_expired(chase_info):
                 continue
 
             # 追单始终向“当前最佳对手价”靠拢，而不是在旧价格上机械加减 tick。
@@ -782,7 +808,7 @@ class OrderTracker:
                 # 各渠道语义并不一致：同步 REST 可能表示交易所已受理，而部分渠道只是
                 # 「撤单请求已投递到 bridge」；在撤单尚未
                 # 生效时就下新单，会出现新旧单同时在场的双份敞口。
-                if not self._await_cancel_confirmed(order_id):
+                if not self._await_cancel_confirmed(order_id, deadline=chase_info.get("submission_deadline")):
                     self._logger.warning(
                         f"追单放弃 {symbol}: 撤单未在 "
                         f"{self.chase_config.cancel_confirm_timeout}s 内确认，保留旧单不换单"
@@ -813,7 +839,7 @@ class OrderTracker:
                 # 而撤单生效前旧单仍可能继续成交，据此下单会多挂。
                 order = self._latest_known_order(order_id, order)
                 remaining_volume = self._get_effective_remaining_volume(order_id, order)
-                if remaining_volume > 0:
+                if remaining_volume > 0 and not self._submission_expired(chase_info):
                     kwargs = _chase_place_kwargs(chase_info)
 
                     new_order = self.executor.place_order(
@@ -887,6 +913,9 @@ class OrderTracker:
 
                 info = self._chase_info[order_id]
                 symbol = info["symbol"]
+
+                if self._submission_expired(info):
+                    continue
 
                 if info["chase_count"] >= self.chase_config.max_count:
                     continue
@@ -1012,6 +1041,7 @@ class OrderTracker:
                 info = self._chase_info[order_id]
                 if (
                     info["chase_count"] >= self.chase_config.max_count
+                    and not self._submission_expired(info)
                     and not info.get("market_order_fallback_pending_cancel", False)
                     and not info.get("market_order_fallback_failed", False)
                 ):
@@ -1021,6 +1051,8 @@ class OrderTracker:
         # 市价兜底必须遵守“先确认旧限价单终态，再补剩余量”的顺序，否则在旧单
         # 还可能成交的情况下直接补市价单，会把剩余量判断放大成重复下单。
         for order_id, order, chase_info in orders_to_fallback:
+            if self._submission_expired(chase_info):
+                continue
             symbol = chase_info["symbol"]
             direction = chase_info["direction"]
             remaining_volume = self._get_effective_remaining_volume(order_id, order)
@@ -1092,7 +1124,7 @@ class OrderTracker:
         direction = chase_info["direction"]
         remaining = self._get_effective_remaining_volume(order_id, completed_order)
         submitted = 0.0
-        if remaining <= 0:
+        if remaining <= 0 or self._submission_expired(chase_info):
             return
         if not self._is_market_fallback_price_safe(completed_order, chase_info):
             self._mark_market_fallback_failed(
@@ -1114,6 +1146,8 @@ class OrderTracker:
                 split_order_volumes(remaining, bounds[1], min_size=bounds[0]) if bounds is not None else [remaining]
             )
             for index, chunk in enumerate(slices, 1):
+                if self._submission_expired(chase_info):
+                    return
                 market_order = self.executor.place_order(
                     direction, OrderType.MARKET, chunk, price=0, **_chase_place_kwargs(chase_info)
                 )
@@ -1286,7 +1320,7 @@ class OrderTracker:
         trade_filled_volume, _ = _summarize_trade_records(self.order_trades.get(order_id, []))
         return max(order.filled_volume, trade_filled_volume)
 
-    def _await_cancel_confirmed(self, order_id: str) -> bool:
+    def _await_cancel_confirmed(self, order_id: str, *, deadline: float | None = None) -> bool:
         """
         等待旧单撤单生效（进入终态）.
 
@@ -1294,6 +1328,8 @@ class OrderTracker:
         ----------
         order_id : str
             已提交撤单请求的订单标识。
+        deadline : float | None, default=None
+            本单提交期限，撤单等待不得超过此时间。
 
         Returns
         -------
@@ -1314,7 +1350,9 @@ class OrderTracker:
         if timeout <= 0:
             return order_id in self.completed_orders
 
-        deadline = self.clock.time() + timeout
+        confirmation_deadline = self.clock.time() + timeout
+        if deadline is not None:
+            confirmation_deadline = min(confirmation_deadline, deadline)
         while True:
             with self.lock:
                 if order_id in self.completed_orders:
@@ -1324,9 +1362,9 @@ class OrderTracker:
                     # 视作不再在场，可以安全换单。
                     return True
 
-            if self.clock.time() >= deadline:
+            if self.clock.time() >= confirmation_deadline:
                 return False
-            self.clock.sleep(min(0.05, max(0.0, deadline - self.clock.time())))
+            self.clock.sleep(min(0.05, max(0.0, confirmation_deadline - self.clock.time())))
 
     def _latest_known_order(self, order_id: str, fallback: UnifiedOrder) -> UnifiedOrder:
         """

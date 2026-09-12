@@ -138,6 +138,7 @@ class AbstractExecutorCapabilityMixin:
         system_limit = _system_max_parallel_symbol_workers()
         return system_limit if channel_limit is None else min(system_limit, channel_limit)
 
+    @property
     def order_param_model(self) -> OrderParamModel:
         """
         返回当前渠道的订单参数模型.

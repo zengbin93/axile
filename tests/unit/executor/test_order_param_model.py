@@ -8,12 +8,22 @@ from axile.channels import get_channel
 from axile.channels.contracts import ChannelPlugin
 from axile.common.order_param_model import OrderParamModel
 from axile.common.trade_channel import TradeChannel
+from axile.executor.abstract_executor.capability import AbstractExecutorCapabilityMixin
 from axile.executor.execution_session import ExecutionSession
 
 
 class _Logger:
     def debug(self, message: object, *args: object, **kwargs: object) -> None:
         _ = message, args, kwargs
+
+
+def test_session_reads_real_executor_capability() -> None:
+    class Owner(AbstractExecutorCapabilityMixin):
+        channel_type = TradeChannel.CTP
+        logger = _Logger()
+
+    session = ExecutionSession(owner=cast("Any", Owner()), symbol="rb2610")
+    assert session.order_param_model is OrderParamModel.OFFSET
 
 
 def test_order_param_model_enum_branches() -> None:

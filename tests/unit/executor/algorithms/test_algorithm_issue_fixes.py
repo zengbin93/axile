@@ -650,7 +650,7 @@ def test_order_tracker_timeout_cancels_only_tracked_symbols() -> None:
     completed = tracker.wait_for_completion(timeout=1.0)
 
     assert completed is False
-    assert executor.query_calls == 2
+    assert executor.query_calls == 1
     assert executor.cancel_order_calls == ["limit-1"]
 
 

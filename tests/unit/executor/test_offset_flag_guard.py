@@ -54,7 +54,6 @@ def _started_tq_executor(monkeypatch):
     api = FakeApi()
     monkeypatch.setattr(TQExecutor, "_build_api", staticmethod(lambda _config: api))
     executor = TQExecutor(TQAccountConfig(account_mode="kq", tq_username="u", tq_password="p"))
-    executor._initialize_connection(executor.account_config)
     monkeypatch.setattr(
         executor,
         "_check_tq_symbol_trading_time",
