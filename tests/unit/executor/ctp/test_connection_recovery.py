@@ -11,9 +11,11 @@ from openctp_ctp import thosttraderapi as td
 
 from axile.common.trade_channel import TradeChannel
 from axile.executor.ctp.ctp_execute import CTPExecutor, CtpRequestError, CtpSessionRecoveryRequired
+from axile.executor.ctp_catalog import CatalogStore, LocalCatalogProvider
 from axile.executor.models.unified_input import CTPAccountConfig
 from axile.executor.models.unified_order import OrderDirection, OrderType
 from axile.server.execution.worker_backend import worker_state
+from axile.server.execution.worker_backend.manager import WorkerBackendManager, WorkerBackendTimeoutError
 from tests.unit.server._execution_test_support import build_account
 
 
@@ -22,6 +24,7 @@ class ScriptedBroker:
 
     def __init__(self, monkeypatch, *, day="20260909", session=2):
         self.executor = CTPExecutor(TradeChannel.CTP)
+        self.executor.set_catalog_provider(LocalCatalogProvider(CatalogStore()))
         self.executor.account_config = CTPAccountConfig(
             broker_id="9999",
             investor_id="100001",
@@ -438,3 +441,67 @@ def test_worker_rebuilds_disconnected_ctp_with_fresh_stages_and_metadata(broker,
         factory.assert_called_once()
     finally:
         replacement.executor.close()
+
+
+def test_two_accounts_share_catalog_but_keep_independent_login_and_recovery(monkeypatch):
+    provider = LocalCatalogProvider(CatalogStore())
+    first = ScriptedBroker(monkeypatch)
+    first.executor.set_catalog_provider(provider)
+    try:
+        first.start()
+        second = ScriptedBroker(monkeypatch, session=3)
+        second.executor.account_config.investor_id = "100002"
+        second.executor.set_catalog_provider(provider)
+        try:
+            second.start()
+            assert first.events.count("ReqQryInstrument") == 1
+            assert "ReqQryInstrument" not in second.events
+            assert "ReqAuthenticate" in second.events
+            assert "ReqUserLogin" in second.events
+            assert "ReqQryTradingAccount" in second.events
+            assert second.executor._verify_connection()
+            assert second.executor.get_tick_size("ag2612") == 1
+            assert second.executor._instruments is not first.executor._instruments
+        finally:
+            second.executor.close()
+        next_day = ScriptedBroker(monkeypatch, day="20260910")
+        next_day.executor.set_catalog_provider(provider)
+        try:
+            next_day.start()
+            assert next_day.events.count("ReqQryInstrument") == 1
+        finally:
+            next_day.executor.close()
+    finally:
+        first.executor.close()
+
+
+def test_reconciliation_progress_keeps_watchdog_alive_over_sixty_seconds(broker, monkeypatch):
+    now = [100.0]
+    updated = [100.0]
+    phases = []
+    monkeypatch.setattr("axile.executor.ctp.ctp_execute.time.monotonic", lambda: now[0])
+    provider = LocalCatalogProvider(CatalogStore())
+
+    def progress(phase):
+        phases.append(phase)
+        updated[0] = now[0]
+
+    monkeypatch.setattr(provider, "progress", progress)
+    broker.executor.set_catalog_provider(provider)
+    handle = SimpleNamespace(catalog=SimpleNamespace(snapshot=lambda _: (True, updated[0], 100.0, 0.0)))
+    request = SimpleNamespace(request_id="test")
+
+    def advance():
+        # 每一阶段有处理进展；总时间超过旧的 60 秒截止时间。
+        now[0] += 20
+        assert WorkerBackendManager._remaining_response_time(handle, request, 160, now[0]) > 0
+
+    names = ("ReqQryOrder", "ReqQryTrade", "ReqQryInvestorPosition", "ReqQryTradingAccount")
+    for name in names:
+        broker.hooks[name] = advance
+    broker.start()
+    assert now[0] == 180
+    assert all(f"{name}完成" in phases for name in names)
+    now[0] += 60
+    with pytest.raises(WorkerBackendTimeoutError, match="无进展"):
+        WorkerBackendManager._remaining_response_time(handle, request, 160, now[0])

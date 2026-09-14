@@ -14,12 +14,14 @@ from typing import cast
 from uuid import uuid4
 
 from axile.common.trade_channel import TradeChannel
+from axile.executor.ctp_catalog import CatalogStore
 from axile.executor.models.execution_result import ExecutionStatus
 from axile.executor.models.unified_account_assets import UnifiedAccountAssets
 from axile.executor.models.unified_input import UnifiedStandardInput
 from axile.executor.models.unified_output import UnifiedStandardOutput
 from axile.executor.termination import ExecutionTerminated, ExecutionTerminationController
 from axile.server.db.models import Account
+from axile.server.execution.worker_backend.catalog import CatalogSession
 from axile.server.execution.worker_backend.protocol import (
     WorkerBackendErrorPayload,
     WorkerBackendRequest,
@@ -118,6 +120,7 @@ class _WorkerBackendHandle:
     control_connection: Connection
     request_lock: Lock = field(default_factory=Lock)
     retired: bool = False
+    catalog: CatalogSession | None = None
 
 
 class WorkerBackendManager:
@@ -170,6 +173,7 @@ class WorkerBackendManager:
         self._lock = Lock()
         # 一账户一常驻 worker；无空闲回收/无上限是有意取舍，理由与重评估阈值见类 docstring。
         self._workers: dict[int, _WorkerBackendHandle] = {}
+        self._catalog_store = CatalogStore()
         self._execute_recv_timeout = execute_recv_timeout
         self._shutdown_recv_timeout = shutdown_recv_timeout
         atexit.register(self.close)
@@ -177,20 +181,25 @@ class WorkerBackendManager:
     def _spawn_worker(self, account_id: int) -> _WorkerBackendHandle:
         parent_conn, child_conn = self._ctx.Pipe(duplex=True)
         child_control_conn, parent_control_conn = self._ctx.Pipe(duplex=False)
+        parent_catalog, child_catalog = self._ctx.Pipe(duplex=True)
         process = self._ctx.Process(
             target=run_worker_backend_loop,
-            args=(child_conn, account_id, child_control_conn),
+            args=(child_conn, account_id, child_control_conn, child_catalog),
             name=f"axile-execution-worker-{account_id}",
             daemon=True,
         )
         process.start()
         child_conn.close()
         child_control_conn.close()
+        child_catalog.close()
+        catalog = CatalogSession(cast("Connection", parent_catalog), self._catalog_store)
+        catalog.thread.start()
         return _WorkerBackendHandle(
             account_id=account_id,
             process=process,
             connection=cast("Connection", parent_conn),
             control_connection=cast("Connection", parent_control_conn),
+            catalog=catalog,
         )
 
     def _send_shutdown(self, handle: _WorkerBackendHandle) -> None:
@@ -234,7 +243,9 @@ class WorkerBackendManager:
             kill = getattr(handle.process, "kill", None)
             if callable(kill):
                 kill()
-            handle.process.join(timeout=2.0)
+                handle.process.join(timeout=2.0)
+        if handle.catalog is not None:
+            handle.catalog.close()
 
     def _dispose_handle(self, handle: _WorkerBackendHandle) -> None:
         try:
@@ -259,6 +270,54 @@ class WorkerBackendManager:
         if handle.process.is_alive():
             handle.process.terminate()
             handle.process.join(timeout=2.0)
+        if handle.catalog is not None:
+            handle.catalog.close()
+
+    @staticmethod
+    def _remaining_response_time(handle, request, deadline, now):
+        if handle.catalog is None:
+            return deadline - now
+        active, updated, started, finished = handle.catalog.snapshot(request.request_id)
+        if active:
+            remaining = updated + _DEFAULT_PREPARE_RECV_TIMEOUT_SECONDS - now
+            if remaining <= 0:
+                raise WorkerBackendTimeoutError("CTP 初始化 worker 连续 60 秒无进展")
+            return remaining
+        # 初始化不消耗后续业务的 IPC 预算，业务本身的执行 deadline 不变。
+        return deadline + max(0.0, finished - started) - now
+
+    def _receive_response(self, handle, request, timeout, termination_controller):
+        if handle.catalog is None and termination_controller is None:
+            if not handle.connection.poll(timeout):
+                raise WorkerBackendTimeoutError(f"worker backend 响应超时（{timeout}s）")
+            return handle.connection.recv(), False
+        deadline = time.monotonic() + timeout
+        termination_deadline = None
+        while True:
+            now = time.monotonic()
+            remaining = self._remaining_response_time(handle, request, deadline, now)
+            if remaining <= 0:
+                raise WorkerBackendTimeoutError(f"worker backend 响应超时（{timeout}s）")
+            if (
+                termination_controller is not None
+                and termination_controller.is_requested()
+                and termination_deadline is None
+            ):
+                handle.control_connection.send(
+                    WorkerTerminationSignal(
+                        execution_id=request.execution_id or "",
+                        reason=termination_controller.reason(),
+                        mode=termination_controller.mode(),
+                    )
+                )
+                termination_deadline = now + _TERMINATION_GRACE_SECONDS
+            if termination_deadline is not None and now >= termination_deadline:
+                return None, True
+            wait_for = min(_TERMINATION_POLL_SECONDS, remaining)
+            if termination_deadline is not None:
+                wait_for = min(wait_for, max(termination_deadline - now, 0.0))
+            if handle.connection.poll(wait_for):
+                return handle.connection.recv(), False
 
     def _force_drop_worker(self, account_id: int, handle: _WorkerBackendHandle) -> None:
         """强制丢弃指定 worker handle 并终止其进程.
@@ -345,37 +404,9 @@ class WorkerBackendManager:
                     continue
                 try:
                     handle.connection.send(request)
-                    if termination_controller is None:
-                        if not handle.connection.poll(timeout):
-                            raise WorkerBackendTimeoutError(f"worker backend 响应超时（{timeout}s）")
-                        response = handle.connection.recv()
-                    else:
-                        response_deadline = time.monotonic() + timeout
-                        termination_deadline: float | None = None
-                        termination_sent = False
-                        while response is None:
-                            now = time.monotonic()
-                            remaining = response_deadline - now
-                            if remaining <= 0:
-                                raise WorkerBackendTimeoutError(f"worker backend 响应超时（{timeout}s）")
-                            if termination_controller.is_requested() and not termination_sent:
-                                handle.control_connection.send(
-                                    WorkerTerminationSignal(
-                                        execution_id=request.execution_id or "",
-                                        reason=termination_controller.reason(),
-                                        mode=termination_controller.mode(),
-                                    )
-                                )
-                                termination_sent = True
-                                termination_deadline = now + _TERMINATION_GRACE_SECONDS
-                            if termination_deadline is not None and now >= termination_deadline:
-                                force_termination = True
-                                break
-                            wait_for = min(_TERMINATION_POLL_SECONDS, remaining)
-                            if termination_deadline is not None:
-                                wait_for = min(wait_for, max(termination_deadline - now, 0.0))
-                            if handle.connection.poll(wait_for):
-                                response = handle.connection.recv()
+                    response, force_termination = self._receive_response(
+                        handle, request, timeout, termination_controller
+                    )
                 except (BrokenPipeError, EOFError, OSError, WorkerBackendTimeoutError) as exc:
                     failure = exc
 
@@ -434,7 +465,7 @@ class WorkerBackendManager:
 
     @staticmethod
     def _requires_ctp_session_recovery(response: WorkerBackendResponse) -> bool:
-        return (
+        return response.requires_worker_restart or (
             response.kind == "error"
             and response.channel_type == TradeChannel.CTP
             and response.error is not None

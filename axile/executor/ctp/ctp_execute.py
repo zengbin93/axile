@@ -60,10 +60,12 @@ from axile.executor.ctp.requests import (
     resolve_offset,
 )
 from axile.executor.ctp.spi import MarketSpi, TraderSpi
+from axile.executor.ctp_catalog import LOCAL_CATALOG, CatalogProvider
 from axile.executor.ctp_product_sessions import (
     decide_ctp_product_session,
     get_ctp_product_sessions,
 )
+from axile.executor.ctp_query_wait import QueryIdleClock
 from axile.executor.execution_engine import ExecutionEngine, _DispatchPlanningResult
 from axile.executor.futures_order_intent import is_close_intent, plan_futures_close_orders, single_close_offset
 from axile.executor.models.execution_result import AlgorithmResult, ExecutionStatus, TargetSizingDecision
@@ -108,6 +110,7 @@ class _PendingQuery:
     rows: list[object]
     done: threading.Event
     error: Exception | None = None
+    idle: QueryIdleClock | None = None
 
 
 @dataclass
@@ -196,6 +199,8 @@ class CTPExecutor(AbstractExecutor, UnifiedCallbackClient):
         self._trader_spi = self._market_spi = None
         self._pending_queries = {}
         self._instruments = {}
+        self._catalog_provider = LOCAL_CATALOG
+        self._catalog_progress_at = 0.0
         self._quotes = {}
         self._order_keys = {}
         self._option_actions = {}
@@ -311,6 +316,33 @@ class CTPExecutor(AbstractExecutor, UnifiedCallbackClient):
             raise TimeoutError(f"{name}超时")
         if stage.error:
             raise stage.error
+        self._catalog_progress(name)
+
+    def set_catalog_provider(self, provider: CatalogProvider) -> None:
+        """在连接前注入目录提供器；账户认证仍由当前执行器完成。"""
+        self._catalog_provider = provider
+
+    def _catalog_progress(self, phase: str, *, throttled: bool = False) -> None:
+        if self._ready:
+            return
+        now = time.monotonic()
+        if not throttled or now - self._catalog_progress_at >= 1:
+            self._catalog_provider.progress(phase)
+            self._catalog_progress_at = now
+
+    def _load_catalog(self):
+        rows = self._query("ReqQryInstrument", td.CThostFtdcQryInstrumentField())
+        self._catalog_progress("构建合约目录")
+        catalog = {str(getattr(x, "InstrumentID")): vars(x) for x in rows if getattr(x, "InstrumentID", "")}
+        if not catalog:
+            raise CtpRequestError("CTP 合约查询返回空结果")
+        return catalog
+
+    def _catalog_checkpoint(self):
+        self._require_active_connection()
+        runtime = self.get_active_execution_runtime()
+        if runtime is not None:
+            runtime.handle_termination_checkpoint()
 
     @override
     def _initialize_connection(self, account_config):
@@ -340,8 +372,12 @@ class CTPExecutor(AbstractExecutor, UnifiedCallbackClient):
             self._wait(self._auth, "认证")
             self._wait(self._login, "登录")
             self._ensure_settlement_confirmed()
-            rows = self._query("ReqQryInstrument", td.CThostFtdcQryInstrumentField())
-            self._instruments = {str(x.InstrumentID): x for x in rows if getattr(x, "InstrumentID", "")}
+            self._instruments = self._catalog_provider.get(
+                (account_config.broker_id, account_config.td_front, self._trading_day),
+                self._load_catalog,
+                self._catalog_checkpoint,
+            )
+            self._catalog_progress("合约目录就绪")
             if not self._instruments:
                 raise CtpRequestError("CTP 合约查询返回空结果")
             path = self._flow_dir / "market"
@@ -526,39 +562,75 @@ class CTPExecutor(AbstractExecutor, UnifiedCallbackClient):
                 "ReqQrySettlementInfoConfirm": "query_settlement_status",
             }[name]
             pending = _PendingQuery([], threading.Event())
+            if name == "ReqQryInstrument":
+                pending.idle = QueryIdleClock()
             pending_rid = None
 
             def register_pending(rid):
                 nonlocal pending_rid
                 pending_rid = rid
+                if pending.idle is not None:
+                    pending.idle.sent()
                 self._pending_queries[rid] = pending
 
             try:
                 self._send_trader_request(operation, name, req, before_send=register_pending)
+                if pending.idle is not None:
+                    pending.idle.sent()
             except Exception:
                 if pending_rid is not None:
                     self._pending_queries.pop(pending_rid, None)
                 raise
             assert pending_rid is not None
             try:
-                if not pending.done.wait(self._timeout):
-                    raise TimeoutError(f"{name}超时")
+                self._wait_query(pending, name)
                 if pending.error:
                     raise pending.error
+                self._catalog_progress(f"{name}完成")
                 return list(pending.rows)
             finally:
+                pending.done.set()
                 self._pending_queries.pop(pending_rid, None)
 
+    def _wait_query(self, pending, name):
+        if pending.idle is None:
+            if not pending.done.wait(self._timeout):
+                raise TimeoutError(f"{name}超时")
+            return
+        while not pending.done.wait(0.05):
+            self._catalog_checkpoint()
+            if pending.idle.timed_out(self._timeout, pending.done):
+                raise TimeoutError(f"{name}超时：连续 {self._timeout:g} 秒无回调")
+        self.logger.info(
+            "CTP 合约查询完成 | records={} max_idle={:.3f}s local_processing={:.3f}s",
+            len(pending.rows),
+            pending.idle.max_idle,
+            pending.idle.processing_seconds,
+        )
+
     def _query_response(self, row, info, rid, last):
-        with self._lock:
-            p = self._pending_queries.get(rid)
-            if not p or p.done.is_set():
-                return
-            p.error = self._error(info, "查询")
-            if row is not None and not p.error:
-                p.rows.append(_copy_native_row(row))
-            if last or p.error:
-                p.done.set()
+        p = self._pending_queries.get(rid)
+        if not p or p.done.is_set():
+            return
+        if p.idle is not None and not p.idle.enter(self._timeout):
+            return
+        try:
+            with self._lock:
+                if p.done.is_set():
+                    return
+                p.error = self._error(info, "查询")
+                if row is not None and not p.error:
+                    p.rows.append(_copy_native_row(row))
+                if p.idle is not None:
+                    self._catalog_progress("合约记录", throttled=True)
+                if last or p.error:
+                    p.done.set()
+        except Exception as exc:
+            p.error = exc
+            p.done.set()
+        finally:
+            if p.idle is not None:
+                p.idle.leave()
 
     @override
     def _verify_connection(self):
@@ -583,8 +655,12 @@ class CTPExecutor(AbstractExecutor, UnifiedCallbackClient):
         orders = self._query("ReqQryOrder", build_query_orders(c))
         for row in orders:
             self._remember_order(row)
+            self._catalog_progress("对账记录", throttled=True)
         trades = self._query("ReqQryTrade", build_query_trades(c, ""))
-        converted_trades = [self._convert_trade(row) for row in trades]
+        converted_trades = []
+        for row in trades:
+            converted_trades.append(self._convert_trade(row))
+            self._catalog_progress("对账记录", throttled=True)
         positions = self._query("ReqQryInvestorPosition", build_query_positions(c))
         accounts = self._query("ReqQryTradingAccount", build_query_account(c))
         if not accounts:
@@ -593,9 +669,15 @@ class CTPExecutor(AbstractExecutor, UnifiedCallbackClient):
             day = str(getattr(row, "TradingDay", "") or "")
             if day and day != self._trading_day:
                 raise CtpRequestError(f"会话对账交易日不一致: expected={self._trading_day}, actual={day}")
+            self._catalog_progress("对账记录", throttled=True)
         self._recovery_snapshot = {
             "trading_day": self._trading_day,
-            "assets": account_to_unified(accounts[-1], positions, self._instruments),
+            "assets": account_to_unified(
+                accounts[-1],
+                positions,
+                self._instruments,
+                progress=lambda: self._catalog_progress("持仓转换", throttled=True),
+            ),
             "orders": orders,
             "trades": converted_trades,
         }

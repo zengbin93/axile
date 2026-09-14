@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+from collections.abc import Callable, Mapping
 from datetime import datetime
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -184,13 +185,19 @@ def quote_to_unified(row: object) -> UnifiedPriceData:
 
 
 def account_to_unified(
-    account: object, position_rows: list[object], instruments: dict[str, object]
+    account: object,
+    position_rows: list[object],
+    instruments: Mapping[str, object],
+    *,
+    progress: Callable[[], None] | None = None,
 ) -> UnifiedAccountAssets:
     """聚合资金与原生持仓帧为统一账户快照。"""
     expanded: list[object] = []
     for row in position_rows:
         split = split_combination_position(row)
         expanded.extend(split if split is not None else [row])
+        if progress is not None:
+            progress()
     groups: dict[tuple[str, str], dict[str, Any]] = {}
     for row in expanded:
         symbol = str(_value(row, "InstrumentID", "") or "")
@@ -214,6 +221,8 @@ def account_to_unified(
         )
         group["cost"] += _float(row, "PositionCost")
         group["origin"] = _value(row, "combination_origin", group["origin"])
+        if progress is not None:
+            progress()
     positions: list[Position] = []
     for (symbol, direction), group in groups.items():
         instrument = instruments.get(symbol)
@@ -238,6 +247,8 @@ def account_to_unified(
                 extra=extra,
             )
         )
+        if progress is not None:
+            progress()
     return UnifiedAccountAssets(
         available_cash=_float(account, "Available"),
         total_asset=_float(account, "Balance"),

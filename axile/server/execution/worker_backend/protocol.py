@@ -142,6 +142,8 @@ class WorkerBackendResponse:
         终止时撤单失败的订单标识。
     normalized_symbol_fields : dict[str, object] | None
         worker 按渠道目录归一化后的 symbol 字段；不包含账户凭据。
+    requires_worker_restart : bool
+        通信或资源清理失败后回收当前 worker；与原始业务错误独立，不重放当前请求。
     """
 
     request_id: str
@@ -158,3 +160,4 @@ class WorkerBackendResponse:
     cancel_attempted: bool | None = None
     cancel_unconfirmed: bool = False
     normalized_symbol_fields: dict[str, object] | None = None
+    requires_worker_restart: bool = False

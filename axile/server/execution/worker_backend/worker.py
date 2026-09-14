@@ -21,6 +21,7 @@ from axile.executor.termination import ExecutionTerminated
 from axile.server.context import Context, PortfolioExecutor
 from axile.server.db.models import Account
 from axile.server.execution.execution_records_output import sanitize_standard_input_for_audit
+from axile.server.execution.worker_backend.catalog import RemoteCatalogProvider
 from axile.server.execution.worker_backend.protocol import (
     WorkerBackendErrorPayload,
     WorkerBackendRequest,
@@ -48,6 +49,7 @@ from axile.server.execution.worker_backend.worker_state import (
     _activate_worker_termination,
     _clear_worker_termination,
     _close_executor,
+    _close_state_executor,
     _finalize_executor,
     _request_worker_termination,
     _resolve_prepared_executor,
@@ -414,7 +416,7 @@ def _handle_shutdown(
     """
     reason = str(request.payload.get("reason", "manager_shutdown"))
     if state.executor is not None:
-        _close_executor(state.executor)
+        _close_state_executor(state)
         state.executor = None
         state.account_id = None
         state.config_signature = None
@@ -476,7 +478,12 @@ def _run_termination_control_loop(connection: Connection, state: _WorkerBackendS
         )
 
 
-def run_worker_backend_loop(connection: Connection, account_id: int, control_connection: Connection) -> None:
+def run_worker_backend_loop(
+    connection: Connection,
+    account_id: int,
+    control_connection: Connection,
+    catalog_connection: Connection | None = None,
+) -> None:
     """运行多进程 worker 的阻塞请求循环.
 
     Parameters
@@ -487,6 +494,8 @@ def run_worker_backend_loop(connection: Connection, account_id: int, control_con
         该 worker 绑定的账户标识。
     """
     state = _WorkerBackendState(account_id=account_id)
+    catalog = RemoteCatalogProvider(catalog_connection) if catalog_connection is not None else None
+    state.catalog_provider = catalog
     control_thread = threading.Thread(
         target=_run_termination_control_loop,
         args=(control_connection, state),
@@ -507,10 +516,17 @@ def run_worker_backend_loop(connection: Connection, account_id: int, control_con
                 break
 
             current_request = cast(WorkerBackendRequest, raw_request)
+            if catalog is not None:
+                catalog.request_id = current_request.request_id
             response = _handle_worker_request(current_request, state)
+            response.requires_worker_restart = (
+                response.requires_worker_restart
+                or state.requires_worker_restart
+                or (catalog is not None and catalog.failed)
+            )
             # 先回响应，再按 shutdown 命令退出循环，保证主进程一定能收到确认消息。
             connection.send(response)
-            if current_request.command == "shutdown":
+            if current_request.command == "shutdown" or response.requires_worker_restart:
                 break
             current_request = None
     except BaseException as exc:  # noqa: BLE001 - IPC 最外层必须保留所有进程退出原因
@@ -526,6 +542,7 @@ def run_worker_backend_loop(connection: Connection, account_id: int, control_con
                 WorkerBackendResponse(
                     request_id=request_id,
                     kind="error",
+                    requires_worker_restart=True,
                     error=WorkerBackendErrorPayload(
                         type=exc.__class__.__name__,
                         message=str(exc) or repr(exc),
@@ -540,6 +557,8 @@ def run_worker_backend_loop(connection: Connection, account_id: int, control_con
                 request_id,
             )
     finally:
+        if catalog_connection is not None:
+            catalog_connection.close()
         try:
             _close_executor(state.executor)
         except BaseException as close_exc:  # noqa: BLE001 - 清理异常也必须可见

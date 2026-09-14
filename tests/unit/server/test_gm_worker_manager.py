@@ -98,6 +98,8 @@ class _FakeControlConnection:
 
 
 class _FakeHandle:
+    catalog = None
+
     def __init__(
         self,
         *,
@@ -172,6 +174,37 @@ def test_request_blocking_polls_with_configured_timeout() -> None:
     assert handle.connection.poll_calls == [1.5]
     assert handle.process.terminate_called is False
     assert manager._workers[2] is handle
+
+
+def test_worker_restart_flag_preserves_error_and_never_replays_current_request(monkeypatch):
+    manager = WorkerBackendManager()
+    old = _FakeHandle()
+    replacement = _FakeHandle()
+    manager._workers[2] = old
+    original = WorkerBackendErrorPayload(type="timeout_error", message="original instrument timeout")
+    old.connection.recv = lambda: WorkerBackendResponse(
+        request_id="req-exec",
+        kind="error",
+        error=original,
+        requires_worker_restart=True,
+    )
+    spawn = []
+
+    def spawn_worker(account_id):
+        spawn.append(account_id)
+        return replacement
+
+    monkeypatch.setattr(manager, "_spawn_worker", spawn_worker)
+    response = manager._request_blocking(2, _execute_request(), timeout=1)
+    assert response.error is original
+    assert old.process.terminate_called
+    assert 2 not in manager._workers
+    assert spawn == []
+    assert old.connection.sent_commands == ["execute_trade"]
+    manager._request_blocking(2, _execute_request(), timeout=1)
+    assert spawn == [2]
+    assert manager._workers[2] is replacement
+    manager.close()
 
 
 def test_request_blocking_timeout_force_kills_and_releases_lock() -> None:

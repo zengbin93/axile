@@ -434,7 +434,7 @@ def test_handle_worker_shutdown_command_returns_ack(
     finalized: list[object | None] = []
     state = worker_backend_entry._WorkerBackendState(executor=object(), account_id=2, config_signature="sig")
 
-    monkeypatch.setattr(worker_backend_entry, "_close_executor", lambda executor: finalized.append(executor))
+    monkeypatch.setattr(worker_state, "_close_executor", lambda executor: finalized.append(executor))
 
     response = worker_backend_entry._handle_worker_request(
         WorkerBackendRequest.shutdown("req-shutdown", reason="test"),

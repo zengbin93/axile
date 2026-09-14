@@ -13,6 +13,8 @@ import threading
 from dataclasses import dataclass, field
 from typing import cast
 
+from loguru import logger
+
 from axile.common.trade_channel import TradeChannel
 from axile.executor.abstract_executor.base import AbstractExecutor
 from axile.executor.termination import ExecutionTerminationController
@@ -23,6 +25,7 @@ from axile.server.execution.execution_account_control import (
     flush_account_control_records,
 )
 from axile.server.execution.factory import create_executor_instance, initialize_executor_instance
+from axile.server.execution.worker_backend.catalog import RemoteCatalogProvider
 from axile.server.execution.worker_backend.protocol import WorkerTerminationSignal
 
 
@@ -37,6 +40,8 @@ class _WorkerBackendState:
     """
 
     executor: object | None = None
+    catalog_provider: RemoteCatalogProvider | None = None
+    requires_worker_restart: bool = False
     account_id: int | None = None
     config_signature: str | None = None
     termination_lock: threading.Lock = field(default_factory=threading.Lock)
@@ -108,14 +113,33 @@ def _close_executor(executor: object | None) -> None:
     """清理请求级状态并释放缓存执行器。"""
     if executor is None:
         return
-    _finalize_executor(executor)
-    stop = getattr(executor, "stop", None)
-    if callable(stop):
-        stop()
-        return
-    close = getattr(executor, "close", None)
-    if callable(close):
-        close()
+    finalize_error = None
+    try:
+        _finalize_executor(executor)
+    except Exception as exc:
+        finalize_error = exc
+    try:
+        stop = getattr(executor, "stop", None)
+        close = getattr(executor, "close", None)
+        if callable(stop):
+            stop()
+        elif callable(close):
+            close()
+    except Exception:
+        if finalize_error is not None:
+            logger.opt(exception=finalize_error).warning("审计收尾失败，连接释放也失败")
+        raise
+    if finalize_error is not None:
+        raise finalize_error
+
+
+def _close_state_executor(state: _WorkerBackendState) -> None:
+    """清理失败时标记整个 worker 不可复用，由主进程终止兜底。"""
+    try:
+        _close_executor(state.executor)
+    except Exception:
+        state.requires_worker_restart = True
+        raise
 
 
 def _config_signature(account: Account) -> str:
@@ -169,7 +193,7 @@ def _resolve_executor(
             return state.executor
 
     if state.executor is not None:
-        _close_executor(state.executor)
+        _close_state_executor(state)
     state.executor = None
     state.account_id = None
     state.config_signature = None
@@ -181,7 +205,7 @@ def _resolve_executor(
     if expected_trading_day and requires_exact_trading_day:
         trading_day = str(getattr(state.executor, "_trading_day", "") or "")
         if trading_day != expected_trading_day:
-            _close_executor(state.executor)
+            _close_state_executor(state)
             state.executor = None
             state.account_id = None
             state.config_signature = None
@@ -276,11 +300,30 @@ def _resolve_prepared_executor(
     )
     verify = getattr(executor, "_verify_connection", None)
     if callable(verify) and not bool(verify()):
+        catalog = state.catalog_provider
+        set_catalog = getattr(executor, "set_catalog_provider", None)
+        if catalog is not None and callable(set_catalog):
+            set_catalog(catalog)
+        else:
+            catalog = None
+        end_attempted = False
         try:
+            if catalog is not None:
+                catalog.begin()
             initialize_executor_instance(cast(AbstractExecutor, executor))
+            if catalog is not None:
+                end_attempted = True
+                catalog.end()
         except Exception:
-            _finalize_executor(executor)
-            _close_executor(executor)
+            if catalog is not None and not end_attempted:
+                try:
+                    catalog.end()
+                except Exception as notification_error:
+                    logger.opt(exception=notification_error).warning("初始化结束通知发送失败，保留原始异常")
+            try:
+                _close_state_executor(state)
+            except Exception as cleanup_error:
+                logger.opt(exception=cleanup_error).warning("初始化失败后的执行器清理失败，保留原始异常")
             state.executor = None
             state.account_id = None
             state.config_signature = None
