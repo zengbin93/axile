@@ -10,11 +10,10 @@ test('单次执行按记录身份筛选，不带日期以保留跨日成交', ()
   expect(selectionQuery(executionSelection(row()))).toEqual({ record_id: 7 })
   expect(executionSelection(row()).kind).toBe('execution')
 })
-test('空仓、无交易、未知持仓与失败不混为一种状态', () => {
-  expect(executionState(row({ positionCount: 0 }))).toBe('空仓 · 无需交易')
-  expect(executionState(row({ positionCount: 2 }))).toBe('持仓不变 · 无需交易')
-  expect(executionState(row())).toBe('未交易 · 持仓未知')
-  expect(executionState(row({ record: { ...row().record, is_success: 0 }, positionCount: 0 }))).toBe('执行失败')
+test('新结论与旧记录中性标题，不根据持仓数量推断执行成败', () => {
+  expect(executionState(row({ positionCount: 0 }))).toBe('历史执行记录')
+  expect(executionState(row({ record: { ...row().record, raw_result: { outcome: 'not_reached', outcome_symbols: ['m2701'] } } }))).toBe('执行不到位 · m2701')
+  expect(executionState(row({ record: { ...row().record, raw_result: { outcome: 'error', outcome_reason: '拒单' } } }))).toBe('执行失败 · 拒单')
 })
 test('缺失和退化快照不当成空仓，完整空数组才是空仓', () => {
   const artifacts = (content: unknown) => [{ artifact_type: 'account_snapshot', content }] as ExecutionArtifact[]

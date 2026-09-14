@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, cast
 from axile.channels import get_channel
 from axile.common.order_param_model import OrderParamModel
 from axile.executor.models.execution_result import (
+    ExecutionOutcome,
     ExecutionStatus,
     TargetSizingDecision,
     TargetSizingStatus,
@@ -103,6 +104,8 @@ class AbstractExecutorCapabilityMixin:
             account_assets=empty_assets,
             memory={"message": "当前不在交易时间"},
             symbol_results={},
+            outcome=ExecutionOutcome.BLOCKED,
+            outcome_reason="当前不在交易时间",
             status=ExecutionStatus.BLOCKED,
             error="当前不在交易时间",
             execution_time=runtime.elapsed_seconds(),

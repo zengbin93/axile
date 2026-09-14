@@ -1,3 +1,4 @@
+import { executionOutcome } from '@/features/account/executionOutcome'
 /**
  * 把执行事件流铺成每品种的「动作流」——因果排序的动词时间线（纯函数，便于测试）。
  *
@@ -109,6 +110,7 @@ function decisionText(e: ExecutionEvent, units: ActionDisplayUnits): string {
   if (algorithm) parts.push(algorithm)
   if (orders != null) parts.push(`${orders} 单`)
   let text = parts.join(' · ')
+  if (d?.outcome != null) return `${text} · ${executionOutcome(d).text}`
   const err = eventError(e)
   if (err) text += ` · ${err}`
   return text

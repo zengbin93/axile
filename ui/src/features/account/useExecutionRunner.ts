@@ -71,7 +71,7 @@ export function useExecutionRunner(accountId: number, onSettled?: () => void) {
               stopPoll()
               runningRef.current = false
               setState({ running: false, kind: null, executionId: null })
-              const outcome = describeRunOutcome(kind, st.status, st.output_status, st.error)
+              const outcome = describeRunOutcome(kind, st)
               // 跑完失败交给账户状态行 / 近期执行，不再叠一块横幅。
               if (outcome.kind !== 'failed') toast(outcome.toast)
               settledRef.current?.()

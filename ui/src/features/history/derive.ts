@@ -15,7 +15,7 @@
 import type { EquityPoint } from '@/components/viz/EquityChart'
 import type { ScheduleSkipActivity } from '@/lib/api/accounts'
 import type { AccountAssetSnapshot, ExecuteRecord, PortfolioAccountRecord } from '@/types/api'
-import { executionRecordError } from '@/features/account/executionRecordError'
+import { executionOutcome } from '@/features/account/executionOutcome'
 
 export type RangeKey = '30' | '90' | 'all'
 
@@ -304,15 +304,15 @@ export function buildEvents(
   // 失败逐条展开、每条可点开执行详情；超过上限的更早失败折叠成一条汇总。
   // 终止（task_status=TERMINATED）不是失败，排除在外，避免时间线把「提前收尾」渲染成「执行失败」。
   const failRecords = records
-    .filter((r) => r.is_success !== 1 && r.raw_result?.task_status !== 'TERMINATED')
+    .filter((r) => executionOutcome(r.raw_result).outcome === 'error')
     .sort((a, b) => b.created_at.localeCompare(a.created_at))
   for (const r of failRecords.slice(0, FAIL_EVENT_CAP)) {
-    const reason = executionRecordError(r)
+    const view = executionOutcome(r.raw_result)
     events.push({
       date: r.created_at.replace('T', ' ').slice(5, 16),
       kind: 'fail',
       tag: '失败',
-      text: reason ? `执行失败 · ${reason}` : '执行失败',
+      text: view.text,
       executionId: r.execution_id,
     })
   }

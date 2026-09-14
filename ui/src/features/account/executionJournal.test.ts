@@ -5,7 +5,7 @@ import type { AccountActivity } from '@/lib/api/accounts'
 function execution(id: number, result: Record<string, unknown> = {}): AccountActivity {
   return { kind: 'execution', occurred_at: '2026-09-07T10:00:00', record: {
     id, execution_id: `exec-${id}`, created_at: '2026-09-07T10:00:00', is_success: 1,
-    raw_input: {}, raw_result: result,
+    raw_input: {}, raw_result: { outcome: 'completed', ...result },
   } }
 }
 function symbol(price = 99, value: number | null = 1000, tick = true, direction = 'BUY') {
@@ -64,11 +64,11 @@ describe('journal quality', () => {
   })
   it('keeps failed, terminated, noop and schedule skip rows individually with detail identities', () => {
     const rows = journalExecutions([
-      execution(1), execution(2, { task_status: 'TERMINATED' }),
-      { ...execution(3), kind: 'execution', record: { ...(execution(3) as Extract<AccountActivity, { kind: 'execution' }>).record, is_success: 0 } },
+      execution(1), execution(2, { task_status: 'TERMINATED', outcome: 'terminated' }),
+      { ...execution(3), kind: 'execution', record: { ...(execution(3) as Extract<AccountActivity, { kind: 'execution' }>).record, is_success: 0, raw_result: { outcome: 'error' } } },
       { kind: 'schedule_skip', id: 5, occurred_at: '2026-09-07T10:00:00', channel: 'tq', reason_code: 'CALENDAR.CLOSED', calendar_day: '2026-09-07', calendar_id: '', calendar_label: '' },
     ])
-    expect(rows.map((r) => r.status)).toEqual(['无成交', '已终止', '失败', '已跳过'])
+    expect(rows.map((r) => r.status)).toEqual(['已完成', '已终止', '执行失败', '已跳过'])
     expect(rows[0].executionId).toBe('exec-1')
     expect(rows[3].executionId).toBeNull()
   })
@@ -79,8 +79,8 @@ describe('journal quality', () => {
   })
   it('does not label a NOOP clear as a completed fill', () => {
     const row = journalExecutions([execution(1, { status: 'NOOP', execution_kind: 'clear_positions' })])[0]
-    expect(row.status).toBe('无成交')
-    expect(row.description).toBe('清仓执行 · 无需下单')
+    expect(row.status).toBe('已完成')
+    expect(row.description).toBe('清仓完成')
   })
 })
 

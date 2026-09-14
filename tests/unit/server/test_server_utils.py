@@ -157,7 +157,7 @@ def test_append_error_execute_record_sanitizes_account_config() -> None:
 
     assert fake_session.committed is True
     assert record.raw_input == {"symbol": "rb2610"}
-    assert record.raw_result == {"msg": "boom"}
+    assert record.raw_result == {"msg": "boom", "outcome": "error", "outcome_reason": "boom"}
     assert record.is_success == 0
 
 

@@ -144,6 +144,8 @@ async def append_error_execute_record(
         已写入数据库的失败执行记录。
     """
     persisted_raw_result = dict(raw_result or {"msg": msg})
+    persisted_raw_result.setdefault("outcome", "error")
+    persisted_raw_result.setdefault("outcome_reason", msg)
     logger.error("{}", msg)
     return await _persist_execute_record(
         account_id=cast("int", account_id),
@@ -261,6 +263,7 @@ async def append_terminated_execute_record(
         已写入数据库的 terminated 执行记录。
     """
     persisted_raw_result = dict(raw_result or {})
+    persisted_raw_result["outcome"] = "terminated"
     persisted_raw_result["task_status"] = ExecutionTaskStatus.TERMINATED.value
     persisted_raw_result["execution_kind"] = execution_kind.value
     mode_value = mode.value if isinstance(mode, ExecutionTerminateMode) else mode

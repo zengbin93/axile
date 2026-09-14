@@ -171,6 +171,8 @@ def test_trade_serializes_success_result_to_json_safe_dict(
         "execution_time",
         "success",
         "extra",
+        "outcome",
+        "outcome_reason",
     }
     assert result["symbol_results"]["ag2612"]["algorithm"] == "SINGLE-MAKER"
     assert captured["execution_id"] is None

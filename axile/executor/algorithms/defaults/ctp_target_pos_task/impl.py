@@ -29,7 +29,8 @@ from axile.executor.algorithms.core.base import (
 )
 from axile.executor.algorithms.utils import setup_order_tracker, teardown_order_tracker
 from axile.executor.algorithms.utils.order_tracker import ChaseConfig
-from axile.executor.models.execution_result import ExecutionStatus
+from axile.executor.algorithms.utils.outcome import summarize_outcome
+from axile.executor.models.execution_result import ExecutionOutcome, ExecutionStatus
 from axile.executor.models.unified_account_assets import Position, PositionDirection, UnifiedAccountAssets
 from axile.executor.models.unified_order import UnifiedOrder
 from axile.executor.models.unified_price import clone_price_data
@@ -783,7 +784,18 @@ def ctp_target_pos_task_algorithm(executor: ExecutorProtocol, algorithm_input: A
         orders = tracker.get_all_orders()
         trades = tracker.get_all_trades()
 
+        conclusion = summarize_outcome(
+            current_net_position,
+            final_net_position,
+            target_volume,
+            orders,
+            trades,
+            execution_memory,
+        )
         return AlgorithmResult(
+            outcome=conclusion["outcome"],
+            outcome_reason=conclusion["outcome_reason"],
+            final_volume=final_net_position,
             orders=orders,
             trades=trades,
             account_assets=final_account_assets,
@@ -824,6 +836,8 @@ def ctp_target_pos_task_algorithm(executor: ExecutorProtocol, algorithm_input: A
             account_assets=executor.get_account_assets(),
             target_volume=algorithm_input.target_volume,
             first_tick=clone_price_data(market_data),
+            outcome=ExecutionOutcome.ERROR,
+            outcome_reason=error_msg,
             status=ExecutionStatus.FAILED,
             error=error_msg,
             memory={

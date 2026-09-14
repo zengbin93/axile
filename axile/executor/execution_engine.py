@@ -18,8 +18,10 @@ from axile.executor.execution_runtime import ExecutionRuntime
 from axile.executor.execution_session import ExecutionSession
 from axile.executor.models.execution_result import (
     AlgorithmResult,
+    ExecutionOutcome,
     ExecutionStatus,
     TargetSizingDecision,
+    aggregate_outcomes,
     is_success_status,
 )
 from axile.executor.models.unified_account_assets import UnifiedAccountAssets
@@ -459,7 +461,7 @@ class ExecutionEngine:
             algorithm_name = self._get_symbol_algorithm_name(standard_input, symbol)
             sizing = sizing_decisions.get(symbol)
             target_volume = sizing.target_quantity if sizing is not None else None
-            if target_volume is None:
+            if sizing is None or target_volume is None:
                 planning_failures.append(
                     self._build_failed_algorithm_result(
                         symbol=symbol,
@@ -685,6 +687,8 @@ class ExecutionEngine:
             sizing=plan.sizing,
             first_tick=clone_price_data(market_data.get(plan.symbol)),
             memory={},
+            outcome=ExecutionOutcome.COMPLETED,
+            final_volume=float(plan.final_target_volume),
             status=ExecutionStatus.NOOP,
             error=None,
             symbol=plan.symbol,
@@ -742,7 +746,7 @@ class ExecutionEngine:
             plan = phase_two_plans[symbol]
             sizing = sizing_decisions.get(symbol)
             target_volume = sizing.target_quantity if sizing is not None else None
-            if target_volume is None:
+            if sizing is None or target_volume is None:
                 planning_failures.append(
                     self._build_failed_algorithm_result(
                         symbol=symbol,
@@ -804,6 +808,11 @@ class ExecutionEngine:
             sizing=current.sizing if current.sizing is not None else previous.sizing,
             first_tick=current.first_tick if current.first_tick is not None else previous.first_tick,
             memory=merged_memory,
+            outcome=aggregate_outcomes([previous.outcome, current.outcome]),
+            outcome_reason=previous.outcome_reason
+            if previous.outcome == ExecutionOutcome.ERROR
+            else current.outcome_reason,
+            final_volume=current.final_volume,
             status=merged_status,
             error=merged_error,
             symbol=previous.symbol,
@@ -935,6 +944,8 @@ class ExecutionEngine:
                     "symbol": result.symbol,
                     "algorithm": result.algorithm,
                     "status": result.status.value,
+                    "outcome": result.outcome.value,
+                    "outcome_reason": result.outcome_reason,
                     "target_volume": result.target_volume,
                     "orders_count": len(result.orders),
                 },
@@ -975,6 +986,8 @@ class ExecutionEngine:
             sizing=sizing,
             first_tick=first_tick,
             memory=dict(memory or {}),
+            outcome=ExecutionOutcome.BLOCKED if status == ExecutionStatus.BLOCKED else ExecutionOutcome.ERROR,
+            outcome_reason=error,
             status=status,
             error=error,
             symbol=symbol,

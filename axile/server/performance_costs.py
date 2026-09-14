@@ -118,6 +118,10 @@ def project_execution(record) -> tuple[dict, list[dict]]:
             and all(result.get("status") == "NOOP" for result in results.values())
         )
     )
+    raw = dict(raw)
+    raw["outcome_symbols"] = [
+        symbol for symbol, result in results.items() if result.get("outcome") in {"not_reached", "blocked"}
+    ]
     duration = number(raw.get("execution_time"))
     payload = {
         "key": str(record.id),
@@ -126,7 +130,11 @@ def project_execution(record) -> tuple[dict, list[dict]]:
             "execution_id": record.execution_id,
             "created_at": record.created_at,
             "is_success": record.is_success,
-            "raw_result": {key: raw[key] for key in ("status", "task_status") if key in raw},
+            "raw_result": {
+                key: raw[key]
+                for key in ("status", "task_status", "outcome", "outcome_reason", "outcome_symbols")
+                if key in raw
+            },
         },
         "noop": noop,
         "durationSec": duration if duration is not None and duration >= 0 else None,

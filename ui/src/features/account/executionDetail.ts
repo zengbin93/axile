@@ -1,3 +1,4 @@
+import { executionOutcome, outcomeOf, type OutcomeView } from '@/features/account/executionOutcome'
 /**
  * 把执行事件流 + 附件组合成「执行详情」视图模型（纯函数，与组件解耦、便于测试）。
  *
@@ -7,7 +8,7 @@
  */
 import { eventError } from '@/features/account/executionRows'
 import { executionReasonText, symbolSkipSummaryReason } from '@/features/account/executionReason'
-import { describeFailure, describeFailureText, type FailureReason } from '@/features/account/failureReason'
+import { describeFailureText, type FailureReason } from '@/features/account/failureReason'
 import type {
   AccountSnapshotSource,
   ExecOrder,
@@ -30,6 +31,8 @@ export interface SymbolChain {
   before: number
   /** 执行后带号持仓。 */
   after: number
+  observedBefore: number | null
+  observedAfter: number | null
   /** 意图带号目标量。 */
   target: number | null
   algorithm: string | null
@@ -138,6 +141,7 @@ export interface ExecutionDetailModel {
   hasReconciliation: boolean
   /** 执行级失败判词（-1021 等翻成人话）；无 execution_failed 事件时为 null。 */
   failure: FailureReason | null
+  conclusion: OutcomeView
   /** 执行任务状态真源；旧记录或接口不可用时为 null。 */
   task: ExecutionStatus | null
   /** worker 被强制停止且无法确认挂单状态时的风险提示。 */
@@ -147,29 +151,11 @@ export interface ExecutionDetailModel {
 /** 把执行结果压成一条自然语言结论；正常完成保持中性。 */
 export function executionHeadline(
   model: ExecutionDetailModel,
-  quantityLabel: string,
 ): { level: 'neutral' | 'warn'; text: string } {
-  const {
-    reachedCount,
-    totalCount,
-    failedCount,
-    tradedReachedCount,
-    alreadyReachedCount,
-    quantizedZeroCount,
-  } = model.header
-  const notReached = totalCount - reachedCount
-  if (model.failure) return { level: 'warn', text: `执行失败：${model.failure.category}` }
-  if (model.task?.status === 'TERMINATED') return { level: 'neutral', text: '执行已终止。' }
-  if (failedCount > 0) return { level: 'warn', text: `执行完成：${failedCount}只失败。` }
-  if (notReached > 0) return { level: 'warn', text: `执行完成：${reachedCount}只到位，${notReached}只未到位。` }
-  if (totalCount === 0) return { level: 'neutral', text: '本次执行没有逐只结果。' }
-  const parts: string[] = []
-  if (tradedReachedCount > 0) parts.push(`${tradedReachedCount}只成交到位`)
-  if (alreadyReachedCount > 0) parts.push(`${alreadyReachedCount}只原已到位`)
-  if (quantizedZeroCount > 0) {
-    parts.push(`${quantizedZeroCount}只因${quantityLabel === '手' ? '不足1手' : '不足最小交易单位'}未下单`)
-  }
-  return { level: 'neutral', text: `执行完成：${parts.join('，')}。` }
+  if (model.task?.status === 'QUEUED') return { level: 'neutral', text: '等待执行' }
+  if (model.task?.status === 'RUNNING') return { level: 'neutral', text: '执行中' }
+  if (model.task?.status === 'TERMINATING') return { level: 'neutral', text: '正在终止' }
+  return { level: model.conclusion.warning ? 'warn' : 'neutral', text: model.conclusion.text }
 }
 
 type Dict = Record<string, unknown>
@@ -341,9 +327,10 @@ function buildSymbolChain(
 ): SymbolChain {
   const symbol = asStr(recon.symbol)
   const before = asNum(recon.before) ?? 0
-  const after = asNum(recon.after) ?? 0
+  const after = asNum(recon.final_volume) ?? asNum(recon.after) ?? 0
   const target = asNum(recon.target)
-  const reached = typeof recon.reached === 'boolean' ? recon.reached : null
+  const symbolOutcome = outcomeOf(recon.outcome)
+  const reached = symbolOutcome === 'completed' ? true : symbolOutcome === 'not_reached' ? false : symbolOutcome === 'unknown' ? null : typeof recon.reached === 'boolean' ? recon.reached : null
   const order = orders.get(symbol)
   const decision = decisions.get(symbol)
   const skipReason = skips.get(symbol)
@@ -354,15 +341,10 @@ function buildSymbolChain(
   if (skipReason) {
     reason = skipReason
     if (reached !== true) action = 'skipped'
-  } else if (decision?.status && decision.status !== 'SUCCEEDED') {
-    // 订单腿非成功（FAILED/BLOCKED/NOOP…）：是否「失败」由仓位真相判定，而非订单枚举。
-    // 仅「确认到位」（reached===true）免罪：受阻/空跑但仓位已在目标 → 保持原动作、不判失败；
-    // 未到位或结果未知（reached 为 false/null）→ 真断点，标记失败。
-    const raw = asStr(recon.status) || decision.status
-    // FAILED 只是「失败」的同义反复，交给动作标签/未到位表达；受阻/空跑/撤单等才是有信息量的原因。
-    if (raw !== 'FAILED') reason = STATUS_LABEL[raw] ?? raw
-    if (reached !== true) action = 'failed'
   }
+  const outcome = outcomeOf(recon.outcome)
+  if (outcome === 'error') action = 'failed'
+  reason = typeof recon.outcome_reason === 'string' ? recon.outcome_reason : reason
 
   const terminalStatus = order?.terminalStatus ?? null
   const canceled = terminalStatus != null && (terminalStatus.includes('撤') || terminalStatus.includes('拒'))
@@ -376,6 +358,8 @@ function buildSymbolChain(
     action,
     before,
     after,
+    observedBefore: asNum(recon.before),
+    observedAfter: asNum(recon.final_volume) ?? asNum(recon.after),
     target,
     algorithm: decision?.algorithm ?? null,
     ordersCount: decision?.ordersCount ?? null,
@@ -672,9 +656,13 @@ export function buildExecutionDetail(
   const pnlBefore = pnlBySymbol(beforeAssets)
   const pnlAfter = pnlBySymbol(afterAssets)
 
-  const symbols: SymbolChain[] = (recon?.symbols ?? []).map((s) =>
-    buildSymbolChain(s as unknown as Record<string, unknown>, startedAt, orders, decisions, skips, pnlBefore, pnlAfter),
-  )
+  const symbols: SymbolChain[] = (recon?.symbols ?? []).map((s) => {
+    const row = s as unknown as Record<string, unknown>
+    const chain = buildSymbolChain(row, startedAt, orders, decisions, skips, pnlBefore, pnlAfter)
+    if (recon?.account.source_before !== 'real') chain.observedBefore = null
+    if (recon?.account.source_after !== 'real' && asNum(row.final_volume) == null) chain.observedAfter = null
+    return chain
+  })
 
   const reachedCount = symbols.filter((s) => s.reached === true).length
   const quantizedZeroCount = symbols.filter((s) => {
@@ -732,8 +720,13 @@ export function buildExecutionDetail(
   }
 
   const targetChange = buildTargetChange(artifacts)
-  const failure = describeFailure(eventAt(events, 'execution_failed'))
-    ?? (task?.status === 'FAILED' ? describeFailureText(task.error ?? '') : null)
+  // 摘要落库后仍可能发生生命周期错误或终止，任务的明确结论必须优先。
+  const taskOverridesSummary = task?.outcome === 'error' || task?.outcome === 'terminated'
+  const conclusionSource = taskOverridesSummary ? task : summary?.outcome != null ? summary : task
+  const conclusion = executionOutcome(conclusionSource, task?.execution_kind === 'clear_positions')
+  const failure = conclusion.outcome === 'error'
+    ? describeFailureText(asStr(conclusionSource?.outcome_reason) || task?.error || '执行过程发生错误')
+    : null
   const terminatedDetails = asDict(eventAt(events, 'execution_terminated')?.details)
   const termination = asDict(terminatedDetails?.termination)
   const terminationWarning = termination?.forced === true && termination.cancel_unconfirmed === true
@@ -744,11 +737,15 @@ export function buildExecutionDetail(
     header,
     targetChange,
     symbols,
-    spine: buildSpine(events, artifacts, symbols, targetChange, failure),
+    spine: buildSpine(events, artifacts, symbols, targetChange, failure).map(node =>
+      node.key === 'failed' || node.key === 'completed'
+        ? { ...node, label: conclusion.text, detail: '', status: conclusion.warning ? 'WARNING' : 'INFO', broken: conclusion.warning }
+        : node),
     bookends,
     artifacts,
     hasReconciliation: recon != null,
     failure,
+    conclusion,
     task,
     terminationWarning,
   }

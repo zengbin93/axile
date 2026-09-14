@@ -615,6 +615,9 @@ export interface ExecutionStatus {
   error: string | null
   /** 执行器输出状态（SUCCEEDED/NOOP/BLOCKED/PARTIAL/FAILED）；任务未结束或无记录时为 null。 */
   output_status?: string | null
+  outcome?: string | null
+  outcome_reason?: string | null
+  outcome_symbols?: string[] | null
   record_id: number | null
   is_success: number | null
   cancel_requested_at: string | null

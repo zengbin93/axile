@@ -15,7 +15,7 @@ from uuid import uuid4
 
 from axile.common.trade_channel import TradeChannel
 from axile.executor.ctp_catalog import CatalogStore
-from axile.executor.models.execution_result import ExecutionStatus
+from axile.executor.models.execution_result import ExecutionOutcome, ExecutionStatus
 from axile.executor.models.unified_account_assets import UnifiedAccountAssets
 from axile.executor.models.unified_input import UnifiedStandardInput
 from axile.executor.models.unified_output import UnifiedStandardOutput
@@ -503,8 +503,10 @@ class WorkerBackendManager:
             memory={"message": message},
             inputs=None,
             symbol_results={},
+            outcome=ExecutionOutcome.ERROR,
             status=ExecutionStatus.FAILED,
             error=message,
+            outcome_reason=message,
             execution_time=0.0,
             channel_type=channel_type or TradeChannel.GM,
             success=False,

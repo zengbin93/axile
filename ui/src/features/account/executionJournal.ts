@@ -1,3 +1,4 @@
+import { executionOutcome } from '@/features/account/executionOutcome'
 import type { AccountActivity } from '@/lib/api/accounts'
 import { buildRecentActivity, recentRowText } from '@/features/account/recent'
 import { dict, number } from '@/features/account/executionValues'
@@ -40,10 +41,8 @@ export function journalExecutions(activity: AccountActivity[]): JournalExecution
     const recent = buildRecentActivity([a], { fetchLimit: 2 }).rows[0]
     const record = a.kind === 'execution' ? a.record : null
     const trades = record ? costTrades(record).map((t, i) => journalTrade(t, `${record.id ?? record.execution_id}:${i}`)) : []
-    const noop = record?.raw_result.status === 'NOOP'
-    const status = noop ? '无成交' : recent.type === 'fill' ? '已完成' : recent.type === 'partial' ? '部分到位'
-      : recent.type === 'fail' ? '失败' : recent.type === 'terminated' ? '已终止'
-        : recent.type === 'blocked' || recent.type === 'skip' ? '已跳过' : trades.length ? '已完成' : '无成交'
+    const view = record ? executionOutcome(record.raw_result) : null
+    const status = view ? ({ completed: '已完成', not_reached: '执行不到位', error: '执行失败', terminated: '已终止', blocked: '已跳过', unknown: '执行结果待确认', legacy: '历史执行记录' }[view.outcome]) : '已跳过'
     const symbols = record ? [...new Set([
       ...Object.keys(dict(record.raw_result.symbol_results)),
       ...Object.keys(record.raw_input.curr_target ?? {}), ...Object.keys(record.raw_input.last_target ?? {}),
@@ -51,9 +50,8 @@ export function journalExecutions(activity: AccountActivity[]): JournalExecution
     return {
       key: a.kind === 'execution' ? `execution:${record?.id ?? record?.execution_id}` : `skip:${a.id}`,
       time: a.occurred_at, executionId: record?.execution_id ?? null, status,
-      warning: recent.type === 'partial' || recent.type === 'fail',
-      description: noop && record?.raw_result.execution_kind === 'clear_positions' ? '清仓执行 · 无需下单'
-        : recent.type === 'noop' && trades.length ? `调仓执行 · ${symbols.length} 个品种` : recentRowText(recent),
+      warning: view?.warning ?? false,
+      description: view?.text ?? recentRowText(recent),
       symbols, trades, summary: summarizeCosts(trades), recordId: record?.id ?? null, durationSec: number(record?.raw_result.execution_time),
     }
   })

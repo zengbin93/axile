@@ -4,7 +4,7 @@ from math import isclose, isfinite
 from typing import Any
 
 from axile.executor.constants.order_status import OrderStatus
-from axile.executor.models.execution_result import ExecutionStatus
+from axile.executor.models.execution_result import ExecutionOutcome, ExecutionStatus
 from axile.executor.models.unified_order import TradeRecord, UnifiedOrder
 
 
@@ -18,6 +18,7 @@ def summarize_outcome(
 ) -> dict[str, Any]:
     """保守聚合错误、欠量及未确认终态；成交后仍有风险时返回 PARTIAL。"""
     errors = _errors(details)
+    process_errors = list(errors)
     remaining = target - final
     terminal = all(OrderStatus.is_completed(order.status) for order in orders)
     completed = isfinite(final) and isclose(final, target, rel_tol=0, abs_tol=1e-9)
@@ -26,6 +27,7 @@ def summarize_outcome(
         errors.append("订单终态未确认（含撤单结果未知）")
     if rejected:
         errors.append("存在拒单")
+        process_errors.append("存在拒单")
     if not completed:
         errors.append(f"目标未完成: final={final}, target={target}, remaining={remaining}")
     filled = sum(trade.trade_volume for trade in trades)
@@ -36,7 +38,21 @@ def summarize_outcome(
             status = ExecutionStatus.BLOCKED
     else:
         status = ExecutionStatus.NOOP if start == target and not orders else ExecutionStatus.SUCCEEDED
-    return {"status": status, "error": "; ".join(errors) or None}
+    if process_errors:
+        outcome = ExecutionOutcome.ERROR
+    elif not terminal or not isfinite(final):
+        outcome = ExecutionOutcome.UNKNOWN
+    elif status == ExecutionStatus.BLOCKED:
+        outcome = ExecutionOutcome.BLOCKED
+    else:
+        outcome = ExecutionOutcome.COMPLETED if completed else ExecutionOutcome.NOT_REACHED
+    return {
+        "status": status,
+        "error": "; ".join(errors) or None,
+        "outcome": outcome,
+        "final_volume": final if isfinite(final) else None,
+        "outcome_reason": "; ".join(process_errors or errors) or None,
+    }
 
 
 def _errors(details: Any) -> list[str]:

@@ -38,7 +38,7 @@ from axile.executor.algorithms.core.base import (
 )
 from axile.executor.algorithms.utils.clock import get_default_clock
 from axile.executor.ctp.options import OptionActionRecord
-from axile.executor.models.execution_result import AlgorithmResult, ExecutionStatus
+from axile.executor.models.execution_result import AlgorithmResult, ExecutionOutcome, ExecutionStatus
 
 
 class CtpOptionExecutorProtocol(ExecutorProtocol, Protocol):
@@ -187,7 +187,12 @@ def ctp_option_exercise_algorithm(executor: ExecutorProtocol, algorithm_input: A
 
     if target <= 0:
         executor.logger.info(f"期权指令 {symbol} 目标张数={target}，跳过")
-        return AlgorithmResult(symbol=symbol, algorithm="CTP_OPTION_EXERCISE", status=ExecutionStatus.NOOP)
+        return AlgorithmResult(
+            symbol=symbol,
+            algorithm="CTP_OPTION_EXERCISE",
+            outcome=ExecutionOutcome.COMPLETED,
+            status=ExecutionStatus.NOOP,
+        )
 
     # 行权前的内在价值检查：避免无价值行权造成账户损失
     if params.action == "exercise" and params.require_value_check:
@@ -198,6 +203,8 @@ def ctp_option_exercise_algorithm(executor: ExecutorProtocol, algorithm_input: A
             return AlgorithmResult(
                 symbol=symbol,
                 algorithm="CTP_OPTION_EXERCISE",
+                outcome=ExecutionOutcome.BLOCKED,
+                outcome_reason="期权无内在价值，已跳过行权",
                 status=ExecutionStatus.NOOP,
                 error="期权无内在价值，已跳过行权",
             )
@@ -215,6 +222,8 @@ def ctp_option_exercise_algorithm(executor: ExecutorProtocol, algorithm_input: A
         return AlgorithmResult(
             symbol=symbol,
             algorithm="CTP_OPTION_EXERCISE",
+            outcome=ExecutionOutcome.ERROR,
+            outcome_reason=str(exc),
             status=ExecutionStatus.FAILED,
             error=str(exc),
         )
@@ -264,6 +273,13 @@ def ctp_option_exercise_algorithm(executor: ExecutorProtocol, algorithm_input: A
     return AlgorithmResult(
         symbol=symbol,
         algorithm="CTP_OPTION_EXERCISE",
+        outcome={
+            "executed": ExecutionOutcome.COMPLETED,
+            "abandoned": ExecutionOutcome.COMPLETED,
+            "cancelled": ExecutionOutcome.NOT_REACHED,
+            "failed": ExecutionOutcome.ERROR,
+        }.get(final_status_value, ExecutionOutcome.UNKNOWN),
+        outcome_reason=error,
         status=algo_status,
         target_volume=target,
         memory=memory_payload,

@@ -1,3 +1,4 @@
+import { executionOutcome } from '@/features/account/executionOutcome'
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react'
 import { useViewTransitionState } from 'react-router'
 import { ArrowLeft, RefreshCw } from 'lucide-react'
@@ -16,8 +17,6 @@ import { Skeleton, SkeletonGroup, SkeletonText } from '@/components/ui/Skeleton'
 import { AccountActions } from '@/features/account/AccountActions'
 import { useExecutionRunner } from '@/features/account/useExecutionRunner'
 import { useTerminateAction } from '@/features/account/useTerminateAction'
-import { executionRecordError } from '@/features/account/executionRecordError'
-import { describeFailureText } from '@/features/account/failureReason'
 import { buildRecentActivity, recentRowText } from '@/features/account/recent'
 import { StaleDataStatus } from '@/features/account/StaleDataStatus'
 import { connectionStaleAt, localQueryError } from '@/features/account/staleData'
@@ -234,30 +233,16 @@ export function AccountDetail({
   const isQueued = isBusy && !isExecuting
   const runKind = live?.kind ?? (runner.kind === 'clear' ? 'clear' : 'rebalance')
   const latestRecord = recordList[0]
-  const latestFailedRecord = latestRecord
-    && latestRecord.raw_result?.status !== 'BLOCKED'
-    && latestRecord.raw_result?.task_status !== 'TERMINATED'
-    && latestRecord.is_success !== 1
-    && latestRecord.execution_id
-    ? latestRecord
-    : undefined
-  const latestFailureText = latestFailedRecord ? executionRecordError(latestFailedRecord) : ''
-  const latestFailure = latestFailureText ? describeFailureText(latestFailureText) : null
+  const latestOutcome = latestRecord ? executionOutcome(latestRecord.raw_result) : null
   const statusHeadline = isTerminating
     ? `正在终止${runVerb(runKind)}`
     : isExecuting
       ? `正在${runVerb(runKind)}`
       : isQueued
         ? '等待执行'
-        : state.integrity === 'off' && latestFailure
-          ? `执行失败：${latestFailure.human}`
-          : `${INTEGRITY_ICON[state.integrity]} ${state.text}`
-  // 「需要看看」兑现：空闲且上次失败时，状态行点进最近失败执行详情（与近期失败行同构）。
-  const lastFailExecId =
-    !isBusy && state.integrity === 'off' && item.last_output_status !== 'BLOCKED'
-      ? (latestFailedRecord?.execution_id ?? null)
-      : null
-  const statusNavId = runningExecId ?? lastFailExecId
+        : latestOutcome?.text ?? `${INTEGRITY_ICON[state.integrity]} ${state.text}`
+  const latestExecId = !isBusy ? latestRecord?.execution_id ?? null : null
+  const statusNavId = runningExecId ?? latestExecId
   const goStatusNav = statusNavId
     ? () => navigate(`/accounts/${accountId}/executions/${statusNavId}`)
     : undefined
@@ -405,17 +390,17 @@ export function AccountDetail({
          * 状态区固定为「标题行 + 副行」两行结构，高度不随运行态增减（框不动，戏在框里演）。
          * 主句常驻 InkRewrite prose：暂停↔执行、执行↔清仓、启停空闲句均墨褪再显。
          * 执行中：生命体征 + phase 副标事件门控，不叠日记（phase 连刷勿糊墨）。
-         * 可点：在途 → 当前执行；「需要看看」→ 最近失败执行。外层始终 div，避免 Link remount 打断换字。
+         * 可点：在途 → 当前执行；空闲 → 最近执行。外层始终 div，避免 Link remount 打断换字。
          */}
         <div
           className={`relative mt-[18px] inline-flex max-w-full min-w-0 items-center gap-2 text-[20px] font-[640] tracking-tight transition-[padding-left] duration-[440ms] ease-[cubic-bezier(.4,0,.2,1)] motion-reduce:transition-none sm:text-[24px] ${
             isBusy ? 'pl-[18px]' : 'pl-0'
-          } ${isTerminating ? 'text-warn' : isBusy ? 'text-accent' : INTEGRITY_TEXT_CLASS[state.integrity]}${
+          } ${isTerminating ? 'text-warn' : isBusy ? 'text-accent' : latestOutcome ? latestOutcome.warning ? 'text-warn' : 'text-ink-1' : INTEGRITY_TEXT_CLASS[state.integrity]}${
             statusNavId ? ' cursor-pointer hover:opacity-80' : ''
           }`}
           role={statusNavId ? 'link' : undefined}
           tabIndex={statusNavId ? 0 : undefined}
-          title={lastFailExecId ? latestFailureText || '查看失败执行详情' : undefined}
+          title={latestExecId ? latestOutcome?.text || '查看执行详情' : undefined}
           onClick={goStatusNav}
           onKeyDown={
             goStatusNav
@@ -795,6 +780,12 @@ export function AccountDetail({
                         <span className="w-4 flex-none text-center text-warn">⚠</span>
                         <OverflowText className="min-w-0 flex-1 text-ink-1" text={recentRowText(row)} />
                         <RecentAmount amount={row.amount} currency={item.currency} />
+                      </>
+                    )}
+                    {(row.type === 'legacy' || row.type === 'unknown') && (
+                      <>
+                        <span className="w-4 flex-none text-center text-ink-3">–</span>
+                        <OverflowText className="min-w-0 flex-1 text-ink-2" text={recentRowText(row)} />
                       </>
                     )}
                     {row.type === 'noop' && (

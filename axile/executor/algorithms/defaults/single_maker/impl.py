@@ -44,7 +44,7 @@ from axile.executor.algorithms.utils import (
 )
 from axile.executor.algorithms.utils.order_tracker import ChaseConfig
 from axile.executor.algorithms.utils.outcome import summarize_outcome
-from axile.executor.models.execution_result import ExecutionStatus
+from axile.executor.models.execution_result import ExecutionOutcome, ExecutionStatus
 from axile.executor.models.unified_price import UnifiedPriceData, clone_price_data
 
 
@@ -194,6 +194,8 @@ def single_maker_callback(
                     account_assets=account_assets,
                     target_volume=target_volume,
                     first_tick=first_tick,
+                    outcome=ExecutionOutcome.BLOCKED,
+                    outcome_reason="盘口买卖一无效，本轮未执行",
                     status=ExecutionStatus.BLOCKED,
                     error="missing_book: 目标未完成",
                     memory={

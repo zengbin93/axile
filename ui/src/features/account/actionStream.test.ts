@@ -130,3 +130,12 @@ describe('buildSymbolActionStream', () => {
     expect(lines[0]?.text).toBe('挂单 买 0.001 基础资产 @62,000 元')
   })
 })
+
+it('新决策未到位时不复述旧失败摘要', () => {
+  const lines = buildSymbolActionStream([ev({
+    event_type: 'symbol_decision_made', status: 'ERROR',
+    details: { decision: { outcome: 'not_reached', target_volume: 3 }, debug: { error: '持仓调整失败' } },
+  })], 'rb2610')
+  expect(lines[0].text).toContain('执行不到位')
+  expect(lines[0].text).not.toContain('失败')
+})

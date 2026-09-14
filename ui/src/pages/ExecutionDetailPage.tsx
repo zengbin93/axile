@@ -99,6 +99,11 @@ function unitsForSymbol(units: DisplayUnits, symbol: string, currency: string): 
   return baseAsset ? { ...units, quantity_label: baseAsset } : units
 }
 
+/** 持仓与目标保留方向符号；订单成交数量仍使用绝对值。 */
+function fmtPosition(v: number | null, units: DisplayUnits): string {
+  return v == null ? '—' : `${v < 0 ? '−' : ''}${fmtQty(v, units)}`
+}
+
 /** 权益金额：两位小数、千分位。 */
 function fmtEquity(v: number | null): string {
   return v == null ? '—' : v.toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
@@ -129,14 +134,12 @@ function Header({
   m,
   currency,
   assetLabel,
-  quantityLabel,
 }: {
   m: ExecutionDetailModel
   currency: string
   assetLabel: string
-  quantityLabel: string
 }) {
-  const v = executionHeadline(m, quantityLabel)
+  const v = executionHeadline(m)
   const h = m.header
   const meta = [TRIGGER_LABEL[h.trigger] ?? h.trigger, KIND_LABEL[h.kind] ?? h.kind].filter(Boolean).join(' ')
   return (
@@ -302,6 +305,7 @@ function SymbolChainRow({
     ? { cls: 'text-ink-3', node: <>无需下单</> }
     : s.reached
     ? { cls: 'text-accent', node: <>到位 {ratioNode ?? '—'}</> }
+    : s.reached == null ? { cls: 'text-ink-3', node: <>到位状态未知</> }
     : { cls: 'text-warn', node: ratioNode != null ? <>⚠ 欠量 · 到位 {ratioNode}</> : <>⚠ 未到位</> }
   const sideText = s.side === 'sell' ? '卖' : s.side === 'buy' ? '买' : ''
   const driftNotable = Math.abs(s.drift) > 1e-6
@@ -330,8 +334,9 @@ function SymbolChainRow({
         <div className="mt-1 text-[12.5px] text-warn">当时未记录换算依据</div>
       )}
       <div className="num mt-0.5 text-[13px] text-ink-3">
-        实际 {fmtQty(s.before, units)} → {fmtQty(s.after, units)}
-        {s.target != null && <span> · 可执行目标 {fmtQty(s.target, units)}</span>}
+        实际 {fmtPosition(s.observedBefore, units)} → {fmtPosition(s.observedAfter, units)}
+        {s.target != null && <span> · 可执行目标 {fmtPosition(s.target, units)}</span>}
+        {s.target != null && s.observedAfter != null && s.reached === false && <span> · 差额 {fmtPosition(s.target - s.observedAfter, units)}</span>}
       </div>
 
       {/* 决策 + 成交 */}
@@ -608,7 +613,7 @@ export function ExecutionDetailPage() {
       <div>
         <ErrorNotice title="执行状态加载失败" error={status.error} onRetry={status.refresh} />
       </div>
-      {model && <Header m={model} currency={currency} assetLabel={assetTerms.shortLabel} quantityLabel={units.quantity_label} />}
+      {model && <Header m={model} currency={currency} assetLabel={assetTerms.shortLabel} />}
 
       {/* 运行中：顶部给一条确定态阶段条作一瞥总览；逐事件细节仍在下方脊柱。 */}
       {isLive && running && running.status === 'queued' && (
@@ -630,7 +635,7 @@ export function ExecutionDetailPage() {
             {model.symbols.length > 0 ? (
               <>
                 <div className="mb-2 text-xs font-semibold tracking-wide text-ink-3">逐只结果</div>
-                {model.symbols.map((s) => {
+                {model.symbols.filter(s => model.conclusion.outcome !== 'not_reached' || model.conclusion.symbols.includes(s.symbol)).map((s) => {
                   const symbolUnits = unitsForSymbol(units, s.symbol, currency)
                   return (
                     <SymbolChainRow

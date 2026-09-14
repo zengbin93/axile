@@ -281,6 +281,9 @@ class ExecutionStatusPublic(SQLModel):
     finished_at: Optional[str] = None
     error: Optional[str] = None
     output_status: Optional[str] = None
+    outcome: Optional[str] = None
+    outcome_reason: Optional[str] = None
+    outcome_symbols: list[str] = Field(default_factory=list)
     record_id: Optional[int] = None
     is_success: Optional[int] = None
     cancel_requested_at: Optional[str] = None

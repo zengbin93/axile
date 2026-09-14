@@ -66,6 +66,8 @@ def test_production_positions_aggregate_and_reach_target(reverse_rows, reverse_p
             params=CTPTargetPosTaskParams(max_wait_seconds=1),
         ),
     )
+    assert result.outcome.value == ("completed" if target == 2 else "not_reached")
+    assert result.final_volume == 2
     assert result.status == (ExecutionStatus.SUCCEEDED if target == 2 else ExecutionStatus.FAILED)
     assert result.memory["current_net_position"] == result.memory["final_net_position"] == 2
     assert result.memory["execution_details"]["rb2610_adjustment"]["current_net"] == 2
@@ -90,6 +92,7 @@ def test_final_check_does_not_accept_first_direction_as_net():
     assert result.status == ExecutionStatus.FAILED
     assert result.memory["final_net_position"] == 2
     assert result.memory["target_reached"] is False
+    assert result.outcome.value == "not_reached"
 
 
 @pytest.mark.parametrize("indices,expected", [([], (0, 0, 0)), ([0], (5, 0, 5)), ([1], (0, 3, -3))])

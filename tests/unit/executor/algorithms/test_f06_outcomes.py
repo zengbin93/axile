@@ -114,6 +114,17 @@ def test_algorithm_outcome(monkeypatch, module, case, expected):
     result = entry(executor, input_data)
     if case not in {"noop", "reject"}:
         assert tracker.wait_for_completion.call_args.kwargs["timeout"] == pytest.approx(0.75)
+    assert (
+        result.outcome.value
+        == {
+            "reject": "error",
+            "timeout": "not_reached",
+            "partial": "not_reached",
+            "unknown_cancel": "unknown" if module is maker else "error",
+            "filled": "completed",
+            "noop": "completed",
+        }[case]
+    )
     assert result.status == expected
     assert result.model_dump(mode="json")["status"] == expected.value
     if expected in {ExecutionStatus.FAILED, ExecutionStatus.PARTIAL}:

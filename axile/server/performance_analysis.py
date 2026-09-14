@@ -20,7 +20,7 @@ from axile.server.db.models.performance import PerformanceBinding, PerformanceSe
 from axile.server.performance import calculate_performance, local_time, observation
 from axile.server.performance_costs import SHANGHAI, daily_costs, project_execution, summarize, timestamp
 
-LOGIC_VERSION = "6"
+LOGIC_VERSION = "7"
 ENGINE_VERSION = version("wbt")
 RETRY_DELAYS = (5, 30, 120)
 
@@ -172,18 +172,33 @@ def _events(records, bindings, skips) -> list[dict]:
         if record.is_success == 1:
             continue
         raw = record.raw_result
-        error = raw.get("error")
-        text = (
-            "上次执行中断，未自动续跑"
-            if raw.get("interrupt_reason") == "process_interrupted"
-            else error
-            if isinstance(error, str) and error.strip()
-            else "执行未完成"
-        )
+        outcome = raw.get("outcome")
+        label = {
+            "completed": "执行完成",
+            "not_reached": "执行不到位",
+            "error": "执行失败",
+            "terminated": "执行已终止",
+            "blocked": "未执行",
+            "unknown": "执行结果待确认",
+        }.get(outcome, "历史执行记录")
+        reason = raw.get("outcome_reason") if outcome in {"error", "blocked"} else None
+        if outcome == "not_reached":
+            symbols = raw.get("symbol_results", {})
+            missing = (
+                [
+                    symbol
+                    for symbol, value in symbols.items()
+                    if isinstance(value, dict) and value.get("outcome") in {"not_reached", "blocked"}
+                ]
+                if isinstance(symbols, dict)
+                else []
+            )
+            reason = "、".join(missing[:3]) + (f" 等 {len(missing)} 个品种" if len(missing) > 3 else "")
+        text = f"{label} · {reason}" if reason else label
         events.append(
             {
                 "time": record.created_at,
-                "tag": "终止" if raw.get("task_status") == "TERMINATED" else "失败",
+                "tag": label,
                 "text": text[:500],
                 "executionId": record.execution_id,
             }

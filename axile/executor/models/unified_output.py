@@ -10,7 +10,13 @@ from typing import Any, TypedDict, override
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from axile.common.trade_channel import TradeChannel
-from axile.executor.models.execution_result import AlgorithmResult, ExecutionStatus, is_success_status
+from axile.executor.models.execution_result import (
+    AlgorithmResult,
+    ExecutionOutcome,
+    ExecutionStatus,
+    aggregate_outcomes,
+    is_success_status,
+)
 from axile.executor.models.unified_account_assets import UnifiedAccountAssets
 from axile.executor.models.unified_input import UnifiedStandardInput
 from axile.executor.models.unified_order import TradeRecord, UnifiedOrder
@@ -90,6 +96,8 @@ class UnifiedStandardOutput(BaseModel):
     symbol_results: dict[str, AlgorithmResult] = Field(default_factory=dict, description="各品种执行结果")
     status: ExecutionStatus = Field(..., description="本次执行的整体状态")
     error: str | None = Field(default=None, description="本次执行的整体失败原因")
+    outcome: ExecutionOutcome | None = Field(default=None, description="执行展示结论")
+    outcome_reason: str | None = Field(default=None, description="展示结论的具体原因")
 
     # === 元数据字段 ===
     execution_time: float = Field(default=0.0, ge=0.0, description="执行耗时（秒）")
@@ -135,6 +143,17 @@ class UnifiedStandardOutput(BaseModel):
         if ("error" not in self.model_fields_set or self.error is None) and self.error is None:
             self.error = _derive_output_error(self.symbol_results, self.memory, self.status)
 
+        if self.outcome is None:
+            self.outcome = aggregate_outcomes([result.outcome for result in self.symbol_results.values()])
+        if self.outcome_reason is None:
+            self.outcome_reason = next(
+                (
+                    result.outcome_reason
+                    for result in self.symbol_results.values()
+                    if result.outcome == self.outcome and result.outcome_reason
+                ),
+                None,
+            )
         self.success = is_success_status(self.status)
 
         return self

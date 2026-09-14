@@ -11,6 +11,22 @@ _QTY_EPS = 1e-9
 _ATTAINED_TOLERANCE = 0.01
 
 
+def build_execution_outcome_details(result: Mapping[str, object]) -> dict[str, object]:
+    """转发展示结论及未到位品种，不复制订单明细或猜测旧记录。"""
+    symbols = result.get("symbol_results")
+    return {
+        "outcome": result.get("outcome"),
+        "outcome_reason": result.get("outcome_reason"),
+        "outcome_symbols": [
+            symbol
+            for symbol, value in symbols.items()
+            if isinstance(value, dict) and value.get("outcome") in {"not_reached", "blocked"}
+        ]
+        if isinstance(symbols, dict)
+        else [],
+    }
+
+
 def build_execution_summary_from_symbol_results(result: dict[str, object]) -> dict[str, int]:
     """
     根据按品种执行结果生成执行摘要.
@@ -361,6 +377,9 @@ def _build_symbol_row(
     return {
         "symbol": symbol,
         "status": symbol_result.get("status"),
+        "outcome": symbol_result.get("outcome"),
+        "outcome_reason": symbol_result.get("outcome_reason"),
+        "final_volume": symbol_result.get("final_volume"),
         "target": target,
         "filled": filled,
         "filled_value": filled_value,

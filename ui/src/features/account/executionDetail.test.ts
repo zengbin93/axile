@@ -68,6 +68,7 @@ function baseFixture(): { events: ExecutionEvent[]; artifacts: ExecutionArtifact
       account_assets: { total_asset: 5176.1, market_value: 9265.26, positions: [{ symbol: 'ag2612', extra: { unrealized_pnl: 30.47 } }], source: 'real', update_time: '2026-07-14T10:18:49' },
     }),
     art('execution_summary', {
+      outcome: 'completed',
       summary: { symbols_total: 1, symbols_succeeded: 1, symbols_failed: 0, symbols_noop: 0 },
       success: true,
       execution_time: 41.2,
@@ -83,6 +84,40 @@ function baseFixture(): { events: ExecutionEvent[]; artifacts: ExecutionArtifact
 }
 
 describe('buildExecutionDetail · 头条', () => {
+  function task(patch: Partial<ExecutionStatus>): ExecutionStatus {
+    return {
+      execution_id: 'e', account_id: 1, execution_kind: 'rebalance', status: 'RUNNING',
+      created_at: '', started_at: null, finished_at: null, error: null,
+      record_id: null, is_success: null, cancel_requested_at: null,
+      cancel_reason: null, terminate_mode: null, ...patch,
+    }
+  }
+
+  it.each([
+    ['QUEUED', '等待执行'], ['RUNNING', '执行中'], ['TERMINATING', '正在终止'],
+  ] as const)('%s 显示实时状态而非历史记录或提前完成', (status, text) => {
+    for (const artifacts of [[], baseFixture().artifacts]) {
+      const model = buildExecutionDetail([], artifacts, task({ status }))
+      expect(executionHeadline(model)).toEqual({ level: 'neutral', text })
+    }
+  })
+
+  it('摘要完成后发生错误，显示任务错误及其原因', () => {
+    const model = buildExecutionDetail([], [art('execution_summary', {
+      outcome: 'completed', outcome_reason: '旧摘要原因', success: true,
+    })], task({ status: 'FAILED', outcome: 'error', outcome_reason: 'CTP 交易前置断线: 4097' }))
+    expect(executionHeadline(model).text).toContain('执行失败')
+    expect(executionHeadline(model).text).toContain('CTP 交易前置断线')
+    expect(model.failure?.category).toBe('CTP 连接')
+  })
+
+  it('摘要完成后终止，显示任务终止结论', () => {
+    const model = buildExecutionDetail([], baseFixture().artifacts,
+      task({ status: 'TERMINATED', outcome: 'terminated' }))
+    expect(executionHeadline(model).text).toBe('执行已终止')
+    expect(model.failure).toBeNull()
+  })
+
   it('强制停止且挂单状态未确认时给出风险提示', () => {
     const events = [ev({
       event_type: 'execution_terminated',
@@ -105,7 +140,7 @@ describe('buildExecutionDetail · 头条', () => {
 
   it('status 失败在空事件和空附件时仍生成真实失败判词', () => {
     const task = {
-      execution_id: 'e', account_id: 3, execution_kind: null, status: 'FAILED',
+      execution_id: 'e', account_id: 3, execution_kind: null, status: 'FAILED', outcome: 'error',
       created_at: '2026-08-25T11:32:05', started_at: null, finished_at: '2026-08-25T11:32:05',
       error: '调仓执行失败, 错误原因: CTP 交易前置断线: 4097', record_id: 36, is_success: 0,
       cancel_requested_at: null, cancel_reason: null, terminate_mode: null,
@@ -148,7 +183,7 @@ describe('buildExecutionDetail · 头条', () => {
     const summary = artifacts.find((a) => a.artifact_type === 'execution_summary')!
     summary.content.success = false
     ;(summary.content.reconciliation as { symbols: unknown[] }).symbols.push({
-      symbol: 'SR609', status: 'FAILED', target: null, filled: 0, filled_value: 0, avg_price: null, before: 974.2, after: 974.2, moved: 0, drift: 0, attained_ratio: null, reached: null,
+      symbol: 'SR609', status: 'FAILED', outcome: 'error', target: null, filled: 0, filled_value: 0, avg_price: null, before: 974.2, after: 974.2, moved: 0, drift: 0, attained_ratio: null, reached: null,
     })
     // 对账事件也标 ERROR —— 逐只失败的生命周期回声
     events.find((e) => e.event_type === 'execution_completed')!.status = 'ERROR'
@@ -219,7 +254,7 @@ describe('buildExecutionDetail · 头条', () => {
     expect(model.header.quantizedZeroCount).toBe(2)
     expect(model.symbols.find((symbol) => symbol.symbol === 'm2701')?.action).toBe('aligned')
     expect(model.symbols.find((symbol) => symbol.symbol === 'm2701')?.broken).toBe(false)
-    expect(executionHeadline(model, '手').text).toBe('执行完成：2只成交到位，2只因不足1手未下单。')
+    expect(executionHeadline(model).text).toBe('执行完成')
   })
 })
 
@@ -319,7 +354,7 @@ describe('buildExecutionDetail · 逐只子链', () => {
     )
     const summary = artifacts.find((a) => a.artifact_type === 'execution_summary')!
     ;(summary.content.reconciliation as { symbols: unknown[] }).symbols.push({
-      symbol: 'm2609', status: 'BLOCKED', target: 2.372859, filled: 0, filled_value: 0, avg_price: null, before: 2.37, after: 2.37, moved: 0, drift: 0, attained_ratio: 0.9988, reached: true,
+      symbol: 'm2609', status: 'BLOCKED', outcome: 'blocked', outcome_reason: '受阻', target: 2.372859, filled: 0, filled_value: 0, avg_price: null, before: 2.37, after: 2.37, moved: 0, drift: 0, attained_ratio: 0.9988, reached: true,
     })
     const m = buildExecutionDetail(events, artifacts).symbols.find((s) => s.symbol === 'm2609')!
     expect(m.reached).toBe(true)
@@ -328,7 +363,7 @@ describe('buildExecutionDetail · 逐只子链', () => {
     expect(m.reason).toBe('受阻')
   })
 
-  it('受阻且未到位：订单腿 BLOCKED 且仓位掉出目标 → 判失败并断点，原因给「受阻」', () => {
+  it('受阻且未到位：显示断点但不判过程失败，原因给「受阻」', () => {
     const { events, artifacts } = baseFixture()
     events.push(
       ev({
@@ -341,11 +376,11 @@ describe('buildExecutionDetail · 逐只子链', () => {
     )
     const summary = artifacts.find((a) => a.artifact_type === 'execution_summary')!
     ;(summary.content.reconciliation as { symbols: unknown[] }).symbols.push({
-      symbol: 'm2609', status: 'BLOCKED', target: 3, filled: 0, filled_value: 0, avg_price: null, before: 1, after: 1, moved: 0, drift: 0, attained_ratio: 0.33, reached: false,
+      symbol: 'm2609', status: 'BLOCKED', outcome: 'blocked', outcome_reason: '受阻', target: 3, filled: 0, filled_value: 0, avg_price: null, before: 1, after: 1, moved: 0, drift: 0, attained_ratio: 0.33, reached: false,
     })
     const m = buildExecutionDetail(events, artifacts).symbols.find((s) => s.symbol === 'm2609')!
     expect(m.reached).toBe(false)
-    expect(m.action).toBe('failed')
+    expect(m.action).not.toBe('failed')
     expect(m.broken).toBe(true)
     expect(m.reason).toBe('受阻')
   })
@@ -363,7 +398,7 @@ describe('buildExecutionDetail · 逐只子链', () => {
     )
     const summary = artifacts.find((a) => a.artifact_type === 'execution_summary')!
     ;(summary.content.reconciliation as { symbols: unknown[] }).symbols.push({
-      symbol: 'SR609', status: 'FAILED', target: null, filled: 0, filled_value: 0, avg_price: null, before: 974.2, after: 974.2, moved: 0, drift: 0, attained_ratio: null, reached: null,
+      symbol: 'SR609', status: 'FAILED', outcome: 'error', target: null, filled: 0, filled_value: 0, avg_price: null, before: 974.2, after: 974.2, moved: 0, drift: 0, attained_ratio: null, reached: null,
     })
     const sr = buildExecutionDetail(events, artifacts).symbols.find((s) => s.symbol === 'SR609')!
     expect(sr.reached).toBeNull()
@@ -438,7 +473,7 @@ describe('buildExecutionDetail · 脊柱与降级', () => {
     expect(byKey.phase1?.detail).toContain('并行 1 只')
     expect(byKey.phase1?.detail).toContain('1/1 到位')
     // 对账用人话、不吐 SUCCEEDED / #record_id
-    expect(byKey.completed?.detail).toBe('成功')
+    expect(byKey.completed?.label).toBe('执行完成')
   })
 
   it('有减有增 → 拆成 阶段1 减仓 + 阶段2 开仓（阶段1 全成才跑）', () => {
@@ -479,4 +514,29 @@ describe('buildExecutionDetail · 脊柱与降级', () => {
     expect(model.header.sourcePosition).toBe('error')
     expect(model.header.sourceEquity).toBe('error')
   })
+})
+
+it('未到位详情不受旧任务 FAILED 与汇总错误回声影响', () => {
+  const { events, artifacts } = baseFixture()
+  const summary = artifacts.find(a => a.artifact_type === 'execution_summary')!
+  summary.content.outcome = 'not_reached'
+  summary.content.symbol_results = { ag2612: { outcome: 'not_reached' } }
+  const row = (summary.content.reconciliation as { symbols: Record<string, unknown>[] }).symbols[0]
+  Object.assign(row, { outcome: 'not_reached', target: 3, final_volume: 2, outcome_reason: '执行时限结束', reached: false })
+  const model = buildExecutionDetail([...events, ev({ event_type: 'execution_failed', status: 'ERROR' })], artifacts)
+  expect(executionHeadline(model).text).toBe('执行不到位 · ag2612')
+  expect(model.failure).toBeNull()
+  expect(model.symbols[0]).toMatchObject({ target: 3, after: 2, reached: false, reason: '执行时限结束' })
+  expect(model.symbols[0].action).not.toBe('failed')
+  expect(model.spine.find(n => n.key === 'failed')?.label).toBe('执行不到位 · ag2612')
+})
+
+it('旧记录保留原始附件和事件，不推断失败标题', () => {
+  const { events, artifacts } = baseFixture()
+  const summary = artifacts.find(a => a.artifact_type === 'execution_summary')!
+  delete summary.content.outcome
+  const model = buildExecutionDetail([...events, ev({ event_type: 'execution_failed', status: 'ERROR' })], artifacts)
+  expect(executionHeadline(model).text).toBe('历史执行记录')
+  expect(model.failure).toBeNull()
+  expect(model.artifacts).toBe(artifacts)
 })

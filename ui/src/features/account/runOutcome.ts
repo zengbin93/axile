@@ -1,32 +1,28 @@
-import type { ExecutionStatus, ExecutionTaskStatus } from '@/types/api'
+import { executionOutcome } from '@/features/account/executionOutcome'
+import type { ExecutionStatus } from '@/types/api'
 
 export type RunKind = 'exec' | 'clear'
 
 export type RunOutcome =
   | { kind: 'success'; toast: string }
   | { kind: 'blocked'; toast: string }
+  | { kind: 'not_reached' | 'unknown'; toast: string }
   | { kind: 'terminated'; toast: string }
   | { kind: 'failed'; error: string }
 
 /**
- * 把任务终态 + 执行器输出翻成 toast 意图.
+ * 把明确的执行结论翻成 toast 意图。
  *
- * 任务 ``SUCCEEDED`` 只表示进程跑完。全员 ``BLOCKED`` 是约束，不是「已按目标到位」。
+ * 不依赖用于调度的任务状态或输出状态。
  * ``failed`` 不弹 toast：账户状态行 / 近期执行已经承接同一次结果。
  */
 export function describeRunOutcome(
   kind: RunKind,
-  status: ExecutionTaskStatus,
-  outputStatus: ExecutionStatus['output_status'],
-  error: string | null | undefined,
+  conclusion?: Pick<ExecutionStatus, 'outcome' | 'outcome_reason' | 'outcome_symbols'>,
 ): RunOutcome {
-  if (status === 'TERMINATED') return { kind: 'terminated', toast: '执行已终止' }
-  if (outputStatus === 'BLOCKED') {
-    return { kind: 'blocked', toast: '非交易时段，未下单' }
-  }
-  if (status === 'FAILED') {
-    const text = typeof error === 'string' && error.trim() ? error : '执行失败，服务端未返回原因'
-    return { kind: 'failed', error: text }
-  }
-  return { kind: 'success', toast: kind === 'exec' ? '执行完成 · 已按目标到位' : '已清仓' }
+  const view = executionOutcome(conclusion, kind === 'clear')
+  if (view.outcome === 'error') return { kind: 'failed', error: view.text }
+  if (view.outcome === 'completed') return { kind: 'success', toast: view.text }
+  if (view.outcome === 'blocked' || view.outcome === 'terminated' || view.outcome === 'not_reached') return { kind: view.outcome, toast: view.text }
+  return { kind: 'unknown', toast: view.text }
 }

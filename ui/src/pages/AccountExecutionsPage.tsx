@@ -19,7 +19,7 @@ import { ApiError } from '@/lib/api/client'
 
 const VIEWS = [{ value: 'executions', label: '按执行' }, { value: 'symbols', label: '按品种' }]
 const RANGES: { value: JournalRange; label: string }[] = [{ value: '7', label: '近 7 天' }, { value: '30', label: '近 30 天' }, { value: '90', label: '近 90 天' }, { value: 'custom', label: '自定义' }]
-const STATUSES = ['全部状态', '已完成', '部分到位', '失败', '已终止', '已跳过', '无成交'].map(label => ({ value: label, label }))
+const STATUSES = ['全部状态', '已完成', '执行不到位', '执行失败', '已终止', '已跳过', '执行结果待确认', '历史执行记录'].map(label => ({ value: label, label }))
 const SORTS = [{ value: 'time', label: '时间从近到远' }, { value: 'value', label: '成交额从高到低' }, { value: 'slippage', label: '滑点损耗优先' }, { value: 'cost', label: '滑点成本从高到低' }]
 const INPUT = 'min-w-0 rounded-lg border border-line bg-surface px-3 py-1.5 text-[13px] text-ink-1 outline-none focus:border-accent'
 interface Visit { expanded: Record<string, Expansion>; count: number; scroll: number }

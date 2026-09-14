@@ -192,6 +192,9 @@ def test_registry_helper_functions_cover_status_serialization_and_registration(
             "finished_at": None,
             "error": None,
             "output_status": None,
+            "outcome": None,
+            "outcome_reason": None,
+            "outcome_symbols": [],
             "record_id": None,
             "is_success": None,
             "cancel_requested_at": None,
@@ -228,6 +231,9 @@ def test_registry_helper_functions_cover_status_serialization_and_registration(
         "finished_at": "2026-03-22T17:00:00",
         "error": None,
         "output_status": None,
+        "outcome": None,
+        "outcome_reason": None,
+        "outcome_symbols": [],
         "record_id": 501,
         "is_success": 0,
         "cancel_requested_at": None,
@@ -580,3 +586,30 @@ def test_execution_record_output_error_prefers_error_over_msg() -> None:
     raw_result = {"error": "5 个品种因交易时段不可执行", "msg": "执行未成功完成", "status": "BLOCKED"}
     assert execution_registry.execution_record_output_error(raw_result) == "5 个品种因交易时段不可执行"
     assert execution_registry.execution_record_output_status(raw_result) == "BLOCKED"
+
+
+def test_terminal_intent_does_not_hide_persisted_outcome(monkeypatch):
+    """重启后 intent 仍存在，也应取落库的明确结论。"""
+    from axile.server.execution import intents
+
+    async def get_intent(_execution_id):
+        return SimpleNamespace(status=ExecutionTaskStatus.FAILED)
+
+    record = SimpleNamespace(
+        id=1000,
+        execution_id="restart-shortfall",
+        account_id=1,
+        is_success=0,
+        created_at="2026-09-14T14:00:00",
+        raw_result={
+            "status": "FAILED",
+            "outcome": "not_reached",
+            "symbol_results": {"m2701": {"outcome": "not_reached"}},
+        },
+    )
+    monkeypatch.setattr(intents, "get_intent", get_intent)
+    monkeypatch.setattr(execution_registry, "SessionLocal", lambda: FakeSession(record=record))
+    payload = asyncio.run(execution_registry.get_execution_status(record.execution_id))
+    assert payload["record_id"] == 1000
+    assert payload["outcome"] == "not_reached"
+    assert payload["outcome_symbols"] == ["m2701"]

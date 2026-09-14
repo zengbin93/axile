@@ -103,3 +103,28 @@ def test_failed_output_still_persists_as_error(monkeypatch) -> None:
     assert captured["path"] == "error"
     assert captured["msg"] == "下单失败"
     assert record.is_success == 0
+
+
+def test_not_reached_clear_keeps_conclusion_and_kind_on_error_record_path(monkeypatch):
+    from axile.executor.models.execution_result import ExecutionOutcome
+
+    async def fake_error(**kwargs):
+        return SimpleNamespace(is_success=0, raw_result=kwargs["raw_result"])
+
+    monkeypatch.setattr("axile.server.execution.execution_records_output.append_error_execute_record", fake_error)
+    output = _output(status=ExecutionStatus.FAILED, error="目标未完成", success=False)
+    output.outcome = ExecutionOutcome.NOT_REACHED
+    output.outcome_reason = "剩余 1 手"
+    record = asyncio.run(
+        append_execute_record_from_output(
+            account=build_account(),
+            raw_input={},
+            result=output.model_dump(mode="json"),
+            output=output,
+            execution_id="clear-shortfall",
+            execution_kind=ExecutionKind.CLEAR_POSITIONS,
+        )
+    )
+    assert record.raw_result["outcome"] == "not_reached"
+    assert record.raw_result["execution_kind"] == "clear_positions"
+    assert record.is_success == 0
