@@ -276,6 +276,7 @@ async def refresh_account_target_snapshot(session: SessionDep, account_id: int) 
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="账户正在执行或刷新，请稍后再试")
 
     try:
+        await session.close()
         raw_target = await resolve_portfolio_target(portfolio, account)
         normalized_target = _normalize_rebalance_target(account, raw_target)
         snapshot = await append_target_weight_snapshot(

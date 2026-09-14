@@ -107,6 +107,8 @@ async def create_job(
     account: Account,
     triggers: list[CronTrigger],
     logger: "loguru.Logger | None" = None,
+    *,
+    binding_checked: bool = False,
 ) -> None:
     """
     为账户创建定时执行任务.
@@ -121,6 +123,8 @@ async def create_job(
         账户配置对应的 Cron 触发器列表。
     logger : loguru.Logger | None, optional
         用于输出日志的 logger；未提供时使用全局 logger。
+    binding_checked : bool, default=False
+        调用方已在账户快照中确认组合绑定时为真，避免运行态应用阶段重新读库。
 
     Returns
     -------
@@ -142,11 +146,12 @@ async def create_job(
         acc_logger.info("跳过定时任务创建 原因: 账户未启动")
         return
 
-    async with SessionLocal() as session:
-        portfolio_id = await get_latest_portfolio_id_by_account_id(session, cast("int", account.id))
-        if portfolio_id is None:
-            acc_logger.info("跳过定时任务创建, 原因: 组合未绑定")
-            return
+    if not binding_checked:
+        async with SessionLocal() as session:
+            portfolio_id = await get_latest_portfolio_id_by_account_id(session, cast("int", account.id))
+            if portfolio_id is None:
+                acc_logger.info("跳过定时任务创建, 原因: 组合未绑定")
+                return
 
     try:
         trigger = combine_cron_triggers(triggers)

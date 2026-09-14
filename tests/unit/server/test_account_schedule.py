@@ -232,7 +232,7 @@ def _patch_reconcile(monkeypatch: pytest.MonkeyPatch) -> list[str]:
     async def fake_portfolio(*_args: object) -> int:
         return 11
 
-    async def fake_create(*_args: object) -> None:
+    async def fake_create(*_args: object, **_kwargs: object) -> None:
         events.append("create")
 
     def fake_delete(*_args: object) -> None:

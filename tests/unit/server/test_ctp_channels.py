@@ -9,7 +9,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from axile.server.execution import ctp_channels
-from tests.unit.server._execution_test_support import build_account
+from tests.unit.server._execution_test_support import AccountSession, build_account
 
 
 def test_register_china_channel_jobs_uses_fixed_session_windows() -> None:
@@ -42,6 +42,12 @@ def test_prepare_china_accounts_isolates_account_failures(monkeypatch: pytest.Mo
         return accounts
 
     monkeypatch.setattr(ctp_channels, "_started_china_channel_accounts", started)
+
+    class Session(AccountSession):
+        async def get(self, _model: object, account_id: int):
+            return next(account for account in accounts if account.id == account_id)
+
+    monkeypatch.setattr(ctp_channels, "SessionLocal", lambda: Session(None))
     monkeypatch.setattr(ctp_channels, "get_worker_backend_manager", Manager)
 
     asyncio.run(ctp_channels.prepare_china_channel_accounts("night"))
@@ -64,6 +70,7 @@ def test_tq_worker_is_rebuilt_before_session_prepare(monkeypatch: pytest.MonkeyP
 
     monkeypatch.setattr(ctp_channels, "get_worker_backend_manager", Manager)
 
+    monkeypatch.setattr(ctp_channels, "SessionLocal", lambda: AccountSession(account))
     asyncio.run(ctp_channels._prepare_accounts([account], "night"))
 
     assert calls == [("drop", 7), ("prepare", 7)]

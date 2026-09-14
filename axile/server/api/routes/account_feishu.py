@@ -251,6 +251,7 @@ async def _build_test_card(
     if not try_register_account_asset_refresh(account_id):
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="账户正在执行或刷新资产，请稍后再试")
     try:
+        await session.close()
         assets = await query_account_assets(account)
     except TimeoutError as exc:
         raise HTTPException(status_code=status.HTTP_504_GATEWAY_TIMEOUT, detail="账户权益查询超时，请稍后重试") from exc
@@ -276,6 +277,7 @@ async def test_account_feishu(
         return AccountFeishuTestResult(ok=False, message="请先填写飞书机器人 key")
     account = await _get_account_or_404(session, account_id)
     card = await _build_test_card(session, account, payload.feishu_card_config)
+    await session.close()
     try:
         await asyncio.to_thread(push_feishu_card, card, key)
     except Exception as exc:  # noqa: BLE001 - 统一转为可展示的联通测试结果

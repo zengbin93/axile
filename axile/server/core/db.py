@@ -34,7 +34,8 @@ def register_sqlite_concurrency_pragmas(target_engine: AsyncEngine) -> None:
             # 先抬忙等待上限再切 WAL：切换本身也可能撞上并发连接。
             cursor.execute(f"PRAGMA busy_timeout={SQLITE_BUSY_TIMEOUT_MS}")
             cursor.execute("PRAGMA journal_mode=WAL")
-            cursor.execute("PRAGMA synchronous=NORMAL")
+            # 控制计数与审计的已提交数据需要掉电持久性，不能用 NORMAL 换吞吐。
+            cursor.execute("PRAGMA synchronous=FULL")
         finally:
             cursor.close()
 
