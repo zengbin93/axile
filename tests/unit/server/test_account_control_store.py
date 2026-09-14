@@ -509,3 +509,45 @@ def test_load_recent_allowed_timestamps_reads_account_and_symbol_scopes() -> Non
             )
 
     asyncio.run(scenario())
+
+
+def test_guard_diagnostics_survive_store_and_audit_query() -> None:
+    """真实 guard 事件落库并经审计查询后，应完整保留触发快照。"""
+    from datetime import datetime
+
+    import pytest
+
+    from axile.executor.account_control.exceptions import AccountControlBlockedError
+    from axile.executor.account_control.guard import AccountControlGuard
+    from axile.executor.account_control.models import AccountControlPolicy
+    from axile.server.account_control_audit import query_account_control_execution_events
+
+    async def scenario() -> None:
+        async with _session_scope() as session:
+            account = _build_account()
+            session.add(account)
+            await session.commit()
+            await session.refresh(account)
+            guard = AccountControlGuard(
+                account_id=account.id,
+                execution_id="exec-details",
+                channel=TradeChannel.CTP,
+                policy=AccountControlPolicy.model_validate(
+                    {
+                        "timezone": "Asia/Shanghai",
+                        "operations": {"place_order": {"account": {"per_day": {"limit": 0, "on_trigger": "block"}}}},
+                    }
+                ),
+                baseline=AccountControlCounterSnapshot(),
+                clock=lambda: datetime(2026, 9, 14, 21, 45, 13),
+            )
+            with pytest.raises(AccountControlBlockedError) as caught:
+                guard.begin_operation("place_order", symbol="zn2611")
+            deltas, events = guard.flush_records()
+            await _build_store(session).flush_execution_records(counter_deltas=deltas, events=events)
+            page = await query_account_control_execution_events(session, execution_id="exec-details")
+            assert page.count == 1
+            assert page.data[0].metadata_["account_control_hit"] == caught.value.details.to_metadata()
+            assert page.data[0].counted is False
+
+    asyncio.run(scenario())

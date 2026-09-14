@@ -354,7 +354,11 @@ def test_guard_waits_until_min_interval_ms_elapsed() -> None:
     ]
     assert events[0].occurred_at_ms == _to_ms(first_moment)
     assert events[1].occurred_at_ms == _to_ms(third_moment)
-    assert events[1].metadata == {
+    wait_details = events[1].metadata["account_control_wait_hits"]
+    assert len(wait_details) == 1
+    assert wait_details[0]["current_value"] == 200
+    assert wait_details[0]["retry_after_ms"] == 300
+    assert {key: value for key, value in events[1].metadata.items() if key != "account_control_wait_hits"} == {
         "order_id": "oid-2",
         "waited_ms": 300,
         "priority": 100,
@@ -570,8 +574,15 @@ def test_guard_applies_group_per_minute_limit_across_baseline_operations() -> No
         clock=lambda: current,
     )
 
-    with pytest.raises(AccountControlBlockedError, match="ctp_td_global"):
+    with pytest.raises(AccountControlBlockedError, match="CTP 交易柜台共享操作组") as caught:
         guard.begin_operation("query_positions")
+    detail = caught.value.details
+    assert detail is not None
+    assert detail.scope_type == "group"
+    assert detail.scope_key == "ctp_td_global"
+    assert detail.operation == "query_positions"
+    assert detail.current_value == detail.limit == 1
+    assert "共享操作次数" in str(caught.value)
 
     counter_deltas, events = guard.flush_records()
 

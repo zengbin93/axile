@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from axile.common.trade_channel import TradeChannel
+from axile.executor.account_control.diagnostics import AccountControlHit
 
 
 class AccountControlBlockedError(RuntimeError):
@@ -21,6 +22,8 @@ class AccountControlBlockedError(RuntimeError):
         被拒绝的操作键。
     symbol : str | None
         与本次调用关联的交易标的代码。
+    details : AccountControlHit | None
+        额度触发瞬间的不可变快照；非额度拦截或旧调用可为空。
     """
 
     def __init__(
@@ -32,6 +35,7 @@ class AccountControlBlockedError(RuntimeError):
         channel: TradeChannel,
         operation: str,
         symbol: str | None = None,
+        details: AccountControlHit | None = None,
     ) -> None:
         super().__init__(message)
         self.account_id = account_id
@@ -39,3 +43,4 @@ class AccountControlBlockedError(RuntimeError):
         self.channel = channel
         self.operation = operation
         self.symbol = symbol
+        self.details = details

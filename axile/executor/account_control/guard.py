@@ -19,6 +19,7 @@ from zoneinfo import ZoneInfo
 from loguru import logger
 
 from axile.common.trade_channel import TradeChannel
+from axile.executor.account_control.diagnostics import AccountControlHit, operation_label
 from axile.executor.account_control.exceptions import AccountControlBlockedError
 from axile.executor.account_control.models import (
     AccountControlBucketType,
@@ -50,6 +51,15 @@ def _normalize_metadata(metadata: Mapping[str, object] | None) -> dict[str, obje
     if metadata is None:
         return {}
     return {str(key): value for key, value in metadata.items()}
+
+
+def _business_metadata(metadata: Mapping[str, object] | None) -> dict[str, object]:
+    """过滤调用方输入，确保风控保留字段只能由评估器写入。"""
+    return {
+        key: value
+        for key, value in _normalize_metadata(metadata).items()
+        if key not in {"account_control_hit", "account_control_wait_hits"}
+    }
 
 
 def _merge_metadata(
@@ -125,6 +135,7 @@ class AccountControlEnforcementDecision:
     outcome: str | None = None
     hit_scope: str | None = None
     hit_rule: str | None = None
+    details: AccountControlHit | None = None
 
     @classmethod
     def allow(cls) -> "AccountControlEnforcementDecision":
@@ -415,8 +426,10 @@ class AccountControlGuard:
             queued = _QueuedRequest(seq=self._queue_seq, priority=operation_policy.priority)
             self._wait_queue.append(queued)
 
+        metadata = _business_metadata(metadata)
         waited_ms = 0
         wait_hits: list[str] = []
+        wait_details: dict[tuple[str, str, str | None, str], AccountControlHit] = {}
         try:
             while True:
                 # 只有 policy 优先级最高且同级最早的请求可以评估并预占额度。
@@ -435,6 +448,10 @@ class AccountControlGuard:
                                 "groups": groups,
                                 "rules": wait_hits,
                             }
+                        if wait_details:
+                            scheduling_metadata["account_control_wait_hits"] = [
+                                detail.to_metadata() for detail in wait_details.values()
+                            ]
                         event_metadata = _merge_metadata(metadata, scheduling_metadata)
                         if resolved_attempt.decision.kind == "block":
                             self._wait_queue.remove(queued)
@@ -449,10 +466,10 @@ class AccountControlGuard:
                             self._thread_state.last_wait_hits = tuple(wait_hits)
                             if waited_ms:
                                 logger.debug(
-                                    "账户控制放行 operation={} waited_ms={} rules={}",
-                                    operation,
+                                    "账户控制放行：{}，累计等待 {} 毫秒，等待原因：{}",
+                                    operation_label(operation),
                                     waited_ms,
-                                    wait_hits,
+                                    [detail.rule_label for detail in wait_details.values()],
                                 )
                             self._wait_queue.remove(queued)
                             return self._record_allowed_attempt(
@@ -462,6 +479,9 @@ class AccountControlGuard:
                                 resolved_attempt=resolved_attempt,
                             )
                         hit = resolved_attempt.decision
+                        if hit.details is not None and hit.details.identity not in wait_details:
+                            wait_details[hit.details.identity] = hit.details
+                            logger.debug(hit.details.message())
                         if hit.hit_scope and hit.hit_rule:
                             label = f"{hit.hit_scope}.{hit.hit_rule}"
                             if label not in wait_hits:
@@ -506,7 +526,7 @@ class AccountControlGuard:
             self._events[event_index] = event.model_copy(
                 update={
                     "outcome": outcome,
-                    "metadata": _merge_metadata(event.metadata, metadata),
+                    "metadata": _merge_metadata(event.metadata, _business_metadata(metadata)),
                 }
             )
 
@@ -589,7 +609,9 @@ class AccountControlGuard:
         self._append_operation_event(
             operation=operation,
             symbol=symbol,
-            metadata=metadata,
+            metadata=_merge_metadata(
+                metadata, {} if decision.details is None else {"account_control_hit": decision.details.to_metadata()}
+            ),
             control_date=resolved_attempt.context.window.control_date,
             decision=AccountControlDecision.BLOCKED,
             counted=False,
@@ -598,6 +620,7 @@ class AccountControlGuard:
         )
         raise AccountControlBlockedError(
             decision.message,
+            details=decision.details,
             account_id=self.account_id,
             execution_id=self.execution_id,
             channel=self.channel,
@@ -696,6 +719,8 @@ class AccountControlGuard:
         outcome: str,
         occurred_at_ms: int,
     ) -> int:
+        assert self.account_id is not None
+        assert self.execution_id is not None
         seq = self._next_event_seq()
         self._events.append(
             AccountControlEventWrite(
@@ -723,6 +748,8 @@ class AccountControlGuard:
         ]
 
     def _build_account_counter_deltas(self) -> list[AccountControlCounterDeltaWrite]:
+        assert self.account_id is not None
+        assert self.execution_id is not None
         counter_deltas: list[AccountControlCounterDeltaWrite] = []
         for key in sorted(self._account_counters, key=lambda item: (item[0], item[1].value, item[2], item[3])):
             control_date, bucket_type, bucket_start, operation = key
@@ -747,6 +774,8 @@ class AccountControlGuard:
         return counter_deltas
 
     def _build_symbol_counter_deltas(self) -> list[AccountControlCounterDeltaWrite]:
+        assert self.account_id is not None
+        assert self.execution_id is not None
         counter_deltas: list[AccountControlCounterDeltaWrite] = []
         for key in sorted(
             self._symbol_counters,
@@ -784,6 +813,7 @@ class AccountControlGuard:
         operation_policy = self.policy.operations.get(operation, AccountControlOperationPolicy())
         decisions = [
             self._check_scope_limits(
+                operation=operation,
                 scope_policy=operation_policy.account,
                 scope_key=operation,
                 context=context,
@@ -797,6 +827,7 @@ class AccountControlGuard:
         if symbol is not None and effective_symbol_scope is not None:
             decisions.append(
                 self._check_scope_limits(
+                    operation=operation,
                     scope_policy=effective_symbol_scope,
                     scope_key=operation,
                     context=context,
@@ -812,6 +843,7 @@ class AccountControlGuard:
                 continue
             decisions.append(
                 self._check_scope_limits(
+                    operation=operation,
                     scope_policy=group_policy,
                     scope_key=group_key,
                     context=context,
@@ -852,6 +884,7 @@ class AccountControlGuard:
     def _check_scope_limits(
         self,
         *,
+        operation: str,
         scope_policy: AccountControlScopePolicy,
         scope_key: str,
         context: AccountControlEvaluationContext,
@@ -859,107 +892,134 @@ class AccountControlGuard:
         message_symbol: str | None,
         is_group: bool,
     ) -> AccountControlEnforcementDecision:
-        day_rule = scope_policy.per_day
-        if day_rule is not None:
-            day_count = self._get_count(
-                control_date=context.window.control_date,
-                bucket_type=AccountControlBucketType.DAY,
-                bucket_start=context.window.day_bucket_start,
+        decisions = []
+        for rule_kind in ("per_day", "per_minute", "min_interval_ms"):
+            rule = getattr(scope_policy, rule_kind)
+            if rule is None:
+                continue
+            current, wait_ms = self._rule_measurement(
+                rule_kind=rule_kind,
+                limit=rule.limit,
+                context=context,
                 scope_key=scope_key,
                 symbol=symbol,
                 is_group=is_group,
             )
-            if day_count >= day_rule.limit:
-                target = message_symbol or "account"
-                decision = self._decision_for_trigger(
-                    rule_kind="per_day",
-                    on_trigger=day_rule.on_trigger,
-                    wait_ms=self._get_wait_ms_until_next_day(context.local_now),
-                    target=target,
-                    operation_or_group=scope_key,
-                )
-                if decision.kind != "allow":
-                    return decision
-
-        max_wait: AccountControlEnforcementDecision | None = None
-        minute_rule = scope_policy.per_minute
-        if minute_rule is not None:
-            minute_count = self._get_count(
-                control_date=context.window.control_date,
-                bucket_type=AccountControlBucketType.MINUTE,
-                bucket_start=context.window.minute_bucket_start,
+            if current is None:
+                continue
+            action = "block" if rule.on_trigger == AccountControlTriggerBehavior.BLOCK else "wait"
+            # 保持分钟零额度的既有直接阻断行为。
+            if rule_kind == "per_minute" and rule.limit == 0:
+                action = "block"
+            if action == "wait" and wait_ms <= 0:
+                continue
+            detail = self._build_hit(
+                rule_kind=rule_kind,
                 scope_key=scope_key,
                 symbol=symbol,
                 is_group=is_group,
+                operation=operation,
+                current=current,
+                limit=rule.limit,
+                action=action,
+                context=context,
+                message_symbol=message_symbol,
+                wait_ms=wait_ms,
             )
-            if minute_count >= minute_rule.limit:
-                if minute_rule.limit == 0:
-                    target = message_symbol or "account"
-                    return AccountControlEnforcementDecision.block(
-                        f"账户风控拦截 {target} {scope_key}：每分钟频率已达上限",
-                        "policy_blocked",
-                    )
-                decision = self._decision_for_trigger(
-                    rule_kind="per_minute",
-                    on_trigger=minute_rule.on_trigger,
-                    wait_ms=self._get_wait_ms_until_next_minute(context.local_now),
-                    target=message_symbol or "account",
-                    operation_or_group=scope_key,
-                )
-                if decision.kind == "block":
-                    return decision
-                if decision.kind == "wait":
-                    if max_wait is None or decision.wait_ms > max_wait.wait_ms:
-                        max_wait = decision
-
-        interval_rule = scope_policy.min_interval_ms
-        if interval_rule is not None:
-            last_allowed_at_ms = self._get_last_allowed_at_ms(
-                scope_key=scope_key,
-                symbol=symbol,
-                is_group=is_group,
+            decision = AccountControlEnforcementDecision(
+                kind=action,
+                wait_ms=wait_ms if action == "wait" else 0,
+                message=detail.message() if action == "block" else None,
+                outcome="policy_blocked" if action == "block" else None,
+                hit_scope=scope_key,
+                hit_rule=rule_kind,
+                details=detail,
             )
-            if last_allowed_at_ms is not None:
-                remaining_ms = interval_rule.limit - (context.occurred_at_ms - last_allowed_at_ms)
-                if remaining_ms > 0:
-                    decision = self._decision_for_trigger(
-                        rule_kind="min_interval_ms",
-                        on_trigger=interval_rule.on_trigger,
-                        wait_ms=remaining_ms,
-                        target=message_symbol or "account",
-                        operation_or_group=scope_key,
-                    )
-                    if decision.kind == "block":
-                        return decision
-                    if decision.kind == "wait":
-                        if max_wait is None or decision.wait_ms > max_wait.wait_ms:
-                            max_wait = decision
+            if rule_kind == "per_day" or action == "block":
+                return decision
+            decisions.append(decision)
+        return self._combine_decisions(decisions)
 
-        if max_wait is not None:
-            return max_wait
-        return AccountControlEnforcementDecision.allow()
-
-    def _decision_for_trigger(
+    def _build_hit(
         self,
         *,
         rule_kind: str,
-        on_trigger: AccountControlTriggerBehavior,
+        scope_key: str,
+        symbol: str | None,
+        is_group: bool,
+        operation: str,
+        current: int,
+        limit: int,
+        action: str,
+        context: AccountControlEvaluationContext,
+        message_symbol: str | None,
         wait_ms: int,
-        target: str,
-        operation_or_group: str,
-    ) -> AccountControlEnforcementDecision:
-        if on_trigger == AccountControlTriggerBehavior.BLOCK:
-            return AccountControlEnforcementDecision.block(
-                f"账户风控拦截 {target} {operation_or_group}：{rule_kind} 已达限额",
-                "policy_blocked",
-            )
-        if wait_ms <= 0:
-            return AccountControlEnforcementDecision.allow()
-        return AccountControlEnforcementDecision.wait(
-            wait_ms,
-            hit_scope=operation_or_group,
-            hit_rule=rule_kind,
+    ) -> AccountControlHit:
+        """从同一轮评估生成不可变快照。"""
+        assert self.policy is not None
+        interval = rule_kind == "min_interval_ms"
+        window_start = None
+        window_end = None
+        if not interval:
+            start = context.local_now.replace(second=0, microsecond=0)
+            if rule_kind == "per_day":
+                start = start.replace(hour=0, minute=0)
+            end = start + (timedelta(days=1) if rule_kind == "per_day" else timedelta(minutes=1))
+            window_start, window_end = start.isoformat(), end.isoformat()
+        return AccountControlHit(
+            rule_kind=rule_kind,
+            scope_type="group" if is_group else ("symbol" if symbol is not None else "account"),
+            scope_key=scope_key,
+            scope_symbol=symbol,
+            operation=operation,
+            current_value=current,
+            limit=limit,
+            unit="milliseconds" if interval else "count",
+            action=action,
+            evaluated_at=context.local_now.isoformat(),
+            account_id=self.account_id,
+            symbol=message_symbol,
+            control_date=None if interval else context.window.control_date,
+            timezone=self.policy.timezone,
+            window_start=window_start,
+            window_end=window_end,
+            retry_after_ms=None if limit == 0 else wait_ms,
         )
+
+    def _rule_measurement(
+        self,
+        *,
+        rule_kind: str,
+        limit: int,
+        context: AccountControlEvaluationContext,
+        scope_key: str,
+        symbol: str | None,
+        is_group: bool,
+    ) -> tuple[int | None, int]:
+        """在评估锁内读取触发值，格式化阶段不再读取可变计数。"""
+        if rule_kind == "min_interval_ms":
+            last = self._get_last_allowed_at_ms(scope_key=scope_key, symbol=symbol, is_group=is_group)
+            if last is None:
+                return None, 0
+            elapsed = context.occurred_at_ms - last
+            return (elapsed, limit - elapsed) if elapsed < limit else (None, 0)
+        daily = rule_kind == "per_day"
+        count = self._get_count(
+            control_date=context.window.control_date,
+            bucket_type=AccountControlBucketType.DAY if daily else AccountControlBucketType.MINUTE,
+            bucket_start=context.window.day_bucket_start if daily else context.window.minute_bucket_start,
+            scope_key=scope_key,
+            symbol=symbol,
+            is_group=is_group,
+        )
+        if count < limit:
+            return None, 0
+        wait_ms = (
+            self._get_wait_ms_until_next_day(context.local_now)
+            if daily
+            else self._get_wait_ms_until_next_minute(context.local_now)
+        )
+        return count, wait_ms
 
     def _get_wait_ms_until_next_minute(self, local_now: datetime) -> int:
         next_minute = local_now.replace(second=0, microsecond=0) + timedelta(minutes=1)

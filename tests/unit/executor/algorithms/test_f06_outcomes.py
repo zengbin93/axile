@@ -24,6 +24,7 @@ class RecoveryRequired(RuntimeError):
     "case, expected",
     [
         ("reject", ExecutionStatus.FAILED),
+        ("risk_block", ExecutionStatus.FAILED),
         ("timeout", ExecutionStatus.FAILED),
         ("partial", ExecutionStatus.PARTIAL),
         ("unknown_cancel", ExecutionStatus.FAILED),
@@ -63,6 +64,11 @@ def test_algorithm_outcome(monkeypatch, module, case, expected):
     monkeypatch.setattr(module, "get_default_clock", lambda: clock)
 
     def submit(*args, **kwargs):
+        if case == "risk_block":
+            from tests.unit.executor.test_account_control_diagnostics import make_guard
+
+            guard = make_guard({"per_day": {"limit": 0, "on_trigger": "block"}})
+            guard.begin_operation("place_order", symbol="rb2610")
         if case == "reject":
             raise RuntimeError("synthetic reject")
         if case == "recovery":
@@ -112,12 +118,13 @@ def test_algorithm_outcome(monkeypatch, module, case, expected):
             entry(executor, input_data)
         return
     result = entry(executor, input_data)
-    if case not in {"noop", "reject"}:
+    if case not in {"noop", "reject", "risk_block"}:
         assert tracker.wait_for_completion.call_args.kwargs["timeout"] == pytest.approx(0.75)
     assert (
         result.outcome.value
         == {
             "reject": "error",
+            "risk_block": "error",
             "timeout": "not_reached",
             "partial": "not_reached",
             "unknown_cancel": "unknown" if module is maker else "error",
@@ -132,6 +139,10 @@ def test_algorithm_outcome(monkeypatch, module, case, expected):
         assert result.memory["remaining_volume"] == 2 - volume[0]
     if case == "reject":
         assert "synthetic reject" in result.error
+    if case == "risk_block":
+        assert "每日下单次数" in result.error
+        assert "当前已用 0 次，上限 0 次" in result.error
+        assert "per_day" not in result.error
     if case == "noop":
         assert not orders
 
