@@ -651,9 +651,3 @@ export function TimerEditor({ tradeChannel, scheduleKind, nightSchedule, value, 
     </div>
   )
 }
-
-/** 自定义模式的内容错误；无则 null。 */
-export function timerEditorError(state: TimerEditorState): string | null {
-  if (!state.autoOn || state.timerTab !== 'custom') return null
-  return state.rawCron.trim() ? cronError(state.rawCron) : '自定义节奏不能为空。'
-}

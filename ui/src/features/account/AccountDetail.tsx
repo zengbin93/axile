@@ -233,12 +233,14 @@ export function AccountDetail({
   const isActivelyExecuting = live?.status === 'running'
   const isQueued = isBusy && !isExecuting
   const runKind = live?.kind ?? (runner.kind === 'clear' ? 'clear' : 'rebalance')
-  const latestFailedRecord = recordList.find((record) =>
-    record.raw_result?.status !== 'BLOCKED'
-    && record.raw_result?.task_status !== 'TERMINATED'
-    && record.is_success !== 1
-    && record.execution_id,
-  )
+  const latestRecord = recordList[0]
+  const latestFailedRecord = latestRecord
+    && latestRecord.raw_result?.status !== 'BLOCKED'
+    && latestRecord.raw_result?.task_status !== 'TERMINATED'
+    && latestRecord.is_success !== 1
+    && latestRecord.execution_id
+    ? latestRecord
+    : undefined
   const latestFailureText = latestFailedRecord ? executionRecordError(latestFailedRecord) : ''
   const latestFailure = latestFailureText ? describeFailureText(latestFailureText) : null
   const statusHeadline = isTerminating

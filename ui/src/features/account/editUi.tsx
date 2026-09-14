@@ -12,11 +12,6 @@ import { Skeleton } from '@/components/ui/Skeleton'
 import { ErrorNotice } from '@/components/ui/ErrorNotice'
 import { MOTION_LAYOUT } from '@/lib/viewTransition'
 
-/** 入口卡 ↔ 子页顶栏 共享容器名（同构壳 FLIP，非文案内容 morph）。 */
-export function editShellVtName(accountId: number, kind: 'timer' | 'algorithm' | 'control'): string {
-  return `edit-shell-${kind}-${accountId}`
-}
-
 /** 与入口卡 / 工作台顶栏同款的壳（圆角·边·底·内边距）。 */
 const SHELL =
   'rounded-[12px] border border-line bg-surface px-4 py-3.5'

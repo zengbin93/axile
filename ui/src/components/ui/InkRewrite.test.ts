@@ -6,7 +6,7 @@ import {
   inkRewriteMs,
   nextInkPair,
   type InkPair,
-} from './InkRewrite'
+} from '@/components/ui/inkRewriteState'
 
 describe('nextInkPair', () => {
   const base: InkPair = { cur: '▶ 启动', curCls: 'text-ink-1', prev: null, prevCls: null, gen: 0 }

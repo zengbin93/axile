@@ -18,7 +18,8 @@ import {
   timerStateToCronExpr,
   type TimerEditorState,
 } from '@/features/setup/cron'
-import { TimerEditor, timerEditorError } from '@/features/setup/TimerEditor'
+import { TimerEditor } from '@/features/setup/TimerEditor'
+import { timerEditorError } from '@/features/setup/cron'
 import { useChannelDescriptor } from '@/stores/channels'
 import {
   EditError,

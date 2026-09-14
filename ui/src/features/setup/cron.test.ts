@@ -14,7 +14,7 @@ import {
   type ScheduleRule,
   type TimerIntent,
 } from './cron'
-import { timerEditorError } from './TimerEditor'
+import { timerEditorError } from './cron'
 
 /** 构造一个定时意图，默认无补发（supN=0）便于断言精确值。 */
 function intent(patch: Partial<TimerIntent> = {}): TimerIntent {

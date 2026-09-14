@@ -6,7 +6,7 @@ import { describe, expect, it } from 'bun:test'
 import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { join, relative } from 'node:path'
 
-import { editShellVtName } from '@/features/account/editUi'
+import { editShellVtName } from '@/features/account/editShellVtName'
 import { portfolioNameVtName } from '@/features/portfolio/viewTransition'
 
 const UI_SRC = join(import.meta.dir, '..')
