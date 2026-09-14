@@ -29,7 +29,7 @@ jobs:
 
     - name: Sync test dependencies
       run: |
-        uv sync --group dev --extra ctp
+        uv sync --locked --group dev --extra ctp
 
     - name: Run Ruff formatter check
       run: |
@@ -66,7 +66,7 @@ jobs:
 
     - name: Sync dev dependencies
       run: |
-        uv sync --group dev
+        uv sync --locked --group dev
       continue-on-error: false
 
     - name: Run BasedPyright
@@ -99,7 +99,7 @@ jobs:
 
     - name: Sync test dependencies
       run: |
-        uv sync --group dev --extra ctp
+        uv sync --locked --group dev --extra ctp
 
     - name: 验证 CTP 原生模块
       run: |

@@ -80,6 +80,7 @@ artifacts = [
 [tool.commitizen]
 name = "cz_conventional_commits"
 version_provider = "pep621"
+pre_bump_hooks = ["uv lock", "git add -- uv.lock"]
 tag_format = "v$version"
 major_version_zero = true
 
