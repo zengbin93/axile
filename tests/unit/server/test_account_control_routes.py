@@ -29,6 +29,9 @@ def _seed_account_control_registry() -> None:
 
 
 class _RouteSession:
+    async def close(self) -> None:
+        return None
+
     def __init__(self, account: Account | None = None) -> None:
         self.account = account
         self.rollback_count = 0

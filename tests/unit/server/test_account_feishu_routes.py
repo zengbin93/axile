@@ -2,6 +2,7 @@
 
 import asyncio
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 from axile.executor.models.unified_account_assets import Position, PositionDirection, UnifiedAccountAssets
 from axile.server.api.routes import account_feishu
@@ -26,7 +27,7 @@ def test_custom_card_test_push_skips_account_asset_query(monkeypatch) -> None:
 
     result = asyncio.run(
         account_feishu.test_account_feishu(
-            object(),
+            SimpleNamespace(close=AsyncMock()),
             1,
             AccountFeishuTestRequest(
                 feishu_key="hook-test",
@@ -85,7 +86,9 @@ def test_default_card_test_push_carries_sample_trades(monkeypatch) -> None:
     monkeypatch.setattr(account_feishu, "push_feishu_card", lambda card, key: pushed.append((card, key)))
 
     result = asyncio.run(
-        account_feishu.test_account_feishu(object(), 1, AccountFeishuTestRequest(feishu_key="hook-test"))
+        account_feishu.test_account_feishu(
+            SimpleNamespace(close=AsyncMock()), 1, AccountFeishuTestRequest(feishu_key="hook-test")
+        )
     )
 
     assert result.ok is True
@@ -129,7 +132,7 @@ def test_template_card_test_push_uses_target_snapshot_weights(monkeypatch) -> No
 
     result = asyncio.run(
         account_feishu.test_account_feishu(
-            object(),
+            SimpleNamespace(close=AsyncMock()),
             1,
             AccountFeishuTestRequest(
                 feishu_key="hook-test",

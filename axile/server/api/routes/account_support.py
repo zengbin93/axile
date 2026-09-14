@@ -103,6 +103,12 @@ async def _reconcile_account_job(
     """
     account_id = cast("int", account.id)
     latest_portfolio_id = await get_latest_portfolio_id_by_account_id(session, account_id)
+    await _apply_account_job(sched, account, latest_portfolio_id)
+
+
+async def _apply_account_job(sched: SchedDep, account: Account, latest_portfolio_id: int | None) -> None:
+    """使用已提交的账户及绑定快照对齐 scheduler，不访问数据库。"""
+    account_id = cast("int", account.id)
     # 关「自动调仓」→ 空 cron：合法，表示仅手动；与 is_started / 组合绑定一并决定是否建 job。
     should_have_job = bool(
         account.is_started and latest_portfolio_id is not None and not is_blank_cron_expr(account.cron_expr)
@@ -122,4 +128,4 @@ async def _reconcile_account_job(
 
     if existing_job is not None:
         delete_job(sched, account_id)
-    await create_job(sched, account, triggers)  # type: ignore[misc]
+    await create_job(sched, account, triggers, binding_checked=True)  # type: ignore[misc]

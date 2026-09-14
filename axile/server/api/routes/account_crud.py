@@ -46,6 +46,7 @@ from axile.server.execution.registry import (
     get_queued_execution_id,
     get_running_execution_id,
 )
+from axile.server.execution.runtime_locks import account_runtime_lock
 from axile.server.execution.scheduler import delete_job
 from axile.server.integrity import plan_executable_target
 from axile.server.performance_analysis import read_performance_summaries
@@ -325,7 +326,7 @@ async def create_account(
             detail=f"服务器错误: {str(exc)}",
         ) from exc
 
-    sync = await reconcile_account_runtime(session, sched, db_account)
+    sync = await _reconcile_committed_runtime(session, sched, cast("int", db_account.id))
     if sync.status != "synchronized":
         response.status_code = status.HTTP_202_ACCEPTED
     return _account_public_with_runtime_sync(db_account, sync)
@@ -486,16 +487,14 @@ async def account_dashboard(session: SessionDep, sched: SchedDep) -> AccountDash
 @router.delete("/{account_id}")
 async def delete_account(session: SessionDep, sched: SchedDep, account_id: int) -> Message:
     """删除账户."""
-    await _get_account_or_404(session, account_id)
-    account = await session.get(Account, account_id)
-    if account is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="账户不存在")
-
-    await session.delete(account)
-    await session.commit()
-
-    delete_job(sched, account_id)
-    await drop_account_worker(account_id)
+    # 与对齐互斥，先等锁再读库，避免删除期间旧对齐把 worker 重新建立。
+    async with account_runtime_lock(account_id):
+        account = await _get_account_or_404(session, account_id)
+        await session.delete(account)
+        await session.commit()
+        await session.close()
+        delete_job(sched, account_id)
+        await drop_account_worker(account_id)
     return Message(message="成功删除账户")
 
 
@@ -617,7 +616,7 @@ async def update_account(
             detail=f"服务器错误: {str(exc)}",
         ) from exc
 
-    sync = await reconcile_account_runtime(session, sched, db_account)
+    sync = await _reconcile_committed_runtime(session, sched, cast("int", db_account.id))
     if sync.status != "synchronized":
         response.status_code = status.HTTP_202_ACCEPTED
     return _account_public_with_runtime_sync(db_account, sync)
@@ -641,11 +640,20 @@ async def retry_account_runtime_sync(
     response: Response,
 ) -> AccountRuntimeSyncPublic:
     """显式重试账户 scheduler 和渠道 worker 的运行态对齐。"""
-    account = await _get_account_or_404(session, account_id)
-    sync = await reconcile_account_runtime(session, sched, account)
+    await _get_account_or_404(session, account_id)
+    sync = await _reconcile_committed_runtime(session, sched, account_id)
     if sync.status != "synchronized":
         response.status_code = status.HTTP_202_ACCEPTED
     return AccountRuntimeSyncPublic.model_validate(sync)
+
+
+async def _reconcile_committed_runtime(session: SessionDep, sched: SchedDep, account_id: int) -> AccountRuntimeSync:
+    """释放已提交配置的读取会话；等锁期间被删除的账户仍返回 404。"""
+    await session.close()
+    try:
+        return await reconcile_account_runtime(account_id, sched)
+    except LookupError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="账户不存在") from exc
 
 
 @router.get("/execute_records/{account_id}", response_model=ExecuteRecordListPublic)

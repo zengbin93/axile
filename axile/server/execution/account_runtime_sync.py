@@ -1,91 +1,152 @@
-"""账户数据库真源与 scheduler / worker 运行态之间的可恢复对齐。"""
+"""账户真源到 scheduler / worker 的对齐：短事务、外部调用、条件回写。"""
 
 from __future__ import annotations
 
-from typing import Any, cast
+from dataclasses import dataclass
 
 from loguru import logger
-from sqlmodel import select
+from sqlalchemy import literal, update
+from sqlalchemy.dialects.sqlite import insert
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from sqlmodel import col, select
 
-from axile.server.api.routes.account_support import _reconcile_account_job
+from axile.server.api.routes.account_support import _apply_account_job
+from axile.server.core.db import SessionLocal
 from axile.server.core.scheduler import Scheduler
 from axile.server.db.models import Account
 from axile.server.db.models.account_runtime_sync import AccountRuntimeSync, AccountRuntimeSyncAttempt
 from axile.server.db.models.base import now_str
 from axile.server.execution.ctp_channels import reconcile_china_channel_account
+from axile.server.execution.runtime_locks import account_runtime_lock
+from axile.server.repositories import get_latest_portfolio_id_by_account_id
+
+
+@dataclass(frozen=True)
+class _RuntimeTarget:
+    """一次对齐使用的独立快照，不携带数据库会话或懒加载关系。"""
+
+    account: Account
+    revision: int
+    reset_worker: bool
+    portfolio_id: int | None
 
 
 async def enqueue_account_runtime_sync(
-    session: Any,
+    session: AsyncSession,
     account_id: int,
     *,
     reset_worker: bool,
     create_request_key: str | None = None,
 ) -> AccountRuntimeSync:
-    """在账户写事务内登记最新运行态目标。"""
-    sync = await session.scalar(select(AccountRuntimeSync).where(AccountRuntimeSync.account_id == account_id))
-    if sync is None:
-        sync = AccountRuntimeSync(
-            account_id=account_id,
-            reset_worker=reset_worker,
-            create_request_key=create_request_key,
+    """在账户写事务内原子登记目标版本，保留尚未执行的 worker 重建要求。"""
+    initial = AccountRuntimeSync(
+        account_id=account_id, reset_worker=reset_worker, create_request_key=create_request_key
+    )
+    statement = insert(AccountRuntimeSync).values(**initial.model_dump(exclude={"id"}))
+    statement = statement.on_conflict_do_update(
+        index_elements=["account_id"],
+        set_={
+            "revision": col(AccountRuntimeSync.revision) + 1,
+            "status": "pending",
+            "reset_worker": col(AccountRuntimeSync.reset_worker) | reset_worker,
+            "last_error": None,
+            "requested_at": now_str(),
+            "synchronized_at": None,
+        },
+    ).returning(AccountRuntimeSync)
+    sync = await session.scalar(statement.execution_options(populate_existing=True))
+    assert sync is not None
+    return sync
+
+
+async def _begin_attempt(account_id: int, factory: async_sessionmaker[AsyncSession]) -> _RuntimeTarget:
+    """提交尝试记录后关闭会话，外部调用只能消费返回的快照。"""
+    async with factory() as session, session.begin():
+        # 先取得短写事务，再读取一致的账户/版本快照，避免 WAL 读事务升级失败。
+        initial = AccountRuntimeSync(account_id=account_id).model_dump(exclude={"id"})
+        await session.execute(
+            insert(AccountRuntimeSync)
+            .from_select(
+                list(initial),
+                select(*(literal(value) for value in initial.values()))
+                .select_from(Account)
+                .where(Account.id == account_id),
+            )
+            .on_conflict_do_nothing(index_elements=["account_id"])
         )
-        session.add(sync)
-        return sync
-    sync.revision += 1
-    sync.status = "pending"
-    sync.reset_worker = sync.reset_worker or reset_worker
-    sync.last_error = None
-    sync.requested_at = now_str()
-    sync.synchronized_at = None
-    session.add(sync)
-    return sync
+        account = await session.get(Account, account_id)
+        if account is None:
+            raise LookupError(f"账户不存在: {account_id}")
+        sync = await session.scalar(
+            update(AccountRuntimeSync)
+            .where(col(AccountRuntimeSync.account_id) == account_id)
+            .values(
+                attempts=col(AccountRuntimeSync.attempts) + 1,
+                last_attempt_at=now_str(),
+                status="pending",
+                last_error=None,
+                synchronized_at=None,
+            )
+            .returning(AccountRuntimeSync)
+        )
+        assert sync is not None
+        portfolio_id = await get_latest_portfolio_id_by_account_id(session, account_id)
+        return _RuntimeTarget(Account(**account.model_dump()), sync.revision, sync.reset_worker, portfolio_id)
 
 
-async def reconcile_account_runtime(session: Any, sched: Scheduler, account: Account) -> AccountRuntimeSync:
-    """执行一次幂等对齐，并持久化结果；异常不会否定已提交的账户配置。"""
-    account_id = cast("int", account.id)
-    sync = await session.scalar(select(AccountRuntimeSync).where(AccountRuntimeSync.account_id == account_id))
-    if sync is None:
-        sync = AccountRuntimeSync(account_id=account_id)
-        session.add(sync)
-        await session.commit()
-
-    revision = sync.revision
-    sync.attempts += 1
-    sync.last_attempt_at = now_str()
-    try:
-        await _reconcile_account_job(session, sched, account)
-        await reconcile_china_channel_account(account, reset=sync.reset_worker)
-    except Exception as exc:  # noqa: BLE001 - 外部进程态故障必须转为可恢复状态
-        message = str(exc)
-        sync.status = "failed"
-        sync.last_error = message
-        session.add(AccountRuntimeSyncAttempt(account_id=account_id, revision=revision, succeeded=False, error=message))
-        session.add(sync)
-        await session.commit()
-        logger.exception("账户运行态对齐失败 account_id={} revision={}", account_id, revision)
-        return sync
-
-    await session.refresh(sync)
-    if sync.revision == revision:
-        sync.status = "synchronized"
-        sync.last_error = None
-        sync.reset_worker = False
-        sync.synchronized_at = now_str()
-    session.add(AccountRuntimeSyncAttempt(account_id=account_id, revision=revision, succeeded=True))
-    session.add(sync)
-    await session.commit()
-    return sync
+async def _finish_attempt(
+    account_id: int, revision: int, error: str | None, factory: async_sessionmaker[AsyncSession]
+) -> AccountRuntimeSync:
+    """审计每次尝试；成功与失败都只能更新自己对应的目标版本。"""
+    async with factory() as session, session.begin():
+        session.add(
+            AccountRuntimeSyncAttempt(account_id=account_id, revision=revision, succeeded=error is None, error=error)
+        )
+        values: dict[str, object] = {"status": "failed", "last_error": error}
+        if error is None:
+            values.update(status="synchronized", reset_worker=False, synchronized_at=now_str())
+        await session.execute(
+            update(AccountRuntimeSync)
+            .where(col(AccountRuntimeSync.account_id) == account_id, col(AccountRuntimeSync.revision) == revision)
+            .values(**values)
+        )
+        sync = await session.scalar(select(AccountRuntimeSync).where(AccountRuntimeSync.account_id == account_id))
+        assert sync is not None
+        # 返回独立对象，即使调用方设置 expire_on_commit=True 也不依赖会话。
+        return AccountRuntimeSync(**sync.model_dump())
 
 
-async def recover_account_runtime_on_startup(session: Any, sched: Scheduler) -> None:
-    """重启时从数据库真源重建所有账户的进程运行态。"""
-    accounts = list((await session.execute(select(Account))).scalars().all())
-    for account in accounts:
+async def reconcile_account_runtime(
+    account_id: int, sched: Scheduler, *, session_factory: async_sessionmaker[AsyncSession] | None = None
+) -> AccountRuntimeSync:
+    """串行对齐并收敛到最新版本；取消保留 pending，当前版本失败交由既有入口重试。"""
+    factory = session_factory or SessionLocal
+    async with account_runtime_lock(account_id):
+        while True:
+            target = await _begin_attempt(account_id, factory)
+            error = None
+            try:
+                await _apply_account_job(sched, target.account, target.portfolio_id)
+                await reconcile_china_channel_account(target.account, reset=target.reset_worker)
+            except Exception as exc:  # noqa: BLE001 - 外部状态失败不能回滚账户真源
+                error = str(exc)
+                logger.exception("账户运行态对齐失败 account_id={} revision={}", account_id, target.revision)
+            sync = await _finish_attempt(account_id, target.revision, error, factory)
+            if sync.revision == target.revision:
+                return sync
+
+
+async def recover_account_runtime_on_startup(
+    sched: Scheduler, *, session_factory: async_sessionmaker[AsyncSession] | None = None
+) -> None:
+    """只携带账户 ID 进入恢复循环，单账户故障不污染后续账户会话。"""
+    factory = session_factory or SessionLocal
+    async with factory() as session:
+        account_ids = list((await session.scalars(select(Account.id))).all())
+    for account_id in account_ids:
+        if account_id is None:
+            continue
         try:
-            # scheduler 与 worker 都是进程态；即使上一次进程已记录 synchronized，
-            # 重启后也必须按数据库中的目标重新收敛。
-            await reconcile_account_runtime(session, sched, account)
-        except Exception:  # noqa: BLE001 - 单账户故障不阻断服务启动和其他账户恢复
-            logger.exception("启动恢复账户运行态失败 account_id={}", account.id)
+            await reconcile_account_runtime(account_id, sched, session_factory=factory)
+        except Exception:  # noqa: BLE001 - 单账户故障不阻断其他账户恢复
+            logger.exception("启动恢复账户运行态失败 account_id={}", account_id)

@@ -149,12 +149,14 @@ async def refresh_portfolio_target_snapshot(session: SessionDep, portfolio_id: i
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="组合或上下文账户正在执行或刷新，请稍后再试")
     try:
         if account_id is None:
+            await session.close()
             raw_target = await resolve_portfolio_target(portfolio, None)
             normalized_target = None
         else:
             account = await session.get(Account, account_id)
             if account is None:
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="绑定账户不存在")
+            await session.close()
             raw_target = await resolve_portfolio_target(portfolio, account)
             normalized_target = _normalize_rebalance_target(account, raw_target)
 
@@ -207,4 +209,5 @@ async def validate_custom_calc(session: SessionDep, payload: ValidateCustomCalcR
     account = await session.get(Account, payload.account_id)
     if account is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="账户不存在")
+    await session.close()
     return await _run_custom_calc_validation(account, payload.custom_calc_py_code)

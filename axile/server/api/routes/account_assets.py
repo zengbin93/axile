@@ -35,6 +35,8 @@ async def refresh_account_assets(session: SessionDep, account_id: int) -> Accoun
         )
 
     try:
+        # close 会释放读事务并分离账户；返回后保存快照使用新的事务。
+        await session.close()
         assets = await query_account_assets(account)
         snapshot = AccountAssetSnapshot(
             account_id=account_id,

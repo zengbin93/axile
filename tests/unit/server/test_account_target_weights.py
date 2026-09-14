@@ -30,6 +30,9 @@ class _ScalarRows:
 class _RouteSession:
     """支持按模型区分 ``get(Account, id)`` 与 ``get(Portfolio, id)`` 的极简会话。"""
 
+    async def close(self) -> None:
+        return None
+
     def __init__(
         self,
         account: Account | None,

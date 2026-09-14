@@ -14,6 +14,9 @@ from tests.unit.server._execution_test_support import build_account
 
 
 class _Session:
+    async def close(self) -> None:
+        return None
+
     def __init__(self, account: Account | None) -> None:
         self.account = account
         self.added: list[object] = []

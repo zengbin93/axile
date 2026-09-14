@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-from types import SimpleNamespace
 
 import pytest
 
@@ -36,6 +35,9 @@ class _FakeSession:
 
     async def execute(self, _statement: object) -> _FakeExecuteResult:
         return _FakeExecuteResult(self._rows)
+
+    async def scalars(self, _statement: object) -> _FakeScalarResult:
+        return _FakeScalarResult(self._rows)
 
 
 class _FakeSessionContext:
@@ -83,29 +85,26 @@ def test_get_db_yields_session_from_sessionlocal(monkeypatch: pytest.MonkeyPatch
 
 def test_init_scheduler_recovers_runtime_for_all_accounts(monkeypatch: pytest.MonkeyPatch) -> None:
     """启动应恢复全部持久化账户的运行态，空 cron 账户也需要对齐 worker。"""
-    account_a = SimpleNamespace(id=1, cron_expr="*/5 * * * *")
-    account_b = SimpleNamespace(id=2, cron_expr="0 * * * *")
-    account_blank = SimpleNamespace(id=3, cron_expr="")
-    context = _FakeSessionContext([account_a, account_blank, account_b])
-    recovery_calls: list[tuple[object, object, object]] = []
+    context = _FakeSessionContext([1, 3, 2])
+    recovery_calls: list[tuple[object, object]] = []
 
     monkeypatch.setattr(
-        initial_data,
+        account_runtime_sync,
         "SessionLocal",
         lambda: context,
     )
 
-    async def fake_reconcile(session: object, scheduler: object, account: object) -> None:
-        recovery_calls.append((session, scheduler, account))
+    async def fake_reconcile(account_id: int, scheduler: object, **_kwargs: object) -> None:
+        recovery_calls.append((account_id, scheduler))
 
     monkeypatch.setattr(account_runtime_sync, "reconcile_account_runtime", fake_reconcile)
 
     asyncio.run(initial_data.init_scheduler())
 
     assert recovery_calls == [
-        (context.session, initial_data.scheduler, account_a),
-        (context.session, initial_data.scheduler, account_blank),
-        (context.session, initial_data.scheduler, account_b),
+        (1, initial_data.scheduler),
+        (3, initial_data.scheduler),
+        (2, initial_data.scheduler),
     ]
 
 
