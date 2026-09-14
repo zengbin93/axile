@@ -54,6 +54,12 @@ async def reconcile_account_runtime(session: Any, sched: Scheduler, account: Acc
     revision = sync.revision
     sync.attempts += 1
     sync.last_attempt_at = now_str()
+    session.add(sync)
+    # 尝试记账必须先提交：`sync` 已是脏对象，一旦 `_reconcile_account_job` 里的
+    # 查询触发 autoflush，UPDATE 会开启写事务并横跨下面的跨进程等待。worker
+    # 在 prepare 收尾写账户控制计数增量时拿不到写锁，报 ``database is locked``，
+    # 整个账户对齐失败。WAL 也救不了这种"写事务横跨 await"的场景。
+    await session.commit()
     try:
         await _reconcile_account_job(session, sched, account)
         await reconcile_china_channel_account(account, reset=sync.reset_worker)
