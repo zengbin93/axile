@@ -179,6 +179,7 @@ def quote_to_unified(row: object) -> UnifiedPriceData:
             "upper_limit_price": _price(row, "UpperLimitPrice"),
             "exchange_id": str(_value(row, "ExchangeID", "") or ""),
             "trading_day": str(_value(row, "TradingDay", "") or ""),
+            "event_millisec": _value(row, "UpdateMillisec", 0),
             **_time_evidence(day, clock, "ActionDay", update_time),
         },
     )

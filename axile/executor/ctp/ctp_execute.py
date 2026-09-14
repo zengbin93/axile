@@ -44,6 +44,7 @@ from axile.executor.ctp.options import (
     finish_option_action,
     option_ref,
 )
+from axile.executor.ctp.quote_time import resolve_quote_time
 from axile.executor.ctp.quote_validation import price_in_bounds, quote_error
 from axile.executor.ctp.requests import (
     build_authenticate,
@@ -84,6 +85,7 @@ from axile.executor.order_volume_limits import (
     effective_max_order_volume,
     ensure_order_volume_allowed,
 )
+from axile.executor.trading_calendar import CHINA_CALENDAR_ID, ShinnyTradingCalendar
 
 _SHANGHAI = ZoneInfo("Asia/Shanghai")
 _ValueT = TypeVar("_ValueT")
@@ -202,6 +204,9 @@ class CTPExecutor(AbstractExecutor, UnifiedCallbackClient):
         self._catalog_provider = LOCAL_CATALOG
         self._catalog_progress_at = 0.0
         self._quotes = {}
+        self._quote_time_logged = set()
+        self._quote_rejections = {}
+        self._quote_calendar = ShinnyTradingCalendar()
         self._order_keys = {}
         self._option_actions = {}
         self._order_callbacks = []
@@ -466,6 +471,14 @@ class CTPExecutor(AbstractExecutor, UnifiedCallbackClient):
 
     def _market_logged_in(self, row, info, request_id):
         with self._lock:
+            if (
+                request_id == 0
+                and not self._closed
+                and not self._invalid_reason
+                and self._md_login.request_id is not None
+                and not self._md_login.done.is_set()
+            ):
+                request_id = self._md_login.request_id
             if not self._accept_stage(self._md_login, request_id):
                 return
             if not self._error(info, "行情登录") and str(getattr(row, "TradingDay", "")) != self._trading_day:
@@ -521,13 +534,24 @@ class CTPExecutor(AbstractExecutor, UnifiedCallbackClient):
             self._invalidate_connection(str(e))
 
     def _accept_stage(self, stage, request_id):
-        return (
+        accepted = (
             not self._closed
             and not self._invalid_reason
             and request_id is not None
             and stage.request_id == request_id
             and not stage.done.is_set()
         )
+
+        if not accepted:
+            name = next(
+                (name for name in ("_auth", "_login", "_settlement", "_md_login") if getattr(self, name) is stage),
+                "unknown",
+            )
+            self.logger.debug(
+                f"CTP 阶段应答拒绝: stage={name} expected={stage.request_id} actual={request_id} "
+                f"closed={self._closed} invalid={bool(self._invalid_reason)} done={stage.done.is_set()}"
+            )
+        return accepted
 
     def _finish_stage(self, stage, info, name, request_id):
         """只接受本实例未完成请求的首次响应，错误使整个实例失效。"""
@@ -838,15 +862,36 @@ class CTPExecutor(AbstractExecutor, UnifiedCallbackClient):
                 if all(x in self._subscription_acks and self._quote_error(x) is None for x in symbols):
                     return {x: self._quotes[x] for x in symbols}
             threading.Event().wait(0.05)
-        raise TimeoutError(f"行情等待超时: {symbols}")
+        with self._lock:
+            diagnostics = {symbol: self._quote_diagnostic(symbol) for symbol in symbols}
+        raise TimeoutError(f"行情等待超时: {symbols}; {diagnostics}")
+
+    def _quote_diagnostic(self, symbol):
+        quote = self._quotes.get(symbol)
+        return {
+            "reason": self._quote_error(symbol),
+            "time": self._quote_time_evidence(quote, time.time()) if quote else None,
+            "last_rejection": self._quote_rejections.get(symbol),
+        }
+
+    @staticmethod
+    def _quote_time_evidence(quote, now):
+        age = now - quote.timestamp / 1000
+        return {
+            **quote.extra,
+            "timestamp": quote.timestamp,
+            "update_time": quote.update_time,
+            "age_seconds": age,
+            "time_direction": "unknown" if quote.timestamp <= 0 else "future" if age < 0 else "past",
+        }
 
     def _quote_error(self, symbol):
         return self._snapshot_quote_error(symbol, self._quotes.get(symbol))
 
-    def _snapshot_quote_error(self, symbol, quote):
+    def _snapshot_quote_error(self, symbol, quote, *, now=None):
         return quote_error(
             quote,
-            now=time.time(),
+            now=time.time() if now is None else now,
             trading_day=self._trading_day,
             max_age=self._config().quote_max_age_seconds,
             tick=self.get_tick_size(symbol),
@@ -1255,18 +1300,59 @@ class CTPExecutor(AbstractExecutor, UnifiedCallbackClient):
         with self._lock:
             if self._closed or self._invalid_reason:
                 return
+            received_at = time.time()
             q = quote_to_unified(row)
             if q.symbol not in self._subscriptions:
                 return
             if q.extra.get("trading_day") != self._trading_day:
                 self._invalidate_connection("行情交易日变化，请重建 CTP 会话")
                 return
+            self._normalize_quote_time(q)
+            q.extra["received_at"] = received_at
+            error = self._snapshot_quote_error(q.symbol, q, now=received_at)
             previous = self._quotes.get(q.symbol)
-            if previous is not None and q.timestamp <= previous.timestamp <= time.time() * 1000:
+            out_of_order = previous is not None and q.timestamp <= previous.timestamp <= received_at * 1000
+            if error or out_of_order:
+                self._quote_rejections[q.symbol] = {
+                    "reason": error or "out_of_order",
+                    **self._quote_time_evidence(q, received_at),
+                }
+            if out_of_order or (
+                error
+                and previous is not None
+                and self._snapshot_quote_error(q.symbol, previous, now=received_at) is None
+            ):
                 return
-            q.extra["received_at"] = time.time()
             self._quotes[q.symbol] = q
         self._dispatch(self._price_callbacks, q)
+
+    def _normalize_quote_time(self, quote):
+        instrument = self._instruments.get(quote.symbol)
+        sessions = ()
+        if getattr(instrument, "ProductClass", None) == td.THOST_FTDC_PC_Futures:
+            sessions = get_ctp_product_sessions(
+                getattr(instrument, "ExchangeID", ""), getattr(instrument, "ProductID", "")
+            )
+        calendar = getattr(self, "_trading_calendar", None)
+        calendar_id = getattr(self, "_channel_calendar_id", None) or CHINA_CALENDAR_ID
+        if calendar is None:
+            calendar = self._quote_calendar
+            calendar_id = CHINA_CALENDAR_ID
+        value, status, reason = resolve_quote_time(
+            quote.update_time, self._trading_day, sessions, lambda day: calendar.is_open(calendar_id, day)
+        )
+        quote.update_time = value
+        quote.timestamp = int(datetime.fromisoformat(value).timestamp() * 1000) if value else 0
+        quote.extra.update(
+            event_time_status=status, normalized_date=value[:10] if value else "", event_time_reason=reason
+        )
+        key = (quote.symbol, status)
+        if status != "native" and key not in self._quote_time_logged:
+            self._quote_time_logged.add(key)
+            self.logger.info(
+                f"CTP 行情时间: symbol={quote.symbol} status={status} reason={reason} "
+                f"original={quote.extra.get('event_date')} normalized={value}"
+            )
 
     def _market_subscribed(self, row, info):
         """保留订阅失败，禁止以缓存行情掩盖异步拒绝。"""
