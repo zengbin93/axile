@@ -12,6 +12,7 @@ from axile.executor.algorithms.defaults.ctp_target_pos_task.impl import (
     CTPTargetPosTaskParams,
     _calculate_order_price,
     _extract_ctp_position_details,
+    _place_volume_slices,
     ctp_target_pos_task_algorithm,
 )
 from axile.executor.constants.order_status import OrderStatus
@@ -21,6 +22,30 @@ from axile.executor.models.execution_result import ExecutionStatus
 from axile.executor.models.unified_account_assets import Position, PositionDirection, UnifiedAccountAssets
 from axile.executor.models.unified_order import OrderDirection, OrderType, TradeRecord, UnifiedOrder
 from axile.executor.models.unified_price import UnifiedPriceData
+from axile.executor.termination import ExecutionTerminated
+
+
+def test_ctp_split_failure_keeps_already_submitted_order():
+    executor = MagicMock()
+    executor.get_order_volume_bounds.return_value = (1, 1)
+    order = UnifiedOrder(
+        order_id="first",
+        symbol="A",
+        direction=OrderDirection.BUY,
+        order_type=OrderType.LIMIT,
+        volume=1,
+        price=10,
+        status=OrderStatus.PENDING,
+    )
+    executor.place_order.side_effect = [order, RuntimeError("native reject")]
+    tracker = MagicMock()
+    orders, submitted = _place_volume_slices(
+        executor, OrderDirection.BUY, 2, 10, offset_flag="0", trade_rule={}, tracker=tracker
+    )
+    assert orders == [order]
+    assert submitted == 1
+    tracker.add_order.assert_called_once()
+    assert tracker.explicit_error == "报单失败，具体原因未确认"
 
 
 def _native_book(reverse_rows=False, reverse_positions=False, split=False):
@@ -66,9 +91,9 @@ def test_production_positions_aggregate_and_reach_target(reverse_rows, reverse_p
             params=CTPTargetPosTaskParams(max_wait_seconds=1),
         ),
     )
-    assert result.outcome.value == ("completed" if target == 2 else "not_reached")
+    assert result.status.value == ("NOOP" if target == 2 else "PARTIAL")
     assert result.final_volume == 2
-    assert result.status == (ExecutionStatus.SUCCEEDED if target == 2 else ExecutionStatus.FAILED)
+    assert result.status == (ExecutionStatus.NOOP if target == 2 else ExecutionStatus.PARTIAL)
     assert result.memory["current_net_position"] == result.memory["final_net_position"] == 2
     assert result.memory["execution_details"]["rb2610_adjustment"]["current_net"] == 2
     assert [(order.direction, order.volume, order.extra["offset_flag"]) for order in executor.orders] == (
@@ -89,10 +114,10 @@ def test_final_check_does_not_accept_first_direction_as_net():
             params=CTPTargetPosTaskParams(max_wait_seconds=1),
         ),
     )
-    assert result.status == ExecutionStatus.FAILED
+    assert result.status == ExecutionStatus.PARTIAL
     assert result.memory["final_net_position"] == 2
     assert result.memory["target_reached"] is False
-    assert result.outcome.value == "not_reached"
+    assert result.status.value == "PARTIAL"
 
 
 @pytest.mark.parametrize("indices,expected", [([], (0, 0, 0)), ([0], (5, 0, 5)), ([1], (0, 3, -3))])
@@ -416,3 +441,100 @@ def test_target_pos_task_propagates_session_recovery_from_final_account_query() 
         ctp_target_pos_task_algorithm(cast("ExecutorProtocol", executor), algorithm_input)
 
     assert executor.account_asset_calls == 2
+
+
+@pytest.mark.parametrize("source", ["unavailable", "assumed", "error"])
+def test_target_pos_task_does_not_trade_when_start_snapshot_is_unknown(source):
+    executor = _FuturesExecutor(TradeChannel.CTP)
+    executor.get_account_assets = MagicMock(
+        return_value=UnifiedAccountAssets.unavailable().model_copy(update={"source": source})
+    )
+    executor.place_order = MagicMock()
+    result = ctp_target_pos_task_algorithm(
+        cast("ExecutorProtocol", executor),
+        AlgorithmInput(
+            symbol="rb2610", target_volume=0, trade_rule={}, params=CTPTargetPosTaskParams(max_wait_seconds=1)
+        ),
+    )
+    assert result.status == ExecutionStatus.FAILED
+    assert result.error == "初始持仓尚未确认"
+    assert result.orders == []
+    executor.place_order.assert_not_called()
+
+
+def test_target_pos_task_forwards_tracker_cancel_error(monkeypatch):
+    executor = _FuturesExecutor(TradeChannel.CTP)
+    tracker = MagicMock()
+    tracker.get_pending_count.return_value = 1
+    tracker.get_all_orders.return_value = []
+    tracker.get_all_trades.return_value = []
+    tracker.explicit_error = None
+    tracker.explicit_blocked_error = None
+
+    def wait_and_fail(timeout):
+        _ = timeout
+        tracker.explicit_error = "撤单失败，订单终态尚未确认"
+        raise RuntimeError("部分订单撤销失败: 1")
+
+    tracker.wait_for_completion.side_effect = wait_and_fail
+    monkeypatch.setattr(
+        "axile.executor.algorithms.defaults.ctp_target_pos_task.impl.setup_order_tracker",
+        lambda *args, **kwargs: tracker,
+    )
+    monkeypatch.setattr(
+        "axile.executor.algorithms.defaults.ctp_target_pos_task.impl.teardown_order_tracker",
+        lambda *args, **kwargs: None,
+    )
+    result = ctp_target_pos_task_algorithm(
+        cast("ExecutorProtocol", executor),
+        AlgorithmInput(
+            symbol="rb2610", target_volume=0, trade_rule={}, params=CTPTargetPosTaskParams(max_wait_seconds=1)
+        ),
+    )
+    assert result.error == "撤单失败，订单终态尚未确认"
+    assert result.status == ExecutionStatus.PARTIAL
+
+
+@pytest.mark.parametrize("source", ["unavailable", "assumed", "error"])
+def test_target_pos_task_does_not_claim_flat_when_final_snapshot_is_unavailable(source):
+    executor = _FuturesExecutor(TradeChannel.CTP)
+    initial = executor.get_account_assets()
+    unavailable = UnifiedAccountAssets.unavailable().model_copy(update={"source": source})
+    executor.get_account_assets = MagicMock(side_effect=[initial, initial, unavailable])
+    result = ctp_target_pos_task_algorithm(
+        cast("ExecutorProtocol", executor),
+        AlgorithmInput(
+            symbol="rb2610", target_volume=0, trade_rule={}, params=CTPTargetPosTaskParams(max_wait_seconds=1)
+        ),
+    )
+    assert result.status == ExecutionStatus.PARTIAL
+    assert result.final_volume is None
+    assert result.error == "最终持仓尚未确认"
+    assert result.orders == executor.orders
+    assert result.trades
+
+
+@pytest.mark.parametrize("stage", ["submit", "final_query"])
+@pytest.mark.parametrize("error_type", [ExecutionTerminated, MemoryError])
+def test_target_pos_task_propagates_interruptions(monkeypatch, stage, error_type):
+    executor = _FuturesExecutor(TradeChannel.CTP)
+    error = (
+        ExecutionTerminated(reason="stop", mode="cancel_pending", cancel_failed_order_ids=["pending"])
+        if error_type is ExecutionTerminated
+        else MemoryError()
+    )
+    initial = executor.get_account_assets()
+    if stage == "submit":
+        monkeypatch.setattr(executor, "place_order", MagicMock(side_effect=error))
+    else:
+        monkeypatch.setattr(executor, "get_account_assets", MagicMock(side_effect=[initial, initial, error, initial]))
+    with pytest.raises(error_type) as raised:
+        ctp_target_pos_task_algorithm(
+            cast("ExecutorProtocol", executor),
+            AlgorithmInput(
+                symbol="rb2610", target_volume=0, trade_rule={}, params=CTPTargetPosTaskParams(max_wait_seconds=1)
+            ),
+        )
+    assert raised.value is error
+    assert executor.order_callbacks == []
+    assert executor.trade_callbacks == []

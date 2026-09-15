@@ -92,9 +92,10 @@ _ValueT = TypeVar("_ValueT")
 
 
 class CtpRequestError(RuntimeError):
-    def __init__(self, message: str, *, return_code: int | None = None) -> None:
+    def __init__(self, message: str, *, return_code: int | None = None, execution_error: str | None = None) -> None:
         super().__init__(message)
         self.return_code = return_code
+        self.execution_error = execution_error
 
 
 class _TradeAssociationPending(CtpRequestError):
@@ -135,6 +136,16 @@ def _copy_native_row(row):
     return SimpleNamespace(**values)
 
 
+def _session_block_message(reason_code: str) -> str:
+    """只翻译明确的交易时段检查结果。"""
+    return {
+        "CTP.SESSION.CLOSED": "当前不在交易时段",
+        "CTP.SESSION.NO_METADATA": "合约资料不可用，交易时段尚未确认",
+        "CTP.SESSION.NO_SESSION_TABLE": "未配置合约交易时段",
+        "CTP.SESSION.CALENDAR_UNAVAILABLE": "交易日历不可用，交易时段尚未确认",
+    }.get(reason_code, "交易时段尚未确认")
+
+
 class CtpExecutionEngine(ExecutionEngine):
     """CTP 的品种时段筛选与 scoped cancel 编排器。"""
 
@@ -152,7 +163,7 @@ class CtpExecutionEngine(ExecutionEngine):
                 self._build_failed_algorithm_result(
                     symbol=symbol,
                     algorithm_name=self._get_symbol_algorithm_name(standard_input, symbol),
-                    error=reason_code,
+                    error=_session_block_message(reason_code),
                     status=ExecutionStatus.BLOCKED,
                     account_assets=account_assets,
                     memory={
@@ -174,22 +185,6 @@ class CtpExecutionEngine(ExecutionEngine):
         status: ExecutionStatus,
         symbol_results: dict[str, AlgorithmResult],
     ) -> str | None:
-        failed_results = [
-            result
-            for result in symbol_results.values()
-            if result.status not in {ExecutionStatus.SUCCEEDED, ExecutionStatus.NOOP}
-        ]
-        if (
-            status == ExecutionStatus.BLOCKED
-            and failed_results
-            and all(
-                isinstance(result.memory.get("symbol_decision_reason_code"), str)
-                and str(result.memory["symbol_decision_reason_code"]).startswith("CTP.SESSION.")
-                for result in failed_results
-            )
-        ):
-            names = ", ".join(result.symbol for result in failed_results)
-            return f"{names} 因交易时段不可执行"
         return super()._derive_dispatch_error(status, symbol_results)
 
 
@@ -255,12 +250,19 @@ class CTPExecutor(AbstractExecutor, UnifiedCallbackClient):
     @staticmethod
     def _error(info, name):
         code = int(getattr(info, "ErrorID", 0) or 0) if info else 0
-        return CtpRequestError(f"{name}失败: ErrorID={code}, {getattr(info, 'ErrorMsg', '')}") if code else None
+        if not code:
+            return None
+        reason = {31: "资金不足", 3: "CTP 登录校验失败"}.get(code, f"{name}失败，渠道返回错误码 {code}")
+        return CtpRequestError(f"{name}失败: ErrorID={code}, {getattr(info, 'ErrorMsg', '')}", execution_error=reason)
 
     @staticmethod
     def _check(code, name):
         if code != 0:
-            raise CtpRequestError(f"{name}同步拒绝: return_code={code}", return_code=code)
+            raise CtpRequestError(
+                f"{name}同步拒绝: return_code={code}",
+                return_code=code,
+                execution_error=f"{name}请求未受理，返回码 {code}",
+            )
 
     def _call_trader_request(self, name, req, *, before_send=None) -> int:
         """直接发送一次 TraderApi 请求，不附加账户控制或适配层重试。"""
@@ -297,10 +299,10 @@ class CTPExecutor(AbstractExecutor, UnifiedCallbackClient):
         )
         if code == -2:
             self._invalidate_connection(message)
-            raise CtpSessionRecoveryRequired(message, return_code=code)
+            raise CtpSessionRecoveryRequired(message, return_code=code, execution_error=f"{meaning}，请求未受理")
         if code == -1:
             self._invalidate_connection(message)
-        raise CtpRequestError(message, return_code=code)
+        raise CtpRequestError(message, return_code=code, execution_error=f"{meaning}，请求未受理")
 
     def _send_trader_request(self, operation, name, req, *, symbol=None, before_send=None) -> int:
         """经通用账户控制发送一次 TraderApi 请求，不在适配层重试。"""
@@ -492,6 +494,7 @@ class CTPExecutor(AbstractExecutor, UnifiedCallbackClient):
                 self._trader_connected = False
             else:
                 self._market_connected = False
+            self._connection_error = f"CTP {kind}前置已断开"
             self._invalidate_connection(f"CTP {kind}前置断线: {reason}")
 
     def _invalidate_connection(self, reason):
@@ -501,12 +504,18 @@ class CTPExecutor(AbstractExecutor, UnifiedCallbackClient):
             self._ready = False
             self._monitoring = False
             self._quotes.clear()
-            self._fail_waiters(CtpSessionRecoveryRequired(self._invalid_reason))
+            self._fail_waiters(
+                CtpSessionRecoveryRequired(
+                    self._invalid_reason, execution_error=getattr(self, "_connection_error", None)
+                )
+            )
 
     def _require_active_connection(self):
         """禁止失效实例继续访问原生 API，包括尚在排队的请求。"""
         if self._closed or self._invalid_reason:
-            raise CtpSessionRecoveryRequired(self._invalid_reason or "CTPExecutor 已关闭")
+            raise CtpSessionRecoveryRequired(
+                self._invalid_reason or "CTPExecutor 已关闭", execution_error=getattr(self, "_connection_error", None)
+            )
 
     def _require_session_ready(self, symbol=None):
         """检查会话就绪及目标品种在本实例收到的新行情。"""
@@ -950,6 +959,7 @@ class CTPExecutor(AbstractExecutor, UnifiedCallbackClient):
         if reason_code is not None:
             raise AccountControlBlockedError(
                 reason_code,
+                execution_error=_session_block_message(reason_code),
                 account_id=None,
                 execution_id=None,
                 channel=TradeChannel.CTP,

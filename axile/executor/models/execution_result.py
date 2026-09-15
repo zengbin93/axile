@@ -6,7 +6,7 @@
 
 from enum import StrEnum
 
-from pydantic import BaseModel, Field, computed_field
+from pydantic import BaseModel, Field, computed_field, model_validator
 
 from axile.executor.models.unified_account_assets import UnifiedAccountAssets
 from axile.executor.models.unified_order import TradeRecord, UnifiedOrder
@@ -26,7 +26,7 @@ class ExecutionStatus(StrEnum):
     BLOCKED : str
         因前置条件不满足而阻塞。
     PARTIAL : str
-        仅完成部分预期动作。
+        已有执行进展，但未完成全部执行要求；可能持仓已到位而订单收尾失败。
     FAILED : str
         执行失败。
     """
@@ -39,7 +39,7 @@ class ExecutionStatus(StrEnum):
 
 
 class ExecutionOutcome(StrEnum):
-    """面向用户的执行结论，与用于控制流程的 ExecutionStatus 独立。"""
+    """面向用户的执行结论；新结果一律由 :func:`outcome_from_status` 派生，不独立计算。"""
 
     COMPLETED = "completed"
     NOT_REACHED = "not_reached"
@@ -47,6 +47,36 @@ class ExecutionOutcome(StrEnum):
     TERMINATED = "terminated"
     BLOCKED = "blocked"
     UNKNOWN = "unknown"
+
+
+_OUTCOME_FROM_STATUS: dict[ExecutionStatus, ExecutionOutcome] = {
+    ExecutionStatus.SUCCEEDED: ExecutionOutcome.COMPLETED,
+    ExecutionStatus.NOOP: ExecutionOutcome.COMPLETED,
+    ExecutionStatus.BLOCKED: ExecutionOutcome.BLOCKED,
+    ExecutionStatus.PARTIAL: ExecutionOutcome.NOT_REACHED,
+    ExecutionStatus.FAILED: ExecutionOutcome.ERROR,
+}
+
+
+def outcome_from_status(status: ExecutionStatus, *, terminated: bool = False) -> ExecutionOutcome:
+    """
+    从控制流状态派生展示结论.
+
+    Parameters
+    ----------
+    status : ExecutionStatus
+        控制流状态，作为展示结论的唯一真源。
+    terminated : bool, optional
+        执行是否因用户终止而停止；终止优先于状态映射。
+
+    Returns
+    -------
+    ExecutionOutcome
+        与状态唯一对应的展示结论。
+    """
+    if terminated:
+        return ExecutionOutcome.TERMINATED
+    return _OUTCOME_FROM_STATUS[status]
 
 
 def aggregate_outcomes(outcomes: list[ExecutionOutcome]) -> ExecutionOutcome:
@@ -147,6 +177,15 @@ class AlgorithmResult(BaseModel):
         repr=False,
         description="执行结束时的账户资产快照，仅供运行时使用",
     )
+
+    @model_validator(mode="after")
+    def _derive_outcome_from_status(self) -> "AlgorithmResult":
+        """未显式给出 outcome/outcome_reason 时从 status 与 error 派生，保证两套结论不分离。"""
+        if "outcome" not in self.model_fields_set:
+            self.outcome = outcome_from_status(self.status)
+        if "outcome_reason" not in self.model_fields_set and self.error is not None:
+            self.outcome_reason = self.error
+        return self
 
     @computed_field  # type: ignore[prop-decorator]
     @property

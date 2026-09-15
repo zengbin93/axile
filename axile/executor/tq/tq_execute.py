@@ -123,7 +123,7 @@ class TQTradingTimeCheck:
         return None if self.status is TQTradingTimeStatus.OPEN else self.status.value
 
     @property
-    def outcome_reason(self) -> str | None:
+    def message(self) -> str | None:
         """返回面向用户的时段检查说明，机器码保留在 status 中。"""
         return {
             TQTradingTimeStatus.OPEN: None,
@@ -150,8 +150,7 @@ class TQExecutionEngine(ExecutionEngine):
                 self._build_failed_algorithm_result(
                     symbol=symbol,
                     algorithm_name=self._get_symbol_algorithm_name(standard_input, symbol),
-                    error=check.error,
-                    outcome_reason=check.outcome_reason,
+                    error=check.message or "无法确认品种交易时段",
                     status=ExecutionStatus.BLOCKED,
                     account_assets=account_assets,
                     memory={
@@ -173,21 +172,6 @@ class TQExecutionEngine(ExecutionEngine):
         status: ExecutionStatus,
         symbol_results: dict[str, AlgorithmResult],
     ) -> str | None:
-        failed_results = [
-            result
-            for result in symbol_results.values()
-            if result.status not in {ExecutionStatus.SUCCEEDED, ExecutionStatus.NOOP}
-        ]
-        if (
-            status == ExecutionStatus.BLOCKED
-            and failed_results
-            and all(
-                result.memory.get("symbol_decision_reason_family") == ExecutionReasonFamily.MARKET_RULE.value
-                for result in failed_results
-            )
-        ):
-            names = ", ".join(result.symbol for result in failed_results)
-            return f"{names} 因交易时段不可执行"
         return super()._derive_dispatch_error(status, symbol_results)
 
 
@@ -475,7 +459,7 @@ class TQExecutor(AbstractExecutor):
         result = runtime.call(submit)
         if isinstance(result, TQTradingTimeCheck):
             raise AccountControlBlockedError(
-                result.outcome_reason or "非交易时段",
+                result.message or "非交易时段",
                 reason_code=result.error,
                 account_id=None,
                 execution_id=None,

@@ -216,12 +216,14 @@ def test_model_dump_keeps_symbol_results_as_main_payload() -> None:
         "symbol_results",
         "channel_type",
         "error",
+        # 柔和版保留展示结论字段，值由 status 派生。
+        "outcome",
+        "outcome_reason",
         "execution_time",
         "success",
         "extra",
-        "outcome",
-        "outcome_reason",
     }
+    assert dumped["outcome"] == "completed"
     assert dumped["symbol_results"]["rb2610"]["target_volume"] == 0.25
     assert dumped["symbol_results"]["rb2610"]["first_tick"]["ask_price"] == 100.5
     assert len(output.orders) == 1
