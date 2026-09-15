@@ -1,9 +1,12 @@
 """执行结果摘要辅助函数."""
 
 from collections.abc import Mapping
+from math import isfinite
 from typing import Any
 
 from axile.executor.models.execution_result import ExecutionStatus
+from axile.executor.models.unified_account_assets import is_degraded_snapshot_source
+from axile.server.execution.legacy_compat import normalize_legacy_result
 
 # 判定「持仓量约等于零」的绝对容差。
 _QTY_EPS = 1e-9
@@ -12,19 +15,24 @@ _ATTAINED_TOLERANCE = 0.01
 
 
 def build_execution_outcome_details(result: Mapping[str, object]) -> dict[str, object]:
-    """转发展示结论及未到位品种，不复制订单明细或猜测旧记录。"""
-    symbols = result.get("symbol_results")
-    return {
-        "outcome": result.get("outcome"),
-        "outcome_reason": result.get("outcome_reason"),
-        "outcome_symbols": [
+    """转发状态/错误契约与展示结论及未到位品种；旧记录先经读时归一，不猜测。"""
+    normalized = normalize_legacy_result(dict(result))
+    symbols = normalized.get("symbol_results")
+    forwarded: dict[str, object] = {
+        key: normalized[key]
+        for key in ("status", "error", "outcome", "outcome_reason", "symbol_results")
+        if key in normalized
+    }
+    forwarded["outcome_symbols"] = (
+        [
             symbol
             for symbol, value in symbols.items()
             if isinstance(value, dict) and value.get("outcome") in {"not_reached", "blocked"}
         ]
         if isinstance(symbols, dict)
-        else [],
-    }
+        else []
+    )
+    return forwarded
 
 
 def build_execution_summary_from_symbol_results(result: dict[str, object]) -> dict[str, int]:
@@ -338,9 +346,10 @@ def _symbol_tca(symbol_result: Mapping[str, Any], avg_price: float | None, is_se
 
 def _account_equity(account_assets: Mapping[str, Any] | None) -> float | None:
     """从账户快照取总权益（``total_asset``）；缺失时返回 ``None``."""
-    if not isinstance(account_assets, dict):
+    if not isinstance(account_assets, dict) or is_degraded_snapshot_source(_account_source(account_assets)):
         return None
-    return _to_float(account_assets.get("total_asset"))
+    equity = _to_float(account_assets.get("total_asset"))
+    return equity if equity is not None and isfinite(equity) else None
 
 
 def _account_source(account_assets: Mapping[str, Any] | None) -> str:
@@ -354,20 +363,20 @@ def _account_source(account_assets: Mapping[str, Any] | None) -> str:
 def _build_symbol_row(
     symbol: str,
     symbol_result: Mapping[str, Any],
-    before_qty: float,
-    after_qty: float,
+    before_qty: float | None,
+    after_qty: float | None,
 ) -> dict[str, Any]:
     """构造单只对账行：意图/成交/前后持仓/到位度/漂移."""
     target = _to_float(symbol_result.get("target_volume"))
     filled, filled_value, avg_price = _signed_filled(symbol_result.get("orders"))
-    moved = after_qty - before_qty
-    drift = moved - filled
+    moved = after_qty - before_qty if after_qty is not None and before_qty is not None else None
+    drift = moved - filled if moved is not None else None
 
     attained_ratio: float | None = None
     reached: bool | None = None
-    if target is not None:
+    if target is not None and after_qty is not None:
         if abs(target) <= _QTY_EPS:
-            reached = abs(after_qty) <= max(abs(before_qty), 1.0) * _ATTAINED_TOLERANCE
+            reached = abs(after_qty) <= max(abs(before_qty or 0.0), 1.0) * _ATTAINED_TOLERANCE
             attained_ratio = 1.0 if reached else None
         else:
             attained_ratio = after_qty / target
@@ -377,6 +386,7 @@ def _build_symbol_row(
     return {
         "symbol": symbol,
         "status": symbol_result.get("status"),
+        "error": symbol_result.get("error"),
         "outcome": symbol_result.get("outcome"),
         "outcome_reason": symbol_result.get("outcome_reason"),
         "final_volume": symbol_result.get("final_volume"),
@@ -394,6 +404,16 @@ def _build_symbol_row(
         "tca": _symbol_tca(symbol_result, avg_price, filled < 0),
         "orders": _build_orders_tree(symbol_result),
     }
+
+
+def _observed_quantity(assets: Mapping[str, Any] | None, positions: dict[str, float], symbol: str) -> float | None:
+    """降级快照不提供持仓事实；自定义仿真来源保留原标记和数量。"""
+    if is_degraded_snapshot_source(_account_source(assets)) or not isinstance(
+        assets.get("positions") if assets else None, list
+    ):
+        return None
+    quantity = positions.get(symbol, 0.0)
+    return quantity if isfinite(quantity) else None
 
 
 def build_symbol_reconciliation(
@@ -443,12 +463,18 @@ def build_symbol_reconciliation(
     for symbol, symbol_result in symbol_results_raw.items():
         if not isinstance(symbol_result, dict):
             continue
+        before_qty = _observed_quantity(before_account_assets, before_map, symbol)
+        after_qty = _observed_quantity(after_assets_dict, after_map, symbol)
+        if after_qty is None:
+            # 最后一次账户查询失败时，仍可回放算法先前确认过的单品种持仓。
+            final_volume = _to_float(symbol_result.get("final_volume"))
+            after_qty = final_volume if final_volume is not None and isfinite(final_volume) else None
         rows.append(
             _build_symbol_row(
                 symbol,
                 symbol_result,
-                before_map.get(symbol, 0.0),
-                after_map.get(symbol, 0.0),
+                before_qty,
+                after_qty,
             )
         )
 

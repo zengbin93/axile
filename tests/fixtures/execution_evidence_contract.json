@@ -1,0 +1,700 @@
+[
+  {
+    "name": "filled",
+    "input": {
+      "before": {
+        "volume": 0,
+        "source": "real"
+      },
+      "algorithm": {
+        "volume": 2,
+        "source": "real"
+      },
+      "after": {
+        "volume": 2,
+        "source": "real"
+      },
+      "target": 2,
+      "order": {
+        "status": "已成交",
+        "filled": 2
+      }
+    },
+    "expected": {
+      "status": "SUCCEEDED",
+      "symbol_status": "SUCCEEDED",
+      "observed_after": 2.0,
+      "reached": true,
+      "equity_after": 1000.0
+    },
+    "wire": {
+      "summary": {
+        "status": "SUCCEEDED",
+        "error": null,
+        "success": true,
+        "symbol_results": {
+          "A": {
+            "status": "SUCCEEDED",
+            "error": null,
+            "target_volume": 2,
+            "final_volume": 2.0
+          }
+        },
+        "reconciliation": {
+          "account": {
+            "equity_before": 1000.0,
+            "equity_after": 1000.0,
+            "source_before": "real",
+            "source_after": "real"
+          },
+          "symbols": [
+            {
+              "symbol": "A",
+              "before": 0.0,
+              "after": 2.0,
+              "target": 2.0,
+              "reached": true,
+              "attained_ratio": 1.0,
+              "moved": 2.0,
+              "drift": 0.0
+            }
+          ]
+        }
+      },
+      "list_result": {
+        "status": "SUCCEEDED",
+        "error": null,
+        "outcome": "completed",
+        "outcome_reason": null,
+        "symbol_results": {
+          "A": {
+            "status": "SUCCEEDED",
+            "error": null,
+            "outcome": "completed",
+            "outcome_reason": null
+          }
+        }
+      },
+      "event_label": null
+    }
+  },
+  {
+    "name": "noop",
+    "input": {
+      "before": {
+        "volume": 0,
+        "source": "real"
+      },
+      "algorithm": {
+        "volume": 0,
+        "source": "real"
+      },
+      "after": {
+        "volume": 0,
+        "source": "real"
+      },
+      "target": 0,
+      "order": null
+    },
+    "expected": {
+      "status": "NOOP",
+      "symbol_status": "NOOP",
+      "observed_after": 0.0,
+      "reached": true,
+      "equity_after": 1000.0
+    },
+    "wire": {
+      "summary": {
+        "status": "NOOP",
+        "error": null,
+        "success": true,
+        "symbol_results": {
+          "A": {
+            "status": "NOOP",
+            "error": null,
+            "target_volume": 0,
+            "final_volume": 0.0
+          }
+        },
+        "reconciliation": {
+          "account": {
+            "equity_before": 1000.0,
+            "equity_after": 1000.0,
+            "source_before": "real",
+            "source_after": "real"
+          },
+          "symbols": [
+            {
+              "symbol": "A",
+              "before": 0.0,
+              "after": 0.0,
+              "target": 0.0,
+              "reached": true,
+              "attained_ratio": 1.0,
+              "moved": 0.0,
+              "drift": 0.0
+            }
+          ]
+        }
+      },
+      "list_result": {
+        "status": "NOOP",
+        "error": null,
+        "outcome": "completed",
+        "outcome_reason": null,
+        "symbol_results": {
+          "A": {
+            "status": "NOOP",
+            "error": null,
+            "outcome": "completed",
+            "outcome_reason": null
+          }
+        }
+      },
+      "event_label": null
+    }
+  },
+  {
+    "name": "blocked_session",
+    "input": {
+      "before": {
+        "volume": 0,
+        "source": "real"
+      },
+      "algorithm": {
+        "volume": 0,
+        "source": "real"
+      },
+      "after": {
+        "volume": 0,
+        "source": "real"
+      },
+      "target": 2,
+      "order": null,
+      "blocked": "当前不在交易时段"
+    },
+    "expected": {
+      "status": "BLOCKED",
+      "symbol_status": "BLOCKED",
+      "observed_after": 0.0,
+      "reached": false,
+      "equity_after": 1000.0
+    },
+    "wire": {
+      "summary": {
+        "status": "BLOCKED",
+        "error": "当前不在交易时段",
+        "success": false,
+        "symbol_results": {
+          "A": {
+            "status": "BLOCKED",
+            "error": "当前不在交易时段",
+            "target_volume": 2,
+            "final_volume": 0.0
+          }
+        },
+        "reconciliation": {
+          "account": {
+            "equity_before": 1000.0,
+            "equity_after": 1000.0,
+            "source_before": "real",
+            "source_after": "real"
+          },
+          "symbols": [
+            {
+              "symbol": "A",
+              "before": 0.0,
+              "after": 0.0,
+              "target": 2.0,
+              "reached": false,
+              "attained_ratio": 0.0,
+              "moved": 0.0,
+              "drift": 0.0
+            }
+          ]
+        }
+      },
+      "list_result": {
+        "status": "BLOCKED",
+        "error": "当前不在交易时段",
+        "outcome": "blocked",
+        "outcome_reason": "当前不在交易时段",
+        "symbol_results": {
+          "A": {
+            "status": "BLOCKED",
+            "error": "当前不在交易时段",
+            "outcome": "blocked",
+            "outcome_reason": "当前不在交易时段"
+          }
+        }
+      },
+      "event_label": "未执行"
+    }
+  },
+  {
+    "name": "unknown_final_unavailable",
+    "input": {
+      "before": {
+        "volume": 0,
+        "source": "real"
+      },
+      "algorithm": {
+        "volume": 0,
+        "source": "unavailable"
+      },
+      "after": {
+        "volume": 0,
+        "source": "unavailable"
+      },
+      "target": 2,
+      "order": null
+    },
+    "expected": {
+      "status": "FAILED",
+      "symbol_status": "FAILED",
+      "observed_after": null,
+      "reached": null,
+      "equity_after": null
+    },
+    "wire": {
+      "summary": {
+        "status": "FAILED",
+        "error": "最终持仓尚未确认",
+        "success": false,
+        "symbol_results": {
+          "A": {
+            "status": "FAILED",
+            "error": "最终持仓尚未确认",
+            "target_volume": 2,
+            "final_volume": null
+          }
+        },
+        "reconciliation": {
+          "account": {
+            "equity_before": 1000.0,
+            "equity_after": null,
+            "source_before": "real",
+            "source_after": "unavailable"
+          },
+          "symbols": [
+            {
+              "symbol": "A",
+              "before": 0.0,
+              "after": null,
+              "target": 2.0,
+              "reached": null,
+              "attained_ratio": null,
+              "moved": null,
+              "drift": null
+            }
+          ]
+        }
+      },
+      "list_result": {
+        "status": "FAILED",
+        "error": "最终持仓尚未确认",
+        "outcome": "error",
+        "outcome_reason": "最终持仓尚未确认",
+        "symbol_results": {
+          "A": {
+            "status": "FAILED",
+            "error": "最终持仓尚未确认",
+            "outcome": "error",
+            "outcome_reason": "最终持仓尚未确认"
+          }
+        }
+      },
+      "event_label": "执行失败"
+    }
+  },
+  {
+    "name": "query_failed_no_orders",
+    "input": {
+      "before": {
+        "volume": 0,
+        "source": "real"
+      },
+      "algorithm": {
+        "volume": 0,
+        "source": "query_failed"
+      },
+      "after": {
+        "volume": 0,
+        "source": "query_failed"
+      },
+      "target": 2,
+      "order": null
+    },
+    "expected": {
+      "status": "FAILED",
+      "symbol_status": "FAILED",
+      "observed_after": null,
+      "reached": null,
+      "equity_after": null
+    },
+    "wire": {
+      "summary": {
+        "status": "FAILED",
+        "error": "最终持仓查询失败，具体原因未确认",
+        "success": false,
+        "symbol_results": {
+          "A": {
+            "status": "FAILED",
+            "error": "最终持仓查询失败，具体原因未确认",
+            "target_volume": 2,
+            "final_volume": null
+          }
+        },
+        "reconciliation": {
+          "account": {
+            "equity_before": 1000.0,
+            "equity_after": null,
+            "source_before": "real",
+            "source_after": "unavailable"
+          },
+          "symbols": [
+            {
+              "symbol": "A",
+              "before": 0.0,
+              "after": null,
+              "target": 2.0,
+              "reached": null,
+              "attained_ratio": null,
+              "moved": null,
+              "drift": null
+            }
+          ]
+        }
+      },
+      "list_result": {
+        "status": "FAILED",
+        "error": "最终持仓查询失败，具体原因未确认",
+        "outcome": "error",
+        "outcome_reason": "最终持仓查询失败，具体原因未确认",
+        "symbol_results": {
+          "A": {
+            "status": "FAILED",
+            "error": "最终持仓查询失败，具体原因未确认",
+            "outcome": "error",
+            "outcome_reason": "最终持仓查询失败，具体原因未确认"
+          }
+        }
+      },
+      "event_label": "执行失败"
+    }
+  },
+  {
+    "name": "query_failed_with_order",
+    "input": {
+      "before": {
+        "volume": 0,
+        "source": "real"
+      },
+      "algorithm": {
+        "volume": 0,
+        "source": "query_failed"
+      },
+      "after": {
+        "volume": 0,
+        "source": "query_failed"
+      },
+      "target": 2,
+      "order": {
+        "status": "已成交",
+        "filled": 2
+      }
+    },
+    "expected": {
+      "status": "PARTIAL",
+      "symbol_status": "PARTIAL",
+      "observed_after": null,
+      "reached": null,
+      "equity_after": null
+    },
+    "wire": {
+      "summary": {
+        "status": "PARTIAL",
+        "error": "最终持仓查询失败，具体原因未确认",
+        "success": false,
+        "symbol_results": {
+          "A": {
+            "status": "PARTIAL",
+            "error": "最终持仓查询失败，具体原因未确认",
+            "target_volume": 2,
+            "final_volume": null
+          }
+        },
+        "reconciliation": {
+          "account": {
+            "equity_before": 1000.0,
+            "equity_after": null,
+            "source_before": "real",
+            "source_after": "unavailable"
+          },
+          "symbols": [
+            {
+              "symbol": "A",
+              "before": 0.0,
+              "after": null,
+              "target": 2.0,
+              "reached": null,
+              "attained_ratio": null,
+              "moved": null,
+              "drift": null
+            }
+          ]
+        }
+      },
+      "list_result": {
+        "status": "PARTIAL",
+        "error": "最终持仓查询失败，具体原因未确认",
+        "outcome": "not_reached",
+        "outcome_reason": "最终持仓查询失败，具体原因未确认",
+        "symbol_results": {
+          "A": {
+            "status": "PARTIAL",
+            "error": "最终持仓查询失败，具体原因未确认",
+            "outcome": "not_reached",
+            "outcome_reason": "最终持仓查询失败，具体原因未确认"
+          }
+        }
+      },
+      "event_label": "执行未全部完成"
+    }
+  },
+  {
+    "name": "wrapup_degrades_success",
+    "input": {
+      "before": {
+        "volume": 0,
+        "source": "real"
+      },
+      "algorithm": {
+        "volume": 2,
+        "source": "real"
+      },
+      "after": {
+        "volume": 2,
+        "source": "unavailable"
+      },
+      "target": 2,
+      "order": {
+        "status": "已成交",
+        "filled": 2
+      }
+    },
+    "expected": {
+      "status": "PARTIAL",
+      "symbol_status": "SUCCEEDED",
+      "observed_after": 2.0,
+      "reached": true,
+      "equity_after": null
+    },
+    "wire": {
+      "summary": {
+        "status": "PARTIAL",
+        "error": "最终持仓尚未确认",
+        "success": false,
+        "symbol_results": {
+          "A": {
+            "status": "SUCCEEDED",
+            "error": null,
+            "target_volume": 2,
+            "final_volume": 2.0
+          }
+        },
+        "reconciliation": {
+          "account": {
+            "equity_before": 1000.0,
+            "equity_after": null,
+            "source_before": "real",
+            "source_after": "unavailable"
+          },
+          "symbols": [
+            {
+              "symbol": "A",
+              "before": 0.0,
+              "after": 2.0,
+              "target": 2.0,
+              "reached": true,
+              "attained_ratio": 1.0,
+              "moved": 2.0,
+              "drift": 0.0
+            }
+          ]
+        }
+      },
+      "list_result": {
+        "status": "PARTIAL",
+        "error": "最终持仓尚未确认",
+        "outcome": "not_reached",
+        "outcome_reason": null,
+        "symbol_results": {
+          "A": {
+            "status": "SUCCEEDED",
+            "error": null,
+            "outcome": "completed",
+            "outcome_reason": null
+          }
+        }
+      },
+      "event_label": "执行未全部完成"
+    }
+  },
+  {
+    "name": "wrapup_preserves_blocked",
+    "input": {
+      "before": {
+        "volume": 0,
+        "source": "real"
+      },
+      "algorithm": {
+        "volume": 0,
+        "source": "real"
+      },
+      "after": {
+        "volume": 0,
+        "source": "query_failed"
+      },
+      "target": 2,
+      "order": null,
+      "blocked": "当前不在交易时段"
+    },
+    "expected": {
+      "status": "BLOCKED",
+      "symbol_status": "BLOCKED",
+      "observed_after": 0.0,
+      "reached": false,
+      "equity_after": null
+    },
+    "wire": {
+      "summary": {
+        "status": "BLOCKED",
+        "error": "当前不在交易时段",
+        "success": false,
+        "symbol_results": {
+          "A": {
+            "status": "BLOCKED",
+            "error": "当前不在交易时段",
+            "target_volume": 2,
+            "final_volume": 0.0
+          }
+        },
+        "reconciliation": {
+          "account": {
+            "equity_before": 1000.0,
+            "equity_after": null,
+            "source_before": "real",
+            "source_after": "unavailable"
+          },
+          "symbols": [
+            {
+              "symbol": "A",
+              "before": 0.0,
+              "after": 0.0,
+              "target": 2.0,
+              "reached": false,
+              "attained_ratio": 0.0,
+              "moved": 0.0,
+              "drift": 0.0
+            }
+          ]
+        }
+      },
+      "list_result": {
+        "status": "BLOCKED",
+        "error": "当前不在交易时段",
+        "outcome": "blocked",
+        "outcome_reason": "当前不在交易时段",
+        "symbol_results": {
+          "A": {
+            "status": "BLOCKED",
+            "error": "当前不在交易时段",
+            "outcome": "blocked",
+            "outcome_reason": "当前不在交易时段"
+          }
+        }
+      },
+      "event_label": "未执行"
+    }
+  },
+  {
+    "name": "partial_canceled",
+    "input": {
+      "before": {
+        "volume": 0,
+        "source": "real"
+      },
+      "algorithm": {
+        "volume": 1,
+        "source": "real"
+      },
+      "after": {
+        "volume": 1,
+        "source": "real"
+      },
+      "target": 2,
+      "order": {
+        "status": "已撤销",
+        "filled": 1
+      }
+    },
+    "expected": {
+      "status": "PARTIAL",
+      "symbol_status": "PARTIAL",
+      "observed_after": 1.0,
+      "reached": false,
+      "equity_after": 1000.0
+    },
+    "wire": {
+      "summary": {
+        "status": "PARTIAL",
+        "error": "目标未完成: 当前持仓=1.0，目标持仓=2",
+        "success": false,
+        "symbol_results": {
+          "A": {
+            "status": "PARTIAL",
+            "error": "目标未完成: 当前持仓=1.0，目标持仓=2",
+            "target_volume": 2,
+            "final_volume": 1.0
+          }
+        },
+        "reconciliation": {
+          "account": {
+            "equity_before": 1000.0,
+            "equity_after": 1000.0,
+            "source_before": "real",
+            "source_after": "real"
+          },
+          "symbols": [
+            {
+              "symbol": "A",
+              "before": 0.0,
+              "after": 1.0,
+              "target": 2.0,
+              "reached": false,
+              "attained_ratio": 0.5,
+              "moved": 1.0,
+              "drift": 0.0
+            }
+          ]
+        }
+      },
+      "list_result": {
+        "status": "PARTIAL",
+        "error": "目标未完成: 当前持仓=1.0，目标持仓=2",
+        "outcome": "not_reached",
+        "outcome_reason": "目标未完成: 当前持仓=1.0，目标持仓=2",
+        "symbol_results": {
+          "A": {
+            "status": "PARTIAL",
+            "error": "目标未完成: 当前持仓=1.0，目标持仓=2",
+            "outcome": "not_reached",
+            "outcome_reason": "目标未完成: 当前持仓=1.0，目标持仓=2"
+          }
+        }
+      },
+      "event_label": "执行未全部完成"
+    }
+  }
+]

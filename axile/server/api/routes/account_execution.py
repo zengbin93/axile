@@ -38,6 +38,7 @@ from axile.server.db.models import (
     TargetWeightSnapshot,
     TargetWeightSnapshotPublic,
 )
+from axile.server.execution.legacy_compat import normalize_execution_event_details
 from axile.server.execution.lifecycle import enqueue_empty_positions, enqueue_execute_trade
 from axile.server.execution.live import live_hub
 from axile.server.execution.rebalance import _normalize_rebalance_target
@@ -411,8 +412,14 @@ async def execution_events(
         .limit(pagination.limit)
     )
     rows = (await session.execute(stmt)).scalars().all()
+    data: list[ExecutionEventPublic] = []
+    for row in rows:
+        item = ExecutionEventPublic.model_validate(row)
+        # 旧事件的 debug.error 读时提升到公共层；技术原文不提升。
+        item.details = normalize_execution_event_details(row.details)
+        data.append(item)
     return ExecutionEventListPublic(
-        data=[ExecutionEventPublic.model_validate(row) for row in rows],
+        data=data,
         count=total,
     )
 

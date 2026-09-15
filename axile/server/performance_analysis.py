@@ -17,10 +17,12 @@ from axile.server.db.models.analysis import analysis_state as states
 from axile.server.db.models.analysis import cost_execution as executions
 from axile.server.db.models.analysis import cost_trade as trades
 from axile.server.db.models.performance import PerformanceBinding, PerformanceSettings
+from axile.server.execution.legacy_compat import normalize_legacy_result
 from axile.server.performance import calculate_performance, local_time, observation
 from axile.server.performance_costs import SHANGHAI, daily_costs, project_execution, summarize, timestamp
 
-LOGIC_VERSION = "8"
+# PARTIAL 只描述执行未全部完成；重建旧缓存中的「未到位」事件文案。
+LOGIC_VERSION = "10"
 ENGINE_VERSION = version("wbt")
 RETRY_DELAYS = (5, 30, 120)
 
@@ -181,29 +183,18 @@ def _events(records, bindings, skips) -> list[dict]:
     for record in records:
         if record.is_success == 1:
             continue
-        raw = record.raw_result
-        outcome = raw.get("outcome")
+        raw = normalize_legacy_result(record.raw_result)
+        status = raw.get("status") if isinstance(raw, dict) else None
         label = {
-            "completed": "执行完成",
-            "not_reached": "执行不到位",
-            "error": "执行失败",
-            "terminated": "执行已终止",
-            "blocked": "未执行",
-            "unknown": "执行结果待确认",
-        }.get(outcome, "历史执行记录")
-        reason = raw.get("outcome_reason") if outcome in {"error", "blocked"} else None
-        if outcome == "not_reached":
-            symbols = raw.get("symbol_results", {})
-            missing = (
-                [
-                    symbol
-                    for symbol, value in symbols.items()
-                    if isinstance(value, dict) and value.get("outcome") in {"not_reached", "blocked"}
-                ]
-                if isinstance(symbols, dict)
-                else []
-            )
-            reason = "、".join(missing[:3]) + (f" 等 {len(missing)} 个品种" if len(missing) > 3 else "")
+            "SUCCEEDED": "调仓完成",
+            "NOOP": "无需调仓",
+            "PARTIAL": "执行未全部完成",
+            "FAILED": "执行失败",
+            "BLOCKED": "未执行",
+        }.get(status, "执行状态未知")
+        if raw.get("task_status") == "TERMINATED":
+            label = "执行已终止"
+        reason = raw.get("error") if status in {"FAILED", "BLOCKED", "PARTIAL"} else None
         text = f"{label} · {reason}" if reason else label
         events.append(
             {

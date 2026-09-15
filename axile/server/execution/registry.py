@@ -26,6 +26,7 @@ from axile.server.db.models import (
     now_str,
 )
 from axile.server.execution.execution_summaries import build_execution_outcome_details
+from axile.server.execution.legacy_compat import normalize_legacy_result
 from axile.server.execution.records import append_terminated_execute_record
 from axile.server.execution_audit import append_execution_event
 
@@ -400,43 +401,44 @@ def _coerce_optional_text(value: object) -> str | None:
 
 
 def execution_record_outcome(raw_result: object) -> dict[str, object]:
-    """只转发持久化结论，不从旧状态猜测执行成败。"""
+    """恒定返回展示结论三元组；status/error 由专门入参传递，避免关键字冲突。"""
     raw = raw_result if isinstance(raw_result, dict) else {}
-    return build_execution_outcome_details(raw)
+    forwarded = build_execution_outcome_details(raw)
+    return {
+        "outcome": forwarded.get("outcome"),
+        "outcome_reason": forwarded.get("outcome_reason"),
+        "outcome_symbols": forwarded.get("outcome_symbols", []),
+    }
 
 
 def execution_record_output_status(raw_result: object) -> str | None:
-    """从执行记录结果中读取执行器 ``status``（如 ``BLOCKED``）。"""
-    if not isinstance(raw_result, dict):
+    """从执行记录结果中读取执行器 ``status``；旧记录经读时归一回填。"""
+    normalized = normalize_legacy_result(raw_result)
+    if not isinstance(normalized, dict):
         return None
-    return _coerce_optional_text(raw_result.get("status"))
+    return _coerce_optional_text(normalized.get("status"))
 
 
 def execution_record_output_error(raw_result: object) -> str | None:
     """
     从执行记录结果中读取人话错误.
 
-    UnifiedStandardOutput 落库字段是 ``error``；旧失败记录可能只有 ``msg``；
-    渠道级非交易时段还会把句子放在 ``memory.message``。轮询接口必须按这个
-    顺序回放，不能只读 ``msg``，否则会出现「服务端未返回原因」。
+    新记录读 ``error``；旧记录经 :func:`normalize_legacy_result` 读时补齐：
+    说人话的遗留文案沿用，异常类名/SDK 原文只进 ``technical_detail``，
+    展示层拿固定人话，不再回退扫描 ``msg``/``memory.message``。
     """
-    if not isinstance(raw_result, dict):
+    normalized = normalize_legacy_result(raw_result)
+    if not isinstance(normalized, dict):
         return None
-    error = _coerce_optional_text(raw_result.get("error"))
-    if error is not None:
-        return error
-    msg = _coerce_optional_text(raw_result.get("msg"))
-    if msg is not None:
-        return msg
-    memory = raw_result.get("memory")
-    if isinstance(memory, dict):
-        return _coerce_optional_text(memory.get("message"))
-    return None
+    return _coerce_optional_text(normalized.get("error"))
 
 
 def _build_persisted_execution_status(record: ExecuteRecord) -> dict[str, object]:
     """根据执行记录回放任务生命周期状态."""
-    task_status = _coerce_execution_task_status(record.raw_result.get("task_status"))
+    normalized_raw = normalize_legacy_result(record.raw_result)
+    task_status = _coerce_execution_task_status(
+        normalized_raw.get("task_status") if isinstance(normalized_raw, dict) else None
+    )
     if task_status is None:
         task_status = ExecutionTaskStatus.SUCCEEDED if record.is_success == 1 else ExecutionTaskStatus.FAILED
 

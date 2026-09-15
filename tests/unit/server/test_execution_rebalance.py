@@ -168,12 +168,14 @@ def test_trade_serializes_success_result_to_json_safe_dict(
         "symbol_results",
         "channel_type",
         "error",
+        # 柔和版保留展示结论字段，值由 status 派生。
+        "outcome",
+        "outcome_reason",
         "execution_time",
         "success",
         "extra",
-        "outcome",
-        "outcome_reason",
     }
+    assert result["outcome"] == "completed"
     assert result["symbol_results"]["ag2612"]["algorithm"] == "SINGLE-MAKER"
     assert captured["execution_id"] is None
 
