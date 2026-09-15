@@ -12,6 +12,7 @@ from zoneinfo import ZoneInfo
 import pandas as pd
 from wbt import WeightBacktest
 
+from axile.server.asset_observations import is_asset_observation
 from axile.server.db.models import ExecuteRecord, ExecuteRecordPublic
 from axile.server.db.models.performance import (
     AccountPerformance,
@@ -106,7 +107,7 @@ def observation(
     result = _mapping(record.raw_result)
     assets = _mapping(result.get("account_assets"))
     asset = _number(assets.get("total_asset"))
-    if assets.get("source") in ("assumed", "error", "unavailable"):
+    if not is_asset_observation(assets, result):
         asset = None
     target = _target(record.raw_input.get("curr_target", fallback_weights))
     if result.get("execution_kind") == "clear_positions":

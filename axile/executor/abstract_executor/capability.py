@@ -98,7 +98,7 @@ class AbstractExecutorCapabilityMixin:
         """
         executor = _executor(self)
         runtime = executor.require_execution_runtime()
-        empty_assets = UnifiedAccountAssets(available_cash=0.0, total_asset=0.0, market_value=0.0, positions=[])
+        empty_assets = UnifiedAccountAssets.unavailable()
 
         return UnifiedStandardOutput(
             account_assets=empty_assets,

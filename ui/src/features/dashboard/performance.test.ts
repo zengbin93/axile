@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { cardPerformance, openFullPerformance } from './performance'
+import { cardPerformance, currentEquity, openFullPerformance } from './performance'
 import { performanceViews, performanceViewports } from '@/features/history/viewState'
 import { performanceEntry } from '@/features/history/performanceCache'
 import { sparklinePath } from '@/components/viz/sparklineGeometry'
@@ -45,4 +45,12 @@ test('小图入口清除旧区间和缩放，仅预取绩效快照', async () =>
     expect(urls).toHaveLength(1)
     expect(urls[0]).toContain('/account/performance/991/snapshot?range=all')
   } finally { globalThis.fetch = original }
+})
+
+
+test('当前资产独立于历史绩效，零余额与未查询有区别', () => {
+  expect(currentEquity({ total_asset: 0 })).toBeNull()
+  expect(currentEquity({ total_asset: 0, asset_observed_at: '2026-09-15' })).toBe(0)
+  expect(currentEquity({ total_asset: 100000, asset_observed_at: '2026-09-15' })).toBe(100000)
+  expect(cardPerformance(summary).equity).toBe(117128.71)
 })

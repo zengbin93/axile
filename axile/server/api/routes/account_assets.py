@@ -11,6 +11,7 @@ from sqlmodel import desc, func, select
 from axile.server.account_assets import query_account_assets
 from axile.server.api.deps import SessionDep
 from axile.server.api.routes.account_support import _get_account_or_404
+from axile.server.asset_observations import is_asset_observation, valid_asset_snapshot_condition
 from axile.server.db.models import (
     AccountAssetSnapshot,
     AccountAssetSnapshotListPublic,
@@ -38,6 +39,8 @@ async def refresh_account_assets(session: SessionDep, account_id: int) -> Accoun
         # close 会释放读事务并分离账户；返回后保存快照使用新的事务。
         await session.close()
         assets = await query_account_assets(account)
+        if not is_asset_observation(assets.model_dump()):
+            raise ValueError("渠道未返回可信账户资产")
         snapshot = AccountAssetSnapshot(
             account_id=account_id,
             assets=cast("dict[str, object]", assets.model_dump(mode="json")),
@@ -77,11 +80,13 @@ async def list_account_asset_snapshots(
     """分页读取账户资产快照（最新在前）."""
     await _get_account_or_404(session, account_id)
     count = await session.scalar(
-        select(func.count()).select_from(AccountAssetSnapshot).where(AccountAssetSnapshot.account_id == account_id)
+        select(func.count())
+        .select_from(AccountAssetSnapshot)
+        .where(AccountAssetSnapshot.account_id == account_id, valid_asset_snapshot_condition())
     )
     statement = (
         select(AccountAssetSnapshot)
-        .where(AccountAssetSnapshot.account_id == account_id)
+        .where(AccountAssetSnapshot.account_id == account_id, valid_asset_snapshot_condition())
         .order_by(desc(AccountAssetSnapshot.id))
         .offset(skip)
         .limit(limit)

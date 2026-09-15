@@ -244,7 +244,9 @@ async def read_costs(session, account_id: int, query: CostQuery) -> dict:
         .mappings()
         .first()
     )
-    if batch is None:
+    from axile.server.performance_analysis import ENGINE_VERSION, LOGIC_VERSION
+
+    if batch is None or batch["logic_version"] != LOGIC_VERSION or batch["engine_version"] != ENGINE_VERSION:
         raise HTTPException(410, detail={"code": "SNAPSHOT_EXPIRED", "message": "快照版本已失效，请重新读取绩效"})
     execution_filter, trade_filter = _filters(query, batch["ranges"][query.range]["performance"])
     totals = await summary(session, trade_filter)

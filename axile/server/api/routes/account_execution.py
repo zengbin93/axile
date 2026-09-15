@@ -17,6 +17,7 @@ from axile.domain.execution import ExecutionArtifactType, ExecutionTaskStatus
 from axile.server.api.deps import HistoryPaginationDep, SchedDep, SessionDep
 from axile.server.api.routes.account_support import _get_account_or_404
 from axile.server.api.routes.portfolio import resolve_portfolio_target
+from axile.server.asset_observations import valid_asset_snapshot_condition
 from axile.server.db.models import (
     AccountAssetSnapshot,
     AccountRebalancePlanPublic,
@@ -72,7 +73,7 @@ async def account_rebalance_plan(session: SessionDep, account_id: int) -> Accoun
     assets_snapshot = (
         await session.execute(
             select(AccountAssetSnapshot)
-            .where(AccountAssetSnapshot.account_id == account_id)
+            .where(AccountAssetSnapshot.account_id == account_id, valid_asset_snapshot_condition())
             .order_by(col(AccountAssetSnapshot.id).desc())
             .limit(1)
         )

@@ -18,3 +18,8 @@ export function openFullPerformance(accountId: number) {
   performanceViewports.delete(`${accountId}:all`)
   void checkPerformance(accountId, 'all')
 }
+
+/** 当前金额只使用真实资产观测，历史绩效独立展示。 */
+export function currentEquity(item: { total_asset: number; asset_observed_at?: string | null }) {
+  return item.asset_observed_at ? item.total_asset : null
+}

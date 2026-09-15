@@ -628,6 +628,7 @@ def test_manager_maps_structured_error_to_failed_output() -> None:
     assert output.status == ExecutionStatus.FAILED
     assert output.channel_type == TradeChannel.CTP
     assert output.get_error_message() == "boom"
+    assert output.account_assets.source == "unavailable"
     assert output.extra["worker_error"] == {
         "type": "runtime_error",
         "message": "boom",

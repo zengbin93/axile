@@ -1,6 +1,6 @@
 import { useViewTransitionState } from 'react-router'
 import { Plus } from 'lucide-react'
-import { cardPerformance } from '@/features/dashboard/performance'
+import { cardPerformance, currentEquity } from '@/features/dashboard/performance'
 import { Link, useNavigate } from '@/components/ui/nav'
 import { Card } from '@/components/ui/Card'
 import { NumberTicker } from '@/components/ui/NumberTicker'
@@ -29,8 +29,9 @@ function FleetCard({
   const gate = gateOf(item)
   // 服务端真源的在途执行：在跑时状态文案与卡边优先反映「正在执行」。
   const live = useRunning(item.account_id)
-  // 金额与日涨跌绑定同一个绩效观测。
-  const { equity, pct, dayLabel, statusLabel } = cardPerformance(item.performance)
+  // 当前权益来自资产查询；涨跌仍取历史执行绩效。
+  const { pct, dayLabel, statusLabel } = cardPerformance(item.performance)
+  const equity = currentEquity(item)
   // 红涨绿跌：涨→up(红)、跌→down(绿)。
   const pctCls = pct == null ? 'text-ink-2' : pct > 0 ? 'text-up' : pct < 0 ? 'text-down' : 'text-ink-2'
 
@@ -95,9 +96,10 @@ function FleetCard({
         <PerformanceCurveLink accountId={item.account_id} summary={item.performance} source="fleet" width={120} height={34} />
       </div>
 
+      <div className="mt-1 text-xs text-ink-3">{item.asset_observed_at ? `资产查询于 ${item.asset_observed_at}` : '尚未查询账户资产'}</div>
       <div className="mt-3 flex gap-2.5 border-t border-line pt-3 text-[14.5px]">
         <span className="min-w-14 flex-none text-ink-3">当前持仓</span>
-        <span>{holdingText(item.holdings_count, item.position_weights)}</span>
+        <span>{item.asset_observed_at ? holdingText(item.holdings_count, item.position_weights) : '持仓尚未查询'}</span>
       </div>
       <ExposureBar weights={item.position_weights} />
     </Card>

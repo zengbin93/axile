@@ -366,7 +366,7 @@ async def account_dashboard(session: SessionDep, sched: SchedDep) -> AccountDash
 
     Notes
     -----
-    卡片金额、日收益与曲线来自已发布绩效快照；持仓与偏离计算继续使用当前资产。
+    当前金额、持仓与偏离来自有效资产观测；日收益与曲线来自已发布历史绩效。
     执行记录、资产、目标与绩效均批量读取，避免逐账户查询。
     """
     accounts = (await session.execute(select(Account))).scalars().all()

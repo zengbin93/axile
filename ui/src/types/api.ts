@@ -332,6 +332,7 @@ export interface AccountDashboardItem {
   /** 已发布的全区间绩效；金额、日收益与曲线同版。 */
   performance?: PerformanceSummary
   /** 最近一次账户资产观测时间；无快照为 null。 */
+  /** 当前 total_asset 的真实资产观测时间；null 表示尚未查询，performance 为独立历史绩效。 */
   asset_observed_at?: string | null
   /** 最近一次执行是否成功（1/0）；无记录为 null。 */
   last_is_success: number | null

@@ -20,7 +20,7 @@ from axile.server.db.models.performance import PerformanceBinding, PerformanceSe
 from axile.server.performance import calculate_performance, local_time, observation
 from axile.server.performance_costs import SHANGHAI, daily_costs, project_execution, summarize, timestamp
 
-LOGIC_VERSION = "7"
+LOGIC_VERSION = "8"
 ENGINE_VERSION = version("wbt")
 RETRY_DELAYS = (5, 30, 120)
 
@@ -90,7 +90,12 @@ def _snapshot_response(joined, range_key: str) -> dict:
         if joined and joined["snapshot_id"]
         else None
     )
-    status = _snapshot_status(row, snapshot is not None)
+    incompatible = snapshot is not None and (
+        snapshot["logic_version"] != LOGIC_VERSION or snapshot["engine_version"] != ENGINE_VERSION
+    )
+    if incompatible:
+        snapshot = None
+    status = "pending" if incompatible else _snapshot_status(row, snapshot is not None)
     result = snapshot["ranges"][range_key] if snapshot else None
     return {
         "status": status,
@@ -124,6 +129,8 @@ async def read_performance_summaries(session, account_ids: list[int]) -> dict:
                     states,
                     snapshots.c.id.label("snapshot_id"),
                     snapshots.c.computed_at,
+                    snapshots.c.logic_version.label("snapshot_logic_version"),
+                    snapshots.c.engine_version.label("snapshot_engine_version"),
                     snapshots.c.ranges["all"]["performance"]["points"].label("points"),
                 )
                 .select_from(states.outerjoin(snapshots, states.c.current_snapshot == snapshots.c.id))
@@ -135,12 +142,15 @@ async def read_performance_summaries(session, account_ids: list[int]) -> dict:
     )
     summaries = {}
     for row in rows:
-        points = row["points"] or []
+        incompatible = row["snapshot_id"] is not None and (
+            row["snapshot_logic_version"] != LOGIC_VERSION or row["snapshot_engine_version"] != ENGINE_VERSION
+        )
+        points = [] if incompatible else row["points"] or []
         last = points[-1] if points else {}
         summaries[row["account_id"]] = PerformanceSummary(
-            snapshot_id=row["snapshot_id"],
-            status=_snapshot_status(row, row["snapshot_id"] is not None),
-            computed_at=row["computed_at"],
+            snapshot_id=None if incompatible else row["snapshot_id"],
+            status="pending" if incompatible else _snapshot_status(row, row["snapshot_id"] is not None),
+            computed_at=None if incompatible else row["computed_at"],
             observed_at=last.get("observed_at"),
             account_equity=last.get("account_equity"),
             account_daily_return=last.get("account_daily_return"),

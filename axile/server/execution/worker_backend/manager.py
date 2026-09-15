@@ -494,12 +494,7 @@ class WorkerBackendManager:
             }
 
         return UnifiedStandardOutput(
-            account_assets=UnifiedAccountAssets(
-                available_cash=0.0,
-                total_asset=0.0,
-                market_value=0.0,
-                positions=[],
-            ),
+            account_assets=UnifiedAccountAssets.unavailable(),
             memory={"message": message},
             inputs=None,
             symbol_results={},

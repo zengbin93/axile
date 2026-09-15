@@ -185,7 +185,12 @@ def test_legacy_summary_waits_for_equity_and_rebuilds_on_logic_upgrade(tmp_path)
                 await session.commit()
                 old = (await read_performance_summaries(session, [2]))[2]
                 assert old.account_equity is None
-                assert old.points[-1].account_return is not None
+                assert old.points == []
+                assert old.status == "pending"
+                assert (await read_snapshot(session, 2, "all"))["result"] is None
+                with pytest.raises(HTTPException) as exc:
+                    await read_costs(session, 2, CostQuery(snapshot_id=initial["snapshot_id"]))
+                assert exc.value.status_code == 410
             await manager.start()
             await manager.stop()
             await manager.run_once()

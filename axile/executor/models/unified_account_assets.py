@@ -103,7 +103,7 @@ class UnifiedAccountAssets(BaseModel):
         最近更新时间。
     source : str
         账户读取来源标记：``real`` 真实拉取、``assumed`` 读账户失败后退化为假设权益、
-        ``error`` 转换异常零值；供下游区分快照可信度，避免用退化数据算出「假的到位度」。
+        ``unavailable`` 未取得资产；``error`` 转换异常零值；供下游区分快照可信度，避免用退化数据算出「假的到位度」。
     """
 
     # === 核心字段 ===
@@ -120,7 +120,7 @@ class UnifiedAccountAssets(BaseModel):
     )
     source: str = Field(
         default="real",
-        description="账户读取来源：``real`` 真实拉取；``assumed`` 读账户失败后退化为假设权益；``error`` 转换异常零值。",
+        description="账户读取来源：``real`` 真实拉取；``assumed`` 读账户失败后退化为假设权益；``unavailable`` 未取得资产；``error`` 转换异常零值。",
     )
 
     # === 渠道特有数据 ===
@@ -135,6 +135,11 @@ class UnifiedAccountAssets(BaseModel):
         validate_assignment=False,
         extra="ignore",
     )
+
+    @classmethod
+    def unavailable(cls) -> "UnifiedAccountAssets":
+        """构造未取得账户资产的占位值，不代表真实零余额。"""
+        return cls(available_cash=0, total_asset=0, market_value=0, source="unavailable")
 
     @override
     def __str__(self) -> str:

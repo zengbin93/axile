@@ -117,3 +117,18 @@ def test_refresh_account_assets_timeout_returns_gateway_timeout(monkeypatch: pyt
     assert session.added == []
     assert session.commits == 0
     assert session.rollbacks == 1
+
+
+@pytest.mark.parametrize("source", ["assumed", "error", "unavailable"])
+def test_untrusted_refresh_preserves_previous_snapshot(monkeypatch, source):
+    session = _Session(build_account(id=48))
+
+    async def query(_account):
+        return UnifiedAccountAssets(available_cash=0, total_asset=0, market_value=0, source=source)
+
+    monkeypatch.setattr(account_assets_routes, "query_account_assets", query)
+    with pytest.raises(HTTPException) as error:
+        asyncio.run(account_assets_routes.refresh_account_assets(session, 48))
+    assert error.value.status_code == 502
+    assert session.added == []
+    assert session.commits == 0

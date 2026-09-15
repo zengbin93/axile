@@ -238,7 +238,7 @@ async def _build_test_card(
     source = _TestNotificationSource(account.name)
     if card_config and card_config.mode == "custom":
         output = UnifiedStandardOutput(
-            account_assets=UnifiedAccountAssets(available_cash=0, total_asset=0, market_value=0),
+            account_assets=UnifiedAccountAssets.unavailable(),
             inputs=None,
             status=ExecutionStatus.NOOP,
             channel_type=account.trade_channel,

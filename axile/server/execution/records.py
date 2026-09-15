@@ -15,6 +15,7 @@ from sqlalchemy.exc import IntegrityError
 
 from axile.domain.execution import ExecutionKind, ExecutionTaskStatus, ExecutionTerminateMode
 from axile.executor.termination import TERMINATION_TRIGGER_OPERATOR
+from axile.server.asset_observations import is_asset_observation
 from axile.server.core.db import SessionLocal
 from axile.server.db.models import Account, AccountAssetSnapshot, ExecuteRecord
 
@@ -74,7 +75,7 @@ async def _persist_execute_record(
         )
         session.add(record)
         assets = raw_result.get("account_assets")
-        if isinstance(assets, dict) and assets:
+        if isinstance(assets, dict) and is_asset_observation(assets, raw_result):
             session.add(
                 AccountAssetSnapshot(
                     account_id=account_id,

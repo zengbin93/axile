@@ -7,6 +7,7 @@ from sqlalchemy import ColumnElement
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import and_, col, desc, func, select
 
+from axile.server.asset_observations import valid_asset_snapshot_condition
 from axile.server.db.models import AccountAssetSnapshot, ExecuteRecord, Portfolio, PortfolioAccount
 
 
@@ -18,7 +19,7 @@ async def get_recent_account_asset_snapshots(
     """获取账户最近的资产快照（最新在前）."""
     result = await session.execute(
         select(AccountAssetSnapshot)
-        .where(AccountAssetSnapshot.account_id == account_id)
+        .where(AccountAssetSnapshot.account_id == account_id, valid_asset_snapshot_condition())
         .order_by(desc(AccountAssetSnapshot.id))
         .limit(limit)
     )
@@ -40,7 +41,9 @@ async def get_recent_account_asset_snapshots_for_accounts(
         )
     ).label("rn")
     ranked = (
-        select(AccountAssetSnapshot, row_number).where(col(AccountAssetSnapshot.account_id).in_(account_ids)).subquery()
+        select(AccountAssetSnapshot, row_number)
+        .where(col(AccountAssetSnapshot.account_id).in_(account_ids), valid_asset_snapshot_condition())
+        .subquery()
     )
     stmt = select(AccountAssetSnapshot).from_statement(
         select(ranked).where(ranked.c.rn <= limit).order_by(ranked.c.account_id, desc(ranked.c.id))
@@ -71,7 +74,7 @@ async def _get_bounded_account_asset_snapshots_for_accounts(
     ).label("rn")
     ranked = (
         select(AccountAssetSnapshot, row_number)
-        .where(col(AccountAssetSnapshot.account_id).in_(account_ids), time_filter)
+        .where(col(AccountAssetSnapshot.account_id).in_(account_ids), time_filter, valid_asset_snapshot_condition())
         .subquery()
     )
     inner_order = desc(ranked.c.id) if newest_first else ranked.c.id

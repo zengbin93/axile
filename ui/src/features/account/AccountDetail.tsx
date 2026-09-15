@@ -2,8 +2,7 @@ import { executionOutcome } from '@/features/account/executionOutcome'
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react'
 import { useViewTransitionState } from 'react-router'
 import { ArrowLeft, RefreshCw } from 'lucide-react'
-import { cardPerformance } from '@/features/dashboard/performance'
-import { requestPerformanceRefresh } from '@/features/history/performanceCache'
+import { cardPerformance, currentEquity } from '@/features/dashboard/performance'
 import { Link, useNavigate } from '@/components/ui/nav'
 import { Card, Chip } from '@/components/ui/Card'
 import { DriftBar } from '@/components/viz/DriftBar'
@@ -54,12 +53,13 @@ import {
   getAccountTargetSnapshot,
   getNextRun,
   refreshAccountTargetSnapshot,
+  refreshAccountAssets,
   updateAccount,
   deleteAccount,
 } from '@/lib/api/accounts'
 import { usePolling } from '@/lib/hooks/usePolling'
 import { useTargetSnapshot } from '@/lib/hooks/useTargetSnapshot'
-import { stateVerdict, gateOf, observedTotalAsset, rebalancePlanOfServer, positionsOf, positionsOfAssets, type StatusLevel } from '@/lib/derive'
+import { stateVerdict, gateOf, observedTotalAsset, rebalancePlanOfServer, positionsOfAssets, type StatusLevel } from '@/lib/derive'
 import { shortErrorReason } from '@/lib/errorInfo'
 import { displayCurrencyUnit, fmtMoney, withCurrency } from '@/lib/format'
 import { describeCron } from '@/features/setup/cron'
@@ -89,17 +89,14 @@ export function AccountDetail({
   const toast = useToastStore((s) => s.toast)
   const sidebarCompact = useNavigationStore((s) => s.sidebarCompact)
   const [timerOpen, setTimerOpen] = useState(false)
-  const [refreshingPerformance, setRefreshingPerformance] = useState(false)
+  const [refreshingAssets, setRefreshingAssets] = useState(false)
   // 启停乐观态：确认后立刻翻转，驱动按钮/状态句日记式换字；与 item 对齐后清除。
   const [startedOverride, setStartedOverride] = useState<boolean | null>(null)
   // 共享元素 FLIP 门控：
   // - 账户名：进详情（舰队/组合）或去编辑页时挂名；持仓/回看不飞名。
-  // - 金额：仅普通「去回看」；曲线入口走专用 SVG 展开，关闭该次原生共享过渡。
   const tDetail = useViewTransitionState(`/accounts/${accountId}`)
   const tEdit = useViewTransitionState(`/accounts/${accountId}/edit`)
-  const tHistory = useViewTransitionState(`/accounts/${accountId}/history`)
   const nameVt = tDetail || tEdit
-  const amountVt = tHistory
   const assetTerms = accountAssetTerms(item.trade_channel)
   const channelDescriptor = useChannelDescriptor(item.trade_channel)
   const channelSchedule = channelDescriptor?.schedule
@@ -203,8 +200,9 @@ export function AccountDetail({
   const recordList = activity.data?.data.flatMap((item) => item.kind === 'execution' ? [item.record] : []) ?? []
   const latestAssets = assetSnapshots.data?.data[0]?.assets
   const snapshotPositions = positionsOfAssets(latestAssets)
-  const positions = latestAssets ? snapshotPositions : positionsOf(recordList)
-  const { equity, pct, dayLabel, statusLabel } = cardPerformance(item.performance)
+  const positions = snapshotPositions
+  const { pct, dayLabel, statusLabel } = cardPerformance(item.performance)
+  const equity = currentEquity(item)
   const holdingsCount = latestAssets ? snapshotPositions.length : item.holdings_count
   const comparisonLoading = comparison.data === null && comparison.loading
   const comparisonError = comparison.error
@@ -305,17 +303,18 @@ export function AccountDetail({
       toast(shortErrorReason(e))
     }
   }
-  const onRefreshPerformance = async () => {
-    if (refreshingPerformance) return
-    setRefreshingPerformance(true)
+  const onRefreshAssets = async () => {
+    if (refreshingAssets) return
+    setRefreshingAssets(true)
     try {
-      if (!await requestPerformanceRefresh(accountId)) throw new Error('绩效更新请求失败，请重试')
+      await refreshAccountAssets(accountId)
+      await Promise.all([refreshAssetSnapshots(), refreshComparison()])
       await onDashboardRefresh?.()
-      toast('已请求更新绩效')
+      toast('账户资产已刷新')
     } catch (e) {
       toast(shortErrorReason(e))
     } finally {
-      setRefreshingPerformance(false)
+      setRefreshingAssets(false)
     }
   }
 
@@ -476,19 +475,19 @@ export function AccountDetail({
         <div className="mt-6 border-t border-line pt-4">
           <div className="flex items-center gap-1.5 text-[14px] text-ink-2">
             <span>{assetTerms.fullLabel}</span>
-            <Tooltip content="刷新绩效快照">
+            <Tooltip content="刷新账户资产">
               <span className="inline-flex">
                 <button
                   type="button"
-                  onClick={onRefreshPerformance}
-                  disabled={refreshingPerformance}
-                  aria-label={refreshingPerformance ? '正在请求更新绩效' : '刷新绩效'}
-                  title="刷新绩效"
+                  onClick={onRefreshAssets}
+                  disabled={refreshingAssets}
+                  aria-label={refreshingAssets ? '正在查询账户资产' : '刷新账户资产'}
+                  title="刷新账户资产"
                   className="grid h-6 w-6 cursor-pointer place-items-center rounded-md text-ink-3 hover:bg-fill hover:text-ink-1 disabled:cursor-default disabled:opacity-40 disabled:hover:bg-transparent"
                 >
                   <RefreshCw
                     size={14}
-                    className={refreshingPerformance ? 'animate-spin motion-reduce:animate-none' : undefined}
+                    className={refreshingAssets ? 'animate-spin motion-reduce:animate-none' : undefined}
                   />
                 </button>
               </span>
@@ -496,14 +495,14 @@ export function AccountDetail({
           </div>
           <div className="flex items-end justify-between gap-4">
             <div>
-              {/* 普通绩效导航的金额身份；点击曲线时不与曲线展开竞争。 */}
+              {/* 当前权益独立于历史绩效金额。 */}
               <div
                 className="num mt-0.5 text-[35px] font-[640] tracking-tight"
-                style={amountVt ? { viewTransitionName: `equity-amount-${accountId}` } : undefined}
               >
                 {equity == null ? '—' : <NumberTicker value={equity} format={{ minimumFractionDigits: 2, maximumFractionDigits: 2 }} />}
                 <span className="ml-1.5 text-[17px] font-medium text-ink-3">{displayCurrencyUnit(item.currency)}</span>
               </div>
+              <div className="mt-1 text-xs text-ink-3">{item.asset_observed_at ? `资产查询于 ${item.asset_observed_at}` : '尚未查询账户资产'}</div>
               <div className="mt-1.5 text-[14.5px] text-ink-2">
                 {pct == null && <span>{dayLabel} — · </span>}
                 <span className="text-xs text-ink-3">{statusLabel}{statusLabel ? ' · ' : ''}</span>
@@ -609,7 +608,7 @@ export function AccountDetail({
                   {driftHeadline}
                 </div>
                 <div className="mt-1.5 text-[14px] text-ink-2">
-                  当前 {holdingsCount === 0 ? '空仓' : `${holdingsCount} 只`} · 目标 {targetCount} 只
+                  当前 {!item.asset_observed_at ? '尚未查询' : holdingsCount === 0 ? '空仓' : `${holdingsCount} 只`} · 目标 {targetCount} 只
                 </div>
                 {plan.off > 0 && (
                   <>
@@ -627,6 +626,7 @@ export function AccountDetail({
               <div className="min-w-0 border-t border-line lg:border-t-0 lg:border-l lg:pl-5">
                 <HoldingsPreviewTable
                   holdings={currentHoldings}
+                  observed={!!latestAssets}
                   currency={item.currency}
                   positionValueLabel={positionValueLabel}
                 />
@@ -863,10 +863,12 @@ const PREVIEW_TH = 'sticky top-0 z-[1] h-8 bg-surface align-middle font-medium'
 const PREVIEW_COL = 'w-[1%] whitespace-nowrap'
 
 function HoldingsPreviewTable({
+  observed = false,
   holdings,
   currency = '',
   positionValueLabel,
 }: {
+  observed?: boolean
   /** `null` = 对照仍在加载，表结构在、单元格骨架占位。 */
   holdings: CurrentHoldingPreview[] | null
   currency?: string
@@ -915,7 +917,7 @@ function HoldingsPreviewTable({
           ) : holdings.length === 0 ? (
             <tr>
               <td colSpan={4} className="h-32 text-[14px] text-ink-3">
-                当前空仓
+                {observed ? '当前空仓' : '持仓尚未查询'}
               </td>
             </tr>
           ) : (
