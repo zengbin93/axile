@@ -38,7 +38,7 @@ from axile.server.db.models import (
     TargetWeightSnapshot,
     TargetWeightSnapshotPublic,
 )
-from axile.server.execution.legacy_compat import normalize_execution_event_details
+from axile.server.execution.legacy_compat import normalize_execution_event_details, normalize_legacy_result
 from axile.server.execution.lifecycle import enqueue_empty_positions, enqueue_execute_trade
 from axile.server.execution.live import live_hub
 from axile.server.execution.rebalance import _normalize_rebalance_target
@@ -443,8 +443,15 @@ async def execution_artifacts(
         .limit(pagination.limit)
     )
     rows = (await session.execute(stmt)).scalars().all()
+    artifact_data: list[ExecutionArtifactPublic] = []
+    for row in rows:
+        item = ExecutionArtifactPublic.model_validate(row)
+        # 旧执行摘要附件读时归一；其他附件形状不同，不做推断。
+        if row.artifact_type == ExecutionArtifactType.EXECUTION_SUMMARY and isinstance(item.content, dict):
+            item.content = normalize_legacy_result(item.content)
+        artifact_data.append(item)
     return ExecutionArtifactListPublic(
-        data=[ExecutionArtifactPublic.model_validate(row) for row in rows],
+        data=artifact_data,
         count=total,
     )
 

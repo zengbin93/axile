@@ -74,7 +74,7 @@ def normalize_legacy_result(raw: object) -> object:
     -------
     object
         补齐 ``status``/``error``（必要时附 ``technical_detail``）后的浅拷贝；
-        非字典输入原样返回。
+        非字典输入原样返回。``reconciliation.symbols`` 是持仓证据行，不做回填。
     """
     if not isinstance(raw, dict):
         return raw
@@ -111,12 +111,8 @@ def normalize_legacy_result(raw: object) -> object:
     symbols = result.get("symbol_results")
     if isinstance(symbols, dict):
         result["symbol_results"] = {symbol: normalize_legacy_result(item) for symbol, item in symbols.items()}
-    reconciliation = result.get("reconciliation")
-    if isinstance(reconciliation, dict) and isinstance(reconciliation.get("symbols"), list):
-        result["reconciliation"] = {
-            **reconciliation,
-            "symbols": [normalize_legacy_result(item) for item in reconciliation["symbols"]],
-        }
+    # reconciliation.symbols 是持仓证据行（before/after/reached），不是结果记录，
+    # 不得对其回填 status/error——那是把结论编造进证据。
     return result
 
 

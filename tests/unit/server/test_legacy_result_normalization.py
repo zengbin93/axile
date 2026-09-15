@@ -70,18 +70,24 @@ def test_success_records_do_not_get_fabricated_error():
 
 
 def test_recursion_into_symbols_and_reconciliation():
-    """symbol_results 与 reconciliation.symbols 逐层归一。"""
+    """symbol_results 逐层归一；reconciliation 行是持仓证据，不做任何回填。"""
     raw = {
         "outcome": "not_reached",
         "symbol_results": {"rb2610": {"outcome": "error", "msg": "ValueError: bad"}},
-        "reconciliation": {"symbols": [{"outcome": "blocked"}]},
+        "reconciliation": {"symbols": [{"symbol": "rb2610", "status": "PARTIAL", "before": 1.0, "after": 2.0}]},
     }
     normalized = normalize_legacy_result(raw)
     symbol = normalized["symbol_results"]["rb2610"]
     assert symbol["status"] == "FAILED"
     assert symbol["error"] == "执行失败，具体原因见执行证据"
     assert symbol["technical_detail"] == "ValueError: bad"
-    assert normalized["reconciliation"]["symbols"][0]["status"] == "BLOCKED"
+    # 证据行原样透传：不得把结论编造进持仓证据。
+    assert normalized["reconciliation"]["symbols"][0] == {
+        "symbol": "rb2610",
+        "status": "PARTIAL",
+        "before": 1.0,
+        "after": 2.0,
+    }
 
 
 def test_non_dict_input_passthrough():
