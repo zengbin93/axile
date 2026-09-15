@@ -39,6 +39,7 @@ class AccountControlBlockedError(RuntimeError):
         symbol: str | None = None,
         details: AccountControlHit | None = None,
         reason_code: str | None = None,
+        execution_error: str | None = None,
     ) -> None:
         super().__init__(message)
         self.account_id = account_id
@@ -48,3 +49,4 @@ class AccountControlBlockedError(RuntimeError):
         self.symbol = symbol
         self.details = details
         self.reason_code = reason_code
+        self.execution_error = execution_error or message

@@ -12,6 +12,13 @@ from typing_extensions import override
 
 from axile.common.trade_channel import TradeChannel
 
+DEGRADED_SNAPSHOT_SOURCES = frozenset({"assumed", "error", "unavailable"})
+
+
+def is_degraded_snapshot_source(source: object) -> bool:
+    """识别明确降级来源；渠道自定义来源仍可提供资产与持仓事实。"""
+    return isinstance(source, str) and source in DEGRADED_SNAPSHOT_SOURCES
+
 
 # 辅助函数（替代 lambda）
 def _get_now_iso() -> str:
@@ -120,7 +127,7 @@ class UnifiedAccountAssets(BaseModel):
     )
     source: str = Field(
         default="real",
-        description="账户读取来源：``real`` 真实拉取；``assumed`` 读账户失败后退化为假设权益；``unavailable`` 未取得资产；``error`` 转换异常零值。",
+        description="账户读取来源：real 或渠道自定义有效来源；assumed、unavailable、error 为降级来源，不提供持仓与权益事实。",
     )
 
     # === 渠道特有数据 ===
