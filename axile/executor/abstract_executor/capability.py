@@ -182,13 +182,11 @@ class AbstractExecutorCapabilityMixin:
         Raises
         ------
         ValueError
-            当目标仓位或账户配置缺失时抛出。
+            当账户配置缺失时抛出。
         """
         executor = _executor(self)
 
-        if not standard_input.curr_target:
-            raise ValueError("当前目标持仓权重不能为空")
-
+        # 空字典是合法空仓目标，已有持仓由 planning 补为零权重。
         if not standard_input.account_config:
             raise ValueError("账户配置不能为空")
 

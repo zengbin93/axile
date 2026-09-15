@@ -1830,3 +1830,62 @@ def test_parallel_operator_terminate_reports_every_symbol_cancel_failure(
 
     assert exc_info.value.trigger == "operator"
     assert sorted(exc_info.value.cancel_failed_order_ids) == sorted(f"order-fail-{symbol}" for symbol in symbols)
+
+
+@pytest.mark.parametrize("last_target", [{}, {"rb2610": 0.1}])
+def test_execute_empty_target_on_flat_account_is_noop(monkeypatch, last_target) -> None:
+    executor = _TestExecutor()
+
+    def unexpected_call(*args, **kwargs):
+        pytest.fail("空仓账户不应下单或撤单")
+
+    monkeypatch.setattr(executor, "cancel_all_orders", unexpected_call)
+    monkeypatch.setattr(executor, "_place_order_impl", unexpected_call)
+    output = executor.execute(
+        UnifiedStandardInput(
+            channel_type=TradeChannel.CTP,
+            account_config=executor.account_config,
+            curr_target={},
+            last_target=last_target,
+        )
+    )
+
+    assert output.success is True
+    assert output.status == ExecutionStatus.NOOP
+    assert output.inputs.curr_target == {}
+    if not last_target:
+        assert output.symbol_results == {}
+        assert executor.market_data_requests == []
+
+
+@pytest.mark.parametrize("direction", [PositionDirection.LONG, PositionDirection.SHORT])
+def test_execute_empty_target_dispatches_existing_position_to_zero(monkeypatch, direction) -> None:
+    from axile.executor import execution_engine as execution_engine_module
+
+    executor = _TestExecutor(account_assets_snapshots=[_assets(positions=[("rb2610", 5.0, direction)])])
+    calls = []
+
+    def resolve_algorithm(name, session):
+        def algorithm(executor, inputs):
+            calls.append((inputs.symbol, inputs.target_volume))
+            return AlgorithmResult(
+                orders=[],
+                account_assets=_assets(),
+                target_volume=inputs.target_volume,
+                first_tick=_price(inputs.symbol),
+            )
+
+        return algorithm
+
+    monkeypatch.setattr(execution_engine_module, "resolve_algorithm", resolve_algorithm)
+    output = executor.execute(
+        UnifiedStandardInput(
+            channel_type=TradeChannel.CTP,
+            account_config=executor.account_config,
+            curr_target={},
+        )
+    )
+
+    assert calls == [("rb2610", 0.0)]
+    assert output.success is True
+    assert output.inputs.curr_target == {}

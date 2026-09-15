@@ -96,7 +96,7 @@ def _derive_dispatch_status(symbol_results: dict[str, AlgorithmResult]) -> Execu
         if all(status == ExecutionStatus.BLOCKED for status in statuses):
             return ExecutionStatus.BLOCKED
         return ExecutionStatus.PARTIAL
-    if statuses and all(status == ExecutionStatus.NOOP for status in statuses):
+    if all(status == ExecutionStatus.NOOP for status in statuses):
         return ExecutionStatus.NOOP
     return ExecutionStatus.SUCCEEDED
 
@@ -429,8 +429,7 @@ class ExecutionEngine:
         account_assets = self._owner.get_account_assets()
         effective_curr_target = self._build_effective_curr_target(standard_input, account_assets)
         symbols = self._owner.get_all_symbols(effective_curr_target, standard_input.last_target)
-        if not symbols:
-            raise ValueError("当前输入没有可执行的 symbol")
+        # 空仓目标且没有待处理品种时，沿空计划汇总为 NOOP。
         return account_assets, effective_curr_target, symbols
 
     def _get_symbol_algorithm_name(self, standard_input: UnifiedStandardInput, symbol: str) -> str:
