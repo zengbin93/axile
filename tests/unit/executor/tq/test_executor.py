@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import asyncio
+from collections.abc import Coroutine
 from datetime import date, timedelta
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
@@ -52,19 +55,30 @@ class FakeApi:
         self.insert_args: dict[str, object] = {}
         self.order_lookups: list[str] = []
         self.canceled: list[str] = []
+        self.quote_calls = 0
         self.closed = False
+        self.loop: asyncio.AbstractEventLoop | None = None
 
     def query_quotes(self, *, ins_class: str, expired: bool = False) -> list[str]:
         return ["SHFE.rb2610"] if ins_class == "FUTURE" and not expired else []
 
+    def create_task(self, coroutine: Coroutine[Any, Any, Any]) -> asyncio.Task:
+        if self.loop is None:
+            self.loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(self.loop)
+        return self.loop.create_task(coroutine)
+
     def wait_update(self, *, deadline: float) -> bool:
         del deadline
+        if self.loop is not None:
+            self.loop.run_until_complete(asyncio.sleep(0.001))
         return False
 
     def is_changing(self, _entity: object) -> bool:
         return False
 
-    def get_quote(self, _symbol: str) -> dict[str, object]:
+    async def get_quote(self, _symbol: str) -> dict[str, object]:
+        self.quote_calls += 1
         return self.quote
 
     def get_trading_calendar(self, start: date, end: date) -> object:
@@ -116,6 +130,13 @@ class FakeApi:
         return {"t1": self.trade}
 
     def close(self) -> None:
+        if self.loop is not None:
+            tasks = asyncio.all_tasks(self.loop)
+            for task in tasks:
+                task.cancel()
+            self.loop.run_until_complete(asyncio.gather(*tasks, return_exceptions=True))
+            self.loop.close()
+            asyncio.set_event_loop(None)
         self.closed = True
 
 
@@ -181,3 +202,43 @@ def test_executor_uses_contract_multiplier_and_rejects_fractional_lots(
     assert instance._calculate_generic_volume(0.32, 3200, assets, {}, symbol="rb2610") == 10
     with pytest.raises(ValueError, match="正整数手"):
         instance._place_order_impl("rb2610", OrderDirection.BUY, OrderType.LIMIT, 1.5, 3200)
+
+
+def test_stale_market_refresh_reuses_snapshot_and_remains_stale(executor: tuple[TQExecutor, FakeApi]) -> None:
+    from axile.executor.algorithms.utils.order_tracker import OrderTracker
+
+    instance, api = executor
+    first = instance.get_market_data(["rb2610"])["rb2610"]
+    # 算法侧使用 symbol 级代理；刷新仍走真实 TQ 取价路径。
+    proxy = SimpleNamespace(
+        symbol="rb2610",
+        logger=instance.logger,
+        get_market_data=lambda: instance.get_market_data(["rb2610"])["rb2610"],
+    )
+    tracker = OrderTracker(executor=proxy)
+    tracker.latest_prices["rb2610"] = first
+    assert tracker._usable_price("rb2610") is None
+    again = instance.get_market_data(["rb2610"])["rb2610"]
+    assert again.timestamp == first.timestamp == 1_700_000_000_000
+    assert instance.get_tick_size("rb2610") == 1
+    assert api.quote_calls == 1
+
+
+def test_missing_first_quote_returns_empty_market_but_metadata_times_out(
+    executor: tuple[TQExecutor, FakeApi], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    instance, api = executor
+
+    def pending_quote(_symbol: str) -> asyncio.Future:
+        return asyncio.get_running_loop().create_future()
+
+    monkeypatch.setattr(api, "get_quote", pending_quote)
+    runtime = instance._require_runtime()
+    read = runtime.quote_snapshots
+    monkeypatch.setattr(runtime, "quote_snapshots", lambda symbols, **_kwargs: read(symbols, timeout=0.02))
+    assert instance.get_market_data(["rb2610"]) == {}
+    with pytest.raises(TimeoutError, match="SHFE.rb2610"):
+        instance.get_tick_size("rb2610")
+    assets = UnifiedAccountAssets(available_cash=1_000_000, total_asset=1_000_000, market_value=0, positions=[])
+    with pytest.raises(TimeoutError, match="SHFE.rb2610"):
+        instance._calculate_generic_volume(0.32, 3200, assets, {"contract_multiplier": 10}, symbol="rb2610")

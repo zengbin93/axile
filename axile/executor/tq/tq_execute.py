@@ -393,20 +393,13 @@ class TQExecutor(AbstractExecutor):
     def _quote_snapshot(self, symbol: str) -> dict[str, object]:
         runtime = self._require_runtime()
         tq_symbol = runtime.resolver.to_tq(symbol)
-        runtime.subscribe([tq_symbol])
-        return runtime.call(lambda api: snapshot_entity(getattr(api, "get_quote")(tq_symbol)))
+        return runtime.quote_snapshot(tq_symbol)
 
     @override
     def get_market_data(self, symbols: list[str]) -> dict[str, UnifiedPriceData]:
         runtime = self._require_runtime()
         tq_symbols = [runtime.resolver.to_tq(symbol) for symbol in symbols]
-        runtime.subscribe(tq_symbols)
-
-        def query(api: object) -> dict[str, dict[str, object]]:
-            get_quote = getattr(api, "get_quote")
-            return {symbol: snapshot_entity(get_quote(symbol)) for symbol in tq_symbols}
-
-        rows = runtime.call(query)
+        rows = runtime.quote_snapshots(tq_symbols)
         result: dict[str, UnifiedPriceData] = {}
         for row in rows.values():
             quote = quote_to_unified(row, runtime.resolver)

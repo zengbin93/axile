@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import asyncio
+import logging
 import queue
 import threading
 import time
 from collections.abc import Callable, Mapping
+from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import Literal, TypeVar, cast
 
@@ -77,6 +80,27 @@ def snapshot_entity(entity: object) -> dict[str, object]:
     return result
 
 
+def _quote_value_snapshot(value: object) -> object:
+    """递归展开行情中的 SDK Mapping（如 TradingTime），不复制其私有 API 引用。"""
+    if isinstance(value, Mapping):
+        return {str(key): _quote_value_snapshot(item) for key, item in value.items() if not str(key).startswith("_")}
+    if isinstance(value, list):
+        return [_quote_value_snapshot(item) for item in value]
+    if isinstance(value, tuple):
+        return tuple(_quote_value_snapshot(item) for item in value)
+    return deepcopy(value)
+
+
+@dataclass(slots=True)
+class _QuoteSubscription:
+    started: float = field(default_factory=time.monotonic)
+    task: asyncio.Task[None] | None = None
+    entity: object | None = None
+    snapshot: dict[str, object] | None = None
+    error: Exception | None = None
+    warned: bool = False
+
+
 class TQRuntime:
     """TqApi 单线程运行时与同步命令桥."""
 
@@ -91,7 +115,10 @@ class TQRuntime:
         self._close_error: BaseException | None = None
         self._api: object | None = None
         self._resolver: TQSymbolResolver | None = None
-        self._subscriptions: dict[str, object] = {}
+        # condition 保护订阅登记、快照与等待状态；SDK entity / task 仅由 owner 使用。
+        self._subscriptions: dict[str, _QuoteSubscription] = {}
+        self._quote_condition = threading.Condition()
+        self._logger = logging.getLogger(__name__)
         self._listeners: list[Callable[[str, dict[str, object]], None]] = []
         self._orders: dict[str, dict[str, object]] = {}
         self._trades: dict[str, dict[str, object]] = {}
@@ -142,14 +169,92 @@ class TQRuntime:
         return RuntimeError("TqSdk 运行时已经停止")
 
     def subscribe(self, symbols: list[str]) -> None:
-        """在 owner thread 创建行情实体订阅."""
+        """登记共享订阅；SDK 协程由 owner 的事件泵驱动，不等待首笔行情。"""
+        with self._quote_condition:
+            if self._stopped.is_set():
+                raise self._stopped_error()
+            pending: list[tuple[str, _QuoteSubscription]] = []
+            for symbol in dict.fromkeys(symbols):
+                if symbol in self._subscriptions:
+                    continue
+                state = _QuoteSubscription()
+                self._subscriptions[symbol] = state
+                pending.append((symbol, state))
+            if pending:
+                self._commands.put(_Command(lambda api: self._start_subscriptions(api, pending)))
 
-        def operation(api: object) -> None:
-            get_quote = getattr(api, "get_quote")
-            for symbol in symbols:
-                self._subscriptions.setdefault(symbol, get_quote(symbol))
+    def _start_subscriptions(self, api: object, pending: list[tuple[str, _QuoteSubscription]]) -> None:
+        for symbol, state in pending:
+            self._start_subscription(api, symbol, state)
 
-        self.call(operation)
+    def _start_subscription(self, api: object, symbol: str, state: _QuoteSubscription) -> None:
+        coroutine = self._subscribe_quote(api, symbol, state)
+        try:
+            state.task = getattr(api, "create_task")(coroutine)
+        except Exception as exc:
+            coroutine.close()
+            self._subscription_failed(symbol, state, exc)
+
+    async def _subscribe_quote(self, api: object, symbol: str, state: _QuoteSubscription) -> None:
+        try:
+            # 同步 get_quote 有约 30 秒 SDK 超时；在 SDK 协程中 await 才不会独占 owner。
+            state.entity = await getattr(api, "get_quote")(symbol)
+            self._publish_quote(state)
+        except Exception as exc:
+            self._subscription_failed(symbol, state, exc)
+            return
+        if state.warned:
+            self._logger.info("TQ 行情订阅恢复 %s，耗时 %.3fs", symbol, time.monotonic() - state.started)
+
+    def _subscription_failed(self, symbol: str, state: _QuoteSubscription, error: Exception) -> None:
+        with self._quote_condition:
+            state.error = error
+            self._quote_condition.notify_all()
+        self._logger.warning("TQ 行情订阅失败 %s，耗时 %.3fs: %s", symbol, time.monotonic() - state.started, error)
+
+    def _publish_quote(self, state: _QuoteSubscription) -> None:
+        snapshot = cast(dict[str, object], _quote_value_snapshot(snapshot_entity(state.entity)))
+        with self._quote_condition:
+            state.snapshot = snapshot
+            self._quote_condition.notify_all()
+        self._emit("quote", deepcopy(snapshot))
+
+    def quote_snapshots(self, symbols: list[str], *, timeout: float = 5.0) -> dict[str, dict[str, object]]:
+        """在调用线程按单次总 deadline 等待首份快照，返回已就绪合约的独立副本。
+
+        超时不取消共享订阅；失败合约记录诊断并省略，交由规划层处理缺失行情。
+        已缓存快照保留 SDK 原始时间戳，不等待下一笔更新。
+        """
+        deadline = time.monotonic() + timeout
+        self.subscribe(symbols)
+        with self._quote_condition:
+            states = {symbol: self._subscriptions[symbol] for symbol in dict.fromkeys(symbols)}
+            while True:
+                if self._stopped.is_set():
+                    raise self._stopped_error()
+                pending = {s: state for s, state in states.items() if state.snapshot is None and state.error is None}
+                remaining = deadline - time.monotonic()
+                if not pending or remaining <= 0:
+                    break
+                if threading.current_thread() is self._thread:
+                    raise RuntimeError("TQ owner 线程不能等待首笔行情")
+                self._quote_condition.wait(remaining)
+            for symbol, state in pending.items():
+                if not state.warned:
+                    state.warned = True
+                    self._logger.warning("TQ 首次行情订阅超时 %s，耗时 %.3fs", symbol, time.monotonic() - state.started)
+            return {symbol: deepcopy(state.snapshot) for symbol, state in states.items() if state.snapshot is not None}
+
+    def quote_snapshot(self, symbol: str, *, timeout: float = 5.0) -> dict[str, object]:
+        """读取单合约元数据；失败或到期时明确报错，禁止以默认规格继续交易。"""
+        rows = self.quote_snapshots([symbol], timeout=timeout)
+        if symbol in rows:
+            return rows[symbol]
+        with self._quote_condition:
+            error = self._subscriptions[symbol].error
+        if error is not None:
+            raise RuntimeError(f"TQ 行情订阅失败 {symbol}: {error}") from error
+        raise TimeoutError(f"TQ 首次行情订阅超时: {symbol}")
 
     def close(self) -> None:
         """停止事件泵并关闭 TqApi."""
@@ -209,9 +314,11 @@ class TQRuntime:
 
     def _pump_changes(self, api: object) -> None:
         is_changing = getattr(api, "is_changing", lambda _entity: False)
-        for entity in tuple(self._subscriptions.values()):
-            if is_changing(entity):
-                self._emit("quote", snapshot_entity(entity))
+        with self._quote_condition:
+            subscriptions = tuple(self._subscriptions.values())
+        for state in subscriptions:
+            if state.entity is not None and is_changing(state.entity):
+                self._publish_quote(state)
         for kind, getter_name, previous in (
             ("order", "get_order", self._orders),
             ("trade", "get_trade", self._trades),
@@ -264,31 +371,37 @@ class TQRuntime:
                             command.finish(result=result)
                 try:
                     wait_update = getattr(api, "wait_update")
-                    try:
-                        wait_update(deadline=time.time() + 0.05)
-                    except TypeError:
-                        wait_update()
+                    wait_update(deadline=time.time() + 0.05)
                     self._pump_changes(api)
                 except BaseException:  # noqa: BLE001 - 终止失效事件泵并让后续调用看到异常
                     raise
         except BaseException as exc:  # noqa: BLE001 - 保存事件泵异常供同步调用方读取
             self._runtime_error = exc
         finally:
+            self._shutdown(api)
+
+    def _shutdown(self, api: object) -> None:
+        """在 owner 内取消订阅并唤醒读价和命令等待方，再释放 SDK。"""
+        with self._quote_condition:
             self._stopped.set()
-            failure = self._stopped_error()
-            while True:
-                try:
-                    pending = self._commands.get_nowait()
-                except queue.Empty:
-                    break
-                if isinstance(pending, _Command):
-                    pending.fail_pending(failure)
+            for state in self._subscriptions.values():
+                if state.task is not None and not state.task.done():
+                    state.task.cancel()
+            self._quote_condition.notify_all()
+        failure = self._stopped_error()
+        while True:
             try:
-                getattr(api, "close")()
-            except BaseException as exc:  # noqa: BLE001 - close 错误必须跨线程传播
-                self._close_error = exc
-            finally:
-                self._api = None
+                pending = self._commands.get_nowait()
+            except queue.Empty:
+                break
+            if isinstance(pending, _Command):
+                pending.fail_pending(failure)
+        try:
+            getattr(api, "close")()
+        except BaseException as exc:  # noqa: BLE001 - close 错误必须跨线程传播
+            self._close_error = exc
+        finally:
+            self._api = None
 
 
 __all__ = ["TQRuntime", "snapshot_entity"]

@@ -177,7 +177,7 @@ class OrderTracker:
     degraded_query_interval: float = 3.0
     # 盘口新鲜度兜底：WS 深度流静默失效时 latest_prices 会冻住，据此挂/改被动价可能越过
     # 点差吃成 taker（REST 对账只兜底订单终态、不兜底盘口）。追价读价前若快照年龄超过
-    # price_stale_after 秒，则用 REST 现价快照兜底刷新，并按 rest_price_refresh_interval 限频。
+    # price_stale_after 秒，则刷新行情快照，并按 rest_price_refresh_interval 限频。
     price_stale_after: float = 5.0
     rest_price_refresh_interval: float = 1.0
 
@@ -369,7 +369,7 @@ class OrderTracker:
         return 0 <= now - price_data.timestamp / 1000.0 <= self.price_stale_after
 
     def _rest_refresh_price(self, symbol: str, now: float) -> UnifiedPriceData | None:
-        """盘口陈旧时用 REST 现价快照兜底刷新（限频、仅当前品种）.
+        """盘口陈旧时刷新行情快照（限频、仅当前品种）.
 
         Parameters
         ----------
@@ -382,13 +382,13 @@ class OrderTracker:
         -------
         UnifiedPriceData | None
             成功且有效则返回新快照并写回 ``latest_prices``；限频命中、非当前品种、
-            REST 失败或快照无效时返回 ``None``。
+            行情快照刷新失败或快照无效时返回 ``None``。
 
         Notes
         -----
         ``executor.get_market_data()`` 是 symbol 级代理（只取 ``executor.symbol``），
-        故仅对当前品种走 REST 兜底；其余品种保持既有 WS 快照。按
-        ``rest_price_refresh_interval`` 限频，避免深度持续断流时每轮追价都打 REST。
+        故仅对当前品种刷新行情快照；其余品种保持既有 WS 快照。按
+        ``rest_price_refresh_interval`` 限频，避免深度持续断流时每轮追价都刷新行情快照。
         """
         if symbol != getattr(self.executor, "symbol", None):
             return None
@@ -401,15 +401,15 @@ class OrderTracker:
         except RECOVERABLE_ALGORITHM_EXCEPTIONS as exc:
             if getattr(exc, "requires_session_recovery", False):
                 raise
-            self._logger.warning(f"盘口陈旧，REST 兜底刷新 {symbol} 失败: {format_exception_message(exc)}")
+            self._logger.warning(f"盘口陈旧，行情快照刷新 {symbol} 失败: {format_exception_message(exc)}")
             return None
         if refreshed is None or not refreshed.is_valid() or not self._price_is_fresh(refreshed, self.clock.time()):
             return None
-        self._logger.info(f"盘口陈旧超 {self.price_stale_after}s，已用 REST 现价兜底刷新 {symbol}")
+        self._logger.info(f"盘口陈旧超 {self.price_stale_after}s，已刷新行情快照 {symbol}")
         return refreshed
 
     def _usable_price(self, symbol: str) -> UnifiedPriceData | None:
-        """取用于追价的可用盘口：新鲜则直接用，陈旧则 REST 兜底刷新.
+        """取用于追价的可用盘口：新鲜则直接用，陈旧则刷新行情快照.
 
         Parameters
         ----------
@@ -419,7 +419,7 @@ class OrderTracker:
         Returns
         -------
         UnifiedPriceData | None
-            新鲜的 WS 快照或 REST 兜底后的快照；两者皆不可得时返回 ``None``。
+            新鲜的 WS 快照或刷新后的行情快照；两者皆不可得时返回 ``None``。
         """
         price = self.latest_prices.get(symbol)
         now = self.clock.time()
@@ -775,7 +775,7 @@ class OrderTracker:
             symbol = chase_info["symbol"]
             direction = chase_info["direction"]
 
-            # 追价前取「可用盘口」：陈旧则 REST 兜底刷新，避免据冻住的 WS 快照追出越点差的 taker 价。
+            # 追价前取「可用盘口」：陈旧则刷新行情快照，避免据冻住的 WS 快照追出越点差的 taker 价。
             latest_price = self._usable_price(symbol)
             if latest_price is None or self._submission_expired(chase_info):
                 continue
@@ -901,8 +901,8 @@ class OrderTracker:
         current_time = self.clock.time()
 
         # 触发判定同样需要新鲜盘口：WS 冻住时若据陈旧价判为无需追价，会让挂单久滞于已偏离
-        # 的价位。但 REST 兜底刷新是阻塞调用、绝不能持锁进行，故先在锁外把候选品种刷新到
-        # latest_prices，再持锁做纯内存判定（与执行阶段共享限频、不重复打 REST）。
+        # 的价位。但行情快照刷新是阻塞调用、绝不能持锁进行，故先在锁外把候选品种刷新到
+        # latest_prices，再持锁做纯内存判定（与执行阶段共享限频、不重复刷新行情快照）。
         for symbol in self._pending_chase_symbols():
             self._usable_price(symbol)
 
@@ -1212,7 +1212,7 @@ class OrderTracker:
     def _is_market_fallback_price_safe(self, completed_order: UnifiedOrder, chase_info: dict[str, Any]) -> bool:
         """使用最新盘口做简单价格保护，避免极端行情直接扫市价单."""
         symbol = chase_info["symbol"]
-        # 注意：此处刻意仍读 latest_prices 而非走 _usable_price 的 REST 兜底——市价兜底的
+        # 注意：此处刻意仍读 latest_prices 而非走 _usable_price 的行情快照刷新——市价兜底的
         # 价格保护是与「被动挂单越点差吃成 taker」不同的关注点，且改动会扰动既有语义；
         # 陈旧盘口在市价兜底路径的兜底留待后续单独评估。
         price_data = self.latest_prices.get(symbol)

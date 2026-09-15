@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+import asyncio
 import threading
 import time
+from collections import UserDict
+from collections.abc import Coroutine
+from typing import Any
 
 import pytest
 
@@ -14,6 +18,7 @@ class FakeApi:
         self.query_count = 0
         self.wait_count = 0
         self.closed = False
+        self.loop: asyncio.AbstractEventLoop | None = None
 
     def query_quotes(self, *, ins_class: str | None = None, expired: bool = False) -> list[str]:
         self.query_count += 1
@@ -25,8 +30,16 @@ class FakeApi:
             return ["SHFE.rb2610", "KQ.m@SHFE.rb", "SSWE.AU9999"]
         return []
 
+    def create_task(self, coroutine: Coroutine[Any, Any, Any]) -> asyncio.Task:
+        if self.loop is None:
+            self.loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(self.loop)
+        return self.loop.create_task(coroutine)
+
     def wait_update(self, *, deadline: float) -> bool:
         del deadline
+        if self.loop is not None:
+            self.loop.run_until_complete(asyncio.sleep(0.001))
         self.wait_count += 1
         return False
 
@@ -40,6 +53,13 @@ class FakeApi:
         return {}
 
     def close(self) -> None:
+        if self.loop is not None:
+            tasks = asyncio.all_tasks(self.loop)
+            for task in tasks:
+                task.cancel()
+            self.loop.run_until_complete(asyncio.gather(*tasks, return_exceptions=True))
+            self.loop.close()
+            asyncio.set_event_loop(None)
         self.closed = True
 
 
@@ -186,7 +206,7 @@ def test_runtime_emits_quote_snapshots() -> None:
             self.quote = {"instrument_id": "rb2610", "exchange_id": "SHFE", "last_price": 3200}
             self.changed = False
 
-        def get_quote(self, _symbol: str) -> dict[str, object]:
+        async def get_quote(self, _symbol: str) -> dict[str, object]:
             return self.quote
 
         def is_changing(self, entity: object) -> bool:
@@ -197,7 +217,7 @@ def test_runtime_emits_quote_snapshots() -> None:
     events: list[tuple[str, dict[str, object]]] = []
     runtime.add_listener(lambda kind, row: events.append((kind, row)))
     try:
-        runtime.subscribe(["SHFE.rb2610"])
+        runtime.quote_snapshot("SHFE.rb2610")
         runtime.call(lambda _api: setattr(api, "changed", True))
         assert events[-1] == (
             "quote",
@@ -239,3 +259,194 @@ def test_runtime_propagates_wait_update_and_close_errors() -> None:
         pass
     with pytest.raises(RuntimeError, match="close failed"):
         runtime.close()
+
+
+class AsyncQuoteApi(FakeApi):
+    """只允许在 SDK 事件循环内取价，可独立挂起、失败和更新合约。"""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.requests: dict[str, asyncio.Future] = {}
+        self.calls: list[str] = []
+        self.quotes: dict[str, dict[str, object]] = {}
+        self.changed: set[str] = set()
+        self.trades: dict[str, object] = {}
+        self.fail_pump = False
+        self.tasks: list[asyncio.Task] = []
+
+    def create_task(self, coroutine: Coroutine[Any, Any, Any]) -> asyncio.Task:
+        task = super().create_task(coroutine)
+        self.tasks.append(task)
+        return task
+
+    def get_quote(self, symbol: str) -> asyncio.Future:
+        assert asyncio.get_running_loop() is self.loop
+        self.calls.append(symbol)
+        future = asyncio.get_running_loop().create_future()
+        self.requests[symbol] = future
+        return future
+
+    def deliver(self, symbol: str, price: int = 3200) -> None:
+        row = {
+            "instrument_id": symbol,
+            "last_price": price,
+            "datetime": "2026-09-01 09:00:00",
+            "nested": UserDict({"x": 1, "_api": threading.Lock()}),
+        }
+        if symbol in self.quotes:
+            self.quotes[symbol].update(row)
+            self.changed.add(symbol)
+        else:
+            self.quotes[symbol] = row
+            self.requests[symbol].set_result(row)
+
+    def is_changing(self, entity: object) -> bool:
+        for symbol in tuple(self.changed):
+            if entity is self.quotes[symbol]:
+                self.changed.remove(symbol)
+                return True
+        return False
+
+    def get_trade(self) -> dict[str, object]:
+        return self.trades
+
+    def wait_update(self, *, deadline: float) -> bool:
+        if self.fail_pump:
+            raise OSError("pump failed")
+        return super().wait_update(deadline=deadline)
+
+
+@pytest.fixture
+def quote_runtime():
+    runtime = TQRuntime(AsyncQuoteApi)
+    try:
+        yield runtime
+    finally:
+        runtime.close()
+
+
+def test_pending_quote_does_not_block_quotes_queries_or_trade_callbacks(quote_runtime: TQRuntime) -> None:
+    from concurrent.futures import ThreadPoolExecutor
+
+    runtime = quote_runtime
+    trade_received = threading.Event()
+    runtime.add_listener(lambda kind, _row: trade_received.set() if kind == "trade" else None)
+    with ThreadPoolExecutor() as pool:
+        waiting = pool.submit(runtime.quote_snapshots, ["slow", "ready"], timeout=0.5)
+        runtime.subscribe(["slow", "ready"])
+        runtime.call(lambda api: getattr(api, "deliver")("ready"))
+        assert runtime.quote_snapshot("ready", timeout=0.1)["last_price"] == 3200
+        assert runtime.call(lambda api: getattr(api, "get_order")(), timeout=0.1) == {}
+        runtime.call(lambda api: getattr(api, "trades").update({"t1": {"trade_id": "t1"}}))
+        assert trade_received.wait(0.1)
+        assert not waiting.done()
+        assert set(waiting.result(timeout=1)) == {"ready"}
+
+
+def test_batch_deadline_and_late_recovery_reuse_subscription(quote_runtime: TQRuntime, caplog) -> None:
+    runtime = quote_runtime
+    caplog.set_level("INFO")
+    symbols = [f"slow{i}" for i in range(8)]
+    started = time.monotonic()
+    assert runtime.quote_snapshots(symbols, timeout=0.1) == {}
+    assert time.monotonic() - started < 0.4
+    assert runtime.quote_snapshots(symbols, timeout=0.01) == {}
+    with pytest.raises(TimeoutError, match="slow0"):
+        runtime.quote_snapshot("slow0", timeout=0.01)
+    assert len([r for r in caplog.records if "首次行情订阅超时" in r.message]) == len(symbols)
+    runtime.call(lambda api: getattr(api, "deliver")("slow0"))
+    assert runtime.quote_snapshot("slow0", timeout=0.1)["last_price"] == 3200
+    assert runtime.call(lambda api: list(getattr(api, "calls"))) == symbols
+    assert any("订阅恢复 slow0" in r.message for r in caplog.records)
+
+
+def test_concurrent_reads_share_task_and_publish_isolated_snapshots(quote_runtime: TQRuntime) -> None:
+    from concurrent.futures import ThreadPoolExecutor
+
+    runtime = quote_runtime
+    received = threading.Event()
+    events: list[dict[str, object]] = []
+
+    def listener(kind: str, row: dict[str, object]) -> None:
+        if kind == "quote":
+            events.append(row)
+            received.set()
+
+    runtime.add_listener(listener)
+    runtime.subscribe(["one"])
+    with ThreadPoolExecutor(max_workers=6) as pool:
+        reads = [pool.submit(runtime.quote_snapshot, "one", timeout=1) for _ in range(6)]
+        runtime.call(lambda api: getattr(api, "deliver")("one"))
+        rows = [read.result(timeout=1) for read in reads]
+    assert received.wait(0.1)
+    assert len(events) == 1  # 首份快照不依赖 is_changing。
+    rows[0]["nested"]["x"] = 99
+    events[0]["nested"]["x"] = 88
+    assert type(rows[1]["nested"]) is dict
+    assert rows[1]["nested"] == {"x": 1}
+    assert runtime.quote_snapshot("one")["nested"] == {"x": 1}
+    received.clear()
+    runtime.call(lambda api: getattr(api, "deliver")("one", 3300))
+    assert received.wait(0.1)
+    updated = runtime.quote_snapshot("one", timeout=0)
+    assert updated["last_price"] == 3300
+    assert updated["datetime"] == rows[1]["datetime"]
+    assert runtime.call(lambda api: list(getattr(api, "calls"))) == ["one"]
+
+
+def test_subscription_error_is_isolated_and_not_retried(quote_runtime: TQRuntime, caplog) -> None:
+    runtime = quote_runtime
+    runtime.subscribe(["bad", "good"])
+    runtime.call(lambda api: getattr(api, "requests")["bad"].set_exception(ValueError("invalid symbol")))
+    runtime.call(lambda api: getattr(api, "deliver")("good"))
+    assert set(runtime.quote_snapshots(["bad", "good"], timeout=0.1)) == {"good"}
+    for _ in range(2):
+        with pytest.raises(RuntimeError, match="bad.*invalid symbol"):
+            runtime.quote_snapshot("bad")
+    assert runtime.call(lambda api: list(getattr(api, "calls"))) == ["bad", "good"]
+    assert len([r for r in caplog.records if "行情订阅失败 bad" in r.message]) == 1
+
+
+@pytest.mark.parametrize("pump_failure", [False, True])
+def test_shutdown_cancels_subscription_and_wakes_readers(quote_runtime: TQRuntime, pump_failure: bool) -> None:
+    from concurrent.futures import ThreadPoolExecutor
+
+    runtime = quote_runtime
+    runtime.subscribe(["slow"])
+    tasks = runtime.call(lambda api: list(getattr(api, "tasks")))
+    with ThreadPoolExecutor() as pool:
+        waiting = pool.submit(runtime.quote_snapshot, "slow", timeout=10)
+        if pump_failure:
+            runtime.call(lambda api: setattr(api, "fail_pump", True))
+        else:
+            runtime.close()
+        with pytest.raises(RuntimeError, match="停止"):
+            waiting.result(timeout=0.5)
+    runtime._thread.join(timeout=1)
+    assert all(task.cancelled() for task in tasks)
+
+
+def test_cached_snapshot_does_not_queue_behind_owner(quote_runtime: TQRuntime) -> None:
+    from concurrent.futures import ThreadPoolExecutor
+
+    runtime = quote_runtime
+    runtime.subscribe(["ready"])
+    runtime.call(lambda api: getattr(api, "deliver")("ready"))
+    assert runtime.quote_snapshot("ready", timeout=0.1)["last_price"] == 3200
+    started = threading.Event()
+    release = threading.Event()
+
+    def block_owner(_api: object) -> None:
+        started.set()
+        release.wait(1)
+
+    with ThreadPoolExecutor() as pool:
+        blocking = pool.submit(runtime.call, block_owner)
+        try:
+            assert started.wait(0.5)
+            cached = pool.submit(runtime.quote_snapshot, "ready", timeout=0)
+            assert cached.result(timeout=0.1)["last_price"] == 3200
+            assert not blocking.done()
+        finally:
+            release.set()
+        blocking.result(timeout=1)
