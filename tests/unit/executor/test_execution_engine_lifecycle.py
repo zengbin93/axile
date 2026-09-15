@@ -326,6 +326,23 @@ def test_symbol_error_capture_still_converts_generic_error_to_failed_result() ->
     assert result.error == "执行失败，具体原因未确认"
 
 
+@pytest.mark.parametrize("status", [ExecutionStatus.BLOCKED, ExecutionStatus.FAILED])
+def test_final_account_query_failure_does_not_rewrite_non_position_conclusions(monkeypatch, status):
+    from unittest.mock import Mock
+
+    from axile.executor.models.execution_result import AlgorithmResult
+
+    executor = _LifecycleRecorderExecutor()
+    executor.logger = Mock()
+    monkeypatch.setattr(executor, "get_account_assets", Mock(side_effect=RuntimeError("native query error")))
+    result = AlgorithmResult(symbol="A", algorithm="test", status=status, error="当前不在交易时段")
+    output = ExecutionEngine(executor)._create_standard_output_from_results(_standard_input(), [result])
+    assert output.status == status
+    assert output.error == "当前不在交易时段"
+    assert output.symbol_results == {"A": result}
+    assert output.account_assets.source == "unavailable"
+
+
 @pytest.mark.parametrize(
     "status, expected",
     [(ExecutionStatus.SUCCEEDED, ExecutionStatus.PARTIAL), (ExecutionStatus.NOOP, ExecutionStatus.FAILED)],

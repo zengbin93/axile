@@ -407,7 +407,6 @@ def test_engine_blocks_all_symbol_sessions_without_execution_io(monkeypatch: pyt
     assert output.error is not None
     assert "2 个品种未执行" in output.error
     assert output.error == "非交易时段，2 个品种未执行"
-    assert output.error == "非交易时段，2 个品种未执行"
     assert cancel_calls == 0
 
 

@@ -87,13 +87,13 @@ def _derive_dispatch_status(symbol_results: dict[str, AlgorithmResult]) -> Execu
     statuses = [result.status for result in symbol_results.values()]
     if ExecutionStatus.PARTIAL in statuses:
         return ExecutionStatus.PARTIAL
-    if any(status in {ExecutionStatus.FAILED, ExecutionStatus.PARTIAL} for status in statuses):
+    if ExecutionStatus.FAILED in statuses:
         # 只要没有任何品种成功（含与 BLOCKED 混合的全败场景），整体即判失败，
         # 避免「0 成交」被 BLOCKED 稀释成 PARTIAL 而在审计里只显示为告警。
         if ExecutionStatus.SUCCEEDED not in statuses:
             return ExecutionStatus.FAILED
         return ExecutionStatus.PARTIAL
-    if any(status == ExecutionStatus.BLOCKED for status in statuses):
+    if ExecutionStatus.BLOCKED in statuses:
         if ExecutionStatus.SUCCEEDED not in statuses:
             return ExecutionStatus.BLOCKED
         return ExecutionStatus.PARTIAL
@@ -1025,7 +1025,13 @@ class ExecutionEngine:
         status = _derive_dispatch_status(symbol_results)
         error = self._derive_dispatch_error(status, symbol_results)
         account_assets, explicit_error = self._read_result_assets()
-        if explicit_error:
+        if explicit_error and status in {
+            ExecutionStatus.SUCCEEDED,
+            ExecutionStatus.NOOP,
+            ExecutionStatus.PARTIAL,
+        }:
+            # 只有依赖持仓事实的结论才因收尾查询失败而降级。
+            # BLOCKED/FAILED 且未下单并不声称仓位，不能改写成「最终持仓查询失败」。
             progressed = any(
                 result.orders or result.trades or result.status in {ExecutionStatus.PARTIAL, ExecutionStatus.SUCCEEDED}
                 for result in results

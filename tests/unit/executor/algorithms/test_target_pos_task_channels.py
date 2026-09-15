@@ -444,6 +444,58 @@ def test_target_pos_task_propagates_session_recovery_from_final_account_query() 
 
 
 @pytest.mark.parametrize("source", ["unavailable", "assumed", "error"])
+def test_target_pos_task_does_not_trade_when_start_snapshot_is_unknown(source):
+    executor = _FuturesExecutor(TradeChannel.CTP)
+    executor.get_account_assets = MagicMock(
+        return_value=UnifiedAccountAssets.unavailable().model_copy(update={"source": source})
+    )
+    executor.place_order = MagicMock()
+    result = ctp_target_pos_task_algorithm(
+        cast("ExecutorProtocol", executor),
+        AlgorithmInput(
+            symbol="rb2610", target_volume=0, trade_rule={}, params=CTPTargetPosTaskParams(max_wait_seconds=1)
+        ),
+    )
+    assert result.status == ExecutionStatus.FAILED
+    assert result.error == "初始持仓尚未确认"
+    assert result.orders == []
+    executor.place_order.assert_not_called()
+
+
+def test_target_pos_task_forwards_tracker_cancel_error(monkeypatch):
+    executor = _FuturesExecutor(TradeChannel.CTP)
+    tracker = MagicMock()
+    tracker.get_pending_count.return_value = 1
+    tracker.get_all_orders.return_value = []
+    tracker.get_all_trades.return_value = []
+    tracker.explicit_error = None
+    tracker.explicit_blocked_error = None
+
+    def wait_and_fail(timeout):
+        _ = timeout
+        tracker.explicit_error = "撤单失败，订单终态尚未确认"
+        raise RuntimeError("部分订单撤销失败: 1")
+
+    tracker.wait_for_completion.side_effect = wait_and_fail
+    monkeypatch.setattr(
+        "axile.executor.algorithms.defaults.ctp_target_pos_task.impl.setup_order_tracker",
+        lambda *args, **kwargs: tracker,
+    )
+    monkeypatch.setattr(
+        "axile.executor.algorithms.defaults.ctp_target_pos_task.impl.teardown_order_tracker",
+        lambda *args, **kwargs: None,
+    )
+    result = ctp_target_pos_task_algorithm(
+        cast("ExecutorProtocol", executor),
+        AlgorithmInput(
+            symbol="rb2610", target_volume=0, trade_rule={}, params=CTPTargetPosTaskParams(max_wait_seconds=1)
+        ),
+    )
+    assert result.error == "撤单失败，订单终态尚未确认"
+    assert result.status == ExecutionStatus.PARTIAL
+
+
+@pytest.mark.parametrize("source", ["unavailable", "assumed", "error"])
 def test_target_pos_task_does_not_claim_flat_when_final_snapshot_is_unavailable(source):
     executor = _FuturesExecutor(TradeChannel.CTP)
     initial = executor.get_account_assets()

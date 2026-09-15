@@ -187,7 +187,7 @@ class OrderTracker:
     rest_price_refresh_interval: float = 1.0
     _explicit_error: str | None = field(default=None, init=False)
     _order_errors: dict[str, str] = field(default_factory=dict, init=False)
-    explicit_blocked_error: str | None = None
+    _explicit_blocked_error: str | None = field(default=None, init=False)
 
     pending_orders: dict[str, UnifiedOrder] = field(default_factory=dict)
     completed_orders: dict[str, UnifiedOrder] = field(default_factory=dict)
@@ -220,6 +220,18 @@ class OrderTracker:
         """执行级重试仅更新自身错误，不能清除其他订单的失败。"""
         with self.lock:
             self._explicit_error = message
+
+    @property
+    def explicit_blocked_error(self) -> str | None:
+        """返回执行级受阻说明，与 explicit_error 共用同一把锁。"""
+        with self.lock:
+            return self._explicit_blocked_error
+
+    @explicit_blocked_error.setter
+    def explicit_blocked_error(self, message: str | None) -> None:
+        """受阻说明只记录明确的账户控制拦截，不能清除其他失败。"""
+        with self.lock:
+            self._explicit_blocked_error = message
 
     def _set_order_error(self, order_id: str, message: str | None) -> None:
         """按原订单身份记录或清除本次换单错误。"""
@@ -607,8 +619,11 @@ class OrderTracker:
         self.executor.handle_termination_checkpoint()
         failed_order_ids = cancel_pending_orders_via_query(self.executor)
         if failed_order_ids:
-            self.explicit_error = "撤单失败，订单终态尚未确认"
-            raise RuntimeError(f"部分订单撤销失败: {'; '.join(failed_order_ids)}")
+            message = "撤单失败，订单终态尚未确认"
+            self.explicit_error = message
+            error = RuntimeError(f"部分订单撤销失败: {'; '.join(failed_order_ids)}")
+            setattr(error, "execution_error", message)
+            raise error
 
         return False
 

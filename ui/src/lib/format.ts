@@ -25,10 +25,10 @@ export function displayCurrencyUnit(currency: string | null | undefined): string
 }
 
 /**
- * 给金额数字缀简短货币记号：人民币用前缀「¥」，私有渠道计价币用后缀「U」。
+ * 给金额数字缀简短货币记号：人民币用前缀「¥」，其它币种用代码空格后缀。
  *
- * 只用于行内钱数的「就地确认」；头部权益另用渠道声明的全称当权威锚。其它币种原样
- * 空格后缀，`currency` 为空则不缀。
+ * 只用于行内钱数的「就地确认」；头部权益另用渠道声明的全称当权威锚。
+ * 不把插件计价币缩成「U」，以免公开核心误把渠道代码显示成私有记号。
  */
 export function withCurrency(numStr: string, currency: string): string {
   const normalized = currency.trim()

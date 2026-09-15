@@ -210,7 +210,7 @@ function accountAssets(content: Dict | null): Dict | null {
 /** 账户快照来源标；无则按传入回退。 */
 function snapshotSource(content: Dict | null, assets: Dict | null): AccountSnapshotSource {
   const s = asStr(content?.source) || asStr(assets?.source)
-  return (s || (assets ? 'real' : 'unavailable')) as AccountSnapshotSource
+  return (s || 'unavailable') as AccountSnapshotSource
 }
 
 /** 敞口 = 持仓市值 / 总权益（%）。 */

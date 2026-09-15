@@ -26,7 +26,15 @@ from axile.server.performance_costs import project_execution
 from tests.unit.executor.test_execution_engine_lifecycle import _standard_input
 
 FIXTURE = Path(__file__).parents[2] / "fixtures" / "execution_evidence_contract.json"
-CASES = json.loads(FIXTURE.read_text())
+
+
+def _load_cases():
+    if not FIXTURE.is_file():
+        raise FileNotFoundError(f"缺少证据契约 fixture: {FIXTURE}")
+    return json.loads(FIXTURE.read_text())
+
+
+CASES = _load_cases()
 
 
 def _assets(spec):
@@ -38,10 +46,15 @@ def _assets(spec):
         source=spec["source"],
         positions=[
             Position(
-                symbol="A", volume=abs(volume), available_volume=abs(volume), market_value=abs(volume) * 100,
+                symbol="A",
+                volume=abs(volume),
+                available_volume=abs(volume),
+                market_value=abs(volume) * 100,
                 direction=PositionDirection.SHORT if volume < 0 else PositionDirection.LONG,
             )
-        ] if volume else [],
+        ]
+        if volume
+        else [],
         update_time="2026-09-15T10:00:00",
     )
 
@@ -61,16 +74,37 @@ def _algorithm_result(case):
     reader = Mock(get_account_assets=_snapshot_reader(inputs["algorithm"]))
     assets, final, query_error = read_final_position(reader, _quantity)
     order = inputs["order"]
-    orders = [] if order is None else [UnifiedOrder(
-        order_id="contract-order", symbol="A", direction=OrderDirection.BUY, order_type=OrderType.LIMIT,
-        volume=2, price=100, status=order["status"], filled_volume=order["filled"],
-    )]
+    orders = (
+        []
+        if order is None
+        else [
+            UnifiedOrder(
+                order_id="contract-order",
+                symbol="A",
+                direction=OrderDirection.BUY,
+                order_type=OrderType.LIMIT,
+                volume=2,
+                price=100,
+                status=order["status"],
+                filled_volume=order["filled"],
+            )
+        ]
+    )
     return AlgorithmResult(
         **summarize_outcome(
-            inputs["before"]["volume"], final, inputs["target"], orders, [],
-            explicit_error=query_error or inputs.get("error"), explicit_blocked_error=inputs.get("blocked"),
+            inputs["before"]["volume"],
+            final,
+            inputs["target"],
+            orders,
+            [],
+            explicit_error=query_error or inputs.get("error"),
+            explicit_blocked_error=inputs.get("blocked"),
         ),
-        symbol="A", algorithm="contract", orders=orders, target_volume=inputs["target"], account_assets=assets,
+        symbol="A",
+        algorithm="contract",
+        orders=orders,
+        target_volume=inputs["target"],
+        account_assets=assets,
     )
 
 
@@ -80,7 +114,8 @@ def build_contract_wire(case, monkeypatch):
     owner = Mock(channel_type=TradeChannel.CTP, get_account_assets=_snapshot_reader(inputs["after"]))
     runtime = Mock(memory={}, elapsed_seconds=Mock(return_value=1))
     output = ExecutionEngine(owner, runtime)._create_standard_output_from_results(
-        _standard_input(), [_algorithm_result(case)],
+        _standard_input(),
+        [_algorithm_result(case)],
     )
     raw = _dump_output_result(output)
     worker_raw = _dump_output_payload(output)
@@ -99,19 +134,31 @@ def build_contract_wire(case, monkeypatch):
     try:
         with monkeypatch.context() as patch:
             patch.setattr(lifecycle, "append_execution_artifact", persist_artifact)
-            asyncio.run(lifecycle.append_execution_result_artifacts(
-                execution_id="contract", result=worker_raw, before_account_assets=_assets(inputs["before"]).model_dump(mode="json"),
-            ))
+            asyncio.run(
+                lifecycle.append_execution_result_artifacts(
+                    execution_id="contract",
+                    result=worker_raw,
+                    before_account_assets=_assets(inputs["before"]).model_dump(mode="json"),
+                )
+            )
         with db.begin() as conn:
-            conn.execute(ExecuteRecord.__table__.insert().values(
-                account_id=1, execution_id="contract", raw_input={}, raw_result=worker_raw,
-                is_success=int(output.success), created_at="2026-09-15T10:00:00",
-            ))
+            conn.execute(
+                ExecuteRecord.__table__.insert().values(
+                    account_id=1,
+                    execution_id="contract",
+                    raw_input={},
+                    raw_result=worker_raw,
+                    is_success=int(output.success),
+                    created_at="2026-09-15T10:00:00",
+                )
+            )
             stored = conn.execute(select(ExecuteRecord.__table__)).mappings().one()
             record = SimpleNamespace(**stored)
-            summary = conn.execute(select(ExecutionArtifact.__table__.c.content).where(
-                ExecutionArtifact.__table__.c.artifact_type == ExecutionArtifactType.EXECUTION_SUMMARY,
-            )).scalar_one()
+            summary = conn.execute(
+                select(ExecutionArtifact.__table__.c.content).where(
+                    ExecutionArtifact.__table__.c.artifact_type == ExecutionArtifactType.EXECUTION_SUMMARY,
+                )
+            ).scalar_one()
         projected, _ = project_execution(record)
         events = _events([record], [], [])
         result_keys = ("status", "error", "target_volume", "final_volume")

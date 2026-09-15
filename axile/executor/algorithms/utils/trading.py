@@ -55,6 +55,26 @@ def create_empty_result(
     )
 
 
+def create_unconfirmed_start_result(
+    account_assets: UnifiedAccountAssets,
+    algorithm_name: str,
+    *,
+    symbol: str,
+    target_volume: float,
+) -> AlgorithmResult:
+    """初始快照不可读时直接交还上层，禁止把未知持仓当成零去下单。"""
+    return AlgorithmResult(
+        symbol=symbol,
+        algorithm=algorithm_name,
+        status=ExecutionStatus.FAILED,
+        error="初始持仓尚未确认",
+        orders=[],
+        account_assets=account_assets,
+        target_volume=target_volume,
+        memory={"algorithm": algorithm_name, "message": "初始持仓尚未确认"},
+    )
+
+
 def determine_order_price(
     direction: OrderDirection,
     market_data: UnifiedPriceData | None,

@@ -33,7 +33,13 @@ from axile.executor.algorithms.utils import setup_order_tracker, teardown_order_
 from axile.executor.algorithms.utils.final_position import read_final_position
 from axile.executor.algorithms.utils.order_tracker import ChaseConfig, OrderTracker
 from axile.executor.algorithms.utils.outcome import summarize_outcome
-from axile.executor.models.unified_account_assets import Position, PositionDirection, UnifiedAccountAssets
+from axile.executor.models.execution_result import ExecutionStatus
+from axile.executor.models.unified_account_assets import (
+    Position,
+    PositionDirection,
+    UnifiedAccountAssets,
+    is_degraded_snapshot_source,
+)
 from axile.executor.models.unified_order import UnifiedOrder
 from axile.executor.models.unified_price import clone_price_data
 from axile.executor.order_volume_limits import split_order_volumes
@@ -730,6 +736,16 @@ def ctp_target_pos_task_algorithm(executor: ExecutorProtocol, algorithm_input: A
     market_data: Any | None = None
 
     account_assets = executor.get_account_assets()
+    if is_degraded_snapshot_source(account_assets.source):
+        return AlgorithmResult(
+            symbol=planned_symbol,
+            algorithm=algorithm_name,
+            status=ExecutionStatus.FAILED,
+            error="初始持仓尚未确认",
+            account_assets=account_assets,
+            target_volume=algorithm_input.target_volume,
+            memory={"algorithm": algorithm_name, "error": "初始持仓尚未确认"},
+        )
     current_net_position = sum(
         -p.volume if p.direction == PositionDirection.SHORT else p.volume
         for p in account_assets.positions
@@ -803,7 +819,7 @@ def ctp_target_pos_task_algorithm(executor: ExecutorProtocol, algorithm_input: A
                 if p.symbol == symbol
             ),
         )
-        if explicit_error:
+        if explicit_error and not isinstance(tracker.explicit_error, str):
             tracker.explicit_error = explicit_error
         target_reached = final_net_position == target_volume
         target_gap = target_volume - final_net_position
@@ -866,8 +882,16 @@ def ctp_target_pos_task_algorithm(executor: ExecutorProtocol, algorithm_input: A
                 if p.symbol == symbol
             ),
         )
-        explicit_blocked_error = e.execution_error if isinstance(e, AccountControlBlockedError) else None
-        explicit_error = explicit_error or (None if explicit_blocked_error else execution_error_message(e, "持仓调整"))
+        tracker_error = tracker.explicit_error if isinstance(tracker.explicit_error, str) else None
+        tracker_blocked = tracker.explicit_blocked_error if isinstance(tracker.explicit_blocked_error, str) else None
+        explicit_blocked_error = tracker_blocked or (
+            e.execution_error if isinstance(e, AccountControlBlockedError) else None
+        )
+        explicit_error = (
+            explicit_error
+            or tracker_error
+            or (None if explicit_blocked_error else execution_error_message(e, "持仓调整"))
+        )
         orders, trades = tracker.get_all_orders(), tracker.get_all_trades()
         return AlgorithmResult(
             **summarize_outcome(

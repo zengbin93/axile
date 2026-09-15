@@ -267,6 +267,19 @@ def test_wait_for_completion_returns_immediately_when_no_orders() -> None:
     assert tracker.wait_for_completion(timeout=3600) is True
 
 
+def test_wait_for_completion_cancel_failure_keeps_execution_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    tracker = OrderTracker(executor=_FakeExecutor())
+    tracker.add_order(_build_pending_order("gm-order-1"))
+    monkeypatch.setattr(
+        "axile.executor.algorithms.utils.order_tracker.cancel_pending_orders_via_query",
+        lambda _executor: ["gm-order-1"],
+    )
+    with pytest.raises(RuntimeError, match="部分订单撤销失败") as raised:
+        tracker.wait_for_completion(timeout=0)
+    assert raised.value.execution_error == "撤单失败，订单终态尚未确认"
+    assert tracker.explicit_error == "撤单失败，订单终态尚未确认"
+
+
 def _build_pending_order(order_id: str, symbol: str = "SHSE.600000") -> UnifiedOrder:
     return UnifiedOrder(
         order_id=order_id,

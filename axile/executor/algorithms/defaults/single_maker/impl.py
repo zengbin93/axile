@@ -50,6 +50,7 @@ from axile.executor.algorithms.utils import (
 from axile.executor.algorithms.utils.final_position import read_final_position
 from axile.executor.algorithms.utils.order_tracker import ChaseConfig
 from axile.executor.algorithms.utils.outcome import summarize_outcome
+from axile.executor.algorithms.utils.trading import create_unconfirmed_start_result
 from axile.executor.models.execution_result import ExecutionStatus
 from axile.executor.models.unified_account_assets import is_degraded_snapshot_source
 from axile.executor.models.unified_price import UnifiedPriceData, clone_price_data
@@ -176,9 +177,13 @@ def single_maker_callback(
 
     target_volume = algorithm_input.target_volume
     first_tick = clone_price_data(market_data)
-    # 初始持仓不可读时尚未产生订单，直接交还上层；不能进入依赖起始量的收尾分支。
+    # 初始快照降级时尚未产生订单，直接交还上层；不能把未知持仓当成零去比较目标并下单。
+    if is_degraded_snapshot_source(account_assets.source):
+        return create_unconfirmed_start_result(
+            account_assets, algorithm_name, symbol=symbol, target_volume=target_volume
+        )
     current_volume = executor.get_current_volume(account_assets)
-    final_volume = float("nan") if is_degraded_snapshot_source(account_assets.source) else current_volume
+    final_volume = current_volume
 
     # 使用工具函数设置订单跟踪器
     tracker = setup_order_tracker(executor, market_data, chase_config)
@@ -267,7 +272,7 @@ def single_maker_callback(
 
             # 重新获取账户资产
             account_assets, final_volume, explicit_error = read_final_position(executor, executor.get_current_volume)
-            if explicit_error:
+            if explicit_error and not isinstance(tracker.explicit_error, str):
                 tracker.explicit_error = explicit_error
 
     except ExecutionTerminated:
@@ -275,10 +280,11 @@ def single_maker_callback(
     except RECOVERABLE_ALGORITHM_EXCEPTIONS as exc:
         if getattr(exc, "requires_session_recovery", False):
             raise
-        tracker.explicit_error = execution_error_message(exc)
+        if not isinstance(tracker.explicit_error, str):
+            tracker.explicit_error = execution_error_message(exc)
         executor.logger.exception("SINGLE-MAKER 执行失败")
         account_assets, final_volume, explicit_error = read_final_position(executor, executor.get_current_volume)
-        if explicit_error:
+        if explicit_error and not isinstance(tracker.explicit_error, str):
             tracker.explicit_error = explicit_error
     finally:
         # 使用工具函数清理订单跟踪器

@@ -170,6 +170,105 @@ def test_maker_initial_position_failure_does_not_enter_finalization(monkeypatch)
     executor.get_account_assets.assert_called_once()
 
 
+@pytest.mark.parametrize("module", [maker, twap, pov], ids=["maker", "twap", "pov"])
+@pytest.mark.parametrize("source", ["unavailable", "assumed", "error"])
+def test_algorithm_does_not_trade_when_start_snapshot_is_unknown(monkeypatch, module, source):
+    executor = MagicMock()
+    executor.symbol = "rb2610"
+    executor.get_account_assets.return_value = UnifiedAccountAssets(
+        available_cash=1, total_asset=1, market_value=0, positions=[], source=source
+    )
+    executor.get_market_data.return_value = None
+    setup = MagicMock()
+    monkeypatch.setattr(module, "setup_order_tracker", setup)
+    if module is maker:
+        entry, params = maker.single_maker_callback, maker.SingleMakerParams()
+    elif module is twap:
+        entry, params = twap.twap, twap.TwapParams(slices=1, total_duration=1, max_wait_seconds=1)
+    else:
+        entry, params = pov.pov, pov.PovParams(max_duration=1, interval_seconds=1, max_wait_seconds=1)
+    result = entry(executor, AlgorithmInput(symbol="rb2610", target_volume=2, trade_rule={}, params=params))
+    assert result.status == ExecutionStatus.FAILED
+    assert result.error == "初始持仓尚未确认"
+    assert result.orders == []
+    setup.assert_not_called()
+    executor.get_current_volume.assert_not_called()
+
+
+@pytest.mark.parametrize("module", [maker, twap, pov], ids=["maker", "twap", "pov"])
+def test_algorithm_keeps_tracker_cancel_error(monkeypatch, module):
+    executor = MagicMock()
+    executor.symbol = "rb2610"
+    assets = UnifiedAccountAssets(available_cash=10000, total_asset=10000, market_value=0, positions=[], source="real")
+    executor.get_account_assets.return_value = assets
+    executor.get_current_volume.side_effect = lambda _: 0
+    executor.get_market_data.return_value = UnifiedPriceData(
+        symbol="rb2610",
+        last_price=100,
+        bid_price=99,
+        ask_price=101,
+        bid_volume=1,
+        ask_volume=1,
+        volume=10,
+        turnover=1000,
+        timestamp=1,
+        update_time="",
+    )
+    tracker = MagicMock()
+    orders = []
+    tracker.get_all_orders.side_effect = lambda: orders
+    tracker.get_all_trades.return_value = []
+    tracker.explicit_error = None
+    tracker.explicit_blocked_error = None
+
+    def wait_and_fail(timeout):
+        _ = timeout
+        tracker.explicit_error = "撤单失败，订单终态尚未确认"
+        raise RuntimeError("部分订单撤销失败: 1")
+
+    tracker.wait_for_completion.side_effect = wait_and_fail
+    monkeypatch.setattr(module, "setup_order_tracker", lambda *args: tracker)
+    monkeypatch.setattr(module, "teardown_order_tracker", lambda *args: None)
+    now = [0.0]
+    clock = MagicMock()
+    clock.time.side_effect = lambda: now[0]
+    monkeypatch.setattr(module, "get_default_clock", lambda: clock)
+
+    def split_submit(*args, **kwargs):
+        _ = args, kwargs
+        order = UnifiedOrder(
+            order_id="1",
+            symbol="rb2610",
+            direction=OrderDirection.BUY,
+            order_type=OrderType.LIMIT,
+            volume=2,
+            price=101,
+            status=OrderStatus.PENDING,
+            filled_volume=0,
+        )
+        orders.append(order)
+        now[0] += 0.25
+        return [order]
+
+    monkeypatch.setattr(module, "submit_and_track_split_orders", split_submit)
+    if hasattr(module, "cancel_pending_orders_via_query"):
+        monkeypatch.setattr(module, "cancel_pending_orders_via_query", lambda _: [])
+    if module is maker:
+        entry, params = maker.single_maker_callback, maker.SingleMakerParams(max_wait_seconds=1)
+    elif module is twap:
+        executor.sleep_or_terminate.side_effect = lambda duration: now.__setitem__(0, now[0] + duration)
+        entry, params = twap.twap, twap.TwapParams(slices=1, total_duration=1, max_wait_seconds=1)
+    else:
+        executor.sleep_or_terminate.side_effect = lambda duration: now.__setitem__(0, now[0] + duration)
+        entry, params = (
+            pov.pov,
+            pov.PovParams(max_duration=1, interval_seconds=1, complete_on_timeout=True, max_wait_seconds=1),
+        )
+    result = entry(executor, AlgorithmInput(symbol="rb2610", target_volume=2, trade_rule={}, params=params))
+    assert result.status == ExecutionStatus.PARTIAL
+    assert result.error == "撤单失败，订单终态尚未确认"
+
+
 def _assert_mid_execution_termination(monkeypatch, module, executor, tracker, entry, input_data, stage):
     stopped = ExecutionTerminated(reason="用户终止", mode="cancel_pending", cancel_failed_order_ids=["unconfirmed"])
     methods = {

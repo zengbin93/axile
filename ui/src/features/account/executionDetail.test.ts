@@ -108,7 +108,6 @@ describe('buildExecutionDetail · 头条', () => {
     })], task({ status: 'FAILED', error: 'CTP 交易前置断线: 4097' }))
     expect(executionHeadline(model).text).toContain('执行失败')
     expect(model.failure?.raw).toContain('CTP 交易前置断线')
-    expect(model.failure?.raw).toContain('CTP 交易前置断线')
   })
 
   it('旧摘要缺少 status 时按字段回退到任务 output_status', () => {

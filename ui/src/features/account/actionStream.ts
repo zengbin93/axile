@@ -80,7 +80,7 @@ function sideText(direction: string): string {
   return ''
 }
 
-/** 终态串归类：成交 / 撤销 / 拒单 / 过期（识别中英文与枚举）。 */
+/** 终态串归类：成交 / 撤销 / 拒单 / 过期。只认统一中文终态，避免 FILLED/部分成交被 includes 误判成全部成交。 */
 function terminalKind(status: string): 'filled' | 'canceled' | 'rejected' | 'expired' | 'other' {
   if (status === '已成交') return 'filled'
   if (status === '已撤销') return 'canceled'
