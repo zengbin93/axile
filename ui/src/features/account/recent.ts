@@ -188,7 +188,7 @@ export function buildRecentActivity(
         time: latest.created_at,
         count: run.length,
         executionId: latest.execution_id ?? null,
-        reason: String(latest.raw_result.outcome_reason ?? ''),
+        reason: executionOutcome(latest.raw_result).reason,
       })
     } else if (k === 'partial') {
       all.push(partialRow(latest, i, run.length, saturated))
@@ -200,7 +200,7 @@ export function buildRecentActivity(
         count: run.length,
         saturated,
         executionId: latest.execution_id ?? null,
-        reason: String(latest.raw_result.outcome_reason ?? ''),
+        reason: executionOutcome(latest.raw_result).reason,
       })
     }
     i = j

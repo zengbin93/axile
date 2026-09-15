@@ -122,6 +122,16 @@ class TQTradingTimeCheck:
     def error(self) -> str | None:
         return None if self.status is TQTradingTimeStatus.OPEN else self.status.value
 
+    @property
+    def outcome_reason(self) -> str | None:
+        """返回面向用户的时段检查说明，机器码保留在 status 中。"""
+        return {
+            TQTradingTimeStatus.OPEN: None,
+            TQTradingTimeStatus.CLOSED: "非交易时段",
+            TQTradingTimeStatus.CALENDAR_UNAVAILABLE: "交易日历不可用",
+            TQTradingTimeStatus.QUOTE_TRADING_TIME_UNAVAILABLE: "无法获取品种交易时段",
+        }[self.status]
+
 
 class TQExecutionEngine(ExecutionEngine):
     """TQ 品种时段筛选编排器。"""
@@ -141,6 +151,7 @@ class TQExecutionEngine(ExecutionEngine):
                     symbol=symbol,
                     algorithm_name=self._get_symbol_algorithm_name(standard_input, symbol),
                     error=check.error,
+                    outcome_reason=check.outcome_reason,
                     status=ExecutionStatus.BLOCKED,
                     account_assets=account_assets,
                     memory={
@@ -464,7 +475,8 @@ class TQExecutor(AbstractExecutor):
         result = runtime.call(submit)
         if isinstance(result, TQTradingTimeCheck):
             raise AccountControlBlockedError(
-                result.error or "CLOSED",
+                result.outcome_reason or "非交易时段",
+                reason_code=result.error,
                 account_id=None,
                 execution_id=None,
                 channel=TradeChannel.TQ,

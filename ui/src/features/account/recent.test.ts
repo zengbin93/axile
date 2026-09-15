@@ -60,3 +60,8 @@ test('排程跳过与执行相互切断分组', () => {
   const result = rows([skip, execution(23, 'not_reached'), { ...skip, id: 2 }])
   expect(result.rows.map(r => r.type)).toEqual(['skip', 'partial', 'skip'])
 })
+
+test('近期记录展示后端受阻和失败原因', () => {
+  const result = rows([execution(23, 'blocked', { outcome_reason: '非交易时段' }), execution(22, 'error', { outcome_reason: '交易日历不可用' })])
+  expect(result.rows.map(recentRowText)).toEqual(['未执行 · 非交易时段', '执行失败 · 最近：交易日历不可用'])
+})

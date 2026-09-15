@@ -8,6 +8,7 @@ import pytest
 
 from axile.common.trade_channel import TradeChannel
 from axile.domain.execution import ExecutionReasonFamily
+from axile.executor.account_control.exceptions import AccountControlBlockedError
 from axile.executor.models.execution_result import AlgorithmResult, ExecutionStatus
 from axile.executor.models.unified_account_assets import UnifiedAccountAssets
 from axile.executor.models.unified_input import TQAccountConfig, UnifiedStandardInput
@@ -280,6 +281,8 @@ def test_engine_blocks_symbol_sessions_without_market_io(monkeypatch: pytest.Mon
     blocked = output.symbol_results["rb2610"]
     assert output.status is ExecutionStatus.PARTIAL
     assert blocked.status is ExecutionStatus.BLOCKED
+    assert blocked.outcome_reason == "非交易时段"
+    assert blocked.error == "CLOSED"
     assert blocked.memory == {
         "symbol_decision_reason_code": TQTradingTimeStatus.CLOSED.value,
         "symbol_decision_reason_family": ExecutionReasonFamily.MARKET_RULE.value,
@@ -405,6 +408,7 @@ def test_engine_blocks_all_symbol_sessions_without_execution_io(monkeypatch: pyt
     assert "因交易时段不可执行" in output.error
     assert "rb2610" in output.error
     assert "ag2612" in output.error
+    assert output.outcome_reason == "非交易时段"
     assert cancel_calls == 0
 
 
@@ -451,8 +455,10 @@ def test_place_order_rechecks_current_symbol_before_submitting(
         lambda _api, _sessions, _now: TQTradingTimeCheck(TQTradingTimeStatus.CLOSED),
     )
 
-    with pytest.raises(Exception, match="CLOSED"):
+    with pytest.raises(AccountControlBlockedError, match="非交易时段") as exc_info:
         instance._place_order_impl("rb2610", OrderDirection.BUY, OrderType.LIMIT, 1, 3200, offset_flag="0")
+
+    assert exc_info.value.reason_code == "CLOSED"
 
     assert api.insert_calls == 0
 
@@ -502,7 +508,22 @@ def test_place_order_rejects_no_night_session_product_at_night(
         lambda api_, sessions, _now: real_check(api_, sessions, _at("2026-08-21T22:59:59")),
     )
 
-    with pytest.raises(Exception, match="CLOSED"):
+    with pytest.raises(AccountControlBlockedError, match="非交易时段"):
         instance._place_order_impl("v_f2609", OrderDirection.BUY, OrderType.LIMIT, 1, 3000, offset_flag="0")
 
     assert api.insert_calls == 0
+
+
+@pytest.mark.parametrize(
+    ("status", "reason"),
+    [
+        (TQTradingTimeStatus.OPEN, None),
+        (TQTradingTimeStatus.CLOSED, "非交易时段"),
+        (TQTradingTimeStatus.CALENDAR_UNAVAILABLE, "交易日历不可用"),
+        (TQTradingTimeStatus.QUOTE_TRADING_TIME_UNAVAILABLE, "无法获取品种交易时段"),
+    ],
+)
+def test_trading_time_reason_is_separate_from_code(status: TQTradingTimeStatus, reason: str | None) -> None:
+    check = TQTradingTimeCheck(status)
+    assert check.outcome_reason == reason
+    assert check.error == (None if status is TQTradingTimeStatus.OPEN else status.value)

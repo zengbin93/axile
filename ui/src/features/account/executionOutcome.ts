@@ -3,6 +3,7 @@ export type ExecutionOutcome = 'completed' | 'not_reached' | 'error' | 'terminat
 export interface OutcomeView {
   outcome: ExecutionOutcome
   text: string
+  reason: string
   warning: boolean
   symbols: string[]
 }
@@ -27,5 +28,5 @@ export function executionOutcome(value: unknown, clear = false): OutcomeView {
     blocked: '未执行', unknown: '执行结果待确认', legacy: '历史执行记录',
   }[outcome]
   const detail = outcome === 'not_reached' ? symbolPreview(symbols) : outcome === 'error' || outcome === 'blocked' ? reason : ''
-  return { outcome, symbols, text: detail ? `${label} · ${detail}` : label, warning: ['not_reached', 'error', 'unknown'].includes(outcome) }
+  return { outcome, symbols, reason, text: detail ? `${label} · ${detail}` : label, warning: ['not_reached', 'error', 'unknown'].includes(outcome) }
 }

@@ -23,3 +23,7 @@ test('缺失和退化快照不当成空仓，完整空数组才是空仓', () =>
   expect(snapshotPositions(artifacts({ account_assets: { positions: [{ symbol: 'rb2610' }] } }), 'account_snapshot')).toBeNull()
   expect(quantityUnit({ quantity_kind: 'base_asset', quantity_label: '单位', quantity_max_decimals: 6, price_label: '', notional_label: '' }, 'ASSETCNY', 'CNY')).toBe('ASSET')
 })
+
+test('历史记录标题直接展示已保存的原因', () => {
+  expect(executionState(row({ record: { ...row().record, raw_result: { outcome: 'blocked', outcome_reason: 'CLOSED' } } }))).toBe('未执行 · CLOSED')
+})

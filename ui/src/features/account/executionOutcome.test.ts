@@ -19,3 +19,17 @@ test('结束提示与概览结论一致，即使任务因旧控制口径标记 F
   const payload = { outcome: 'not_reached', outcome_symbols: ['m2701'] }
   expect(describeRunOutcome('exec', payload)).toEqual({ kind: 'not_reached', toast: executionOutcome(payload).text })
 })
+
+test('账户结论和结束提示直接展示后端原因', () => {
+  const raw = Object.freeze({ outcome: 'blocked' as const, outcome_reason: '非交易时段' })
+  expect(executionOutcome(raw).text).toBe('未执行 · 非交易时段')
+  expect(describeRunOutcome('exec', raw)).toEqual({ kind: 'blocked', toast: '未执行 · 非交易时段' })
+  expect(raw.outcome_reason).toBe('非交易时段')
+  expect(executionOutcome({ outcome: 'blocked', outcome_reason: ' ' }).text).toBe('未执行')
+})
+
+test('前端不翻译历史原因码', () => {
+  for (const reason of ['CLOSED', 'CALENDAR_UNAVAILABLE', 'QUOTE_TRADING_TIME_UNAVAILABLE']) {
+    expect(executionOutcome({ outcome: 'blocked', outcome_reason: reason }).text).toBe('未执行 · ' + reason)
+  }
+})

@@ -540,3 +540,20 @@ it('旧记录保留原始附件和事件，不推断失败标题', () => {
   expect(model.failure).toBeNull()
   expect(model.artifacts).toBe(artifacts)
 })
+
+it('详情头条与品种原因展示后端说明，原始附件保留', () => {
+  const summary = art('execution_summary', {
+    outcome: 'blocked', outcome_reason: '非交易时段',
+    reconciliation: { account: { source_before: 'real', source_after: 'real' }, symbols: [{ symbol: 'm2609', outcome: 'blocked', outcome_reason: '非交易时段', before: 0, after: 0, target: 1 }] },
+  })
+  const model = buildExecutionDetail([], [summary])
+  expect(executionHeadline(model).text).toBe('未执行 · 非交易时段')
+  expect(model.symbols[0].reason).toBe('非交易时段')
+  expect(summary.content.outcome_reason).toBe('非交易时段')
+})
+
+it('详情保留未知原因，不猜测或隐藏诊断信息', () => {
+  const model = buildExecutionDetail([], [art('execution_summary', { outcome: 'error', outcome_reason: 'UNKNOWN_CODE' })])
+  expect(executionHeadline(model).text).toContain('UNKNOWN_CODE')
+  expect(JSON.stringify(model.failure)).toContain('UNKNOWN_CODE')
+})

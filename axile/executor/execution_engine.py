@@ -970,6 +970,7 @@ class ExecutionEngine:
         error: str,
         *,
         status: ExecutionStatus = ExecutionStatus.FAILED,
+        outcome_reason: str | None = None,
         orders: list[UnifiedOrder] | None = None,
         account_assets: UnifiedAccountAssets | None = None,
         target_volume: TargetVolumeValue | None = None,
@@ -977,7 +978,7 @@ class ExecutionEngine:
         memory: dict[str, object] | None = None,
         sizing: TargetSizingDecision | None = None,
     ) -> AlgorithmResult:
-        """构造单个品种的失败算法结果."""
+        """构造失败结果；渠道返回机器错误码时需另传可读 outcome_reason。"""
         return AlgorithmResult(
             orders=list(orders or []),
             account_assets=account_assets or self._owner.get_account_assets(),
@@ -986,7 +987,7 @@ class ExecutionEngine:
             first_tick=first_tick,
             memory=dict(memory or {}),
             outcome=ExecutionOutcome.BLOCKED if status == ExecutionStatus.BLOCKED else ExecutionOutcome.ERROR,
-            outcome_reason=error,
+            outcome_reason=outcome_reason if outcome_reason is not None else error,
             status=status,
             error=error,
             symbol=symbol,

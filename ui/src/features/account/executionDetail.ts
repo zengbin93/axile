@@ -725,7 +725,7 @@ export function buildExecutionDetail(
   const conclusionSource = taskOverridesSummary ? task : summary?.outcome != null ? summary : task
   const conclusion = executionOutcome(conclusionSource, task?.execution_kind === 'clear_positions')
   const failure = conclusion.outcome === 'error'
-    ? describeFailureText(asStr(conclusionSource?.outcome_reason) || task?.error || '执行过程发生错误')
+    ? describeFailureText(conclusion.reason || task?.error || '执行过程发生错误')
     : null
   const terminatedDetails = asDict(eventAt(events, 'execution_terminated')?.details)
   const termination = asDict(terminatedDetails?.termination)
