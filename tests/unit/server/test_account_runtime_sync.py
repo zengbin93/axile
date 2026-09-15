@@ -92,7 +92,8 @@ def test_failure_and_cancellation_release_lock_and_retry_converges(
 
             monkeypatch.setattr(runtime, "reconcile_china_channel_account", prepare)
             failed = await runtime.reconcile_account_runtime(1, MagicMock(), session_factory=factory)
-            assert failed.status == "failed" and failed.last_error == "worker timeout"
+            # 异常原文只进日志；用户可见的 last_error 用固定人话。
+            assert failed.status == "failed" and failed.last_error == "账户运行态对齐失败，具体原因见服务日志"
             mode = "cancel"
             task = asyncio.create_task(runtime.reconcile_account_runtime(1, MagicMock(), session_factory=factory))
             await asyncio.wait_for(entered.wait(), 5)

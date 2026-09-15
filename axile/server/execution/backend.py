@@ -137,7 +137,8 @@ async def _run_rebalance_via_worker_process(request: RebalanceBackendRequest) ->
         request.logger.warning(f"交易被终止 trigger={request.trigger_source}")
         raise
     except Exception as exc:
-        msg = f"调仓执行失败, 错误原因: {exc}"
+        # 异常原文只进日志（opt(exception=...)）；用户可读说明用固定文案。
+        msg = "调仓执行失败，具体原因未确认"
         await _append_rebalance_error_record(request, msg)
         request.logger.opt(exception=exc).error("{}", msg)
         raise
@@ -433,7 +434,7 @@ async def _run_clear_positions_via_worker_process(request: ClearPositionsBackend
         raise
     except Exception as exc:
         await _record_clear_positions_failure(request, error=exc)
-        raise ValueError(f"清除持仓失败 | 错误原因={exc}") from exc
+        raise ValueError("清仓执行失败，具体原因未确认") from exc
 
 
 async def _run_clear_positions_inline(request: ClearPositionsBackendRequest) -> ExecuteRecord:
@@ -474,7 +475,7 @@ async def _run_clear_positions_inline(request: ClearPositionsBackendRequest) -> 
         raise
     except Exception as exc:
         await _record_clear_positions_failure(request, error=exc, executor=executor)
-        raise ValueError(f"清除持仓失败 | 错误原因={exc}") from exc
+        raise ValueError("清仓执行失败，具体原因未确认") from exc
     finally:
         await execution_lifecycle.cleanup_executor_runtime(executor)
 

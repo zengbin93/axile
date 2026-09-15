@@ -679,12 +679,13 @@ async def list_execute_records(
     )
     records = (await session.execute(statement)).scalars().all()
 
-    data: list[ExecuteRecordPublic] = []
-    for record in records:
-        item = ExecuteRecordPublic.model_validate(record)
+    data = [
         # 旧记录读时归一：列表响应与新记录同形，前端不需要 legacy 分支。
-        item.raw_result = normalize_legacy_result(record.raw_result)
-        data.append(item)
+        ExecuteRecordPublic.model_validate(record).model_copy(
+            update={"raw_result": normalize_legacy_result(record.raw_result)}
+        )
+        for record in records
+    ]
     return ExecuteRecordListPublic(
         data=data,
         count=count,

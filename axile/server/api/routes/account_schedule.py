@@ -229,10 +229,10 @@ async def account_activity(
     )
 
     def _public_record(row: ExecuteRecord) -> ExecuteRecordPublic:
-        item = ExecuteRecordPublic.model_validate(row)
         # 旧记录读时归一：活动流里的执行记录与新记录同形。
-        item.raw_result = normalize_legacy_result(row.raw_result)
-        return item
+        return ExecuteRecordPublic.model_validate(row).model_copy(
+            update={"raw_result": normalize_legacy_result(row.raw_result)}
+        )
 
     activities: list[ExecutionActivity | ScheduleSkipActivity] = [
         ExecutionActivity(

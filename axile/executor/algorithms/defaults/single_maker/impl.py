@@ -48,11 +48,11 @@ from axile.executor.algorithms.utils import (
     teardown_order_tracker,
 )
 from axile.executor.algorithms.utils.final_position import read_final_position
-from axile.executor.algorithms.utils.order_tracker import ChaseConfig
+from axile.executor.algorithms.utils.order_tracker import ChaseConfig, OrderTracker
 from axile.executor.algorithms.utils.outcome import summarize_outcome
 from axile.executor.algorithms.utils.trading import create_unconfirmed_start_result
 from axile.executor.models.execution_result import ExecutionStatus
-from axile.executor.models.unified_account_assets import is_degraded_snapshot_source
+from axile.executor.models.unified_account_assets import UnifiedAccountAssets, is_degraded_snapshot_source
 from axile.executor.models.unified_price import UnifiedPriceData, clone_price_data
 from axile.executor.termination import ExecutionTerminated
 
@@ -132,6 +132,72 @@ def _resolve_pricing_on_book(
     return determine_order_price(direction, market_data, price_strategy="ACTIVE")
 
 
+def _missing_book_result(
+    executor: ExecutorProtocol,
+    account_assets: UnifiedAccountAssets,
+    algorithm_name: str,
+    symbol: str,
+    target_volume: float,
+    first_tick: UnifiedPriceData | None,
+    execution_memory: dict[str, Any],
+    chase_config: ChaseConfig | None,
+) -> AlgorithmResult:
+    """盘口无效且策略为 skip 时构造本轮跳过结果（欠量，下轮重挂）。"""
+    executor.logger.warning(f"{symbol} 盘口买卖一无效（假盘口），本轮跳过（skip）")
+    execution_memory[f"{symbol}_skipped"] = "missing_book"
+    return AlgorithmResult(
+        orders=[],
+        trades=[],
+        account_assets=account_assets,
+        target_volume=target_volume,
+        first_tick=first_tick,
+        status=ExecutionStatus.BLOCKED,
+        error="盘口买卖一无效，本轮未执行",
+        memory={
+            "algorithm": algorithm_name,
+            "target_volume": target_volume,
+            "execution_details": execution_memory,
+            "symbols_processed": 1,
+            "orders_generated": 0,
+            "trades_generated": 0,
+            "total_asset": account_assets.total_asset,
+            "chase_enabled": chase_config is not None,
+        },
+    )
+
+
+def _record_submit_failure(
+    executor: ExecutorProtocol,
+    tracker: OrderTracker,
+    execution_memory: dict[str, Any],
+    symbol: str,
+    exc: BaseException,
+) -> None:
+    """把报单阶段的可恢复异常落到显式错误通道与执行记忆；原文进日志。"""
+    if isinstance(exc, AccountControlBlockedError):
+        tracker.explicit_blocked_error = exc.execution_error
+    else:
+        tracker.explicit_error = execution_error_message(exc, "报单")
+    error_message = format_exception_message(exc)
+    executor.logger.error(f"{symbol} 下单失败: {error_message}")
+    execution_memory[f"{symbol}_error"] = error_message
+
+
+def _recover_outer_failure(
+    executor: ExecutorProtocol,
+    tracker: OrderTracker,
+    exc: BaseException,
+) -> tuple[UnifiedAccountAssets, float]:
+    """外层可恢复异常的收尾：补显式错误并重读最终持仓。"""
+    if not isinstance(tracker.explicit_error, str):
+        tracker.explicit_error = execution_error_message(exc)
+    executor.logger.exception("SINGLE-MAKER 执行失败")
+    assets, final_volume, query_error = read_final_position(executor, executor.get_current_volume)
+    if query_error and not isinstance(tracker.explicit_error, str):
+        tracker.explicit_error = query_error
+    return assets, final_volume
+
+
 @register_algorithm(
     "SINGLE-MAKER",
     order_param_models=ALL_ORDER_PARAM_MODELS,
@@ -200,26 +266,15 @@ def single_maker_callback(
             pricing = _resolve_pricing_on_book(direction, market_data, params)
             if pricing is None:
                 # 盘口无效 + on_missing_book=skip：本轮跳过该品种（欠量，下轮 rebalance 重挂），永不 taker
-                executor.logger.warning(f"{symbol} 盘口买卖一无效（假盘口），本轮跳过（skip）")
-                execution_memory[f"{symbol}_skipped"] = "missing_book"
-                return AlgorithmResult(
-                    orders=[],
-                    trades=[],
-                    account_assets=account_assets,
-                    target_volume=target_volume,
-                    first_tick=first_tick,
-                    status=ExecutionStatus.BLOCKED,
-                    error="盘口买卖一无效，本轮未执行",
-                    memory={
-                        "algorithm": algorithm_name,
-                        "target_volume": algorithm_input.target_volume,
-                        "execution_details": execution_memory,
-                        "symbols_processed": 1,
-                        "orders_generated": 0,
-                        "trades_generated": 0,
-                        "total_asset": account_assets.total_asset,
-                        "chase_enabled": chase_config is not None,
-                    },
+                return _missing_book_result(
+                    executor,
+                    account_assets,
+                    algorithm_name,
+                    symbol,
+                    target_volume,
+                    first_tick,
+                    execution_memory,
+                    chase_config,
                 )
             order_type, price = pricing
 
@@ -259,13 +314,7 @@ def single_maker_callback(
             except RECOVERABLE_ALGORITHM_EXCEPTIONS as e:
                 if getattr(e, "requires_session_recovery", False):
                     raise
-                if isinstance(e, AccountControlBlockedError):
-                    tracker.explicit_blocked_error = e.execution_error
-                else:
-                    tracker.explicit_error = execution_error_message(e, "报单")
-                error_message = format_exception_message(e)
-                executor.logger.error(f"{symbol} 下单失败: {error_message}")
-                execution_memory[f"{symbol}_error"] = error_message
+                _record_submit_failure(executor, tracker, execution_memory, symbol, e)
 
             # 等待订单完成
             tracker.wait_for_completion(timeout=max(0.0, deadline - get_default_clock().time()))
@@ -280,12 +329,7 @@ def single_maker_callback(
     except RECOVERABLE_ALGORITHM_EXCEPTIONS as exc:
         if getattr(exc, "requires_session_recovery", False):
             raise
-        if not isinstance(tracker.explicit_error, str):
-            tracker.explicit_error = execution_error_message(exc)
-        executor.logger.exception("SINGLE-MAKER 执行失败")
-        account_assets, final_volume, explicit_error = read_final_position(executor, executor.get_current_volume)
-        if explicit_error and not isinstance(tracker.explicit_error, str):
-            tracker.explicit_error = explicit_error
+        account_assets, final_volume = _recover_outer_failure(executor, tracker, exc)
     finally:
         # 使用工具函数清理订单跟踪器
         teardown_order_tracker(executor, tracker, chase_config)

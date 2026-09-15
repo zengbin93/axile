@@ -128,8 +128,9 @@ async def reconcile_account_runtime(
             try:
                 await _apply_account_job(sched, target.account, target.portfolio_id)
                 await reconcile_china_channel_account(target.account, reset=target.reset_worker)
-            except Exception as exc:  # noqa: BLE001 - 外部状态失败不能回滚账户真源
-                error = str(exc)
+            except Exception:  # noqa: BLE001 - 外部状态失败不能回滚账户真源
+                # sync.error 会随账户 API 展示给用户；异常原文只进日志。
+                error = "账户运行态对齐失败，具体原因见服务日志"
                 logger.exception("账户运行态对齐失败 account_id={} revision={}", account_id, target.revision)
             sync = await _finish_attempt(account_id, target.revision, error, factory)
             if sync.revision == target.revision:

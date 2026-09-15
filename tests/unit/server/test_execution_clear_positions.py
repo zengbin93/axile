@@ -273,7 +273,7 @@ def test_empty_positions_wraps_worker_failure_with_error_record(
     monkeypatch.setattr(execution_backend, "append_execution_event", fake_append_execution_event)
     monkeypatch.setattr(execution_backend, "append_error_execute_record", fake_append_error_execute_record)
 
-    with pytest.raises(ValueError, match="清除持仓失败 \\| 错误原因=worker exploded"):
+    with pytest.raises(ValueError, match="清仓执行失败，具体原因未确认"):
         asyncio.run(clear_positions_execution.__empty_positions(account, execution_id="exec-empty-worker-failed-1"))
 
     assert captured_event["execution_id"] == "exec-empty-worker-failed-1"

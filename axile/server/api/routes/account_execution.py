@@ -412,12 +412,13 @@ async def execution_events(
         .limit(pagination.limit)
     )
     rows = (await session.execute(stmt)).scalars().all()
-    data: list[ExecutionEventPublic] = []
-    for row in rows:
-        item = ExecutionEventPublic.model_validate(row)
+    data = [
         # 旧事件的 debug.error 读时提升到公共层；技术原文不提升。
-        item.details = normalize_execution_event_details(row.details)
-        data.append(item)
+        ExecutionEventPublic.model_validate(row).model_copy(
+            update={"details": normalize_execution_event_details(row.details)}
+        )
+        for row in rows
+    ]
     return ExecutionEventListPublic(
         data=data,
         count=total,
@@ -446,9 +447,10 @@ async def execution_artifacts(
     artifact_data: list[ExecutionArtifactPublic] = []
     for row in rows:
         item = ExecutionArtifactPublic.model_validate(row)
+        content = item.content
         # 旧执行摘要附件读时归一；其他附件形状不同，不做推断。
-        if row.artifact_type == ExecutionArtifactType.EXECUTION_SUMMARY and isinstance(item.content, dict):
-            item.content = normalize_legacy_result(item.content)
+        if row.artifact_type == ExecutionArtifactType.EXECUTION_SUMMARY and isinstance(content, dict):
+            item = item.model_copy(update={"content": normalize_legacy_result(content)})
         artifact_data.append(item)
     return ExecutionArtifactListPublic(
         data=artifact_data,

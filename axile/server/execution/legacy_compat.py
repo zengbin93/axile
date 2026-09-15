@@ -36,7 +36,7 @@ _LEGACY_ERROR_COPY = {
     _TERMINATED_OUTCOME: "执行已终止",
 }
 
-_EXCEPTION_CLASS = re.compile(r"^[\w.]*(Error|Exception)\b[:\s]")
+_EXCEPTION_CLASS = re.compile(r"\b[\w.]*(Error|Exception)\b[:\s]")
 _TECHNICAL_MARKERS = ("Traceback", "ErrorID=", "return_code=")
 
 
@@ -46,8 +46,11 @@ def _text(value: object) -> str | None:
 
 
 def _is_technical_text(text: str) -> bool:
-    """识别异常类名、堆栈与渠道错误码等不宜展示给用户的技术原文。"""
-    return bool(_EXCEPTION_CLASS.match(text) or any(marker in text for marker in _TECHNICAL_MARKERS))
+    """识别异常类名、堆栈与渠道错误码等不宜展示给用户的技术原文。
+
+    异常类名可出现在句子中缀（如 ``错误原因: RuntimeError: ...``），用 search 全文匹配。
+    """
+    return bool(_EXCEPTION_CLASS.search(text) or any(marker in text for marker in _TECHNICAL_MARKERS))
 
 
 def _legacy_message(raw: dict[str, Any]) -> str | None:
@@ -107,6 +110,10 @@ def normalize_legacy_result(raw: object) -> object:
                     result["technical_detail"] = legacy
                 # 用回填后的 outcome 取固定文案，覆盖「无结论但有状态」的记录。
                 result["error"] = _LEGACY_ERROR_COPY.get(result.get("outcome")) or "执行结果待确认"
+    elif _is_technical_text(result["error"]):
+        # 历史写入的 error 自带异常原文：原文退入 technical_detail，主展示换固定人话。
+        result.setdefault("technical_detail", result["error"])
+        result["error"] = _LEGACY_ERROR_COPY.get(result.get("outcome")) or "执行失败，具体原因见执行证据"
 
     symbols = result.get("symbol_results")
     if isinstance(symbols, dict):
