@@ -25,7 +25,7 @@ target_volume 表示要行权 / 放弃 / 自对冲的张数（必须为非负整
 
 from __future__ import annotations
 
-from typing import Any, Protocol, cast
+from typing import TYPE_CHECKING, Any, Protocol, cast
 
 from pydantic import Field
 
@@ -37,8 +37,11 @@ from axile.executor.algorithms.core.base import (
     register_algorithm,
 )
 from axile.executor.algorithms.utils.clock import get_default_clock
-from axile.executor.ctp.options import OptionActionRecord
 from axile.executor.models.execution_result import AlgorithmResult, ExecutionOutcome, ExecutionStatus
+
+if TYPE_CHECKING:
+    # 算法注册和元数据查询不能触发可选渠道 SDK 导入；此类型仅供静态检查使用。
+    from axile.executor.ctp.options import OptionActionRecord
 
 
 class CtpOptionExecutorProtocol(ExecutorProtocol, Protocol):
