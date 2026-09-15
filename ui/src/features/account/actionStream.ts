@@ -80,13 +80,12 @@ function sideText(direction: string): string {
   return ''
 }
 
-/** 终态串归类：成交 / 撤销 / 拒单 / 过期（识别中英文与枚举）。 */
+/** 终态串归类：成交 / 撤销 / 拒单 / 过期。只认统一中文终态，避免 FILLED/部分成交被 includes 误判成全部成交。 */
 function terminalKind(status: string): 'filled' | 'canceled' | 'rejected' | 'expired' | 'other' {
-  const s = status.toUpperCase()
-  if (s.includes('FILL') || status.includes('成交')) return 'filled'
-  if (s.includes('CANCEL') || status.includes('撤')) return 'canceled'
-  if (s.includes('REJECT') || status.includes('拒')) return 'rejected'
-  if (s.includes('EXPIRE') || status.includes('过期')) return 'expired'
+  if (status === '已成交') return 'filled'
+  if (status === '已撤销') return 'canceled'
+  if (status === '已拒绝') return 'rejected'
+  if (status === '已过期') return 'expired'
   return 'other'
 }
 
@@ -110,7 +109,7 @@ function decisionText(e: ExecutionEvent, units: ActionDisplayUnits): string {
   if (algorithm) parts.push(algorithm)
   if (orders != null) parts.push(`${orders} 单`)
   let text = parts.join(' · ')
-  if (d?.outcome != null) return `${text} · ${executionOutcome(d).text}`
+  if (d?.status != null) return `${text} · ${executionOutcome(d).text}`
   const err = eventError(e)
   if (err) text += ` · ${err}`
   return text

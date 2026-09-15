@@ -1,4 +1,4 @@
-import { executionOutcome } from '@/features/account/executionOutcome'
+import { executionOutcome, executionRecordSummary } from '@/features/account/executionOutcome'
 import type { AccountActivity } from '@/lib/api/accounts'
 import { buildRecentActivity, recentRowText } from '@/features/account/recent'
 import { dict, number } from '@/features/account/executionValues'
@@ -41,8 +41,8 @@ export function journalExecutions(activity: AccountActivity[]): JournalExecution
     const recent = buildRecentActivity([a], { fetchLimit: 2 }).rows[0]
     const record = a.kind === 'execution' ? a.record : null
     const trades = record ? costTrades(record).map((t, i) => journalTrade(t, `${record.id ?? record.execution_id}:${i}`)) : []
-    const view = record ? executionOutcome(record.raw_result) : null
-    const status = view ? ({ completed: '已完成', not_reached: '执行不到位', error: '执行失败', terminated: '已终止', blocked: '已跳过', unknown: '执行结果待确认', legacy: '历史执行记录' }[view.outcome]) : '已跳过'
+    const view = record ? executionOutcome(record) : null
+    const status = view?.title ?? '已跳过'
     const symbols = record ? [...new Set([
       ...Object.keys(dict(record.raw_result.symbol_results)),
       ...Object.keys(record.raw_input.curr_target ?? {}), ...Object.keys(record.raw_input.last_target ?? {}),
@@ -51,7 +51,7 @@ export function journalExecutions(activity: AccountActivity[]): JournalExecution
       key: a.kind === 'execution' ? `execution:${record?.id ?? record?.execution_id}` : `skip:${a.id}`,
       time: a.occurred_at, executionId: record?.execution_id ?? null, status,
       warning: view?.warning ?? false,
-      description: view?.text ?? recentRowText(recent),
+      description: record ? executionRecordSummary(record) : recentRowText(recent),
       symbols, trades, summary: summarizeCosts(trades), recordId: record?.id ?? null, durationSec: number(record?.raw_result.execution_time),
     }
   })

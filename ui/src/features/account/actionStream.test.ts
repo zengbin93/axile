@@ -26,6 +26,11 @@ function ev(patch: Partial<ExecutionEvent>): ExecutionEvent {
 }
 
 describe('buildSymbolActionStream', () => {
+  it.each(['部分成交', '待成交', '已报', 'CLOSED', 'FILLED', 'UNKNOWN'])('订单状态精确回放，不把 %s 判作全部成交', status => {
+    const lines = buildSymbolActionStream([ev({ event_type: 'order_terminal', details: { order: { terminal_status: status, volume: 2, filled_volume: 1 } } })], 'rb2610')
+    expect(lines[0].text).toContain(status)
+    expect(lines[0].good).toBe(false)
+  })
   it('决策置顶，即便其时间戳晚于成交（补发乱序已修）', () => {
     const lines = buildSymbolActionStream(
       [
@@ -35,7 +40,7 @@ describe('buildSymbolActionStream', () => {
           status: 'SUCCESS',
           order_id: 'o1',
           ts_local_created: '2026-07-14T23:17:16',
-          details: { order: { direction: 'OrderDirection.BUY', terminal_status: 'FILLED', volume: 0.0756, filled_volume: 0.0756, avg_price: 62000 } },
+          details: { order: { direction: 'OrderDirection.BUY', terminal_status: '已成交', volume: 0.0756, filled_volume: 0.0756, avg_price: 62000 } },
         }),
         // 决策补发在末尾，时间戳最晚：
         ev({
@@ -56,7 +61,7 @@ describe('buildSymbolActionStream', () => {
     )
 
     expect(lines.map((l) => l.text)).toEqual([
-      '决策 · 目标仓 0.0756 · single-maker · 1 单',
+      '决策 · 目标仓 0.0756 · single-maker · 1 单 · 调仓完成',
       '挂单 买 0.0756 @61,990',
       '成交 买 0.0756/0.0756 @62,000',
     ])
@@ -75,8 +80,8 @@ describe('buildSymbolActionStream', () => {
         ev({ event_type: 'order_submitted', seq: 1, order_id: 'o1', ts_local_created: '2026-07-14T23:17:08', details: { order: { direction: 'OrderDirection.BUY', volume: 1, price: 100 } } }),
         ev({ event_type: 'order_submitted', seq: 2, order_id: 'o2', reason_code: 'COMMON.ORDER_CHASE', ts_local_created: '2026-07-14T23:17:13', details: { chase: { index: 1, max: 5, from_price: 100, to_price: 101, prev_order_id: 'o1' } } }),
         // o1 被追价撤掉的终态——应被抑制：
-        ev({ event_type: 'order_terminal', seq: 3, status: 'SUCCESS', order_id: 'o1', ts_local_created: '2026-07-14T23:17:14', details: { order: { direction: 'OrderDirection.BUY', terminal_status: 'CANCELED', volume: 1, filled_volume: 0 } } }),
-        ev({ event_type: 'order_terminal', seq: 4, status: 'SUCCESS', order_id: 'o2', ts_local_created: '2026-07-14T23:17:20', details: { order: { direction: 'OrderDirection.BUY', terminal_status: 'FILLED', volume: 1, filled_volume: 1, avg_price: 101 } } }),
+        ev({ event_type: 'order_terminal', seq: 3, status: 'SUCCESS', order_id: 'o1', ts_local_created: '2026-07-14T23:17:14', details: { order: { direction: 'OrderDirection.BUY', terminal_status: '已撤销', volume: 1, filled_volume: 0 } } }),
+        ev({ event_type: 'order_terminal', seq: 4, status: 'SUCCESS', order_id: 'o2', ts_local_created: '2026-07-14T23:17:20', details: { order: { direction: 'OrderDirection.BUY', terminal_status: '已成交', volume: 1, filled_volume: 1, avg_price: 101 } } }),
       ],
       'rb2610',
     )
@@ -134,8 +139,8 @@ describe('buildSymbolActionStream', () => {
 it('新决策未到位时不复述旧失败摘要', () => {
   const lines = buildSymbolActionStream([ev({
     event_type: 'symbol_decision_made', status: 'ERROR',
-    details: { decision: { outcome: 'not_reached', target_volume: 3 }, debug: { error: '持仓调整失败' } },
+    details: { decision: { status: 'PARTIAL', target_volume: 3 }, debug: { error: '持仓调整失败' } },
   })], 'rb2610')
-  expect(lines[0].text).toContain('执行不到位')
+  expect(lines[0].text).toContain('执行未全部完成')
   expect(lines[0].text).not.toContain('失败')
 })

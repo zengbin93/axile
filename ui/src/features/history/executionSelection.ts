@@ -8,5 +8,5 @@ export function executionSelection(row: CostExecutionRow): Extract<ChartSelectio
 }
 
 export function executionState(row: CostExecutionRow): string {
-  return executionOutcome(row.record.raw_result).text
+  return executionOutcome(row.record).text
 }
