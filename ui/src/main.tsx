@@ -1,12 +1,15 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
-import '@fontsource-variable/space-grotesk'
-import '@fontsource-variable/jetbrains-mono'
 import '@/styles/theme.css'
-import App from '@/App'
+import { commitFonts, prepareCachedFonts, warmFonts } from '@/fonts'
 
-createRoot(document.getElementById('root')!).render(
-  <StrictMode>
-    <App />
-  </StrictMode>,
-)
+void prepareCachedFonts()
+void import('@/App').then(({ default: App }) => {
+  commitFonts()
+  createRoot(document.getElementById('root')!).render(
+    <StrictMode>
+      <App />
+    </StrictMode>,
+  )
+  warmFonts()
+})
