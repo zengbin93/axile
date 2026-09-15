@@ -1,11 +1,19 @@
 """以最终持仓与订单终态共同判定算法结果，禁止把提交成功视作达标。"""
 
 from math import isclose, isfinite
-from typing import Any
+from typing import TypedDict
 
 from axile.executor.constants.order_status import OrderStatus
-from axile.executor.models.execution_result import ExecutionOutcome, ExecutionStatus
+from axile.executor.models.execution_result import ExecutionStatus
 from axile.executor.models.unified_order import TradeRecord, UnifiedOrder
+
+
+class OutcomeSummary(TypedDict):
+    """算法结果的明确状态与可序列化持仓字段。"""
+
+    status: ExecutionStatus
+    error: str | None
+    final_volume: float | None
 
 
 def summarize_outcome(
@@ -14,56 +22,31 @@ def summarize_outcome(
     target: float,
     orders: list[UnifiedOrder],
     trades: list[TradeRecord],
-    details: Any,
-) -> dict[str, Any]:
-    """保守聚合错误、欠量及未确认终态；成交后仍有风险时返回 PARTIAL。"""
-    errors = _errors(details)
-    process_errors = list(errors)
-    remaining = target - final
+    explicit_error: str | None = None,
+    explicit_blocked_error: str | None = None,
+) -> OutcomeSummary:
+    """以订单、成交、持仓和明确错误聚合结果，绝不扫描调试数据。"""
     terminal = all(OrderStatus.is_completed(order.status) for order in orders)
     completed = isfinite(final) and isclose(final, target, rel_tol=0, abs_tol=1e-9)
+    progress = bool(orders or trades) or (isfinite(final) and final != start)
     rejected = any(order.status == OrderStatus.REJECTED for order in orders)
-    if not terminal:
-        errors.append("订单终态未确认（含撤单结果未知）")
-    if rejected:
-        errors.append("存在拒单")
-        process_errors.append("存在拒单")
-    if not completed:
-        errors.append(f"目标未完成: final={final}, target={target}, remaining={remaining}")
-    filled = sum(trade.trade_volume for trade in trades)
-    progress = filled > 0 or any(order.filled_volume > 0 for order in orders) or final != start
-    if errors:
-        status = ExecutionStatus.PARTIAL if progress else ExecutionStatus.FAILED
-        if not orders and not _errors(details) and _skipped(details):
-            status = ExecutionStatus.BLOCKED
-    else:
+    error = explicit_error
+    if rejected and error is None:
+        error = "报单被拒绝"
+    if not terminal and error is None:
+        error = "订单最终状态尚未确认（含撤单结果未知）"
+    if not isfinite(final) and error is None:
+        error = "最终持仓尚未确认"
+    if completed and error is None:
         status = ExecutionStatus.NOOP if start == target and not orders else ExecutionStatus.SUCCEEDED
-    if process_errors:
-        outcome = ExecutionOutcome.ERROR
-    elif not terminal or not isfinite(final):
-        outcome = ExecutionOutcome.UNKNOWN
-    elif status == ExecutionStatus.BLOCKED:
-        outcome = ExecutionOutcome.BLOCKED
+    elif error is None and not progress and explicit_blocked_error:
+        status, error = ExecutionStatus.BLOCKED, explicit_blocked_error
     else:
-        outcome = ExecutionOutcome.COMPLETED if completed else ExecutionOutcome.NOT_REACHED
+        status = ExecutionStatus.PARTIAL if progress else ExecutionStatus.FAILED
+        if error is None:
+            error = explicit_blocked_error or f"目标未完成: 当前持仓={final}，目标持仓={target}"
     return {
         "status": status,
-        "error": "; ".join(errors) or None,
-        "outcome": outcome,
+        "error": error,
         "final_volume": final if isfinite(final) else None,
-        "outcome_reason": "; ".join(process_errors or errors) or None,
     }
-
-
-def _errors(details: Any) -> list[str]:
-    if isinstance(details, list):
-        return [error for item in details for error in _errors(item)]
-    if isinstance(details, dict):
-        return [str(value) for key, value in details.items() if "error" in key and value]
-    return []
-
-
-def _skipped(details: Any) -> bool:
-    if isinstance(details, list):
-        return any(_skipped(item) for item in details)
-    return isinstance(details, dict) and any("skipped" in key and value for key, value in details.items())

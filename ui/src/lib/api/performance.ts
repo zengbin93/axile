@@ -23,10 +23,11 @@ export interface PerformanceSnapshot {
 }
 export interface CostExecutionRow {
   key: string
-  record: { id: number; execution_id: string | null; created_at: string; is_success: number; raw_result: { status?: string; task_status?: string; outcome?: string; outcome_reason?: string; outcome_symbols?: string[] } }
+  record: { id: number; execution_id: string | null; created_at: string; is_success: number; raw_result: { status?: string; task_status?: string; error?: string; execution_kind?: string; symbol_results?: Record<string, unknown> } }
   noop: boolean
   durationSec?: number | null
   symbolCount: number
+  tradeCount?: number | null
   positionCount?: number | null
   positions?: Array<{ symbol: string; quantity: number; direction: string }> | null
   transactions?: TransactionPreview[]

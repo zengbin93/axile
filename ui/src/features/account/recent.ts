@@ -19,10 +19,11 @@ type Kind = 'fill' | 'clear' | 'noop' | 'fail' | 'partial' | 'terminated' | 'blo
 export type RecentRow =
   | { type: 'legacy' | 'unknown'; key: string; time: string; executionId: string | null }
   | { type: 'fill'; key: string; time: string; executionId: string | null; desc: string; amount: string }
-  | { type: 'noop'; key: string; time: string; count: number }
+  | { type: 'noop'; key: string; time: string; count: number; clear?: boolean }
   | { type: 'fail'; key: string; time: string; count: number; saturated: boolean; executionId: string | null; reason: string }
   | {
       type: 'partial'
+      clear?: boolean
       key: string
       time: string
       count: number
@@ -51,12 +52,14 @@ function assetAmount(r: ExecuteRecord): string {
  * 再判成功清仓（`execution_kind==='clear_positions'`）：确有平仓成交，不应按调仓口径误判为「空跑」。
  */
 function kindOf(r: ExecuteRecord): Kind {
-  const { outcome } = executionOutcome(r.raw_result)
-  if (outcome === 'legacy' || outcome === 'unknown' || outcome === 'blocked' || outcome === 'terminated') return outcome
-  if (outcome === 'error') return 'fail'
-  if (outcome === 'not_reached') return 'partial'
-  if (r.raw_result?.execution_kind === 'clear_positions') return 'clear'
-  return r.raw_result?.status === 'NOOP' ? 'noop' : 'fill'
+  const { state } = executionOutcome(r)
+  if (state === 'UNKNOWN') return 'unknown'
+  if (state === 'BLOCKED') return 'blocked'
+  if (state === 'TERMINATED') return 'terminated'
+  if (state === 'FAILED') return 'fail'
+  if (state === 'PARTIAL') return 'partial'
+  if (state === 'NOOP') return 'noop'
+  return r.raw_result?.execution_kind === 'clear_positions' ? 'clear' : 'fill'
 }
 
 /** 成交/清仓行的描述与金额（两者都是「有成交的成功执行」，同一 ✓ 样式）。 */
@@ -67,15 +70,16 @@ function fillRow(r: ExecuteRecord, i: number, kind: 'fill' | 'clear'): RecentRow
     key: `${kind === 'clear' ? 'c' : 'f'}${r.id ?? r.execution_id ?? i}`,
     time: r.created_at,
     executionId: r.execution_id ?? null,
-    desc: executionOutcome(r.raw_result, kind === 'clear').text,
+    desc: executionOutcome(r, kind === 'clear').text,
     amount: amount || '—',
   }
 }
 
 function partialRow(latest: ExecuteRecord, i: number, count: number, saturated: boolean): RecentRow {
-  const view = executionOutcome(latest.raw_result)
+  const view = executionOutcome(latest)
   return {
     type: 'partial',
+    clear: latest.raw_result?.execution_kind === 'clear_positions',
     key: `p${i}`,
     time: latest.created_at,
     count,
@@ -90,19 +94,22 @@ function partialRow(latest: ExecuteRecord, i: number, count: number, saturated: 
 
 /** 一瞥行主文案；详情与执行记录页共用，避免两处各写一句。 */
 export function recentRowText(row: RecentRow): string {
-  if (row.type === 'legacy') return '历史执行记录'
-  if (row.type === 'unknown') return '执行结果待确认'
+  if (row.type === 'legacy' || row.type === 'unknown') return '执行状态未知'
   if (row.type === 'fill') return row.desc
-  if (row.type === 'noop') return `${row.count > 1 ? `${row.count} 次空跑` : '空跑'} · 目标未变`
+  if (row.type === 'noop') {
+    const title = row.clear ? '无需清仓' : '无需调仓'
+    return row.count > 1 ? `连续 ${row.count} 次${title}` : title
+  }
   if (row.type === 'fail') {
     const head = row.count > 1 ? `连续 ${row.count}${row.saturated ? '+' : ''} 次执行失败` : '执行失败'
     return row.reason ? `${head} · 最近：${row.reason}` : head
   }
   if (row.type === 'partial') {
-    const head = row.count > 1 ? `连续 ${row.count}${row.saturated ? '+' : ''} 次执行不到位` : '执行不到位'
+    const title = executionOutcome({ status: 'PARTIAL' }).title
+    const head = row.count > 1 ? `连续 ${row.count}${row.saturated ? '+' : ''} 次${title}` : title
     return row.reason ? `${head} · ${row.reason}` : head
   }
-  if (row.type === 'terminated') return row.count > 1 ? `已终止 · ${row.count} 次` : '已终止'
+  if (row.type === 'terminated') return row.count > 1 ? `执行已终止 · ${row.count} 次` : '执行已终止'
   if (row.type === 'skip') return row.count > 1 ? `连续 ${row.count} 次${row.reason}` : row.reason
   if (row.type !== 'blocked') return ''
   return `${row.count > 1 ? `${row.count} 次未执行` : '未执行'}${row.reason ? ` · ${row.reason}` : ''}`
@@ -165,14 +172,14 @@ export function buildRecentActivity(
     let j = i
     while (j < activity.length) {
       const candidate = activity[j]
-      if (candidate.kind !== 'execution' || kindOf(candidate.record) !== k) break
+      if (candidate.kind !== 'execution' || kindOf(candidate.record) !== k || candidate.record.raw_result?.execution_kind !== current.record.raw_result?.execution_kind) break
       j += 1
     }
     const run = activity.slice(i, j).map((item) => item.kind === 'execution' ? item.record : null).filter((item): item is ExecuteRecord => item != null)
     const latest = run[0]
     const saturated = j === activity.length && windowFull
     if (k === 'noop') {
-      all.push({ type: 'noop', key: `n${i}`, time: latest.created_at, count: run.length })
+      all.push({ type: 'noop', key: `n${i}`, time: latest.created_at, count: run.length, clear: latest.raw_result?.execution_kind === 'clear_positions' })
     } else if (k === 'terminated') {
       all.push({
         type: 'terminated',
@@ -188,7 +195,7 @@ export function buildRecentActivity(
         time: latest.created_at,
         count: run.length,
         executionId: latest.execution_id ?? null,
-        reason: executionOutcome(latest.raw_result).reason,
+        reason: executionOutcome(latest).reason,
       })
     } else if (k === 'partial') {
       all.push(partialRow(latest, i, run.length, saturated))
@@ -200,7 +207,7 @@ export function buildRecentActivity(
         count: run.length,
         saturated,
         executionId: latest.execution_id ?? null,
-        reason: executionOutcome(latest.raw_result).reason,
+        reason: executionOutcome(latest).reason,
       })
     }
     i = j

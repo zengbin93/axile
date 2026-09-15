@@ -1,5 +1,4 @@
 import { executionOutcome } from '@/features/account/executionOutcome'
-import type { ExecutionStatus } from '@/types/api'
 
 export type RunKind = 'exec' | 'clear'
 
@@ -18,11 +17,13 @@ export type RunOutcome =
  */
 export function describeRunOutcome(
   kind: RunKind,
-  conclusion?: Pick<ExecutionStatus, 'outcome' | 'outcome_reason' | 'outcome_symbols'>,
+  conclusion?: { status?: string; output_status?: string | null; error?: string | null },
 ): RunOutcome {
-  const view = executionOutcome(conclusion, kind === 'clear')
-  if (view.outcome === 'error') return { kind: 'failed', error: view.text }
-  if (view.outcome === 'completed') return { kind: 'success', toast: view.text }
-  if (view.outcome === 'blocked' || view.outcome === 'terminated' || view.outcome === 'not_reached') return { kind: view.outcome, toast: view.text }
+  const view = executionOutcome({ status: conclusion?.output_status ?? conclusion?.status, task_status: conclusion?.status, error: conclusion?.error }, kind === 'clear')
+  if (view.state === 'FAILED') return { kind: 'failed', error: view.text }
+  if (view.state === 'SUCCEEDED' || view.state === 'NOOP') return { kind: 'success', toast: view.text }
+  if (view.state === 'BLOCKED') return { kind: 'blocked', toast: view.text }
+  if (view.state === 'TERMINATED') return { kind: 'terminated', toast: view.text }
+  if (view.state === 'PARTIAL') return { kind: 'not_reached', toast: view.text }
   return { kind: 'unknown', toast: view.text }
 }

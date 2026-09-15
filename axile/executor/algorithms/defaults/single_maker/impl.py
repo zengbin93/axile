@@ -24,6 +24,7 @@ from typing import Any, Literal
 
 from pydantic import Field
 
+from axile.executor.account_control.exceptions import AccountControlBlockedError
 from axile.executor.algorithms.common.params import BaseAlgorithmParams, ChaseParamsMixin
 from axile.executor.algorithms.core.base import (
     ALL_ORDER_PARAM_MODELS,
@@ -34,7 +35,11 @@ from axile.executor.algorithms.core.base import (
     OrderType,
     register_algorithm,
 )
-from axile.executor.algorithms.exceptions import RECOVERABLE_ALGORITHM_EXCEPTIONS, format_exception_message
+from axile.executor.algorithms.exceptions import (
+    RECOVERABLE_ALGORITHM_EXCEPTIONS,
+    execution_error_message,
+    format_exception_message,
+)
 from axile.executor.algorithms.utils import (
     determine_order_price,
     get_default_clock,
@@ -42,10 +47,13 @@ from axile.executor.algorithms.utils import (
     submit_and_track_split_orders,
     teardown_order_tracker,
 )
+from axile.executor.algorithms.utils.final_position import read_final_position
 from axile.executor.algorithms.utils.order_tracker import ChaseConfig
 from axile.executor.algorithms.utils.outcome import summarize_outcome
-from axile.executor.models.execution_result import ExecutionOutcome, ExecutionStatus
+from axile.executor.models.execution_result import ExecutionStatus
+from axile.executor.models.unified_account_assets import is_degraded_snapshot_source
 from axile.executor.models.unified_price import UnifiedPriceData, clone_price_data
+from axile.executor.termination import ExecutionTerminated
 
 
 class SingleMakerParams(BaseAlgorithmParams, ChaseParamsMixin):
@@ -168,6 +176,9 @@ def single_maker_callback(
 
     target_volume = algorithm_input.target_volume
     first_tick = clone_price_data(market_data)
+    # 初始持仓不可读时尚未产生订单，直接交还上层；不能进入依赖起始量的收尾分支。
+    current_volume = executor.get_current_volume(account_assets)
+    final_volume = float("nan") if is_degraded_snapshot_source(account_assets.source) else current_volume
 
     # 使用工具函数设置订单跟踪器
     tracker = setup_order_tracker(executor, market_data, chase_config)
@@ -178,8 +189,6 @@ def single_maker_callback(
         executor.logger.info(f"开始执行 {symbol} 的交易")
 
         # 执行调仓
-        current_volume = executor.get_current_volume(account_assets)
-
         if target_volume != current_volume:
             direction = OrderDirection.BUY if target_volume > current_volume else OrderDirection.SELL
             needed_volume = abs(target_volume - current_volume)
@@ -194,10 +203,8 @@ def single_maker_callback(
                     account_assets=account_assets,
                     target_volume=target_volume,
                     first_tick=first_tick,
-                    outcome=ExecutionOutcome.BLOCKED,
-                    outcome_reason="盘口买卖一无效，本轮未执行",
                     status=ExecutionStatus.BLOCKED,
-                    error="missing_book: 目标未完成",
+                    error="盘口买卖一无效，本轮未执行",
                     memory={
                         "algorithm": algorithm_name,
                         "target_volume": algorithm_input.target_volume,
@@ -242,12 +249,15 @@ def single_maker_callback(
                         "order_id": orders[0].order_id,
                         "order_ids": [order.order_id for order in orders],
                     }
-            except MemoryError:
-                executor.logger.exception(f"{symbol} 下单遇到不可恢复异常")
+            except (MemoryError, ExecutionTerminated):
                 raise
             except RECOVERABLE_ALGORITHM_EXCEPTIONS as e:
                 if getattr(e, "requires_session_recovery", False):
                     raise
+                if isinstance(e, AccountControlBlockedError):
+                    tracker.explicit_blocked_error = e.execution_error
+                else:
+                    tracker.explicit_error = execution_error_message(e, "报单")
                 error_message = format_exception_message(e)
                 executor.logger.error(f"{symbol} 下单失败: {error_message}")
                 execution_memory[f"{symbol}_error"] = error_message
@@ -256,8 +266,20 @@ def single_maker_callback(
             tracker.wait_for_completion(timeout=max(0.0, deadline - get_default_clock().time()))
 
             # 重新获取账户资产
-            account_assets = executor.get_account_assets()
+            account_assets, final_volume, explicit_error = read_final_position(executor, executor.get_current_volume)
+            if explicit_error:
+                tracker.explicit_error = explicit_error
 
+    except ExecutionTerminated:
+        raise
+    except RECOVERABLE_ALGORITHM_EXCEPTIONS as exc:
+        if getattr(exc, "requires_session_recovery", False):
+            raise
+        tracker.explicit_error = execution_error_message(exc)
+        executor.logger.exception("SINGLE-MAKER 执行失败")
+        account_assets, final_volume, explicit_error = read_final_position(executor, executor.get_current_volume)
+        if explicit_error:
+            tracker.explicit_error = explicit_error
     finally:
         # 使用工具函数清理订单跟踪器
         teardown_order_tracker(executor, tracker, chase_config)
@@ -265,9 +287,18 @@ def single_maker_callback(
     orders = tracker.get_all_orders()
     trades = tracker.get_all_trades()
 
-    final_volume = executor.get_current_volume(account_assets)
     return AlgorithmResult(
-        **summarize_outcome(current_volume, final_volume, target_volume, orders, trades, execution_memory),
+        **summarize_outcome(
+            current_volume,
+            final_volume,
+            target_volume,
+            orders,
+            trades,
+            explicit_error=tracker.explicit_error if isinstance(tracker.explicit_error, str) else None,
+            explicit_blocked_error=tracker.explicit_blocked_error
+            if isinstance(tracker.explicit_blocked_error, str)
+            else None,
+        ),
         orders=orders,
         trades=trades,
         account_assets=account_assets,

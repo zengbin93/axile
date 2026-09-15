@@ -18,6 +18,7 @@ from typing import Any, Dict, List, Literal, Tuple, cast
 from pydantic import Field
 
 from axile.common.trade_channel import TradeChannel
+from axile.executor.account_control.exceptions import AccountControlBlockedError
 from axile.executor.algorithms.common.params import BaseAlgorithmParams, ChaseParamsMixin
 from axile.executor.algorithms.core.base import (
     AlgorithmInput,
@@ -27,14 +28,16 @@ from axile.executor.algorithms.core.base import (
     OrderType,
     register_algorithm,
 )
+from axile.executor.algorithms.exceptions import execution_error_message
 from axile.executor.algorithms.utils import setup_order_tracker, teardown_order_tracker
-from axile.executor.algorithms.utils.order_tracker import ChaseConfig
+from axile.executor.algorithms.utils.final_position import read_final_position
+from axile.executor.algorithms.utils.order_tracker import ChaseConfig, OrderTracker
 from axile.executor.algorithms.utils.outcome import summarize_outcome
-from axile.executor.models.execution_result import ExecutionOutcome, ExecutionStatus
 from axile.executor.models.unified_account_assets import Position, PositionDirection, UnifiedAccountAssets
 from axile.executor.models.unified_order import UnifiedOrder
 from axile.executor.models.unified_price import clone_price_data
 from axile.executor.order_volume_limits import split_order_volumes
+from axile.executor.termination import ExecutionTerminated
 
 
 class CTPTargetPosTaskParams(BaseAlgorithmParams, ChaseParamsMixin):
@@ -328,6 +331,7 @@ def _place_volume_slices(
     *,
     offset_flag: str,
     trade_rule: Dict[str, Any] | None,
+    tracker: OrderTracker | None = None,
 ) -> Tuple[List[UnifiedOrder], float]:
     """按有效单笔上限拆单提交；返回订单列表与成功提交手数。"""
     orders: List[UnifiedOrder] = []
@@ -350,13 +354,24 @@ def _place_volume_slices(
                 trade_rule=trade_rule,
             )
         except Exception as exc:
-            if isinstance(exc, MemoryError) or bool(getattr(exc, "requires_session_recovery", False)):
+            if tracker is not None:
+                if isinstance(exc, AccountControlBlockedError):
+                    tracker.explicit_blocked_error = exc.execution_error
+                else:
+                    tracker.explicit_error = execution_error_message(exc, "报单")
+            if isinstance(exc, (MemoryError, ExecutionTerminated)) or bool(
+                getattr(exc, "requires_session_recovery", False)
+            ):
                 raise
             executor.logger.error(
                 f"拆单提交失败: {direction.value} {chunk}手@{limit_price} offset={offset_flag}, 错误: {exc}"
             )
             break
         orders.append(order)
+        if tracker is not None:
+            tracker.add_order(order, direction=direction, offset_flag=offset_flag, trade_rule=trade_rule)
+            tracker.explicit_error = None
+            tracker.explicit_blocked_error = None
         submitted += float(chunk)
     if submitted < volume:
         executor.logger.warning(f"拆单未提交缺口: {volume - submitted}，目标 {volume}，已提交 {submitted}")
@@ -375,6 +390,7 @@ def _submit_close_leg(
     failure_message: str,
     failure_level: str = "warning",
     trade_rule: Dict[str, Any] | None = None,
+    tracker: OrderTracker | None = None,
 ) -> Tuple[List[UnifiedOrder], float]:
     """提交单腿平仓订单（可按单笔上限拆单），并按调用方要求记录日志."""
     _ = symbol
@@ -387,13 +403,14 @@ def _submit_close_leg(
             limit_price,
             offset_flag=offset_flag,
             trade_rule=trade_rule,
+            tracker=tracker,
         )
         if not orders:
             raise RuntimeError("平仓拆单后无任何订单提交成功")
         executor.logger.info(success_message.format(order_id=orders[-1].order_id))
         return orders, submitted
     except Exception as e:
-        if isinstance(e, MemoryError) or bool(getattr(e, "requires_session_recovery", False)):
+        if isinstance(e, (MemoryError, ExecutionTerminated)) or bool(getattr(e, "requires_session_recovery", False)):
             raise
         getattr(executor.logger, failure_level)(failure_message.format(error=e))
         return [], 0
@@ -407,6 +424,7 @@ def _smart_close_position(
     limit_price: float,
     offset_priority: str = "昨今",
     trade_rule: Dict[str, Any] | None = None,
+    tracker: OrderTracker | None = None,
 ) -> Tuple[List[UnifiedOrder], float, bool]:
     """
     按昨仓 / 今仓可用量智能拆分平仓顺序。
@@ -482,6 +500,7 @@ def _smart_close_position(
             success_message=f"{offset_name}订单提交成功: {leg_volume}手, 订单ID: {{order_id}}",
             failure_message=f"{offset_name}失败: {{error}}",
             trade_rule=trade_rule,
+            tracker=tracker,
         )
         if not leg_orders:
             continue
@@ -506,6 +525,7 @@ def _smart_close_position(
             failure_message="通用平仓也失败: {error}",
             failure_level="error",
             trade_rule=trade_rule,
+            tracker=tracker,
         )
         if leg_orders:
             orders.extend(leg_orders)
@@ -531,6 +551,7 @@ def _execute_position_adjustment(
     offset_priority: str,
     *,
     trade_rule: Dict[str, Any] | None = None,
+    tracker: OrderTracker | None = None,
 ) -> List[UnifiedOrder]:
     """
     按目标净持仓执行单品种持仓调整。
@@ -586,7 +607,14 @@ def _execute_position_adjustment(
         if position_detail.short_total > 0:  # 先平空头
             close_volume = min(abs(adjust_volume), position_detail.short_total)
             close_orders, executed_volume, close_ok = _smart_close_position(
-                executor, symbol, "BUY", close_volume, limit_price, offset_priority, trade_rule=trade_rule
+                executor,
+                symbol,
+                "BUY",
+                close_volume,
+                limit_price,
+                offset_priority,
+                trade_rule=trade_rule,
+                tracker=tracker,
             )
             orders.extend(close_orders)
             if not close_ok:
@@ -605,6 +633,7 @@ def _execute_position_adjustment(
                 limit_price,
                 offset_flag=THOST_FTDC_OF_Open,
                 trade_rule=trade_rule,
+                tracker=tracker,
             )
             orders.extend(open_orders)
             if open_orders:
@@ -617,7 +646,14 @@ def _execute_position_adjustment(
         if position_detail.long_total > 0:  # 先平多头
             close_volume = min(adjust_volume, position_detail.long_total)
             close_orders, executed_volume, close_ok = _smart_close_position(
-                executor, symbol, "SELL", close_volume, limit_price, offset_priority, trade_rule=trade_rule
+                executor,
+                symbol,
+                "SELL",
+                close_volume,
+                limit_price,
+                offset_priority,
+                trade_rule=trade_rule,
+                tracker=tracker,
             )
             orders.extend(close_orders)
             if not close_ok:
@@ -635,6 +671,7 @@ def _execute_position_adjustment(
                 limit_price,
                 offset_flag=THOST_FTDC_OF_Open,
                 trade_rule=trade_rule,
+                tracker=tracker,
             )
             orders.extend(open_orders)
             if open_orders:
@@ -693,6 +730,11 @@ def ctp_target_pos_task_algorithm(executor: ExecutorProtocol, algorithm_input: A
     market_data: Any | None = None
 
     account_assets = executor.get_account_assets()
+    current_net_position = sum(
+        -p.volume if p.direction == PositionDirection.SHORT else p.volume
+        for p in account_assets.positions
+        if p.symbol == planned_symbol
+    )
     executor.logger.info(f"账户总资产: {account_assets.total_asset:.2f}, 可用资金: {account_assets.available_cash:.2f}")
 
     symbol = algorithm_input.symbol
@@ -736,22 +778,8 @@ def ctp_target_pos_task_algorithm(executor: ExecutorProtocol, algorithm_input: A
                 price_type,
                 offset_priority,
                 trade_rule=trade_rule,
+                tracker=tracker,
             )
-
-            for order in symbol_orders:
-                order_direction = order.direction
-                if not isinstance(order_direction, OrderDirection):
-                    order_direction = OrderDirection(order_direction)
-                tracker.add_order(
-                    order,
-                    direction=order_direction,
-                    target_volume=target_volume,
-                    current_volume=position_detail.net_position,
-                    offset_flag=str(order.extra.get("offset_flag"))
-                    if order.extra.get("offset_flag") is not None
-                    else None,
-                    trade_rule=trade_rule,
-                )
 
             execution_memory[f"{symbol}_adjustment"] = {
                 "current_net": position_detail.net_position,
@@ -767,9 +795,16 @@ def ctp_target_pos_task_algorithm(executor: ExecutorProtocol, algorithm_input: A
 
         # 最终是否达标以重新拉取的账户资产为准，而不是依赖本地订单累计推断；
         # 这样可以覆盖交易所异步回报延迟、部分成交和通道侧补单等情况。
-        final_account_assets = executor.get_account_assets()
-        final_position_detail = _extract_ctp_position_details(final_account_assets, [symbol]).get(symbol)
-        final_net_position = final_position_detail.net_position if final_position_detail else 0
+        final_account_assets, final_net_position, explicit_error = read_final_position(
+            executor,
+            lambda assets: sum(
+                -p.volume if p.direction == PositionDirection.SHORT else p.volume
+                for p in assets.positions
+                if p.symbol == symbol
+            ),
+        )
+        if explicit_error:
+            tracker.explicit_error = explicit_error
         target_reached = final_net_position == target_volume
         target_gap = target_volume - final_net_position
 
@@ -778,7 +813,6 @@ def ctp_target_pos_task_algorithm(executor: ExecutorProtocol, algorithm_input: A
                 f"{symbol} 最终持仓未达目标: 当前{final_net_position} 目标{target_volume} 差值{target_gap}"
             )
 
-        result_status = ExecutionStatus.SUCCEEDED if target_reached else ExecutionStatus.FAILED
         executor.logger.info(f"{algorithm_name}算法执行完成")
 
         orders = tracker.get_all_orders()
@@ -790,12 +824,11 @@ def ctp_target_pos_task_algorithm(executor: ExecutorProtocol, algorithm_input: A
             target_volume,
             orders,
             trades,
-            execution_memory,
+            tracker.explicit_error if isinstance(tracker.explicit_error, str) else None,
+            tracker.explicit_blocked_error if isinstance(tracker.explicit_blocked_error, str) else None,
         )
         return AlgorithmResult(
-            outcome=conclusion["outcome"],
-            outcome_reason=conclusion["outcome_reason"],
-            final_volume=final_net_position,
+            **conclusion,
             orders=orders,
             trades=trades,
             account_assets=final_account_assets,
@@ -817,29 +850,40 @@ def ctp_target_pos_task_algorithm(executor: ExecutorProtocol, algorithm_input: A
                 "total_asset_after": final_account_assets.total_asset,
                 "chase_enabled": chase_config is not None,
             },
-            status=result_status,
-            error=None
-            if target_reached
-            else f"{symbol} 持仓调整失败: 当前净持仓 {final_net_position}，目标 {target_volume}",
         )
 
     except Exception as e:
-        if bool(getattr(e, "requires_session_recovery", False)):
+        if isinstance(e, (MemoryError, ExecutionTerminated)) or bool(getattr(e, "requires_session_recovery", False)):
             raise
         error_msg = f"{algorithm_name}算法执行失败: {e}"
         executor.logger.error(f"{error_msg}")
         execution_memory["error"] = str(e)
-
+        final_account_assets, final_volume, explicit_error = read_final_position(
+            executor,
+            lambda assets: sum(
+                -p.volume if p.direction == PositionDirection.SHORT else p.volume
+                for p in assets.positions
+                if p.symbol == symbol
+            ),
+        )
+        explicit_blocked_error = e.execution_error if isinstance(e, AccountControlBlockedError) else None
+        explicit_error = explicit_error or (None if explicit_blocked_error else execution_error_message(e, "持仓调整"))
+        orders, trades = tracker.get_all_orders(), tracker.get_all_trades()
         return AlgorithmResult(
-            orders=tracker.get_all_orders(),
-            trades=tracker.get_all_trades(),
-            account_assets=executor.get_account_assets(),
+            **summarize_outcome(
+                current_net_position,
+                final_volume,
+                algorithm_input.target_volume,
+                orders,
+                trades,
+                explicit_error,
+                explicit_blocked_error,
+            ),
+            orders=orders,
+            trades=trades,
+            account_assets=final_account_assets,
             target_volume=algorithm_input.target_volume,
             first_tick=clone_price_data(market_data),
-            outcome=ExecutionOutcome.ERROR,
-            outcome_reason=error_msg,
-            status=ExecutionStatus.FAILED,
-            error=error_msg,
             memory={
                 "algorithm": algorithm_name,
                 "success": False,

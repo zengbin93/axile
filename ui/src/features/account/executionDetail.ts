@@ -1,4 +1,6 @@
 import { executionOutcome, outcomeOf, type OutcomeView } from '@/features/account/executionOutcome'
+import { isDegradedSnapshotSource } from '@/features/account/accountSnapshot'
+import { recordOrders } from './recordOrders'
 /**
  * 把执行事件流 + 附件组合成「执行详情」视图模型（纯函数，与组件解耦、便于测试）。
  *
@@ -26,6 +28,7 @@ export type ChainAction = 'reduce' | 'increase' | 'open' | 'close' | 'flip' | 'a
 /** 单只执行子链：意图→决策→下单→成交→到位，附带浮盈与断点。 */
 export interface SymbolChain {
   symbol: string
+  status?: string | null
   action: ChainAction
   /** 执行前带号持仓。 */
   before: number
@@ -83,17 +86,13 @@ export interface ExecutionHeader {
   exposureBefore: number | null
   exposureAfter: number | null
   /**
-   * 到位/持仓真相的来源标：只依赖执行后快照（after）。
-   *
-   * 到位度（``attainedRatio`` / ``reached``）由「after 持仓 vs target」派生，与执行前基线无关，
-   * 故 before 缺失也不污染它——after 为 ``real`` 时到位度即可信。
+   * 执行后账户快照来源；退化时逐品种仍可能保留算法先前确认的持仓。
+   * 到位度以对账行的证据为准，不能由此来源标或执行状态直接推断。
    */
   sourcePosition: AccountSnapshotSource
   /**
-   * 权益 / 敞口 / drift 的来源标：这些量是「后 − 前」的跨端差，取两端较差者。
-   *
-   * 只要有一端非 ``real``，权益变动与敞口对比即退化，故与 ``sourcePosition`` 分标：
-   * before 单独缺失时，仅此标退化、到位度仍可信。
+   * 权益 / 敞口的来源标：跨端对比取两端较差者。
+   * 只要有一端明确退化就不能比较，但不污染另一端已确认的持仓。
    */
   sourceEquity: AccountSnapshotSource
   success: boolean
@@ -211,7 +210,7 @@ function accountAssets(content: Dict | null): Dict | null {
 /** 账户快照来源标；无则按传入回退。 */
 function snapshotSource(content: Dict | null, assets: Dict | null): AccountSnapshotSource {
   const s = asStr(content?.source) || asStr(assets?.source)
-  return (s || 'unavailable') as AccountSnapshotSource
+  return (s || (assets ? 'real' : 'unavailable')) as AccountSnapshotSource
 }
 
 /** 敞口 = 持仓市值 / 总权益（%）。 */
@@ -327,10 +326,10 @@ function buildSymbolChain(
 ): SymbolChain {
   const symbol = asStr(recon.symbol)
   const before = asNum(recon.before) ?? 0
-  const after = asNum(recon.final_volume) ?? asNum(recon.after) ?? 0
+  const after = asNum(recon.after) ?? 0
   const target = asNum(recon.target)
-  const symbolOutcome = outcomeOf(recon.outcome)
-  const reached = symbolOutcome === 'completed' ? true : symbolOutcome === 'not_reached' ? false : symbolOutcome === 'unknown' ? null : typeof recon.reached === 'boolean' ? recon.reached : null
+  // PARTIAL 也可能是持仓已到位但订单收尾失败；执行状态不能覆盖持仓对账事实。
+  const reached = typeof recon.reached === 'boolean' ? recon.reached : null
   const order = orders.get(symbol)
   const decision = decisions.get(symbol)
   const skipReason = skips.get(symbol)
@@ -342,12 +341,13 @@ function buildSymbolChain(
     reason = skipReason
     if (reached !== true) action = 'skipped'
   }
-  const outcome = outcomeOf(recon.outcome)
-  if (outcome === 'error') action = 'failed'
-  reason = typeof recon.outcome_reason === 'string' ? recon.outcome_reason : reason
+  const outcome = outcomeOf(recon.status)
+  if (outcome === 'FAILED') action = 'failed'
+  if (outcome === 'BLOCKED') action = 'skipped'
+  reason = typeof recon.error === 'string' ? recon.error : reason
 
   const terminalStatus = order?.terminalStatus ?? null
-  const canceled = terminalStatus != null && (terminalStatus.includes('撤') || terminalStatus.includes('拒'))
+  const canceled = terminalStatus === '已撤销' || terminalStatus === '已拒绝'
   if (canceled && !reason) reason = terminalStatus ?? ''
 
   // 断点＝主动跳过、订单腿失败、或仓位掉出目标；「受阻/空跑但已到位」不再算断点（安静即好）。
@@ -355,11 +355,12 @@ function buildSymbolChain(
 
   return {
     symbol,
+    status: asStr(recon.status) || null,
     action,
     before,
     after,
     observedBefore: asNum(recon.before),
-    observedAfter: asNum(recon.final_volume) ?? asNum(recon.after),
+    observedAfter: asNum(recon.after),
     target,
     algorithm: decision?.algorithm ?? null,
     ordersCount: decision?.ordersCount ?? null,
@@ -556,8 +557,8 @@ function buildSpine(
       label: '读执行前账户',
       detail: SOURCE_DEGRADED_LABEL[src] ?? '',
       time: hhmmss(asStr(beforeAssets?.update_time)),
-      status: src === 'real' ? 'INFO' : 'WARNING',
-      broken: src !== 'real',
+      status: isDegradedSnapshotSource(src) ? 'WARNING' : 'INFO',
+      broken: isDegradedSnapshotSource(src),
     })
   }
   if (target) {
@@ -595,8 +596,8 @@ function buildSpine(
       label: '读执行后账户',
       detail: SOURCE_DEGRADED_LABEL[src] ?? '',
       time: hhmmss(asStr(afterAssets?.update_time)),
-      status: src === 'real' ? 'INFO' : 'WARNING',
-      broken: src !== 'real',
+      status: isDegradedSnapshotSource(src) ? 'WARNING' : 'INFO',
+      broken: isDegradedSnapshotSource(src),
     })
   }
   if (failed) {
@@ -649,6 +650,8 @@ export function buildExecutionDetail(
   const recon = reconciliationOf(artifacts)
   const beforeAssets = accountAssets(artifactContent(artifacts, AT.before))
   const afterAssets = accountAssets(artifactContent(artifacts, AT.after))
+  const srcBefore = recon?.account.source_before ?? snapshotSource(artifactContent(artifacts, AT.before), beforeAssets)
+  const srcAfter = recon?.account.source_after ?? snapshotSource(artifactContent(artifacts, AT.after), afterAssets)
 
   const orders = ordersBySymbol(events)
   const decisions = decisionsBySymbol(events)
@@ -656,11 +659,26 @@ export function buildExecutionDetail(
   const pnlBefore = pnlBySymbol(beforeAssets)
   const pnlAfter = pnlBySymbol(afterAssets)
 
-  const symbols: SymbolChain[] = (recon?.symbols ?? []).map((s) => {
-    const row = s as unknown as Record<string, unknown>
+  const recordedSymbols = asDict(summary?.symbol_results)
+  const detailRows = recordedSymbols ? Object.entries(recordedSymbols).map(([symbol, value]) => {
+    const result = asDict(value) ?? {}
+    const evidence = recon?.symbols.find(row => row.symbol === symbol)
+    return { ...evidence, ...result, symbol, target: result.target_volume ?? evidence?.target,
+      orders: Array.isArray(result.orders) ? recordOrders(result) : evidence?.orders ?? [] }
+  }) : recon?.symbols ?? []
+  const symbols: SymbolChain[] = detailRows.map((s) => {
+    const row = { ...s } as Record<string, unknown>
+    if (isDegradedSnapshotSource(srcBefore)) row.before = null
+    if (isDegradedSnapshotSource(srcAfter)) {
+      const final = asNum(row.final_volume)
+      // 旧摘要可能把不可用快照当成空仓；不能沿用该占位值算出的到位度。
+      if (final == null || final !== asNum(row.after)) {
+        row.reached = null
+        row.attained_ratio = null
+      }
+      row.after = final
+    }
     const chain = buildSymbolChain(row, startedAt, orders, decisions, skips, pnlBefore, pnlAfter)
-    if (recon?.account.source_before !== 'real') chain.observedBefore = null
-    if (recon?.account.source_after !== 'real' && asNum(row.final_volume) == null) chain.observedAfter = null
     return chain
   })
 
@@ -683,11 +701,9 @@ export function buildExecutionDetail(
   // 生命周期 ERROR 只是逐只失败的回声，重复计入会虚增（交给脊柱表达即可）。
   const failedCount = symbols.filter((s) => s.action === 'failed').length
 
-  const srcBefore = (recon?.account.source_before ?? 'unavailable') as AccountSnapshotSource
-  const srcAfter = (recon?.account.source_after ?? 'unavailable') as AccountSnapshotSource
-  // 到位度只依赖执行后快照，故持仓族直接取 after；权益/敞口/drift 是跨端差，取两端较差。
+  // 账户来源与逐品种证据分别保留；权益/敞口比较取两端较差来源。
   const sourcePosition = srcAfter
-  const sourceEquity = (SOURCE_RANK[srcBefore] ?? 3) >= (SOURCE_RANK[srcAfter] ?? 3) ? srcBefore : srcAfter
+  const sourceEquity = (SOURCE_RANK[srcBefore] ?? 0) >= (SOURCE_RANK[srcAfter] ?? 0) ? srcBefore : srcAfter
 
   const header: ExecutionHeader = {
     kind: asStr(startedDebug?.execution_kind) || task?.execution_kind || 'rebalance',
@@ -699,10 +715,10 @@ export function buildExecutionDetail(
     tradedReachedCount,
     alreadyReachedCount,
     quantizedZeroCount,
-    equityBefore: recon?.account.equity_before ?? asNum(beforeAssets?.total_asset),
-    equityAfter: recon?.account.equity_after ?? asNum(afterAssets?.total_asset),
-    exposureBefore: exposure(beforeAssets),
-    exposureAfter: exposure(afterAssets),
+    equityBefore: isDegradedSnapshotSource(srcBefore) ? null : recon?.account.equity_before ?? asNum(beforeAssets?.total_asset),
+    equityAfter: isDegradedSnapshotSource(srcAfter) ? null : recon?.account.equity_after ?? asNum(afterAssets?.total_asset),
+    exposureBefore: isDegradedSnapshotSource(srcBefore) ? null : exposure(beforeAssets),
+    exposureAfter: isDegradedSnapshotSource(srcAfter) ? null : exposure(afterAssets),
     sourcePosition,
     sourceEquity,
     success: summary?.success === true || (summary?.success == null && failedCount === 0 && symbols.length > 0),
@@ -710,21 +726,26 @@ export function buildExecutionDetail(
 
   const stdInput = asDict(artifactContent(artifacts, AT.standardInput)?.input)
   const bookends: AccountBookends = {
-    cashBefore: asNum(beforeAssets?.available_cash),
-    cashAfter: asNum(afterAssets?.available_cash),
-    equityBefore: asNum(beforeAssets?.total_asset),
-    equityAfter: asNum(afterAssets?.total_asset),
-    mvBefore: asNum(beforeAssets?.market_value),
-    mvAfter: asNum(afterAssets?.market_value),
+    cashBefore: isDegradedSnapshotSource(srcBefore) ? null : asNum(beforeAssets?.available_cash),
+    cashAfter: isDegradedSnapshotSource(srcAfter) ? null : asNum(afterAssets?.available_cash),
+    equityBefore: header.equityBefore,
+    equityAfter: header.equityAfter,
+    mvBefore: isDegradedSnapshotSource(srcBefore) ? null : asNum(beforeAssets?.market_value),
+    mvAfter: isDegradedSnapshotSource(srcAfter) ? null : asNum(afterAssets?.market_value),
     timeoutSec: asNum(stdInput?.execution_timeout),
   }
 
   const targetChange = buildTargetChange(artifacts)
   // 摘要落库后仍可能发生生命周期错误或终止，任务的明确结论必须优先。
-  const taskOverridesSummary = task?.outcome === 'error' || task?.outcome === 'terminated'
-  const conclusionSource = taskOverridesSummary ? task : summary?.outcome != null ? summary : task
+  const taskOverridesSummary = task?.status === 'FAILED' || task?.status === 'TERMINATED'
+  const conclusionSource = taskOverridesSummary ? {
+    ...summary,
+    status: task?.output_status ?? (task?.status === 'FAILED' ? 'FAILED' : summary?.status),
+    task_status: task?.status,
+    error: task?.error ?? summary?.error,
+  } : { ...summary, status: summary?.status ?? task?.output_status, task_status: task?.status, error: summary?.error ?? task?.error }
   const conclusion = executionOutcome(conclusionSource, task?.execution_kind === 'clear_positions')
-  const failure = conclusion.outcome === 'error'
+  const failure = ['FAILED', 'BLOCKED', 'PARTIAL'].includes(conclusion.state) && !!conclusion.reason
     ? describeFailureText(conclusion.reason || task?.error || '执行过程发生错误')
     : null
   const terminatedDetails = asDict(eventAt(events, 'execution_terminated')?.details)

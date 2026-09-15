@@ -40,8 +40,12 @@ def test_migration_history_is_linear() -> None:
         "0010_account_runtime_sync.py",
         "0011_account_performance.py",
         "0012_performance_snapshots.py",
+        "0013_normalize_execution_result_fields.py",
     ]
     initial = _load_migration(migration_paths[0])
+    normalize = _load_migration(migration_paths[-1])
+    assert normalize.revision == "0013"
+    assert normalize.down_revision == "0012"
     calendar = _load_migration(migration_paths[1])
     plugin_network = _load_migration(migration_paths[2])
     account_asset_snapshot = _load_migration(migration_paths[3])

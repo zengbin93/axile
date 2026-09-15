@@ -20,7 +20,7 @@ from axile.executor.models.unified_output import UnifiedStandardOutput
 from axile.server.db.models import Account
 from axile.server.execution.execution_records_output import resolve_completion_event_status
 from axile.server.execution.execution_summaries import (
-    build_execution_outcome_details,
+    build_execution_result_details,
     build_execution_summary_from_symbol_results,
     build_symbol_reconciliation,
     count_orders_from_symbol_results,
@@ -242,7 +242,7 @@ def _append_success_audit(
         artifact_type=ExecutionArtifactType.EXECUTION_SUMMARY,
         schema_version=2,
         content={
-            **build_execution_outcome_details(result),
+            **build_execution_result_details(result),
             "summary": build_execution_summary_from_symbol_results(result),
             "success": result.get("success", True),
             "execution_time": result.get("execution_time"),

@@ -281,8 +281,8 @@ def test_engine_blocks_symbol_sessions_without_market_io(monkeypatch: pytest.Mon
     blocked = output.symbol_results["rb2610"]
     assert output.status is ExecutionStatus.PARTIAL
     assert blocked.status is ExecutionStatus.BLOCKED
-    assert blocked.outcome_reason == "非交易时段"
-    assert blocked.error == "CLOSED"
+    assert blocked.error == "非交易时段"
+    assert blocked.memory["symbol_decision_reason_code"] == "CLOSED"
     assert blocked.memory == {
         "symbol_decision_reason_code": TQTradingTimeStatus.CLOSED.value,
         "symbol_decision_reason_family": ExecutionReasonFamily.MARKET_RULE.value,
@@ -359,7 +359,7 @@ def test_execute_blocks_unresolved_symbol_without_stopping_sibling(monkeypatch: 
     assert output.status is ExecutionStatus.PARTIAL
     assert output.symbol_results["rb2610"].status is ExecutionStatus.SUCCEEDED
     assert blocked.status is ExecutionStatus.BLOCKED
-    assert blocked.error == TQTradingTimeStatus.QUOTE_TRADING_TIME_UNAVAILABLE.value
+    assert blocked.error == "无法获取品种交易时段"
     assert blocked.memory == {
         "symbol_decision_reason_code": TQTradingTimeStatus.QUOTE_TRADING_TIME_UNAVAILABLE.value,
         "symbol_decision_reason_family": ExecutionReasonFamily.MARKET_RULE.value,
@@ -405,10 +405,9 @@ def test_engine_blocks_all_symbol_sessions_without_execution_io(monkeypatch: pyt
 
     assert output.status is ExecutionStatus.BLOCKED
     assert output.error is not None
-    assert "因交易时段不可执行" in output.error
-    assert "rb2610" in output.error
-    assert "ag2612" in output.error
-    assert output.outcome_reason == "非交易时段"
+    assert "2 个品种未执行" in output.error
+    assert output.error == "非交易时段，2 个品种未执行"
+    assert output.error == "非交易时段，2 个品种未执行"
     assert cancel_calls == 0
 
 
@@ -525,5 +524,5 @@ def test_place_order_rejects_no_night_session_product_at_night(
 )
 def test_trading_time_reason_is_separate_from_code(status: TQTradingTimeStatus, reason: str | None) -> None:
     check = TQTradingTimeCheck(status)
-    assert check.outcome_reason == reason
+    assert check.message == reason
     assert check.error == (None if status is TQTradingTimeStatus.OPEN else status.value)

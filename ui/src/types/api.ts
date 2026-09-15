@@ -616,9 +616,6 @@ export interface ExecutionStatus {
   error: string | null
   /** 执行器输出状态（SUCCEEDED/NOOP/BLOCKED/PARTIAL/FAILED）；任务未结束或无记录时为 null。 */
   output_status?: string | null
-  outcome?: string | null
-  outcome_reason?: string | null
-  outcome_symbols?: string[] | null
   record_id: number | null
   is_success: number | null
   cancel_requested_at: string | null
@@ -671,8 +668,13 @@ export interface ExecutionArtifact {
   created_at: string
 }
 
-/** 账户快照读取来源标：真实拉取 / 假设权益退化 / 转换异常零值 / 读取不可用。 */
-export type AccountSnapshotSource = 'real' | 'assumed' | 'error' | 'unavailable'
+/**
+ * 账户快照读取来源标。
+ *
+ * `assumed`、`error`、`unavailable` 是已知的退化来源；渠道或仿真器可以提供其他
+ * 有效来源标，前端必须保留其快照事实。
+ */
+export type AccountSnapshotSource = 'real' | 'assumed' | 'error' | 'unavailable' | (string & {})
 
 /** 单笔成交明细。 */
 export interface ExecTrade {
@@ -731,13 +733,13 @@ export interface SymbolReconciliation {
   /** 本次成交加权均价；无成交时为 `null`。 */
   avg_price: number | null
   /** 执行前带号持仓。 */
-  before: number
+  before: number | null
   /** 执行后带号持仓。 */
-  after: number
+  after: number | null
   /** 本次实际净变动 `after - before`。 */
-  moved: number
+  moved: number | null
   /** 成交与实际变动之差，非零即滑点/费用/外部变动信号。 */
-  drift: number
+  drift: number | null
   /** 到位度 `after / target`；`target≈0` 时无意义为 `null`。 */
   attained_ratio: number | null
   /** 是否到位；`target` 缺失时为 `null`。 */

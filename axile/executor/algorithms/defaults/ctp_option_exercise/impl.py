@@ -25,7 +25,7 @@ target_volume 表示要行权 / 放弃 / 自对冲的张数（必须为非负整
 
 from __future__ import annotations
 
-from typing import Any, Protocol, cast
+from typing import TYPE_CHECKING, Any, Protocol, cast
 
 from pydantic import Field
 
@@ -36,9 +36,14 @@ from axile.executor.algorithms.core.base import (
     ExecutorProtocol,
     register_algorithm,
 )
+from axile.executor.algorithms.exceptions import execution_error_message
 from axile.executor.algorithms.utils.clock import get_default_clock
-from axile.executor.ctp.options import OptionActionRecord
-from axile.executor.models.execution_result import AlgorithmResult, ExecutionOutcome, ExecutionStatus
+from axile.executor.models.execution_result import AlgorithmResult, ExecutionStatus
+from axile.executor.termination import ExecutionTerminated
+
+if TYPE_CHECKING:
+    # 算法注册和元数据查询不能触发可选渠道 SDK 导入；此类型仅供静态检查使用。
+    from axile.executor.ctp.options import OptionActionRecord
 
 
 class CtpOptionExecutorProtocol(ExecutorProtocol, Protocol):
@@ -190,7 +195,6 @@ def ctp_option_exercise_algorithm(executor: ExecutorProtocol, algorithm_input: A
         return AlgorithmResult(
             symbol=symbol,
             algorithm="CTP_OPTION_EXERCISE",
-            outcome=ExecutionOutcome.COMPLETED,
             status=ExecutionStatus.NOOP,
         )
 
@@ -203,9 +207,7 @@ def ctp_option_exercise_algorithm(executor: ExecutorProtocol, algorithm_input: A
             return AlgorithmResult(
                 symbol=symbol,
                 algorithm="CTP_OPTION_EXERCISE",
-                outcome=ExecutionOutcome.BLOCKED,
-                outcome_reason="期权无内在价值，已跳过行权",
-                status=ExecutionStatus.NOOP,
+                status=ExecutionStatus.BLOCKED,
                 error="期权无内在价值，已跳过行权",
             )
 
@@ -218,14 +220,15 @@ def ctp_option_exercise_algorithm(executor: ExecutorProtocol, algorithm_input: A
             trade_rule=algorithm_input.trade_rule,
         )
     except (RuntimeError, ValueError) as exc:
+        if isinstance(exc, ExecutionTerminated) or getattr(exc, "requires_session_recovery", False):
+            raise
         executor.logger.error(f"期权指令提交失败 {symbol} action={params.action}: {exc}")
         return AlgorithmResult(
             symbol=symbol,
             algorithm="CTP_OPTION_EXERCISE",
-            outcome=ExecutionOutcome.ERROR,
-            outcome_reason=str(exc),
             status=ExecutionStatus.FAILED,
-            error=str(exc),
+            error=execution_error_message(exc, "期权指令提交"),
+            memory={"error": str(exc)},
         )
 
     final = _wait_for_terminal(
@@ -239,7 +242,7 @@ def ctp_option_exercise_algorithm(executor: ExecutorProtocol, algorithm_input: A
     if final is None:
         final_status_value = "unknown"
         algo_status = ExecutionStatus.FAILED
-        error: str | None = "option_action_record_missing"
+        error: str | None = "期权指令最终状态尚未确认"
     else:
         final_status_value = getattr(final.status, "value", str(final.status))
         if final_status_value == "executed":
@@ -250,11 +253,13 @@ def ctp_option_exercise_algorithm(executor: ExecutorProtocol, algorithm_input: A
             error = None
         elif final_status_value in ("cancelled", "failed"):
             algo_status = ExecutionStatus.FAILED
-            error = final.error_msg or final_status_value
+            error = "期权指令已撤销" if final_status_value == "cancelled" else "期权指令执行失败"
+            if final.error_id:
+                error += f"，错误码 {final.error_id}"
         else:
             # 未到终态（轮询超时）
             algo_status = ExecutionStatus.FAILED
-            error = f"option_action_pending_after_timeout:{final_status_value}"
+            error = "期权指令等待超时，最终状态尚未确认"
 
     memory_payload: dict[str, object] = {
         "option_action": {
@@ -273,13 +278,6 @@ def ctp_option_exercise_algorithm(executor: ExecutorProtocol, algorithm_input: A
     return AlgorithmResult(
         symbol=symbol,
         algorithm="CTP_OPTION_EXERCISE",
-        outcome={
-            "executed": ExecutionOutcome.COMPLETED,
-            "abandoned": ExecutionOutcome.COMPLETED,
-            "cancelled": ExecutionOutcome.NOT_REACHED,
-            "failed": ExecutionOutcome.ERROR,
-        }.get(final_status_value, ExecutionOutcome.UNKNOWN),
-        outcome_reason=error,
         status=algo_status,
         target_volume=target,
         memory=memory_payload,

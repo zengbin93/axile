@@ -23,7 +23,11 @@ from pydantic import BaseModel
 from axile.common.logging import LogComponent, bind_log_context
 from axile.domain.execution import ExecutionEventStatus, ExecutionEventType, ExecutionReasonFamily
 from axile.executor.algorithms.core.base import ExecutorProtocol
-from axile.executor.algorithms.exceptions import RECOVERABLE_ALGORITHM_EXCEPTIONS, format_exception_message
+from axile.executor.algorithms.exceptions import (
+    RECOVERABLE_ALGORITHM_EXCEPTIONS,
+    execution_error_message,
+    format_exception_message,
+)
 from axile.executor.algorithms.utils.clock import Clock, get_default_clock
 from axile.executor.algorithms.utils.trading import cancel_pending_orders_via_query
 from axile.executor.constants.order_status import OrderStatus
@@ -32,6 +36,7 @@ from axile.executor.models.unified_account_assets import UnifiedAccountAssets
 from axile.executor.models.unified_order import OrderDirection, OrderType, TradeRecord, UnifiedOrder
 from axile.executor.models.unified_price import UnifiedPriceData
 from axile.executor.order_volume_limits import split_order_volumes
+from axile.executor.termination import ExecutionTerminated
 
 MARKET_FALLBACK_MAX_SLIPPAGE = 0.005
 
@@ -180,6 +185,9 @@ class OrderTracker:
     # price_stale_after 秒，则刷新行情快照，并按 rest_price_refresh_interval 限频。
     price_stale_after: float = 5.0
     rest_price_refresh_interval: float = 1.0
+    _explicit_error: str | None = field(default=None, init=False)
+    _order_errors: dict[str, str] = field(default_factory=dict, init=False)
+    explicit_blocked_error: str | None = None
 
     pending_orders: dict[str, UnifiedOrder] = field(default_factory=dict)
     completed_orders: dict[str, UnifiedOrder] = field(default_factory=dict)
@@ -200,6 +208,26 @@ class OrderTracker:
     def __post_init__(self) -> None:
         """绑定订单组件，同时保留执行会话已有的账户与品种上下文."""
         self._logger = bind_log_context(self.executor.logger, component=LogComponent.ORDER)
+
+    @property
+    def explicit_error(self) -> str | None:
+        """返回执行级错误或尚未恢复的订单错误，不读取调试信息。"""
+        with self.lock:
+            return self._explicit_error or next(iter(self._order_errors.values()), None)
+
+    @explicit_error.setter
+    def explicit_error(self, message: str | None) -> None:
+        """执行级重试仅更新自身错误，不能清除其他订单的失败。"""
+        with self.lock:
+            self._explicit_error = message
+
+    def _set_order_error(self, order_id: str, message: str | None) -> None:
+        """按原订单身份记录或清除本次换单错误。"""
+        with self.lock:
+            if message is None:
+                self._order_errors.pop(order_id, None)
+            else:
+                self._order_errors[order_id] = message
 
     def add_order(
         self,
@@ -399,7 +427,7 @@ class OrderTracker:
         try:
             refreshed = self.executor.get_market_data()
         except RECOVERABLE_ALGORITHM_EXCEPTIONS as exc:
-            if getattr(exc, "requires_session_recovery", False):
+            if isinstance(exc, (MemoryError, ExecutionTerminated)) or getattr(exc, "requires_session_recovery", False):
                 raise
             self._logger.warning(f"盘口陈旧，行情快照刷新 {symbol} 失败: {format_exception_message(exc)}")
             return None
@@ -579,6 +607,7 @@ class OrderTracker:
         self.executor.handle_termination_checkpoint()
         failed_order_ids = cancel_pending_orders_via_query(self.executor)
         if failed_order_ids:
+            self.explicit_error = "撤单失败，订单终态尚未确认"
             raise RuntimeError(f"部分订单撤销失败: {'; '.join(failed_order_ids)}")
 
         return False
@@ -605,6 +634,8 @@ class OrderTracker:
         try:
             return cast("OrderChannelHealth", getter())
         except Exception as exc:  # noqa: BLE001
+            if isinstance(exc, (MemoryError, ExecutionTerminated)) or getattr(exc, "requires_session_recovery", False):
+                raise
             self._logger.debug(f"查询订单通道健康度失败: {format_exception_message(exc)}")
             return OrderChannelHealth.UNKNOWN
 
@@ -653,7 +684,9 @@ class OrderTracker:
         try:
             pending_orders = self.executor.get_pending_orders()
         except Exception as exc:
-            if bool(getattr(exc, "requires_session_recovery", False)):
+            if isinstance(exc, (MemoryError, ExecutionTerminated)) or bool(
+                getattr(exc, "requires_session_recovery", False)
+            ):
                 raise
             self._logger.warning(f"定时查询挂单状态失败: {format_exception_message(exc)}")
             return
@@ -696,6 +729,10 @@ class OrderTracker:
             try:
                 terminal_order = cast("UnifiedOrder | None", reconcile(symbol, order_id))
             except Exception as exc:  # noqa: BLE001
+                if isinstance(exc, (MemoryError, ExecutionTerminated)) or getattr(
+                    exc, "requires_session_recovery", False
+                ):
+                    raise
                 self._logger.warning(f"订单 {order_id} 对账失败: {format_exception_message(exc)}")
                 continue
             if terminal_order is not None and terminal_order.is_completed():
@@ -713,7 +750,9 @@ class OrderTracker:
         try:
             return self.executor.get_account_assets()
         except Exception as exc:  # noqa: BLE001
-            if bool(getattr(exc, "requires_session_recovery", False)):
+            if isinstance(exc, (MemoryError, ExecutionTerminated)) or bool(
+                getattr(exc, "requires_session_recovery", False)
+            ):
                 raise
             self._logger.warning(f"超时后刷新账户资产失败: {format_exception_message(exc)}")
             return None
@@ -873,20 +912,24 @@ class OrderTracker:
                     )
 
                     self._update_chase_info(order_id, new_order)
+                    self._set_order_error(order_id, None)
 
                 with self.lock:
                     self._chasing_order_id = None
 
-            except MemoryError:
+            except (MemoryError, ExecutionTerminated):
                 with self.lock:
                     self._chasing_order_id = None
                 raise
             except RECOVERABLE_ALGORITHM_EXCEPTIONS as exc:
                 with self.lock:
                     self._chasing_order_id = None
-                if bool(getattr(exc, "requires_session_recovery", False)):
+                if isinstance(exc, (MemoryError, ExecutionTerminated)) or bool(
+                    getattr(exc, "requires_session_recovery", False)
+                ):
                     raise
                 self._logger.error(f"追单失败 {symbol}: {exc}")
+                self._set_order_error(order_id, execution_error_message(exc, "追单"))
 
         self._fallback_to_market_order()
 
@@ -1075,14 +1118,19 @@ class OrderTracker:
                     raise RuntimeError("cancel_order returned False")
 
                 self._logger.info(f"已请求撤销限价单，等待终态后再执行市价单兜底: {symbol} 订单ID {order_id}")
-            except MemoryError:
+            except (MemoryError, ExecutionTerminated):
+                with self.lock:
+                    chase_info.pop("market_order_fallback_pending_cancel", None)
                 raise
             except RECOVERABLE_ALGORITHM_EXCEPTIONS as exc:
-                if bool(getattr(exc, "requires_session_recovery", False)):
+                if isinstance(exc, (MemoryError, ExecutionTerminated)) or bool(
+                    getattr(exc, "requires_session_recovery", False)
+                ):
                     with self.lock:
                         chase_info.pop("market_order_fallback_pending_cancel", None)
                     raise
                 self._logger.error(f"市价单兜底前撤单失败 {symbol}: {exc}")
+                self._set_order_error(order_id, execution_error_message(exc, "撤单"))
                 self._mark_market_fallback_failed(
                     order_id,
                     reason_code="COMMON.MARKET_FALLBACK_CANCEL_FAILED",
@@ -1182,6 +1230,7 @@ class OrderTracker:
                     },
                 )
         except (MemoryError, *RECOVERABLE_ALGORITHM_EXCEPTIONS) as exc:
+            self._set_order_error(order_id, execution_error_message(exc, "报单"))
             self._mark_market_fallback_failed(
                 order_id,
                 reason_code="COMMON.MARKET_FALLBACK_ORDER_FAILED",
@@ -1193,7 +1242,9 @@ class OrderTracker:
                     "remaining_volume": remaining - submitted,
                 },
             )
-            if isinstance(exc, MemoryError) or bool(getattr(exc, "requires_session_recovery", False)):
+            if isinstance(exc, (MemoryError, ExecutionTerminated)) or bool(
+                getattr(exc, "requires_session_recovery", False)
+            ):
                 raise
             return
         if submitted < remaining:
@@ -1208,6 +1259,8 @@ class OrderTracker:
                     "remaining_volume": remaining - submitted,
                 },
             )
+        else:
+            self._set_order_error(order_id, None)
 
     def _is_market_fallback_price_safe(self, completed_order: UnifiedOrder, chase_info: dict[str, Any]) -> bool:
         """使用最新盘口做简单价格保护，避免极端行情直接扫市价单."""

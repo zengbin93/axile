@@ -26,7 +26,7 @@ class ExecutionStatus(StrEnum):
     BLOCKED : str
         因前置条件不满足而阻塞。
     PARTIAL : str
-        仅完成部分预期动作。
+        已有执行进展，但未完成全部执行要求；可能持仓已到位而订单收尾失败。
     FAILED : str
         执行失败。
     """
@@ -36,31 +36,6 @@ class ExecutionStatus(StrEnum):
     BLOCKED = "BLOCKED"
     PARTIAL = "PARTIAL"
     FAILED = "FAILED"
-
-
-class ExecutionOutcome(StrEnum):
-    """面向用户的执行结论，与用于控制流程的 ExecutionStatus 独立。"""
-
-    COMPLETED = "completed"
-    NOT_REACHED = "not_reached"
-    ERROR = "error"
-    TERMINATED = "terminated"
-    BLOCKED = "blocked"
-    UNKNOWN = "unknown"
-
-
-def aggregate_outcomes(outcomes: list[ExecutionOutcome]) -> ExecutionOutcome:
-    """错误优先；缺少证据不推定完成，混合受阻与完成属于未到位。"""
-    if not outcomes:
-        return ExecutionOutcome.UNKNOWN
-    for outcome in (ExecutionOutcome.ERROR, ExecutionOutcome.TERMINATED, ExecutionOutcome.UNKNOWN):
-        if outcome in outcomes:
-            return outcome
-    if all(outcome == ExecutionOutcome.BLOCKED for outcome in outcomes):
-        return ExecutionOutcome.BLOCKED
-    if any(outcome != ExecutionOutcome.COMPLETED for outcome in outcomes):
-        return ExecutionOutcome.NOT_REACHED
-    return ExecutionOutcome.COMPLETED
 
 
 class TargetSizingStatus(StrEnum):
@@ -128,8 +103,6 @@ class AlgorithmResult(BaseModel):
         执行失败时的错误信息。
     """
 
-    outcome: ExecutionOutcome = Field(default=ExecutionOutcome.UNKNOWN, description="执行展示结论")
-    outcome_reason: str | None = Field(default=None, description="过程错误或未到位的具体原因")
     final_volume: float | None = Field(default=None, description="结束时实际持仓；缺少证据时为空")
     symbol: str = Field(default="", description="品种代码")
     algorithm: str = Field(default="", description="实际执行的算法名")

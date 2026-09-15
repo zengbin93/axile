@@ -347,7 +347,7 @@ async def _record_rebalance_inline_failure(
     error: Exception,
 ) -> None:
     """记录调仓 inline 路径的失败审计与错误记录。"""
-    msg = f"调仓执行失败, 错误原因: {error}"
+    msg = "调仓执行失败，具体原因未确认"
     if request.execution_id and executor is not None:
         # inline 路径失败时 runtime 仍在当前进程内，可直接沿用 executor 的 audit seq 记失败事件。
         await append_execution_event(
@@ -545,7 +545,7 @@ async def _record_clear_positions_failure(
     executor: AbstractExecutor | None = None,
 ) -> None:
     """记录清仓失败路径的审计事件与错误执行记录。"""
-    msg = f"清除持仓失败 | 错误原因={error}"
+    msg = "清仓执行失败，具体原因未确认"
     await append_execution_event(
         execution_id=request.execution_id,
         account_id=cast("int", request.account.id),

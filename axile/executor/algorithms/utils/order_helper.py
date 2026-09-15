@@ -374,6 +374,7 @@ def submit_and_track_order(
 
     decision = resolve_reduce_intent(executor, direction, volume, target_volume, current_volume, price)
     if decision.action == "SKIP":
+        tracker.explicit_blocked_error = "下单金额低于最小名义金额"
         executor.emit_audit_event(
             event_type=ExecutionEventType.SYMBOL_SKIPPED,
             status=ExecutionEventStatus.WARNING,
@@ -407,6 +408,7 @@ def submit_and_track_order(
             **kwargs,
         )
     except SubMinQuantityError as exc:
+        tracker.explicit_blocked_error = "下单数量低于最小可交易数量"
         # 碎量按步长取整后归零：视作「该品种无可执行动作」而非下单失败，记跳过事件并放行。
         executor.emit_audit_event(
             event_type=ExecutionEventType.SYMBOL_SKIPPED,

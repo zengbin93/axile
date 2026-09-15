@@ -58,6 +58,22 @@ test('lightweight pagination completes beyond one page and fails closed on broke
 
 test('snapshot execution status preserves blocked and partial outcomes before is_success', () => {
   const base = { key: '1', record: { id: 1, execution_id: 'e1', created_at: record.created_at, is_success: 0, raw_result: { status: 'BLOCKED' } }, noop: false, symbolCount: 0, summary: summarizeCosts([]) }
-  expect(snapshotExecution(base).status).toBe('已跳过')
-  expect(snapshotExecution({ ...base, record: { ...base.record, raw_result: { status: 'PARTIAL' } } }).status).toBe('部分到位')
+  expect(snapshotExecution(base).status).toBe('未执行')
+  expect(snapshotExecution({ ...base, record: { ...base.record, raw_result: { status: 'PARTIAL' } } }).status).toBe('执行未全部完成')
+})
+
+test('裁剪后的绩效投影使用独立统计，成交分页不影响整次执行摘要', () => {
+  const row = snapshotExecution({ key: '5', record: { ...record, id: 5, raw_result: { status: 'SUCCEEDED', symbol_results: { A: { status: 'SUCCEEDED' }, B: { status: 'SUCCEEDED' } } } }, tradeCount: 1000, symbolCount: 1, noop: false, summary: summarizeCosts([]) })
+  expect(row.description).toBe('调仓 · 涉及 2 个品种 · 1000 笔成交')
+  expect(row.trades).toEqual([])
+})
+
+test('普通列表与快照列表摘要显示执行规模，状态列单独显示结论', () => {
+  const completed = { ...record, id: 5, raw_result: { ...record.raw_result, status: 'SUCCEEDED' } }
+  const live = journalExecutions([{ kind: 'execution', occurred_at: completed.created_at, record: completed }])[0]
+  const snapshot = snapshotExecution({ key: '5', record: completed, noop: false, symbolCount: 99, summary: summarizeCosts([]), reason: '调仓完成' })
+  for (const row of [live, snapshot]) {
+    expect(row.description).toBe('调仓 · 涉及 3 个品种 · 4 笔成交')
+    expect(row.status).toBe('调仓完成')
+  }
 })

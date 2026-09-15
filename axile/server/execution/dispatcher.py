@@ -144,8 +144,7 @@ async def recover_intents_on_startup() -> None:
             raw_result={
                 "error": PROCESS_INTERRUPTED_REASON,
                 "interrupt_reason": "process_interrupted",
-                "outcome": "error",
-                "outcome_reason": PROCESS_INTERRUPTED_REASON,
+                "status": "FAILED",
                 "task_status": ExecutionTaskStatus.FAILED.value,
                 "execution_kind": intent.kind.value,
             },

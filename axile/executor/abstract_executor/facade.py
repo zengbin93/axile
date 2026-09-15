@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, cast
 from axile.executor.abstract_executor.support import _coerce_object_dict, _coerce_trade_rules
 from axile.executor.account_control.decorators import controlled_operation
 from axile.executor.feishu_notifications import FeishuNotificationSource, send_execute_results_to_feishu
-from axile.executor.models.execution_result import ExecutionOutcome, ExecutionStatus
+from axile.executor.models.execution_result import ExecutionStatus
 from axile.executor.models.feishu import FeishuCardConfig
 from axile.executor.models.unified_account_assets import Position, UnifiedAccountAssets
 from axile.executor.models.unified_callback import OrderUpdateCallback, PriceDataCallback, TradeRecordCallback
@@ -634,7 +634,6 @@ class AbstractExecutorFacadeMixin:
             account_assets=account_assets,
             memory={"message": "当前账户无持仓，无需清仓"},
             symbol_results={},
-            outcome=ExecutionOutcome.COMPLETED,
             status=ExecutionStatus.NOOP,
             channel_type=executor.channel_type,
             inputs=empty_input,

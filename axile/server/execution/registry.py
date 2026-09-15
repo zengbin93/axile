@@ -1,7 +1,7 @@
 """执行任务内存状态与终止控制."""
 
 import asyncio
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from threading import Event, Lock
 from typing import cast
 
@@ -25,7 +25,6 @@ from axile.server.db.models import (
     new_execution_id,
     now_str,
 )
-from axile.server.execution.execution_summaries import build_execution_outcome_details
 from axile.server.execution.records import append_terminated_execute_record
 from axile.server.execution_audit import append_execution_event
 
@@ -45,9 +44,6 @@ class ExecutionTaskState:
     finished_at: str | None = None
     error: str | None = None
     output_status: str | None = None
-    outcome: str | None = None
-    outcome_reason: str | None = None
-    outcome_symbols: list[str] = field(default_factory=list)
     record_id: int | None = None
     is_success: int | None = None
     task: asyncio.Task[object] | None = None
@@ -345,9 +341,6 @@ def _serialize_execution_task_state(state: ExecutionTaskState) -> dict[str, obje
         "finished_at": state.finished_at,
         "error": state.error,
         "output_status": state.output_status,
-        "outcome": state.outcome,
-        "outcome_reason": state.outcome_reason,
-        "outcome_symbols": state.outcome_symbols,
         "record_id": state.record_id,
         "is_success": state.is_success,
         "cancel_requested_at": state.cancel_requested_at,
@@ -397,12 +390,6 @@ def _coerce_optional_text(value: object) -> str | None:
     if isinstance(value, str) and value.strip():
         return value
     return None
-
-
-def execution_record_outcome(raw_result: object) -> dict[str, object]:
-    """只转发持久化结论，不从旧状态猜测执行成败。"""
-    raw = raw_result if isinstance(raw_result, dict) else {}
-    return build_execution_outcome_details(raw)
 
 
 def execution_record_output_status(raw_result: object) -> str | None:
@@ -455,7 +442,6 @@ def _build_persisted_execution_status(record: ExecuteRecord) -> dict[str, object
             None if task_status == ExecutionTaskStatus.TERMINATED else execution_record_output_error(record.raw_result)
         ),
         "output_status": execution_record_output_status(record.raw_result),
-        **execution_record_outcome(record.raw_result),
         "record_id": record.id,
         "is_success": record.is_success,
         "cancel_requested_at": cast("str | None", termination.get("requested_at")),
@@ -512,7 +498,6 @@ def request_execution_termination(
         if state.status == ExecutionTaskStatus.QUEUED:
             requested_at = now_str()
             state.status = ExecutionTaskStatus.TERMINATED
-            state.outcome = "terminated"
             state.finished_at = requested_at
             state.cancel_requested_at = state.cancel_requested_at or requested_at
             state.cancel_reason = reason

@@ -677,7 +677,8 @@ def test_mark_execution_finished_copies_record_error_unless_exception() -> None:
         )
         failed = execution_registry.get_execution_task_state(execution_id)
         assert failed is not None
-        assert failed.error == "worker exploded"
-        assert failed.output_status is None
+        assert failed.error == "执行失败，具体原因未确认"
+        assert failed.output_status == "FAILED"
+        assert failed.output_status == "FAILED"
     finally:
         execution_registry._clear_execution_task_state(execution_id)

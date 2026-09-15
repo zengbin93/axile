@@ -38,6 +38,7 @@ from typing import Any, Literal
 
 from pydantic import Field, model_validator
 
+from axile.executor.account_control.exceptions import AccountControlBlockedError
 from axile.executor.algorithms.common.params import BaseAlgorithmParams
 from axile.executor.algorithms.core.base import (
     ALL_ORDER_PARAM_MODELS,
@@ -47,7 +48,11 @@ from axile.executor.algorithms.core.base import (
     OrderDirection,
     register_algorithm,
 )
-from axile.executor.algorithms.exceptions import RECOVERABLE_ALGORITHM_EXCEPTIONS, format_exception_message
+from axile.executor.algorithms.exceptions import (
+    RECOVERABLE_ALGORITHM_EXCEPTIONS,
+    execution_error_message,
+    format_exception_message,
+)
 from axile.executor.algorithms.utils import (
     determine_order_price,
     get_default_clock,
@@ -55,11 +60,13 @@ from axile.executor.algorithms.utils import (
     submit_and_track_split_orders,
     teardown_order_tracker,
 )
+from axile.executor.algorithms.utils.final_position import read_final_position
 from axile.executor.algorithms.utils.order_tracker import OrderTracker
 from axile.executor.algorithms.utils.outcome import summarize_outcome
 from axile.executor.algorithms.utils.trading import cancel_pending_orders_via_query, create_empty_result
 from axile.executor.models.unified_account_assets import UnifiedAccountAssets
 from axile.executor.models.unified_price import UnifiedPriceData, clone_price_data
+from axile.executor.termination import ExecutionTerminated
 
 ALGORITHM_NAME = "POV"
 
@@ -309,12 +316,20 @@ def _place_participation_slice(
             return detail
         detail["order_id"] = orders[0].order_id
         detail["order_ids"] = [order.order_id for order in orders]
+        tracker.explicit_error = None
+        tracker.explicit_blocked_error = None
     except MemoryError:
         executor.logger.exception(f"{executor.symbol} 下单遇到不可恢复异常")
+        raise
+    except ExecutionTerminated:
         raise
     except RECOVERABLE_ALGORITHM_EXCEPTIONS as exc:
         if getattr(exc, "requires_session_recovery", False):
             raise
+        if isinstance(exc, AccountControlBlockedError):
+            tracker.explicit_blocked_error = exc.execution_error
+        else:
+            tracker.explicit_error = execution_error_message(exc, "报单")
         error_message = format_exception_message(exc)
         executor.logger.error(f"{executor.symbol} 下单失败: {error_message}")
         detail["error"] = error_message
@@ -323,6 +338,7 @@ def _place_participation_slice(
     tracker.wait_for_completion(timeout=max(0.0, deadline - get_default_clock().time()))
     failed_cancels = cancel_pending_orders_via_query(executor)
     if failed_cancels:
+        tracker.explicit_error = "撤单失败，订单终态尚未确认"
         detail["cancel_error"] = f"撤单失败: {failed_cancels}"
     return detail
 
@@ -401,12 +417,20 @@ def pov(
             fill_wait,
             slice_details,
         )
+    except ExecutionTerminated:
+        raise
+    except RECOVERABLE_ALGORITHM_EXCEPTIONS as exc:
+        if getattr(exc, "requires_session_recovery", False):
+            raise
+        tracker.explicit_error = execution_error_message(exc)
+        executor.logger.exception("POV 执行失败")
     finally:
         executor.unregister_price_callback(accumulator.on_price)
         teardown_order_tracker(executor, tracker, None)
 
-    account_assets = executor.get_account_assets()
-    final_volume = executor.get_current_volume(account_assets)
+    account_assets, final_volume, explicit_error = read_final_position(executor, executor.get_current_volume)
+    if explicit_error:
+        tracker.explicit_error = explicit_error
     orders = tracker.get_all_orders()
     trades = tracker.get_all_trades()
 
@@ -416,7 +440,17 @@ def pov(
     )
 
     return AlgorithmResult(
-        **summarize_outcome(start_volume, final_volume, target_volume, orders, trades, slice_details),
+        **summarize_outcome(
+            start_volume,
+            final_volume,
+            target_volume,
+            orders,
+            trades,
+            explicit_error=tracker.explicit_error if isinstance(tracker.explicit_error, str) else None,
+            explicit_blocked_error=tracker.explicit_blocked_error
+            if isinstance(tracker.explicit_blocked_error, str)
+            else None,
+        ),
         orders=orders,
         trades=trades,
         account_assets=account_assets,

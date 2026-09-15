@@ -21,3 +21,13 @@ RECOVERABLE_ALGORITHM_EXCEPTIONS: tuple[type[BaseException], ...] = (
 def format_exception_message(exc: BaseException) -> str:
     """生成适合日志与 memory 记录的异常消息."""
     return f"{type(exc).__name__}: {exc}"
+
+
+def execution_error_message(exc: BaseException, operation: str = "执行") -> str:
+    """只回放渠道在错误发生处给出的说明，未知异常使用操作级中文。"""
+    message = getattr(exc, "execution_error", None)
+    if isinstance(message, str) and message:
+        return message
+    if isinstance(exc, TimeoutError):
+        return "报单请求超时，是否受理尚未确认" if operation == "报单" else f"{operation}超时，结果尚未确认"
+    return f"{operation}失败，具体原因未确认"

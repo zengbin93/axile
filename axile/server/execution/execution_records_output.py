@@ -84,8 +84,6 @@ async def append_execute_record_from_output(
         持久化后的执行记录。
     """
     result["execution_kind"] = execution_kind.value
-    result["outcome"] = output.outcome.value if output.outcome is not None else "unknown"
-    result["outcome_reason"] = output.outcome_reason
     if output.success:
         return await append_success_execute_record(
             account,

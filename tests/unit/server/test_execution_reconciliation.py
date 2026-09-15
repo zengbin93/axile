@@ -265,7 +265,48 @@ def test_reconciliation_missing_before_marks_unavailable() -> None:
     assert recon["account"]["equity_before"] is None
     assert recon["account"]["equity_after"] == 1000.0
     assert recon["account"]["source_after"] == "real"
-    assert recon["symbols"][0]["before"] == 0.0
+    assert recon["symbols"][0]["before"] is None
+    assert recon["symbols"][0]["moved"] is None
+    assert recon["symbols"][0]["drift"] is None
+
+
+@pytest.mark.parametrize("source", ["unavailable", "assumed", "error"])
+@pytest.mark.parametrize("final_volume", [None, 0.0, 2.0])
+def test_reconciliation_unavailable_snapshot_uses_only_confirmed_symbol_position(source, final_volume):
+    result = {
+        "account_assets": {"source": source, "positions": []},
+        "symbol_results": {"A": {"status": "PARTIAL", "target_volume": 0, "final_volume": final_volume}},
+    }
+    row = build_symbol_reconciliation(result, {"source": "real", "positions": []})["symbols"][0]
+    assert row["after"] == final_volume
+    assert row["reached"] is (None if final_volume is None else final_volume == 0)
+    if final_volume is None:
+        assert row["attained_ratio"] is None
+        assert row["moved"] is None
+        assert row["drift"] is None
+
+
+def test_reconciliation_latest_real_account_position_overrides_earlier_algorithm_position():
+    result = {
+        "account_assets": {"source": "real", "positions": [_long("A", 3)]},
+        "symbol_results": {"A": {"status": "SUCCEEDED", "target_volume": 2, "final_volume": 2}},
+    }
+    row = build_symbol_reconciliation(result, None)["symbols"][0]
+    assert row["after"] == 3
+    assert row["final_volume"] == 2
+    assert row["reached"] is False
+    assert row["attained_ratio"] == 1.5
+
+
+def test_reconciliation_preserves_custom_simulation_source_without_relabeling_it_real():
+    assets = {"source": "dummy", "positions": [_long("A", 2)]}
+    result = {"account_assets": assets, "symbol_results": {"A": {"target_volume": 2}}}
+    recon = build_symbol_reconciliation(result, assets)
+    assert recon["account"]["source_before"] == "dummy"
+    assert recon["account"]["source_after"] == "dummy"
+    assert recon["symbols"][0]["after"] == 2
+    assert recon["symbols"][0]["reached"] is True
+    assert recon["symbols"][0]["drift"] == 0
 
 
 def test_reconciliation_empty_symbol_results() -> None:

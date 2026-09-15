@@ -56,9 +56,13 @@ def _normalize_startup_error(error: Exception) -> GMBridgeStartupError:
     """把 GM SDK 启动异常收敛为安全、稳定的错误类型."""
     status = getattr(error, "status", None)
     message = str(error)
-    if status == 1000 or "错误或无效的token" in message:
-        return GMAuthenticationError("GM token 无效或已失效")
-    return GMBridgeStartupError(f"GM bridge 启动失败: {message or error.__class__.__name__}")
+    if status == 1000 or isinstance(error, GMAuthenticationError):
+        normalized = GMAuthenticationError("GM token 无效或已失效")
+        normalized.execution_error = "GM token 无效或已失效"
+    else:
+        normalized = GMBridgeStartupError(f"GM bridge 启动失败: {message or error.__class__.__name__}")
+        normalized.execution_error = "GM 启动失败，具体原因未确认"
+    return normalized
 
 
 class GMBridgeEventSink(Protocol):

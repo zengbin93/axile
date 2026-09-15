@@ -10,7 +10,7 @@ function rec(id: number, ok: boolean, at: string, error?: string): ExecuteRecord
     id,
     execution_id: `exec-${id}`,
     raw_input: {},
-    raw_result: { outcome: ok ? 'completed' : 'error', outcome_reason: error },
+    raw_result: { status: ok ? 'SUCCEEDED' : 'FAILED', error: error },
     is_success: ok ? 1 : 0,
     created_at: at,
   } as ExecuteRecord

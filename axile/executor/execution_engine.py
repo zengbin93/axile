@@ -14,17 +14,16 @@ from typing import TYPE_CHECKING
 from axile.domain.execution import ExecutionEventStatus, ExecutionEventType, ExecutionReasonFamily
 from axile.executor.account_control.exceptions import AccountControlBlockedError
 from axile.executor.algorithms.core.base import AlgorithmInput, resolve_algorithm
+from axile.executor.algorithms.exceptions import execution_error_message
 from axile.executor.execution_runtime import ExecutionRuntime
 from axile.executor.execution_session import ExecutionSession
 from axile.executor.models.execution_result import (
     AlgorithmResult,
-    ExecutionOutcome,
     ExecutionStatus,
     TargetSizingDecision,
-    aggregate_outcomes,
     is_success_status,
 )
-from axile.executor.models.unified_account_assets import UnifiedAccountAssets
+from axile.executor.models.unified_account_assets import UnifiedAccountAssets, is_degraded_snapshot_source
 from axile.executor.models.unified_input import UnifiedStandardInput
 from axile.executor.models.unified_order import UnifiedOrder
 from axile.executor.models.unified_output import UnifiedStandardOutput
@@ -86,14 +85,16 @@ def _coerce_int(value: object) -> int | None:
 def _derive_dispatch_status(symbol_results: dict[str, AlgorithmResult]) -> ExecutionStatus:
     """根据按品种结果推导本次执行的整体状态."""
     statuses = [result.status for result in symbol_results.values()]
+    if ExecutionStatus.PARTIAL in statuses:
+        return ExecutionStatus.PARTIAL
     if any(status in {ExecutionStatus.FAILED, ExecutionStatus.PARTIAL} for status in statuses):
         # 只要没有任何品种成功（含与 BLOCKED 混合的全败场景），整体即判失败，
         # 避免「0 成交」被 BLOCKED 稀释成 PARTIAL 而在审计里只显示为告警。
-        if not any(is_success_status(status) for status in statuses):
+        if ExecutionStatus.SUCCEEDED not in statuses:
             return ExecutionStatus.FAILED
         return ExecutionStatus.PARTIAL
     if any(status == ExecutionStatus.BLOCKED for status in statuses):
-        if all(status == ExecutionStatus.BLOCKED for status in statuses):
+        if ExecutionStatus.SUCCEEDED not in statuses:
             return ExecutionStatus.BLOCKED
         return ExecutionStatus.PARTIAL
     if all(status == ExecutionStatus.NOOP for status in statuses):
@@ -112,7 +113,10 @@ def _derive_dispatch_error(
     if len(failed_results) == 1 and failed_results[0].error:
         return failed_results[0].error
     if status == ExecutionStatus.BLOCKED:
-        return f"{len(failed_results)} 个品种被账户风控拦截"
+        reasons = {result.error for result in failed_results}
+        if len(reasons) == 1 and failed_results[0].error:
+            return f"{failed_results[0].error}，{len(failed_results)} 个品种未执行"
+        return f"{len(failed_results)} 个品种执行受阻"
     return f"{len(failed_results)} 个品种执行未成功"
 
 
@@ -381,7 +385,7 @@ class ExecutionEngine:
             return self._build_failed_algorithm_result(
                 symbol=task.symbol,
                 algorithm_name=task.algorithm_name,
-                error=str(exc),
+                error=exc.execution_error,
                 status=ExecutionStatus.BLOCKED,
                 sizing=task.sizing,
             )
@@ -391,7 +395,7 @@ class ExecutionEngine:
             return self._build_failed_algorithm_result(
                 symbol=task.symbol,
                 algorithm_name=task.algorithm_name,
-                error=str(exc),
+                error=execution_error_message(exc),
                 sizing=task.sizing,
             )
 
@@ -686,7 +690,6 @@ class ExecutionEngine:
             sizing=plan.sizing,
             first_tick=clone_price_data(market_data.get(plan.symbol)),
             memory={},
-            outcome=ExecutionOutcome.COMPLETED,
             final_volume=float(plan.final_target_volume),
             status=ExecutionStatus.NOOP,
             error=None,
@@ -802,15 +805,12 @@ class ExecutionEngine:
 
         return AlgorithmResult(
             orders=[*previous.orders, *current.orders],
+            trades=[*previous.trades, *current.trades],
             account_assets=current.account_assets,
             target_volume=current.target_volume if current.target_volume is not None else previous.target_volume,
             sizing=current.sizing if current.sizing is not None else previous.sizing,
             first_tick=current.first_tick if current.first_tick is not None else previous.first_tick,
             memory=merged_memory,
-            outcome=aggregate_outcomes([previous.outcome, current.outcome]),
-            outcome_reason=previous.outcome_reason
-            if previous.outcome == ExecutionOutcome.ERROR
-            else current.outcome_reason,
             final_volume=current.final_volume,
             status=merged_status,
             error=merged_error,
@@ -943,8 +943,6 @@ class ExecutionEngine:
                     "symbol": result.symbol,
                     "algorithm": result.algorithm,
                     "status": result.status.value,
-                    "outcome": result.outcome.value,
-                    "outcome_reason": result.outcome_reason,
                     "target_volume": result.target_volume,
                     "orders_count": len(result.orders),
                 },
@@ -970,7 +968,6 @@ class ExecutionEngine:
         error: str,
         *,
         status: ExecutionStatus = ExecutionStatus.FAILED,
-        outcome_reason: str | None = None,
         orders: list[UnifiedOrder] | None = None,
         account_assets: UnifiedAccountAssets | None = None,
         target_volume: TargetVolumeValue | None = None,
@@ -978,16 +975,14 @@ class ExecutionEngine:
         memory: dict[str, object] | None = None,
         sizing: TargetSizingDecision | None = None,
     ) -> AlgorithmResult:
-        """构造失败结果；渠道返回机器错误码时需另传可读 outcome_reason。"""
+        """构造失败或明确阻断结果。"""
         return AlgorithmResult(
             orders=list(orders or []),
-            account_assets=account_assets or self._owner.get_account_assets(),
+            account_assets=account_assets or self._read_result_assets()[0],
             target_volume=target_volume,
             sizing=sizing,
             first_tick=first_tick,
             memory=dict(memory or {}),
-            outcome=ExecutionOutcome.BLOCKED if status == ExecutionStatus.BLOCKED else ExecutionOutcome.ERROR,
-            outcome_reason=outcome_reason if outcome_reason is not None else error,
             status=status,
             error=error,
             symbol=symbol,
@@ -1029,9 +1024,17 @@ class ExecutionEngine:
         symbol_results = self._build_symbol_results(results)
         status = _derive_dispatch_status(symbol_results)
         error = self._derive_dispatch_error(status, symbol_results)
+        account_assets, explicit_error = self._read_result_assets()
+        if explicit_error:
+            progressed = any(
+                result.orders or result.trades or result.status in {ExecutionStatus.PARTIAL, ExecutionStatus.SUCCEEDED}
+                for result in results
+            )
+            status = ExecutionStatus.PARTIAL if progressed else ExecutionStatus.FAILED
+            error = explicit_error
 
         return UnifiedStandardOutput(
-            account_assets=self._owner.get_account_assets(),
+            account_assets=account_assets,
             memory=self._runtime.memory,
             symbol_results=symbol_results,
             status=status,
@@ -1040,3 +1043,18 @@ class ExecutionEngine:
             channel_type=self._owner.channel_type,
             inputs=standard_input,
         )
+
+    def _read_result_assets(self) -> tuple[UnifiedAccountAssets, str | None]:
+        """收尾查询失败也保留已生成的品种与订单证据。"""
+        try:
+            assets = self._owner.get_account_assets()
+            if is_degraded_snapshot_source(assets.source):
+                return assets, "最终持仓尚未确认"
+            return assets, None
+        except (ExecutionTerminated, MemoryError):
+            raise
+        except Exception as exc:  # noqa: BLE001 - 收尾必须保留渠道 SDK 查询失败前的执行证据
+            if getattr(exc, "requires_session_recovery", False):
+                raise
+            self._owner.logger.exception("执行收尾持仓查询失败")
+            return UnifiedAccountAssets.unavailable(), execution_error_message(exc, "最终持仓查询")

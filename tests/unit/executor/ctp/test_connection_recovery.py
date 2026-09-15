@@ -19,6 +19,22 @@ from axile.server.execution.worker_backend.manager import WorkerBackendManager, 
 from tests.unit.server._execution_test_support import build_account
 
 
+@pytest.mark.parametrize(
+    "code, expected", [(31, "资金不足"), (3, "CTP 登录校验失败"), (4097, "报单失败，渠道返回错误码 4097")]
+)
+def test_ctp_result_reason_uses_exact_error_id(code, expected):
+    error = CTPExecutor._error(
+        SimpleNamespace(ErrorID=code, ErrorMsg="原文: invalid token margin insufficient"), "报单"
+    )
+    assert error.execution_error == expected
+    assert "原文: invalid token margin insufficient" in str(error)
+
+
+def test_ctp_unknown_error_text_does_not_classify():
+    error = CTPExecutor._error(SimpleNamespace(ErrorID=999, ErrorMsg="4097 资金不足 token invalid"), "查询")
+    assert error.execution_error == "查询失败，渠道返回错误码 999"
+
+
 class ScriptedBroker:
     """按 OpenCTP 请求/回调签名回放启动流程，并允许在任一请求注入故障。"""
 

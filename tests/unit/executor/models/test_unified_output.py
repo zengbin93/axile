@@ -219,8 +219,6 @@ def test_model_dump_keeps_symbol_results_as_main_payload() -> None:
         "execution_time",
         "success",
         "extra",
-        "outcome",
-        "outcome_reason",
     }
     assert dumped["symbol_results"]["rb2610"]["target_volume"] == 0.25
     assert dumped["symbol_results"]["rb2610"]["first_tick"]["ask_price"] == 100.5

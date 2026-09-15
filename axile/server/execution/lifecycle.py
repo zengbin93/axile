@@ -34,7 +34,7 @@ from axile.server.execution.execution_account_control import (
     flush_account_control_records,
 )
 from axile.server.execution.execution_summaries import (
-    build_execution_outcome_details,
+    build_execution_result_details,
     build_execution_summary_from_symbol_results,
     build_symbol_reconciliation,
     count_orders_from_symbol_results,
@@ -55,7 +55,6 @@ from axile.server.execution.registry import (
     clear_queued_execution,
     clear_running_execution,
     create_termination_controller,
-    execution_record_outcome,
     execution_record_output_error,
     execution_record_output_status,
     finalize_execution_task_state,
@@ -210,13 +209,8 @@ def _mark_execution_finished(
         record_id=None if record is None else record.id,
         is_success=0 if error is not None else None if record is None else record.is_success,
         # 异常优先；业务失败（如全员 BLOCKED）没有异常，必须从记录里把原因带出来。
-        error=str(error) if error is not None else execution_record_output_error(raw_result),
-        output_status=execution_record_output_status(raw_result),
-        **(
-            {"outcome": "error", "outcome_reason": str(error)}
-            if error is not None
-            else execution_record_outcome(raw_result)
-        ),
+        error="执行失败，具体原因未确认" if error is not None else execution_record_output_error(raw_result),
+        output_status="FAILED" if error is not None else execution_record_output_status(raw_result),
     )
 
 
@@ -347,7 +341,6 @@ async def _record_terminated_execution(
     update_execution_task_state(
         execution_id,
         status=ExecutionTaskStatus.TERMINATED,
-        outcome="terminated",
         finished_at=finished_at,
         record_id=record.id,
         is_success=record.is_success,
@@ -481,7 +474,7 @@ async def append_execution_result_artifacts(
         artifact_type=ExecutionArtifactType.EXECUTION_SUMMARY,
         schema_version=2,
         content={
-            **build_execution_outcome_details(result),
+            **build_execution_result_details(result),
             "summary": build_execution_summary_from_symbol_results(result),
             "success": result.get("success", True),
             "execution_time": result.get("execution_time"),
@@ -585,7 +578,6 @@ async def mark_inline_execution_succeeded(execution_id: str, record: ExecuteReco
         is_success=record.is_success,
         error=execution_record_output_error(raw_result),
         output_status=execution_record_output_status(raw_result),
-        **execution_record_outcome(raw_result),
     )
 
 

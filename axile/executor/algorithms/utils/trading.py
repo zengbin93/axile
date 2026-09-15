@@ -7,7 +7,7 @@
 from typing import Any
 
 from axile.executor.algorithms.core.base import AlgorithmResult, ExecutorProtocol
-from axile.executor.models.execution_result import ExecutionOutcome, ExecutionStatus
+from axile.executor.models.execution_result import ExecutionStatus
 from axile.executor.models.unified_account_assets import UnifiedAccountAssets
 from axile.executor.models.unified_order import OrderDirection, OrderType
 from axile.executor.models.unified_price import UnifiedPriceData
@@ -46,7 +46,6 @@ def create_empty_result(
         memory["execution_details"] = execution_memory
 
     return AlgorithmResult(
-        outcome=ExecutionOutcome.COMPLETED,
         status=ExecutionStatus.NOOP,
         orders=[],
         account_assets=account_assets,

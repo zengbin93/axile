@@ -32,7 +32,6 @@ export function displayCurrencyUnit(currency: string | null | undefined): string
  */
 export function withCurrency(numStr: string, currency: string): string {
   const normalized = currency.trim()
-  if (/^USD.$/i.test(normalized)) return `${numStr}U`
   if (normalized.toUpperCase() === 'CNY') return `¥${numStr}`
   return normalized ? `${numStr} ${normalized}` : numStr
 }

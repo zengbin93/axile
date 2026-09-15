@@ -12,9 +12,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from axile.common.trade_channel import TradeChannel
 from axile.executor.models.execution_result import (
     AlgorithmResult,
-    ExecutionOutcome,
     ExecutionStatus,
-    aggregate_outcomes,
     is_success_status,
 )
 from axile.executor.models.unified_account_assets import UnifiedAccountAssets
@@ -33,7 +31,6 @@ class ExtraData(TypedDict, total=False):
 
 def _derive_output_error(
     symbol_results: dict[str, AlgorithmResult],
-    memory: dict[str, Any],
     status: ExecutionStatus,
 ) -> str | None:
     """
@@ -43,8 +40,6 @@ def _derive_output_error(
     ----------
     symbol_results : dict[str, AlgorithmResult]
         各品种的执行结果映射。
-    memory : dict[str, Any]
-        输出对象附带的运行时内存数据。
     status : ExecutionStatus
         当前整体执行状态。
 
@@ -53,11 +48,8 @@ def _derive_output_error(
     str | None
         推导出的错误信息；若不存在则返回 ``None``。
     """
-    if status in {ExecutionStatus.BLOCKED, ExecutionStatus.NOOP}:
-        message = memory.get("message")
-        if isinstance(message, str) and message:
-            return message
-
+    if is_success_status(status):
+        return None
     for result in symbol_results.values():
         if not is_success_status(result.status) and result.error:
             return result.error
@@ -96,8 +88,6 @@ class UnifiedStandardOutput(BaseModel):
     symbol_results: dict[str, AlgorithmResult] = Field(default_factory=dict, description="各品种执行结果")
     status: ExecutionStatus = Field(..., description="本次执行的整体状态")
     error: str | None = Field(default=None, description="本次执行的整体失败原因")
-    outcome: ExecutionOutcome | None = Field(default=None, description="执行展示结论")
-    outcome_reason: str | None = Field(default=None, description="展示结论的具体原因")
 
     # === 元数据字段 ===
     execution_time: float = Field(default=0.0, ge=0.0, description="执行耗时（秒）")
@@ -141,19 +131,8 @@ class UnifiedStandardOutput(BaseModel):
             self.extra["channel_type"] = channel_value
 
         if ("error" not in self.model_fields_set or self.error is None) and self.error is None:
-            self.error = _derive_output_error(self.symbol_results, self.memory, self.status)
+            self.error = _derive_output_error(self.symbol_results, self.status)
 
-        if self.outcome is None:
-            self.outcome = aggregate_outcomes([result.outcome for result in self.symbol_results.values()])
-        if self.outcome_reason is None:
-            self.outcome_reason = next(
-                (
-                    result.outcome_reason
-                    for result in self.symbol_results.values()
-                    if result.outcome == self.outcome and result.outcome_reason
-                ),
-                None,
-            )
         self.success = is_success_status(self.status)
 
         return self

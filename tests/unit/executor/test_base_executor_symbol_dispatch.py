@@ -770,12 +770,12 @@ def test_execute_continues_other_symbols_and_marks_overall_failure(
     assert output.status == ExecutionStatus.PARTIAL
     assert len(output.symbol_results) == 2
     assert [order.symbol for order in output.orders] == ["rb2610"]
-    assert output.error == "ag2612 failed"
+    assert output.error == "执行失败，具体原因未确认"
     assert output.symbol_results["ag2612"].algorithm == "FAIL-ALGO"
     assert output.symbol_results["ag2612"].status == ExecutionStatus.FAILED
     assert output.symbol_results["ag2612"].success is False
     assert output.symbol_results["ag2612"].error is not None
-    assert "ag2612 failed" in output.symbol_results["ag2612"].error
+    assert output.symbol_results["ag2612"].error == "执行失败，具体原因未确认"
 
 
 def test_execute_single_symbol_failure_is_aggregated(
@@ -832,9 +832,9 @@ def test_execute_single_symbol_failure_is_aggregated(
     assert sum(1 for result in output.symbol_results.values() if not result.success) == 1
     assert output.symbol_results["rb2610"].algorithm == "FAIL-ALGO"
     assert output.symbol_results["rb2610"].status == ExecutionStatus.FAILED
-    assert output.error == "rb2610 failed with FAIL-ALGO"
+    assert output.error == "执行失败，具体原因未确认"
     assert output.symbol_results["rb2610"].error is not None
-    assert "rb2610 failed with FAIL-ALGO" in output.symbol_results["rb2610"].error
+    assert output.symbol_results["rb2610"].error == "执行失败，具体原因未确认"
 
 
 def test_execute_serial_dispatch_treats_explicit_failed_status_as_failure(

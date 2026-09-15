@@ -11,9 +11,9 @@ test('单次执行按记录身份筛选，不带日期以保留跨日成交', ()
   expect(executionSelection(row()).kind).toBe('execution')
 })
 test('新结论与旧记录中性标题，不根据持仓数量推断执行成败', () => {
-  expect(executionState(row({ positionCount: 0 }))).toBe('历史执行记录')
-  expect(executionState(row({ record: { ...row().record, raw_result: { outcome: 'not_reached', outcome_symbols: ['m2701'] } } }))).toBe('执行不到位 · m2701')
-  expect(executionState(row({ record: { ...row().record, raw_result: { outcome: 'error', outcome_reason: '拒单' } } }))).toBe('执行失败 · 拒单')
+  expect(executionState(row({ positionCount: 0 }))).toBe('执行状态未知')
+  expect(executionState(row({ record: { ...row().record, raw_result: { status: 'PARTIAL', symbol_results: { m2701: { status: 'PARTIAL' } } } } }))).toBe('执行未全部完成')
+  expect(executionState(row({ record: { ...row().record, raw_result: { status: 'FAILED', error: '拒单' } } }))).toBe('执行失败')
 })
 test('缺失和退化快照不当成空仓，完整空数组才是空仓', () => {
   const artifacts = (content: unknown) => [{ artifact_type: 'account_snapshot', content }] as ExecutionArtifact[]
@@ -25,5 +25,5 @@ test('缺失和退化快照不当成空仓，完整空数组才是空仓', () =>
 })
 
 test('历史记录标题直接展示已保存的原因', () => {
-  expect(executionState(row({ record: { ...row().record, raw_result: { outcome: 'blocked', outcome_reason: 'CLOSED' } } }))).toBe('未执行 · CLOSED')
+  expect(executionState(row({ record: { ...row().record, raw_result: { status: 'BLOCKED', error: 'CLOSED' } } }))).toBe('未执行')
 })
