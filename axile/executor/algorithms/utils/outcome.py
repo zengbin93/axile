@@ -29,9 +29,16 @@ def summarize_outcome(
 ) -> OutcomeSummary:
     """以订单、成交、持仓和明确错误聚合结果，绝不扫描调试数据。"""
     terminal = all(OrderStatus.is_completed(order.status) for order in orders)
-    completed = isfinite(final) and isclose(final, target, rel_tol=0, abs_tol=1e-9)
-    progress = bool(orders or trades) or (isfinite(final) and final != start)
+    # 进展 = 真实成交、持仓位移或尚未确认终态的挂单；已终态零成交的死单（拒单/零成交撤单）不算进展，
+    # 落 FAILED——禁止把「提交过订单」稀释成 PARTIAL 告警。
+    progress = (
+        bool(trades)
+        or any(order.filled_volume > 0 for order in orders)
+        or (isfinite(final) and final != start)
+        or (bool(orders) and not terminal)
+    )
     rejected = any(order.status == OrderStatus.REJECTED for order in orders)
+    completed = isfinite(final) and isclose(final, target, rel_tol=0, abs_tol=1e-9)
     error = explicit_error
     if rejected and error is None:
         error = "报单被拒绝"
@@ -40,8 +47,9 @@ def summarize_outcome(
     if not isfinite(final) and error is None:
         error = "最终持仓尚未确认"
     if completed and error is None:
-        status = ExecutionStatus.NOOP if start == target and not orders else ExecutionStatus.SUCCEEDED
-    elif error is None and not progress and explicit_blocked_error:
+        status = ExecutionStatus.NOOP if start == target and not orders and not trades else ExecutionStatus.SUCCEEDED
+    elif error is None and not progress and not orders and explicit_blocked_error:
+        # BLOCKED 只描述「从未报单」的受阻；死单（拒单/零成交撤单）走失败分支。
         status, error = ExecutionStatus.BLOCKED, explicit_blocked_error
     else:
         status = ExecutionStatus.PARTIAL if progress else ExecutionStatus.FAILED

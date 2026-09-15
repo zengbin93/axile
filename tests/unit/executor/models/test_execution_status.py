@@ -44,12 +44,14 @@ def test_result_status_matrix(start, final, target, error, blocked, expected):
     [
         (OrderStatus.FILLED, 1, "SUCCEEDED"),
         (OrderStatus.PENDING, 1, "PARTIAL"),
-        (OrderStatus.REJECTED, 0, "PARTIAL"),
-        (OrderStatus.CANCELED, 0, "PARTIAL"),
-        (OrderStatus.CANCELED, float("nan"), "PARTIAL"),
+        # 已终态零成交的死单（拒单/零成交撤单）不是执行进展，判 FAILED，
+        # 禁止把「提交过订单」稀释成 PARTIAL 告警。
+        (OrderStatus.REJECTED, 0, "FAILED"),
+        (OrderStatus.CANCELED, 0, "FAILED"),
+        (OrderStatus.CANCELED, float("nan"), "FAILED"),
     ],
 )
-def test_existing_orders_are_progress_and_require_confirmed_terminal_state(status, final, expected):
+def test_dead_orders_are_not_progress_but_pending_terminal_is(status, final, expected):
     order = UnifiedOrder(
         order_id="1",
         symbol="A",

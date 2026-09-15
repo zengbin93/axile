@@ -83,13 +83,20 @@ def _coerce_int(value: object) -> int | None:
 
 
 def _derive_dispatch_status(symbol_results: dict[str, AlgorithmResult]) -> ExecutionStatus:
-    """根据按品种结果推导本次执行的整体状态."""
+    """根据按品种结果推导本次执行的整体状态.
+
+    Notes
+    -----
+    账户级结论按「最重的事实」表述：任何品种有执行进展但未完成（PARTIAL），
+    账户就是 PARTIAL——即使另有品种彻底失败，因为账户确实发生了部分成交/位移，
+    判 FAILED 会夸大；品种级的硬失败保留在 symbol_results 与审计计数里可见。
+    只有不存在任何 PARTIAL 时才进入 FAILED/BLOCKED 判定：全败（含与 BLOCKED
+    混合）即 FAILED，避免「0 成交」被 BLOCKED 稀释。
+    """
     statuses = [result.status for result in symbol_results.values()]
     if ExecutionStatus.PARTIAL in statuses:
         return ExecutionStatus.PARTIAL
     if ExecutionStatus.FAILED in statuses:
-        # 只要没有任何品种成功（含与 BLOCKED 混合的全败场景），整体即判失败，
-        # 避免「0 成交」被 BLOCKED 稀释成 PARTIAL 而在审计里只显示为告警。
         if ExecutionStatus.SUCCEEDED not in statuses:
             return ExecutionStatus.FAILED
         return ExecutionStatus.PARTIAL

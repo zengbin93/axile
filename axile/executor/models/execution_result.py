@@ -180,7 +180,15 @@ class AlgorithmResult(BaseModel):
 
     @model_validator(mode="after")
     def _derive_outcome_from_status(self) -> "AlgorithmResult":
-        """未显式给出 outcome/outcome_reason 时从 status 与 error 派生，保证两套结论不分离。"""
+        """未显式给出 outcome/outcome_reason 时从 status 与 error 派生，保证两套结论不分离.
+
+        Warning
+        -------
+        派生只发生在构造与校验时；构造之后修改 ``status``（直接赋值或
+        ``model_copy(update=...)``）不会触发重派生，会得到分离结论。
+        需要改状态时必须重建实例；落库边界 ``execution_records_output``
+        会按当前 status 重派生兜底。
+        """
         if "outcome" not in self.model_fields_set:
             self.outcome = outcome_from_status(self.status)
         if "outcome_reason" not in self.model_fields_set and self.error is not None:

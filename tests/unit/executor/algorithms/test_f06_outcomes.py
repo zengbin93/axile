@@ -28,7 +28,8 @@ class RecoveryRequired(RuntimeError):
     [
         ("reject", ExecutionStatus.FAILED),
         ("risk_block", ExecutionStatus.BLOCKED),
-        ("timeout", ExecutionStatus.PARTIAL),
+        # 挂单超时撤单且零成交零位移：没有执行进展，如实判 FAILED 而非 PARTIAL 告警。
+        ("timeout", ExecutionStatus.FAILED),
         ("partial", ExecutionStatus.PARTIAL),
         ("unknown_cancel", ExecutionStatus.PARTIAL),
         ("filled", ExecutionStatus.SUCCEEDED),
