@@ -232,6 +232,9 @@ export function AccountDetail({
   const runKind = live?.kind ?? (runner.kind === 'clear' ? 'clear' : 'rebalance')
   const latestRecord = recordList[0]
   const latestOutcome = latestRecord ? executionOutcome(latestRecord.raw_result) : null
+  const idleStatusTextClass = latestOutcome
+    ? latestOutcome.warning ? 'text-warn' : 'text-ink-1'
+    : INTEGRITY_TEXT_CLASS[state.integrity]
   const statusHeadline = isTerminating
     ? `正在终止${runVerb(runKind)}`
     : isExecuting
@@ -394,7 +397,7 @@ export function AccountDetail({
         <div
           className={`relative mt-[18px] inline-flex max-w-full min-w-0 items-center gap-2 text-[20px] font-[640] tracking-tight transition-[padding-left] duration-[440ms] ease-[cubic-bezier(.4,0,.2,1)] motion-reduce:transition-none sm:text-[24px] ${
             isBusy ? 'pl-[18px]' : 'pl-0'
-          } ${isTerminating ? 'text-warn' : isBusy ? 'text-accent' : latestOutcome ? latestOutcome.warning ? 'text-warn' : 'text-ink-1' : INTEGRITY_TEXT_CLASS[state.integrity]}${
+          } ${isTerminating ? 'text-warn' : isBusy ? 'text-accent' : idleStatusTextClass}${
             statusNavId ? ' cursor-pointer hover:opacity-80' : ''
           }`}
           role={statusNavId ? 'link' : undefined}
@@ -436,7 +439,7 @@ export function AccountDetail({
                   ? 'text-accent exec-flow'
                   : isBusy
                     ? 'text-accent'
-                    : INTEGRITY_TEXT_CLASS[state.integrity]
+                    : idleStatusTextClass
             }
           />
           {/* 相位副标：外壳 phase-grow 让入场 footprint 宽度 0→内容（grid-fr，箭头随 reflow 挪、
