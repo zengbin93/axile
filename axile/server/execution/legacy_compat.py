@@ -32,7 +32,7 @@ _TERMINATED_TASK_STATUS = "TERMINATED"
 _LEGACY_ERROR_COPY = {
     "error": "执行失败，具体原因见执行证据",
     "not_reached": "执行不到位",
-    "blocked": "账户风控拦截，未执行",
+    "blocked": "执行受阻，具体原因见执行证据",
     _TERMINATED_OUTCOME: "执行已终止",
 }
 
@@ -50,18 +50,24 @@ def _is_technical_text(text: str) -> bool:
 
     异常类名可出现在句子中缀（如 ``错误原因: RuntimeError: ...``），用 search 全文匹配。
     """
-    return bool(_EXCEPTION_CLASS.search(text) or any(marker in text for marker in _TECHNICAL_MARKERS))
+    return bool(
+        _EXCEPTION_CLASS.search(text)
+        or any(marker in text for marker in _TECHNICAL_MARKERS)
+        or re.fullmatch(r"(?:-?\d+|[A-Z][A-Z0-9_.]*)", text.strip())
+        or text == "gm_authentication_error"
+    )
 
 
 def _legacy_message(raw: dict[str, Any]) -> str | None:
     """按优先级收集旧记录遗留的过程文案。"""
     memory = raw.get("memory")
     candidates = (
+        raw.get("outcome_reason"),
         raw.get("msg"),
         memory.get("message") if isinstance(memory, dict) else None,
-        raw.get("outcome_reason"),
     )
-    return next((_text(item) for item in candidates if _text(item)), None)
+    texts = [text for item in candidates if (text := _text(item))]
+    return next((text for text in texts if not _is_technical_text(text)), texts[0] if texts else None)
 
 
 def normalize_legacy_result(raw: object) -> object:
@@ -107,13 +113,18 @@ def normalize_legacy_result(raw: object) -> object:
                 result["error"] = legacy
             else:
                 if legacy is not None:
-                    result["technical_detail"] = legacy
+                    result.setdefault("technical_detail", legacy)
                 # 用回填后的 outcome 取固定文案，覆盖「无结论但有状态」的记录。
-                result["error"] = _LEGACY_ERROR_COPY.get(result.get("outcome")) or "执行结果待确认"
+                result["error"] = _LEGACY_ERROR_COPY.get(str(result.get("outcome"))) or "执行结果待确认"
     elif _is_technical_text(result["error"]):
         # 历史写入的 error 自带异常原文：原文退入 technical_detail，主展示换固定人话。
         result.setdefault("technical_detail", result["error"])
-        result["error"] = _LEGACY_ERROR_COPY.get(result.get("outcome")) or "执行失败，具体原因见执行证据"
+        reason = _text(result.get("outcome_reason"))
+        result["error"] = (
+            reason
+            if reason and not _is_technical_text(reason)
+            else (_LEGACY_ERROR_COPY.get(_OUTCOME_FROM_STATUS.get(str(result.get("status")), "")) or "执行结果待确认")
+        )
 
     symbols = result.get("symbol_results")
     if isinstance(symbols, dict):

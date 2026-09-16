@@ -70,16 +70,32 @@ async def run_migrations_online() -> None:
 
     该模式会创建 Engine，并将实际数据库连接绑定到 Alembic 上下文。
     """
+    injected = config.attributes.get("connection")
+    if injected is not None:
+        do_run_migrations(injected)
+        return
+
     connectable = create_async_engine(get_url(), echo=True, future=True)
 
     async with connectable.connect() as connection:
-        await connection.run_sync(do_run_migrations)
+        if connection.dialect.name == "sqlite":
+            await connection.exec_driver_sql("PRAGMA busy_timeout=30000")
+            await connection.exec_driver_sql("PRAGMA synchronous=FULL")
+            await connection.exec_driver_sql("BEGIN IMMEDIATE")
+        try:
+            await connection.run_sync(do_run_migrations)
+            await connection.commit()
+        except Exception:
+            await connection.rollback()
+            raise
 
     # 显式关闭引擎，避免 aiosqlite 连接在 __del__ 中报错
     await connectable.dispose()
 
 
-if context.is_offline_mode():
+if config.attributes.get("connection") is not None:
+    do_run_migrations(config.attributes["connection"])
+elif context.is_offline_mode():
     run_migrations_offline()
 else:
     asyncio.run(run_migrations_online())

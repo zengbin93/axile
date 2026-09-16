@@ -58,7 +58,7 @@ def test_technical_markers_are_detected(message):
 
 
 def test_fixed_copy_per_outcome():
-    assert normalize_legacy_result({"outcome": "blocked"})["error"] == "账户风控拦截，未执行"
+    assert normalize_legacy_result({"outcome": "blocked"})["error"] == "执行受阻，具体原因见执行证据"
     assert normalize_legacy_result({"outcome": "not_reached"})["error"] == "执行不到位"
     assert normalize_legacy_result({"outcome": "terminated"})["error"] == "执行已终止"
 

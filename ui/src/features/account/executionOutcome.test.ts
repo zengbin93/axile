@@ -46,8 +46,8 @@ test.each([
 
 test('错误只按明确字段顺序回放，品种同因和不同因分别汇总', () => {
   expect(executionRecordView({ error: '第一', msg: '第二', memory: { message: '第三' } }).reason).toBe('第一')
-  expect(executionRecordView({ msg: '第二', memory: { message: '第三' } }).reason).toBe('第二')
-  expect(executionRecordView({ memory: { message: '第三', last_error: '不读' } }).reason).toBe('第三')
+  expect(executionRecordView({ msg: 'CLOSED', memory: { message: '第三' } }).reason).toBe('')
+  expect(executionRecordView({ memory: { message: 'CLOSED', last_error: '不读' } }).reason).toBe('')
   const raw = { status: 'BLOCKED', symbol_results: { A: { status: 'BLOCKED', error: '休市' }, B: { status: 'BLOCKED', error: '休市' } } }
   expect(executionRecordView(raw).reason).toBe('休市，2 个品种执行受阻')
   raw.symbol_results.B.error = '行情不可用'

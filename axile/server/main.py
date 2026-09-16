@@ -5,6 +5,7 @@ import ipaddress
 import os
 import signal
 import sys
+from collections.abc import Callable
 from pathlib import Path
 
 import uvicorn
@@ -163,6 +164,7 @@ def run_server(
     workers: int | None = None,
     reload: bool = False,
     reload_dirs: list[Path] | None = None,
+    migration_runner: Callable[[], None] | None = None,
 ) -> None:
     """
     根据给定参数启动 Uvicorn 服务器.
@@ -181,6 +183,9 @@ def run_server(
         是否启用 Uvicorn 热重载；仅用于本地开发。
     reload_dirs : list[Path] | None, optional
         额外热重载监听目录。
+    migration_runner : Callable[[], None] | None, optional
+        发行层迁移回调；完成初始化后、启动服务前调用，异常会阻止启动。
+        缺省时仅升级公共 Axile 迁移链。
 
     Raises
     ------
@@ -233,7 +238,10 @@ def run_server(
         here = Path(__file__).parent
         alembic_cfg.set_main_option("script_location", f"{here}/alembic")
         alembic_cfg.set_main_option("prepend_sys_path", ".")
-        command.upgrade(alembic_cfg, "head")
+        if migration_runner is None:
+            command.upgrade(alembic_cfg, "head")
+        else:
+            migration_runner()
     else:
         logger.warning("axile 未完成初始化配置，跳过数据库迁移，进入初始化向导模式。")
 

@@ -18,7 +18,7 @@ export interface OutcomeView {
 }
 
 function recordedReason(raw: Dict, results: Dict[]): string {
-  const reason = text(raw.error) || text(raw.msg) || text(dict(raw.memory).message)
+  const reason = text(raw.error)
   if (reason) return reason
   const affected = results.filter(result => affectedStates.has(text(result.status)))
   const reasons = affected.map(result => text(result.error))
