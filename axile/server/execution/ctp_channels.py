@@ -12,7 +12,6 @@ from axile.common.trade_channel import TradeChannel
 from axile.server.core.db import SessionLocal
 from axile.server.core.scheduler import Scheduler
 from axile.server.db.models import Account
-from axile.server.execution.runtime_locks import account_runtime_lock
 from axile.server.execution.worker_backend.manager import get_worker_backend_manager
 
 CHINA_NIGHT_PREPARE_JOB_ID = "china-night-session-prepare"
@@ -35,36 +34,22 @@ async def _prepare_accounts(
     mode: Literal["startup", "day", "night"],
 ) -> None:
     """并发准备账户；天勤在日夜盘窗口先强制重建 worker."""
+    # 上层对齐依赖本模块的渠道操作；延迟导入仅用于定时编排入口。
+    from axile.server.core.scheduler import scheduler
+    from axile.server.execution.account_runtime_sync import reconcile_scheduled_account
+
     semaphore = asyncio.Semaphore(_MAX_PREPARE_CONCURRENCY)
-    manager = get_worker_backend_manager()
 
     async def prepare(account: Account) -> None:
         async with semaphore:
             try:
                 if account.id is None:
                     return
-                async with account_runtime_lock(account.id):
-                    # 候选列表只用于枚举，等锁后必须重新检查删除、停用和渠道变更。
-                    async with SessionLocal() as session:
-                        current = await session.get(Account, account.id)
-                    if (
-                        current is None
-                        or not current.is_started
-                        or current.trade_channel not in {TradeChannel.CTP, TradeChannel.TQ}
-                    ):
-                        return
-                    if current.trade_channel == TradeChannel.TQ and mode != "startup":
-                        await manager.drop_account(int(account.id))
-                    result = await manager.prepare_account(current)
-                logger.info(
-                    "{} 通道准备完成 account_id={} mode={} trading_day={}",
-                    account.trade_channel,
-                    account.id,
-                    mode,
-                    result.get("trading_day", ""),
-                )
-            except Exception as exc:  # noqa: BLE001 - 单账户失败不得阻断其他账户
-                logger.error("{} 通道准备失败 account_id={} mode={}: {}", account.trade_channel, account.id, mode, exc)
+                sync = await reconcile_scheduled_account(account.id, scheduler, mode)
+                if sync is not None and sync.status == "synchronized":
+                    logger.info("通道准备完成 account_id={} mode={}", account.id, mode)
+            except Exception:  # noqa: BLE001 - 单账户失败不得阻断其他账户
+                logger.exception("通道准备失败 account_id={} mode={}", account.id, mode)
 
     await asyncio.gather(*(prepare(account) for account in accounts))
 

@@ -4,8 +4,9 @@ import type { AccountRuntimeSync } from '@/types/api'
 
 export function runtimeSyncMessage(sync: AccountRuntimeSync | null | undefined): string {
   if (sync?.status === 'synchronized') return '算法配置已保存'
-  if (sync?.status === 'pending') return '配置已保存，运行态待同步'
-  if (sync?.status === 'failed') return '配置已保存，运行态同步失败'
+  const reason = sync?.last_error ? `：${sync.last_error}` : ''
+  if (sync?.status === 'pending') return `配置已保存，运行态待同步${reason}`
+  if (sync?.status === 'failed') return `配置已保存，运行态同步失败${reason}`
   return '配置已保存，同步状态暂不可用'
 }
 

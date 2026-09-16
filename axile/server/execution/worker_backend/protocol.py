@@ -35,12 +35,18 @@ class WorkerBackendErrorPayload:
     message : str
         面向主进程和审计的错误摘要。
     retryable : bool
-        是否建议上层视为可重试错误。
+        是否建议上层视为可重试错误，不代表预期的柜台等待状态。
+    reason_code : str | None
+        渠道在错误发生处确定的稳定原因码，不从 message 推断。
+    error_id : int | None
+        渠道异步响应错误码，与同步请求返回码区分。
     """
 
     type: str
     message: str
     retryable: bool = False
+    reason_code: str | None = None
+    error_id: int | None = None
 
 
 @dataclass(slots=True)

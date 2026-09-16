@@ -11,7 +11,11 @@ from axile.server.db.models.base import now_str
 
 
 class AccountRuntimeSync(SQLModel, table=True):
-    """每个账户一条的运行态对齐目标与最近状态。"""
+    """每个账户一条的运行态对齐目标与最近状态。
+
+    ``pending`` 包含柜台暂未初始化；``last_error`` 保存最近一次未完成对齐的
+    可读原因，不代表该目标必为 failed。仅完整对齐成功才清除原因。
+    """
 
     __table_args__ = (UniqueConstraint("account_id", name="uq_account_runtime_sync_account"),)
 
@@ -31,7 +35,11 @@ class AccountRuntimeSync(SQLModel, table=True):
 
 
 class AccountRuntimeSyncAttempt(SQLModel, table=True):
-    """运行态对齐的不可变尝试审计记录。"""
+    """运行态对齐的不可变尝试审计记录。
+
+    ``succeeded=False`` 表示本次未完成，包括可等待的 pending；账户当前状态
+    以 AccountRuntimeSync 为准，不能由单次尝试的布尔值反推。
+    """
 
     id: int | None = Field(default=None, primary_key=True)
     account_id: int = Field(sa_column=Column(Integer, ForeignKey("account.id", ondelete="CASCADE"), nullable=False))

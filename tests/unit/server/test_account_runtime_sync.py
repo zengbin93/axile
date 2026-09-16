@@ -13,10 +13,10 @@ from axile.server.execution import account_runtime_sync as runtime
 from tests.unit.server._runtime_db_support import runtime_database
 
 
-@pytest.mark.parametrize("old_fails", [False, True])
+@pytest.mark.parametrize("old_fails", [False, True, "pending"])
 @pytest.mark.parametrize("wal", [False, True])
 def test_old_result_cannot_overwrite_new_revision(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, old_fails: bool, wal: bool
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, old_fails: bool | str, wal: bool
 ) -> None:
     """旧成功和旧失败都只审计旧版本，随后使用最新账户快照继续对齐。"""
 
@@ -41,6 +41,15 @@ def test_old_result_cannot_overwrite_new_revision(
                 if len(observed) == 1:
                     entered.set()
                     await release.wait()
+                    if old_fails == "pending":
+                        from axile.server.execution.worker_backend.manager import WorkerBackendExecutionError
+
+                        raise WorkerBackendExecutionError(
+                            "未初始化",
+                            execution_error="交易柜台尚未初始化，账户通道暂未就绪",
+                            reason_code="CTP_NOT_INITIALIZED",
+                            error_id=7,
+                        )
                     if old_fails:
                         raise RuntimeError("old prepare failed")
                 else:
@@ -190,5 +199,95 @@ def test_startup_retries_synchronized_accounts_and_isolates_failure(
                     (await session.scalars(select(AccountRuntimeSync).order_by(AccountRuntimeSync.account_id))).all()
                 )
                 assert [row.status for row in rows] == ["failed", "synchronized"]
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("next_result", ["success", "pending", "failed"])
+def test_uninitialized_waits_and_session_prepare_updates_sync(tmp_path, monkeypatch, next_result):
+    from loguru import logger
+
+    from axile.server.execution import ctp_channels
+    from axile.server.execution.worker_backend.manager import WorkerBackendExecutionError
+
+    reason = "交易柜台尚未初始化，账户通道暂未就绪"
+    records = []
+
+    async def scenario():
+        async with runtime_database(tmp_path / "runtime.db") as (factory, sessions):
+            monkeypatch.setattr(runtime, "SessionLocal", factory)
+            mode = "pending"
+            resets = []
+
+            async def prepare(account, *, reset):
+                assert all(not session.in_transaction() for session in sessions)
+                resets.append(reset)
+                if mode == "pending":
+                    raise WorkerBackendExecutionError(
+                        reason,
+                        execution_error=reason,
+                        reason_code="CTP_NOT_INITIALIZED",
+                        error_id=7,
+                    )
+                if mode == "failed":
+                    raise WorkerBackendExecutionError("technical", execution_error="CTP 登录校验失败")
+
+            monkeypatch.setattr(runtime, "reconcile_china_channel_account", prepare)
+            async with factory() as session, session.begin():
+                await runtime.enqueue_account_runtime_sync(session, 1, reset_worker=True)
+                account = await session.get(Account, 1)
+            sync = await runtime.reconcile_account_runtime(1, MagicMock(), session_factory=factory)
+            assert (sync.status, sync.last_error, sync.reset_worker) == ("pending", reason, True)
+            assert sync.synchronized_at is None
+            warnings = [record for record in records if record["level"].name == "WARNING"]
+            assert len(warnings) == 1 and warnings[0]["exception"] is None
+            assert not any(record["level"].name in {"ERROR", "CRITICAL"} for record in records)
+            mode = next_result
+            await asyncio.wait_for(ctp_channels._prepare_accounts([account], "day"), 5)
+            async with factory() as session:
+                sync = await session.scalar(select(AccountRuntimeSync).where(AccountRuntimeSync.account_id == 1))
+                attempts = list((await session.scalars(select(AccountRuntimeSyncAttempt))).all())
+            assert sync.status == {"success": "synchronized", "pending": "pending", "failed": "failed"}[mode]
+            assert sync.last_error == {"success": None, "pending": reason, "failed": "CTP 登录校验失败"}[mode]
+            assert sync.reset_worker is (mode != "success")
+            assert bool(sync.synchronized_at) is (mode == "success")
+            assert [attempt.succeeded for attempt in attempts] == [False, mode == "success"]
+            assert attempts[0].error == reason
+            assert resets == [True, True]
+
+    sink = logger.add(lambda message: records.append(message.record))
+    try:
+        asyncio.run(scenario())
+    finally:
+        logger.remove(sink)
+
+
+@pytest.mark.parametrize("boundary", ["scheduler", "other_channel", "unknown", "retryable"])
+def test_only_explicit_ctp_prepare_error_is_pending(tmp_path, monkeypatch, boundary):
+    from axile.common.trade_channel import TradeChannel
+    from axile.server.execution.worker_backend.manager import WorkerBackendExecutionError
+
+    async def scenario():
+        async with runtime_database(tmp_path / "runtime.db") as (factory, _sessions):
+            if boundary == "other_channel":
+                async with factory() as session, session.begin():
+                    account = await session.get(Account, 1)
+                    account.trade_channel = TradeChannel.TQ
+
+            async def fail(*args, **kwargs):
+                raise WorkerBackendExecutionError(
+                    "private SDK detail",
+                    execution_error="账户通道准备未完成",
+                    reason_code="CTP_NOT_INITIALIZED" if boundary in {"scheduler", "other_channel"} else None,
+                    retryable=boundary == "retryable",
+                )
+
+            monkeypatch.setattr(
+                runtime, "_apply_account_job" if boundary == "scheduler" else "reconcile_china_channel_account", fail
+            )
+            sync = await runtime.reconcile_account_runtime(1, MagicMock(), session_factory=factory)
+            assert sync.status == "failed"
+            assert sync.last_error == "账户通道准备未完成"
+            assert "SDK" not in sync.last_error
 
     asyncio.run(scenario())

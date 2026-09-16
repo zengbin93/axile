@@ -155,7 +155,7 @@ def test_retry_returns_404_when_account_is_deleted_while_waiting(
     asyncio.run(scenario())
 
 
-@pytest.mark.parametrize("change", ["disabled", "deleted", "renamed"])
+@pytest.mark.parametrize("change", ["disabled", "deleted", "renamed", "channel_changed"])
 def test_session_prepare_reloads_after_waiting_for_runtime_lock(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, change: str
 ) -> None:
@@ -164,6 +164,7 @@ def test_session_prepare_reloads_after_waiting_for_runtime_lock(
     async def scenario() -> None:
         async with runtime_database(tmp_path / "runtime.db") as (factory, sessions):
             monkeypatch.setattr(ctp_channels, "SessionLocal", factory)
+            monkeypatch.setattr(runtime, "SessionLocal", factory)
             prepared: list[str] = []
 
             class Manager:
@@ -184,6 +185,8 @@ def test_session_prepare_reloads_after_waiting_for_runtime_lock(
                     assert account is not None
                     if change == "deleted":
                         await session.delete(account)
+                    elif change == "channel_changed":
+                        account.trade_channel = "gm"
                     elif change == "disabled":
                         account.is_started = False
                     else:

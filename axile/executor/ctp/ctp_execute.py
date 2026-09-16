@@ -92,10 +92,20 @@ _ValueT = TypeVar("_ValueT")
 
 
 class CtpRequestError(RuntimeError):
-    def __init__(self, message: str, *, return_code: int | None = None, execution_error: str | None = None) -> None:
+    def __init__(
+        self,
+        message: str,
+        *,
+        return_code: int | None = None,
+        execution_error: str | None = None,
+        error_id: int | None = None,
+        reason_code: str | None = None,
+    ) -> None:
         super().__init__(message)
         self.return_code = return_code
         self.execution_error = execution_error
+        self.error_id = error_id
+        self.reason_code = reason_code
 
 
 class _TradeAssociationPending(CtpRequestError):
@@ -253,7 +263,16 @@ class CTPExecutor(AbstractExecutor, UnifiedCallbackClient):
         if not code:
             return None
         reason = {31: "资金不足", 3: "CTP 登录校验失败"}.get(code, f"{name}失败，渠道返回错误码 {code}")
-        return CtpRequestError(f"{name}失败: ErrorID={code}, {getattr(info, 'ErrorMsg', '')}", execution_error=reason)
+        reason_code = None
+        if name == "认证" and code == 7:
+            reason = "交易柜台尚未初始化，账户通道暂未就绪"
+            reason_code = "CTP_NOT_INITIALIZED"
+        return CtpRequestError(
+            f"{name}失败: ErrorID={code}, {getattr(info, 'ErrorMsg', '')}",
+            execution_error=reason,
+            error_id=code,
+            reason_code=reason_code,
+        )
 
     @staticmethod
     def _check(code, name):
@@ -498,21 +517,29 @@ class CTPExecutor(AbstractExecutor, UnifiedCallbackClient):
             self._invalidate_connection(f"CTP {kind}前置断线: {reason}")
 
     def _invalidate_connection(self, reason):
-        """永久撤销本实例就绪状态，并唤醒所有等待者。"""
+        """永久撤销就绪状态；保留首个失效原因及其可读错误契约。"""
         with self._lock:
-            self._invalid_reason = self._invalid_reason or reason
+            if not self._invalid_reason:
+                self._invalid_reason = str(reason)
+                self._connection_failure = CtpSessionRecoveryRequired(
+                    self._invalid_reason,
+                    execution_error=getattr(reason, "execution_error", None)
+                    or getattr(self, "_connection_error", None),
+                    return_code=getattr(reason, "return_code", None),
+                    error_id=getattr(reason, "error_id", None),
+                    reason_code=getattr(reason, "reason_code", None),
+                )
             self._ready = False
             self._monitoring = False
             self._quotes.clear()
-            self._fail_waiters(
-                CtpSessionRecoveryRequired(
-                    self._invalid_reason, execution_error=getattr(self, "_connection_error", None)
-                )
-            )
+            self._fail_waiters(self._connection_failure)
 
     def _require_active_connection(self):
         """禁止失效实例继续访问原生 API，包括尚在排队的请求。"""
         if self._closed or self._invalid_reason:
+            failure = getattr(self, "_connection_failure", None)
+            if failure is not None:
+                raise failure
             raise CtpSessionRecoveryRequired(
                 self._invalid_reason or "CTPExecutor 已关闭", execution_error=getattr(self, "_connection_error", None)
             )
@@ -569,7 +596,7 @@ class CTPExecutor(AbstractExecutor, UnifiedCallbackClient):
                 return False
             error = self._error(info, name)
             if error:
-                self._invalidate_connection(str(error))
+                self._invalidate_connection(error)
                 return False
             stage.done.set()
             return True
@@ -1373,7 +1400,7 @@ class CTPExecutor(AbstractExecutor, UnifiedCallbackClient):
             symbol = str(getattr(row, "InstrumentID", ""))
             if error:
                 if not symbol:
-                    self._invalidate_connection(str(error))
+                    self._invalidate_connection(error)
                     return
                 self._subscription_errors[symbol] = str(error)
                 self._quotes.pop(symbol, None)

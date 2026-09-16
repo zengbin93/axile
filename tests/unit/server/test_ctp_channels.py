@@ -3,13 +3,18 @@
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
 
+from axile.common.trade_channel import TradeChannel
+from axile.server.db.models import Account
+from axile.server.execution import account_runtime_sync as runtime
 from axile.server.execution import ctp_channels
-from tests.unit.server._execution_test_support import AccountSession, build_account
+from tests.unit.server._execution_test_support import build_account
+from tests.unit.server._runtime_db_support import runtime_database
 
 
 def test_register_china_channel_jobs_uses_fixed_session_windows() -> None:
@@ -26,7 +31,7 @@ def test_register_china_channel_jobs_uses_fixed_session_windows() -> None:
     assert all(call.kwargs["max_instances"] == 1 for call in calls)
 
 
-def test_prepare_china_accounts_isolates_account_failures(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_prepare_china_accounts_isolates_account_failures(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     accounts = [build_account(id=1), build_account(id=2)]
     prepared: list[tuple[int | None, str | None]] = []
 
@@ -43,20 +48,19 @@ def test_prepare_china_accounts_isolates_account_failures(monkeypatch: pytest.Mo
 
     monkeypatch.setattr(ctp_channels, "_started_china_channel_accounts", started)
 
-    class Session(AccountSession):
-        async def get(self, _model: object, account_id: int):
-            return next(account for account in accounts if account.id == account_id)
+    async def scenario():
+        async with runtime_database(tmp_path / "runtime.db") as (factory, _sessions):
+            monkeypatch.setattr(runtime, "SessionLocal", factory)
+            monkeypatch.setattr(ctp_channels, "get_worker_backend_manager", Manager)
+            await ctp_channels.prepare_china_channel_accounts("night")
 
-    monkeypatch.setattr(ctp_channels, "SessionLocal", lambda: Session(None))
-    monkeypatch.setattr(ctp_channels, "get_worker_backend_manager", Manager)
-
-    asyncio.run(ctp_channels.prepare_china_channel_accounts("night"))
+    asyncio.run(scenario())
 
     assert sorted(prepared) == [(1, None), (2, None)]
 
 
-def test_tq_worker_is_rebuilt_before_session_prepare(monkeypatch: pytest.MonkeyPatch) -> None:
-    account = build_account(id=7, trade_channel="tq", brokerage="tq")
+def test_tq_worker_is_rebuilt_before_session_prepare(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    account = build_account(id=1, trade_channel="tq", brokerage="tq")
     calls: list[tuple[str, int]] = []
 
     class Manager:
@@ -70,7 +74,14 @@ def test_tq_worker_is_rebuilt_before_session_prepare(monkeypatch: pytest.MonkeyP
 
     monkeypatch.setattr(ctp_channels, "get_worker_backend_manager", Manager)
 
-    monkeypatch.setattr(ctp_channels, "SessionLocal", lambda: AccountSession(account))
-    asyncio.run(ctp_channels._prepare_accounts([account], "night"))
+    async def scenario():
+        async with runtime_database(tmp_path / "runtime.db") as (factory, _sessions):
+            monkeypatch.setattr(runtime, "SessionLocal", factory)
+            async with factory() as session, session.begin():
+                current = await session.get(Account, 1)
+                current.trade_channel = TradeChannel.TQ
+                await runtime.enqueue_account_runtime_sync(session, 1, reset_worker=True)
+            await ctp_channels._prepare_accounts([account], "night")
 
-    assert calls == [("drop", 7), ("prepare", 7)]
+    asyncio.run(scenario())
+    assert calls == [("drop", 1), ("prepare", 1)]

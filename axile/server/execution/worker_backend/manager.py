@@ -37,7 +37,23 @@ from axile.server.portfolio_runner import (
 
 
 class WorkerBackendExecutionError(RuntimeError):
-    """多进程 worker 返回错误响应时抛出的异常。."""
+    """多进程 worker 返回错误响应时抛出的异常。"""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        execution_error: str | None = None,
+        reason_code: str | None = None,
+        error_id: int | None = None,
+        retryable: bool = False,
+    ) -> None:
+        """保留 IPC 的安全展示原因与机器码，不从异常原文推断业务状态。"""
+        super().__init__(message)
+        self.execution_error = execution_error
+        self.reason_code = reason_code
+        self.error_id = error_id
+        self.retryable = retryable
 
 
 class WorkerBackendTimeoutError(WorkerBackendExecutionError):
@@ -555,7 +571,14 @@ class WorkerBackendManager:
         )
         if response.kind != "result" or response.output_payload is None:
             message = response.error.message if response.error is not None else "账户通道准备失败"
-            raise WorkerBackendExecutionError(message)
+            error = response.error
+            raise WorkerBackendExecutionError(
+                message,
+                execution_error=message,
+                reason_code=error.reason_code if error else None,
+                error_id=error.error_id if error else None,
+                retryable=error.retryable if error else False,
+            )
         return response.output_payload
 
     async def drop_account(self, account_id: int) -> None:

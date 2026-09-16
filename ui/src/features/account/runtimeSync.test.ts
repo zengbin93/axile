@@ -19,3 +19,11 @@ test('保存与同步状态分别表达，旧 revision 不覆盖新保存', () =
   expect(newerRuntimeSync(sync, null)).toBe(sync)
   expect(newerRuntimeSync(sync, { ...sync, revision: 4, status: 'pending' })?.revision).toBe(4)
 })
+
+
+test('等待与失败提示使用后端可读原因，成功不展示旧原因', () => {
+  const last_error = '交易柜台尚未初始化，账户通道暂未就绪'
+  expect(runtimeSyncMessage({ ...sync, status: 'pending', last_error })).toBe(`配置已保存，运行态待同步：${last_error}`)
+  expect(runtimeSyncMessage({ ...sync, status: 'failed', last_error })).toBe(`配置已保存，运行态同步失败：${last_error}`)
+  expect(runtimeSyncMessage({ ...sync, last_error })).toBe('算法配置已保存')
+})

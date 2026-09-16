@@ -521,3 +521,81 @@ def test_reconciliation_progress_keeps_watchdog_alive_over_sixty_seconds(broker,
     now[0] += 60
     with pytest.raises(WorkerBackendTimeoutError, match="无进展"):
         WorkerBackendManager._remaining_response_time(handle, request, 160, now[0])
+
+
+@pytest.mark.parametrize(
+    "code, stage, reason_code",
+    [
+        (7, "ReqAuthenticate", "CTP_NOT_INITIALIZED"),
+        (3, "ReqAuthenticate", None),
+        (999, "ReqAuthenticate", None),
+        (7, "ReqUserLogin", None),
+    ],
+)
+def test_stage_error_contract_survives_invalidation_and_ipc(broker, monkeypatch, code, stage, reason_code):
+    import asyncio
+    import pickle
+
+    from axile.server.execution.worker_backend import worker
+    from axile.server.execution.worker_backend.manager import WorkerBackendExecutionError
+    from axile.server.execution.worker_backend.protocol import WorkerBackendRequest
+
+    broker.errors[stage] = SimpleNamespace(ErrorID=code, ErrorMsg="SDK technical original")
+    with pytest.raises(CtpSessionRecoveryRequired) as caught:
+        broker.start()
+    error = caught.value
+    assert error.error_id == code
+    assert error.reason_code == reason_code
+    assert error.execution_error
+    assert "SDK" not in error.execution_error
+    if reason_code:
+        assert error.execution_error == "交易柜台尚未初始化，账户通道暂未就绪"
+    broker.executor._disconnected("交易", 123)
+    with pytest.raises(CtpSessionRecoveryRequired) as repeated:
+        broker.executor._require_active_connection()
+    assert repeated.value.execution_error == error.execution_error
+    assert repeated.value.reason_code == reason_code
+    assert not broker.executor._verify_connection()
+    broker.trader.ReqOrderInsert.assert_not_called()
+
+    def fail_prepare(**kwargs):
+        raise error
+
+    monkeypatch.setattr(worker, "_resolve_prepared_executor", fail_prepare)
+    request = WorkerBackendRequest(
+        request_id="prepare",
+        command="prepare",
+        account_payload=build_account(id=1).model_dump(mode="json"),
+        execution_id=None,
+        payload={},
+    )
+    response = pickle.loads(pickle.dumps(worker._handle_prepare(request, worker._WorkerBackendState())))
+    manager = WorkerBackendManager()
+    monkeypatch.setattr(manager, "_request_blocking", lambda *args: response)
+    with pytest.raises(WorkerBackendExecutionError) as result:
+        asyncio.run(manager.prepare_account(build_account(id=1)))
+    assert result.value.reason_code == reason_code
+    assert result.value.error_id == code
+    assert result.value.execution_error == error.execution_error
+    assert result.value.retryable
+
+
+def test_worker_retries_authentication_with_a_new_executor_after_not_initialized(broker, monkeypatch):
+    account = build_account(id=1)
+    state = worker_state._WorkerBackendState()
+    broker.errors["ReqAuthenticate"] = SimpleNamespace(ErrorID=7, ErrorMsg="not initialized")
+    monkeypatch.setattr(worker_state, "create_executor_instance", lambda account: broker.start())
+    with pytest.raises(CtpSessionRecoveryRequired):
+        worker_state._resolve_executor(state, account)
+    assert state.executor is None
+    assert broker.executor._closed
+
+    replacement = ScriptedBroker(monkeypatch)
+    monkeypatch.setattr(worker_state, "create_executor_instance", lambda account: replacement.start())
+    try:
+        current = worker_state._resolve_executor(state, account)
+        assert current is replacement.executor
+        assert current._verify_connection()
+        assert worker_state._resolve_executor(state, account) is current
+    finally:
+        replacement.executor.close()

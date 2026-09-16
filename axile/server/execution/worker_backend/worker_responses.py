@@ -54,6 +54,8 @@ def _build_error_payload(exc: Exception) -> WorkerBackendErrorPayload:
     return WorkerBackendErrorPayload(
         type=_camel_to_snake(exc.__class__.__name__),
         message=message,
+        reason_code=getattr(exc, "reason_code", None),
+        error_id=getattr(exc, "error_id", None),
         retryable=isinstance(exc, TimeoutError) or bool(getattr(exc, "requires_session_recovery", False)),
     )
 

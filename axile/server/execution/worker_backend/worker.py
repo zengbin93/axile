@@ -95,11 +95,15 @@ def _handle_prepare(request: WorkerBackendRequest, state: _WorkerBackendState) -
             },
         )
     except Exception as exc:  # noqa: BLE001 - IPC 边界统一返回结构化错误
+        error = _build_error_payload(exc)
+        if error.reason_code != "CTP_NOT_INITIALIZED":
+            # IPC 只传安全文案；故障的技术上下文保留在 worker 日志。
+            logger.opt(exception=exc).error("账户通道准备失败 account_id={}", account.id)
         return WorkerBackendResponse(
             request_id=request.request_id,
             kind="error",
             channel_type=account.trade_channel,
-            error=_build_error_payload(exc),
+            error=error,
         )
     finally:
         _finalize_executor(executor)
