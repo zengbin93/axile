@@ -9,14 +9,10 @@ export interface SymbolRow {
   reason: string
 }
 
-/** 从事件 details 里取品种级错误串（后端写在 `details.debug.error`）。 */
+/** 从事件 details 公共层取品种级错误串；旧事件由服务端读时提升，前端不读调试载荷。 */
 export function eventError(e: ExecutionEvent): string {
-  const debug = (e.details as { debug?: unknown } | undefined)?.debug
-  if (debug && typeof debug === 'object' && 'error' in debug) {
-    const err = (debug as { error?: unknown }).error
-    if (typeof err === 'string') return err
-  }
-  return ''
+  const error = (e.details as { error?: unknown } | undefined)?.error
+  return typeof error === 'string' ? error : ''
 }
 
 /** 执行级（非逐只）问题提示：来自 EXECUTION_FAILED 等生命周期事件。 */
@@ -29,7 +25,7 @@ export interface LifecycleNote {
  * 从事件流里挑出执行级 ERROR/WARNING 提示（排除逐只事件，避免与 symbolRows 重复）。
  *
  * 用于覆盖「在进入 symbol 调度前就失败」的场景——此时没有逐只行，真实原因躺在
- * `EXECUTION_FAILED` 的 `details.debug.error` 里，需要单独显出来。
+ * `EXECUTION_FAILED` 的 `details.error` 里，需要单独显出来。
  */
 export function lifecycleNotes(events: ExecutionEvent[]): LifecycleNote[] {
   const notes: LifecycleNote[] = []

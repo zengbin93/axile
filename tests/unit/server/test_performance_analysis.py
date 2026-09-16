@@ -27,10 +27,38 @@ from axile.server.performance_analysis import (
     read_performance_summaries,
     read_snapshot,
 )
-from axile.server.performance_costs import daily_costs, project_execution, summarize, timestamp
+from axile.server.performance_costs import daily_costs, execution_list_payload, project_execution, summarize, timestamp
 from axile.server.performance_details import CostQuery, read_costs
 from tests.unit.server._execution_test_support import build_account
 from tests.unit.server.test_initial_migration import _MIGRATIONS_DIR, _load_migration
+
+
+def test_execution_projection_keeps_counts_without_large_symbol_evidence():
+    import copy
+
+    symbol = {
+        "status": "PARTIAL",
+        "error": "未到位",
+        "orders": [{"order_id": "A", "extra": {"raw": "x" * 10000}}],
+        "trades": [{"trade_volume": 1, "trade_price": 10}] * 1000,
+        "memory": {"debug": "x" * 10000},
+        "account_assets": {"positions": [1] * 1000},
+    }
+    item = record(symbol_results={"A": symbol})
+    original = copy.deepcopy(item.raw_result)
+    payload, trades = project_execution(item)
+    assert payload["record"]["raw_result"]["symbol_results"] == {
+        "A": {"status": "PARTIAL", "error": "未到位", "outcome": "not_reached"}
+    }
+    assert payload["tradeCount"] == len(trades) == 1000
+    assert item.raw_result == original
+
+    old = {"record": {"id": 1, "raw_result": original}}
+    compact = execution_list_payload(old)
+    assert compact["tradeCount"] == 1000
+    assert compact["record"]["raw_result"]["symbol_results"] == payload["record"]["raw_result"]["symbol_results"]
+    assert old["record"]["raw_result"] == original
+    assert execution_list_payload(compact) == compact
 
 
 def record(index=1, **kwargs):
@@ -612,5 +640,41 @@ def test_journal_snapshot_trade_identity_filter_and_aggregation(tmp_path):
                 record_id = page["data"][0]["record_id"]
                 exact = await read_costs(session, 2, query.model_copy(update={"record_id": record_id}))
                 assert all(row["record_id"] == record_id for row in exact["data"])
+
+    asyncio.run(check())
+
+
+def test_version_8_projection_is_rebuilt_with_execution_evidence(tmp_path):
+    """旧投影缺少新结果字段时，重启后从完整记录重建。"""
+    from axile.server.db.models.analysis import cost_execution as executions
+
+    async def check():
+        async with database(tmp_path, count=1) as (_, sessions, manager):
+            await queue(sessions)
+            await manager.run_once()
+            initial = await snapshot(sessions)
+            async with sessions() as session:
+                payload = (await session.execute(sa.select(executions.c.payload))).scalar_one()
+                payload["record"]["raw_result"] = {"status": "PARTIAL", "outcome": "not_reached"}
+                payload.pop("tradeCount", None)
+                await session.execute(executions.update().values(payload=payload))
+                await session.execute(snapshots.update().values(logic_version="8"))
+                await session.execute(states.update().values(logic_version="8"))
+                await session.commit()
+                with pytest.raises(HTTPException) as exc:
+                    await read_costs(session, 2, CostQuery(snapshot_id=initial["snapshot_id"]))
+                assert exc.value.status_code == 410
+            await manager.start()
+            await manager.stop()
+            await manager.run_once()
+            current = await snapshot(sessions)
+            assert current["status"] == "ready"
+            assert current["snapshot_id"] != initial["snapshot_id"]
+            async with sessions() as session:
+                page = await read_costs(session, 2, CostQuery(snapshot_id=current["snapshot_id"]))
+                rebuilt = page["data"][0]
+                expected, _ = project_execution(record())
+                assert rebuilt["record"]["raw_result"] == expected["record"]["raw_result"]
+                assert rebuilt["tradeCount"] == expected["tradeCount"] == 1
 
     asyncio.run(check())

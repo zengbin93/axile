@@ -191,10 +191,11 @@ def test_registry_helper_functions_cover_status_serialization_and_registration(
             "started_at": "2026-03-22T18:00:00",
             "finished_at": None,
             "error": None,
-            "output_status": None,
+            # 柔和版保留展示结论三元组。
             "outcome": None,
             "outcome_reason": None,
             "outcome_symbols": [],
+            "output_status": None,
             "record_id": None,
             "is_success": None,
             "cancel_requested_at": None,
@@ -231,6 +232,7 @@ def test_registry_helper_functions_cover_status_serialization_and_registration(
         "finished_at": "2026-03-22T17:00:00",
         "error": None,
         "output_status": None,
+        # 柔和版保留展示结论三元组。
         "outcome": None,
         "outcome_reason": None,
         "outcome_symbols": [],
@@ -602,14 +604,16 @@ def test_terminal_intent_does_not_hide_persisted_outcome(monkeypatch):
         is_success=0,
         created_at="2026-09-14T14:00:00",
         raw_result={
-            "status": "FAILED",
-            "outcome": "not_reached",
-            "symbol_results": {"m2701": {"outcome": "not_reached"}},
+            "status": "PARTIAL",
+            "error": "目标尚未到位",
+            "symbol_results": {"m2701": {"status": "PARTIAL"}},
         },
     )
     monkeypatch.setattr(intents, "get_intent", get_intent)
     monkeypatch.setattr(execution_registry, "SessionLocal", lambda: FakeSession(record=record))
     payload = asyncio.run(execution_registry.get_execution_status(record.execution_id))
     assert payload["record_id"] == 1000
+    assert payload["output_status"] == "PARTIAL"
+    assert payload["error"] == "目标尚未到位"
+    # 柔和版读时归一：status 反向补齐展示结论，不再有 legacy 空洞。
     assert payload["outcome"] == "not_reached"
-    assert payload["outcome_symbols"] == ["m2701"]

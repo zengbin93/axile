@@ -508,11 +508,12 @@ def test_handle_execute_trade_exception_returns_structured_error_payload(
     assert response.kind == "error"
     assert response.error is not None
     assert response.error.type == "runtime_error"
-    assert response.error.message == "boom"
+    # message 面向用户展示：未知异常用固定人话，原文进 worker 日志。
+    assert response.error.message == "worker 执行失败，具体原因未确认"
     assert response.error.retryable is False
     error_payload = cast(object, captured["error"])
     assert getattr(error_payload, "type") == "runtime_error"
-    assert getattr(error_payload, "message") == "boom"
+    assert getattr(error_payload, "message") == "worker 执行失败，具体原因未确认"
 
 
 def test_handle_execute_trade_marks_persistent_ctp_queue_limit_for_session_recovery(
@@ -616,7 +617,7 @@ def test_handle_execute_trade_preserves_original_error_when_failed_audit_raises(
     response = worker_backend_entry._handle_execute_trade(request, worker_backend_entry._WorkerBackendState())
 
     assert response.error is not None
-    assert response.error.message == "original boom"
+    assert response.error.message == "worker 执行失败，具体原因未确认"
 
 
 def test_worker_loop_returns_structured_error_for_uncaught_base_exception(

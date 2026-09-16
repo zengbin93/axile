@@ -3,6 +3,7 @@ import { journalExecutions, journalSymbols, type JournalExecution, type JournalS
 import { loadJournal, type TimeWindow } from '@/features/account/journalActivity'
 import { combineCosts, summarizeCosts, shanghaiTime, shanghaiLabel, type CostSummary } from '@/features/history/costs'
 import type { ChartSelection } from '@/features/history/chartModel'
+import { executionRecordSummary, executionRecordView } from '@/features/account/executionOutcome'
 
 export interface JournalData { executions: JournalExecution[]; symbols: JournalSymbol[]; dataUntil: string | null }
 export type SnapshotScope = Omit<CostQuery, 'dimension' | 'cursor' | 'sort' | 'limit'>
@@ -73,12 +74,10 @@ export async function loadCostGroups<T>(accountId: number, query: CostQuery, sig
 }
 
 export function snapshotExecution(row: CostExecutionRow): JournalExecution {
-  const raw = row.record.raw_result
-  const status = raw.task_status === 'TERMINATED' ? '已终止' : raw.status === 'BLOCKED' ? '已跳过'
-    : raw.status === 'PARTIAL' ? '部分到位' : row.record.is_success !== 1 ? '失败' : row.noop ? '无成交' : '已完成'
+  const view = executionRecordView(row.record)
   return { key: `execution:${row.record.id}`, recordId: row.record.id, executionId: row.record.execution_id,
-    time: row.record.created_at, status, warning: status === '失败' || status === '部分到位',
-    description: row.reason || `${row.symbolCount} 个成交品种 · ${row.summary.count} 笔成交`,
+    time: row.record.created_at, status: view.title, warning: view.warning,
+    description: executionRecordSummary(row.record, row.tradeCount ?? (view.tradeCount || row.summary.count)),
     symbols: [...new Set([...(row.transactions ?? []).map(t => t.symbol), ...(row.attempts ?? []).map(a => a.symbol)])],
     trades: [], summary: row.summary, durationSec: row.durationSec ?? null }
 }

@@ -13,7 +13,7 @@ from axile.server.db.models.analysis import analysis_snapshot as snapshots
 from axile.server.db.models.analysis import cost_execution as executions
 from axile.server.db.models.analysis import cost_trade as trades
 from axile.server.db.models.performance import RangeKey
-from axile.server.performance_costs import timestamp
+from axile.server.performance_costs import execution_list_payload, timestamp
 
 
 class CostQuery(BaseModel):
@@ -174,7 +174,7 @@ async def _execution_page(session, filters, trade_filter, query, offset):
                 *row_filter, trades.c.payload["quantity"].as_float().is_not(None)
             )
         )
-        data.append({**payload, "symbolCount": symbol_count, "summary": row_summary})
+        data.append({**execution_list_payload(payload), "symbolCount": symbol_count, "summary": row_summary})
     return data
 
 

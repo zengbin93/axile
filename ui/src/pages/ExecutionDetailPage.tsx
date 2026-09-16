@@ -1,3 +1,4 @@
+import { isDegradedSnapshotSource } from '@/features/account/accountSnapshot'
 import { lossClass } from '@/features/history/costs'
 import { useCallback, useState } from 'react'
 import { useLocation, useParams } from 'react-router'
@@ -7,7 +8,7 @@ import { SkeletonLines } from '@/components/ui/Skeleton'
 import { NumberTicker } from '@/components/ui/NumberTicker'
 import { ErrorNotice } from '@/components/ui/ErrorNotice'
 import { SizingEvidence } from '@/features/account/SizingEvidence'
-import { isQuantizedZero, weightText } from '@/features/account/sizingEvidenceModel'
+import { weightText } from '@/features/account/sizingEvidenceModel'
 import { usePolling } from '@/lib/hooks/usePolling'
 import { getExecutionArtifacts, getExecutionEvents, getExecutionStatus } from '@/lib/api/executions'
 import { currencyOf } from '@/lib/derive'
@@ -22,8 +23,9 @@ import {
   type SymbolChain,
 } from '@/features/account/executionDetail'
 import { buildSymbolActionStream, type ActionLine } from '@/features/account/actionStream'
+import { executionRecordView } from '@/features/account/executionOutcome'
 import { AccountPageTitle } from '@/features/account/pageHead'
-import { BLAME_LABEL, type FailureReason } from '@/features/account/failureReason'
+import type { FailureReason } from '@/features/account/failureReason'
 import { PhaseBar } from '@/features/dashboard/PhaseBar'
 import { accountAssetTerms, positionValueLabelOf } from '@/features/dashboard/display'
 import { useDomainStore } from '@/stores/domain'
@@ -173,39 +175,31 @@ function Header({
 }
 
 /**
- * 快照来源提示条：按「到位度」与「权益」两族各自的来源标分别措辞，不做全局塌缩。
- *
- * 到位度只依赖执行后快照，权益/敞口/drift 是跨前后差。故：执行后快照退化时，两族皆不可信，
- * 出强提示；仅执行前基线缺失时，只有权益族退化、到位度仍可信，出「只警告该退化的量」的准提示。
- * 琥珀只点在真正偏离的量上，不再把可信的到位度也刷成「仅供参考」。
+ * 账户快照退化时说明缺失范围；逐品种先前确认的持仓仍是独立证据。
  */
 function SnapshotNote({ m, assetLabel }: { m: ExecutionDetailModel; assetLabel: string }) {
   const h = m.header
   if (m.task?.status === 'FAILED' && m.task.started_at == null) return null
-  const posBad = h.sourcePosition !== 'real'
-  const eqBad = h.sourceEquity !== 'real'
+  const posBad = isDegradedSnapshotSource(h.sourcePosition)
+  const eqBad = isDegradedSnapshotSource(h.sourceEquity)
   if (!posBad && !eqBad) return null
   const label = (s: string) => SOURCE_DEGRADED_LABEL[s] ?? s
-  // sourceEquity 恒不优于 sourcePosition：posBad ⇒ 执行后快照退化 ⇒ 两族皆污染。
   const note = posBad
-    ? `执行后账户快照为「${label(h.sourcePosition)}」——到位度与${assetLabel}均基于非真实快照，仅供参考。`
-    : `执行前基线为「${label(h.sourceEquity)}」——${assetLabel}变动与敞口对比不可得；到位度基于执行后真实快照，仍然可信。`
+    ? `执行后账户快照为「${label(h.sourcePosition)}」，${assetLabel}变动与敞口对比不可得；逐品种仅展示已确认的持仓证据，缺少证据时到位状态未知。`
+    : `执行前基线为「${label(h.sourceEquity)}」，${assetLabel}变动与敞口对比不可得；执行后持仓与到位证据仍然保留。`
   return <div className="mt-2 rounded bg-warn-soft px-2.5 py-1.5 text-[13.5px] text-warn">{note}</div>
 }
 
-/**
- * 失败判词：把执行级失败（-1021 等）翻成人话——主因 + 归谁 + 可否重试 + 下一步，原始错误可下钻。
- *
- * 「偏离」头条点进来后回答「为什么」。走琥珀（失败=注意，不碰红绿）。
- */
+/** 直接显示已有原因，原始文本在证据区回放。 */
 function FailureNote({ f }: { f: FailureReason }) {
   return (
-    <ErrorNotice
-      title={f.human}
-      error={new Error(`归${BLAME_LABEL[f.blame]} · ${f.retryable ? '恢复前置后可重试' : '需先处理再重试'} · ${f.action}`)}
-      variant="mutation"
-      evidence={f.raw ? [{ label: '原始错误', value: f.raw }] : []}
-    />
+    <div className="my-2 rounded bg-warn-soft px-2.5 py-2 text-[14px] text-warn">
+      <p className="whitespace-pre-wrap">{f.human}</p>
+      <details className="mt-1 text-[12.5px] text-ink-3">
+        <summary className="cursor-pointer">原始错误证据</summary>
+        <pre className="mt-1 whitespace-pre-wrap break-all">{f.raw}</pre>
+      </details>
+    </div>
   )
 }
 
@@ -300,13 +294,8 @@ function SymbolChainRow({
     s.attainedRatio == null ? null : (
       <NumberTicker value={s.attainedRatio * 100} format={{ minimumFractionDigits: 2, maximumFractionDigits: 2 }} suffix="%" />
     )
-  const quantizedZero = isQuantizedZero(s.sizing)
-  const outcome = quantizedZero && s.reached
-    ? { cls: 'text-ink-3', node: <>无需下单</> }
-    : s.reached
-    ? { cls: 'text-accent', node: <>到位 {ratioNode ?? '—'}</> }
-    : s.reached == null ? { cls: 'text-ink-3', node: <>到位状态未知</> }
-    : { cls: 'text-warn', node: ratioNode != null ? <>⚠ 欠量 · 到位 {ratioNode}</> : <>⚠ 未到位</> }
+  const result = executionRecordView({ status: s.status })
+  const outcome = { cls: result.warning ? 'text-warn' : 'text-ink-3', node: result.title }
   const sideText = s.side === 'sell' ? '卖' : s.side === 'buy' ? '买' : ''
   const driftNotable = Math.abs(s.drift) > 1e-6
   // 浮盈：当前水平取 after（无则回退 before）。未成交时前→后 Δ 纯为行情漂移、与执行无关，
@@ -321,7 +310,7 @@ function SymbolChainRow({
       <div className="flex items-baseline justify-between gap-3">
         <div className="flex items-baseline gap-2">
           <span className="text-[14.5px] font-medium">{s.symbol}</span>
-          <span className="text-[12px] text-ink-3">{ACTION_LABEL[s.action]}</span>
+          {s.observedBefore != null && s.observedAfter != null && <span className="text-[12px] text-ink-3">{ACTION_LABEL[s.action]}</span>}
         </div>
         <span className={`text-[14px] font-semibold ${outcome.cls}`}>{outcome.node}</span>
       </div>
@@ -336,6 +325,7 @@ function SymbolChainRow({
       <div className="num mt-0.5 text-[13px] text-ink-3">
         实际 {fmtPosition(s.observedBefore, units)} → {fmtPosition(s.observedAfter, units)}
         {s.target != null && <span> · 可执行目标 {fmtPosition(s.target, units)}</span>}
+        {ratioNode != null && <span> · 到位比例 {ratioNode}</span>}
         {s.target != null && s.observedAfter != null && s.reached === false && <span> · 差额 {fmtPosition(s.target - s.observedAfter, units)}</span>}
       </div>
 
@@ -635,7 +625,7 @@ export function ExecutionDetailPage() {
             {model.symbols.length > 0 ? (
               <>
                 <div className="mb-2 text-xs font-semibold tracking-wide text-ink-3">逐只结果</div>
-                {model.symbols.filter(s => model.conclusion.outcome !== 'not_reached' || model.conclusion.symbols.includes(s.symbol)).map((s) => {
+                {model.symbols.filter(s => model.conclusion.state !== 'PARTIAL' || model.conclusion.symbols.length === 0 || model.conclusion.symbols.includes(s.symbol)).map((s) => {
                   const symbolUnits = unitsForSymbol(units, s.symbol, currency)
                   return (
                     <SymbolChainRow

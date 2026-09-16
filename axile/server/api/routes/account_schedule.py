@@ -25,6 +25,7 @@ from axile.server.db.models import (
     ScheduleSkipActivity,
 )
 from axile.server.db.models.schedule import ScheduleSkipReason
+from axile.server.execution.legacy_compat import normalize_legacy_result
 from axile.server.trading_calendar import (
     CalendarDecisionStatus,
     CalendarSkipReason,
@@ -226,10 +227,17 @@ async def account_activity(
         .scalars()
         .all()
     )
+
+    def _public_record(row: ExecuteRecord) -> ExecuteRecordPublic:
+        # 旧记录读时归一：活动流里的执行记录与新记录同形。
+        return ExecuteRecordPublic.model_validate(row).model_copy(
+            update={"raw_result": normalize_legacy_result(row.raw_result)}
+        )
+
     activities: list[ExecutionActivity | ScheduleSkipActivity] = [
         ExecutionActivity(
             occurred_at=row.created_at,
-            record=ExecuteRecordPublic.model_validate(row),
+            record=_public_record(row),
         )
         for row in execution_rows
     ]

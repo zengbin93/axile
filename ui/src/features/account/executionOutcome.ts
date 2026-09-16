@@ -1,32 +1,70 @@
-/** 展示结论只接受新记录的明确证据，不回推旧状态。 */
-export type ExecutionOutcome = 'completed' | 'not_reached' | 'error' | 'terminated' | 'blocked' | 'unknown' | 'legacy'
+/** 只读取执行记录已有字段，不从错误文本推断结果。 */
+type Dict = Record<string, unknown>
+const dict = (value: unknown): Dict => value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Dict : {}
+const text = (value: unknown): string => typeof value === 'string' ? value : ''
+const affectedStates = new Set(['BLOCKED', 'PARTIAL', 'FAILED'])
+export type ViewState = 'SUCCEEDED' | 'NOOP' | 'BLOCKED' | 'PARTIAL' | 'FAILED' | 'TERMINATED' | 'UNKNOWN'
 export interface OutcomeView {
-  outcome: ExecutionOutcome
-  text: string
+  state: ViewState
+  title: string
+  tone: 'neutral' | 'warn'
   reason: string
-  warning: boolean
+  symbolCount: number
+  affectedCount: number
+  tradeCount: number
   symbols: string[]
+  text: string
+  warning: boolean
 }
-const OUTCOMES = new Set(['completed', 'not_reached', 'error', 'terminated', 'blocked', 'unknown'])
-const dict = (v: unknown): Record<string, unknown> => v && typeof v === 'object' ? v as Record<string, unknown> : {}
-export function outcomeOf(value: unknown): ExecutionOutcome {
-  return typeof value === 'string' && OUTCOMES.has(value) ? value as ExecutionOutcome : 'legacy'
+
+function recordedReason(raw: Dict, results: Dict[]): string {
+  const reason = text(raw.error)
+  if (reason) return reason
+  const affected = results.filter(result => affectedStates.has(text(result.status)))
+  const reasons = affected.map(result => text(result.error))
+  if (!reasons.some(Boolean)) return ''
+  if (reasons.every(value => value === reasons[0])) return `${reasons[0]}${affected.length > 1 ? `，${affected.length} 个品种执行受阻` : ''}`
+  return `${affected.length} 个品种执行受阻，原因不同`
 }
-export function symbolPreview(symbols: string[]): string {
-  return symbols.slice(0, 3).join('、') + (symbols.length > 3 ? ` 等 ${symbols.length} 个品种` : '')
+
+export function executionRecordView(value: unknown, clear = false): OutcomeView {
+  const record = dict(value)
+  const raw = 'raw_result' in record ? dict(record.raw_result) : record
+  const entries = Object.entries(dict(raw.symbol_results)).map(([symbol, result]) => [symbol, dict(result)] as const)
+  const results = entries.map(([, result]) => result)
+  const symbols = entries.filter(([, result]) => affectedStates.has(text(result.status))).map(([symbol]) => symbol)
+  const affectedCount = symbols.length || entries.length
+  const taskStatus = record.task_status ?? raw.task_status
+  const status = text(raw.status)
+  const state: ViewState = taskStatus === 'TERMINATED' ? 'TERMINATED' : ['SUCCEEDED', 'NOOP', 'BLOCKED', 'PARTIAL', 'FAILED'].includes(status) ? status as ViewState : 'UNKNOWN'
+  const isClear = clear || raw.execution_kind === 'clear_positions'
+  const title = {
+    SUCCEEDED: isClear ? '清仓完成' : '调仓完成',
+    NOOP: isClear ? '无需清仓' : '无需调仓',
+    BLOCKED: `未执行${affectedCount ? ` · ${affectedCount} 个品种执行受阻` : ''}`,
+    PARTIAL: '执行未全部完成',
+    FAILED: '执行失败', TERMINATED: '执行已终止', UNKNOWN: '执行状态未知',
+  }[state]
+  const warning = affectedStates.has(state) || state === 'TERMINATED'
+  return { state, title, text: title, tone: warning ? 'warn' : 'neutral', warning,
+    reason: recordedReason(raw, results), symbols, symbolCount: entries.length, affectedCount,
+    tradeCount: results.reduce((count, result) => count + (Array.isArray(result.trades) ? result.trades.length : 0), 0) }
 }
-export function executionOutcome(value: unknown, clear = false): OutcomeView {
-  const raw = dict(value)
-  const outcome = outcomeOf(raw.outcome)
-  const symbols = Array.isArray(raw.outcome_symbols)
-    ? raw.outcome_symbols.filter((s): s is string => typeof s === 'string')
-    : Object.entries(dict(raw.symbol_results)).filter(([, v]) => ['not_reached', 'blocked'].includes(String(dict(v).outcome))).map(([symbol]) => symbol)
-  const reason = typeof raw.outcome_reason === 'string' ? raw.outcome_reason.trim() : ''
-  const label = {
-    completed: clear || raw.execution_kind === 'clear_positions' ? '清仓完成' : '执行完成',
-    not_reached: '执行不到位', error: '执行失败', terminated: '执行已终止',
-    blocked: '未执行', unknown: '执行结果待确认', legacy: '历史执行记录',
-  }[outcome]
-  const detail = outcome === 'not_reached' ? symbolPreview(symbols) : outcome === 'error' || outcome === 'blocked' ? reason : ''
-  return { outcome, symbols, reason, text: detail ? `${label} · ${detail}` : label, warning: ['not_reached', 'error', 'unknown'].includes(outcome) }
+
+export const executionOutcome = executionRecordView
+
+/** 摘要描述执行规模；结论单独由状态列显示。 */
+export function executionRecordSummary(value: unknown, recordedTradeCount?: number | null): string {
+  const record = dict(value)
+  const raw = 'raw_result' in record ? dict(record.raw_result) : record
+  const view = executionRecordView(value)
+  const tradeCount = recordedTradeCount ?? view.tradeCount
+  return [
+    raw.execution_kind === 'clear_positions' ? '清仓' : '调仓',
+    view.symbolCount ? `涉及 ${view.symbolCount} 个品种` : '',
+    tradeCount ? `${tradeCount} 笔成交` : '未记录成交',
+  ].filter(Boolean).join(' · ')
 }
+
+export function outcomeOf(value: unknown): ViewState { return executionRecordView({ status: value }).state }
+export function symbolPreview(symbols: string[]): string { return symbols.length ? `${symbols.length} 个品种执行未成功` : '' }

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import time
 from typing import Any
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -15,6 +16,7 @@ from axile.executor.models.order_channel_health import OrderChannelHealth
 from axile.executor.models.unified_account_assets import Position, PositionDirection, UnifiedAccountAssets
 from axile.executor.models.unified_order import OrderDirection, OrderType, UnifiedOrder
 from axile.executor.models.unified_price import UnifiedPriceData
+from axile.executor.termination import ExecutionTerminated
 
 
 class _Logger:
@@ -263,6 +265,19 @@ def test_wait_for_completion_returns_immediately_when_no_orders() -> None:
     )
     # 未 add_order：pending 为空、无换单在途。即便给一个很大的 timeout，也应立刻返回 True。
     assert tracker.wait_for_completion(timeout=3600) is True
+
+
+def test_wait_for_completion_cancel_failure_keeps_execution_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    tracker = OrderTracker(executor=_FakeExecutor())
+    tracker.add_order(_build_pending_order("gm-order-1"))
+    monkeypatch.setattr(
+        "axile.executor.algorithms.utils.order_tracker.cancel_pending_orders_via_query",
+        lambda _executor: ["gm-order-1"],
+    )
+    with pytest.raises(RuntimeError, match="部分订单撤销失败") as raised:
+        tracker.wait_for_completion(timeout=0)
+    assert raised.value.execution_error == "撤单失败，订单终态尚未确认"
+    assert tracker.explicit_error == "撤单失败，订单终态尚未确认"
 
 
 def _build_pending_order(order_id: str, symbol: str = "SHSE.600000") -> UnifiedOrder:
@@ -723,6 +738,45 @@ def test_chase_cancel_propagates_ctp_session_recovery_without_fallback() -> None
     assert not tracker._chase_info[order.order_id].get("market_order_fallback_pending_cancel", False)
 
 
+@pytest.mark.parametrize(
+    "stage", ["chase_cancel", "fallback_cancel", "fallback_submit", "pending_query", "final_assets"]
+)
+@pytest.mark.parametrize("error_type", [ExecutionTerminated, MemoryError])
+def test_tracker_propagates_interruptions_without_continuing_orders(monkeypatch, stage, error_type):
+    executor = _ChaseExecutor()
+    tracker = OrderTracker(
+        executor=executor,
+        chase_config=ChaseConfig(enabled=True, max_count=0 if stage == "fallback_cancel" else 5, interval=0),
+    )
+    executor.tracker = tracker
+    order = _build_pending_order("interrupted")
+    tracker.add_order(order, direction=OrderDirection.BUY)
+    tracker.latest_prices[order.symbol] = _wide_spread_price(order.symbol)
+    error = (
+        ExecutionTerminated(reason="stop", mode="cancel_pending", cancel_failed_order_ids=[order.order_id])
+        if error_type is ExecutionTerminated
+        else MemoryError()
+    )
+    method, run = {
+        "chase_cancel": ("cancel_order", tracker._check_and_chase),
+        "fallback_cancel": ("cancel_order", tracker._fallback_to_market_order),
+        "fallback_submit": (
+            "place_order",
+            lambda: tracker._submit_market_fallback_order(order, tracker._chase_info[order.order_id]),
+        ),
+        "pending_query": ("get_pending_orders", tracker._query_pending_orders),
+        "final_assets": ("get_account_assets", tracker._refresh_timeout_account_assets),
+    }[stage]
+    monkeypatch.setattr(executor, method, MagicMock(side_effect=error))
+    monkeypatch.setattr(tracker, "_is_market_fallback_price_safe", lambda *args: True)
+    with pytest.raises(error_type) as raised:
+        run()
+    assert raised.value is error
+    assert executor._placed == 0
+    assert tracker._chasing_order_id is None
+    assert not tracker._fallback_submitting
+
+
 def test_chase_proceeds_when_cancel_confirmed() -> None:
     """同步确认撤单的渠道必须照常换单，不受本次改动影响。"""
     executor = _ChaseExecutor()
@@ -738,6 +792,48 @@ def test_chase_proceeds_when_cancel_confirmed() -> None:
     tracker._check_and_chase()
 
     assert executor._placed == 1, "撤单已确认却没有换单"
+
+
+def test_one_order_chase_success_does_not_clear_another_failure(monkeypatch):
+    executor = _ChaseExecutor()
+    tracker = OrderTracker(executor=executor, chase_config=ChaseConfig(enabled=True, max_count=5, interval=0))
+    executor.tracker = tracker
+    for order_id in ["A", "B"]:
+        order = _build_pending_order(order_id)
+        tracker.add_order(order, direction=OrderDirection.BUY)
+        tracker.latest_prices[order.symbol] = _wide_spread_price(order.symbol)
+    cancel = executor.cancel_order
+
+    def fail_a(order_id):
+        if order_id == "A":
+            raise RuntimeError("A cancel failed")
+        return cancel(order_id)
+
+    monkeypatch.setattr(executor, "cancel_order", fail_a)
+    tracker._check_and_chase()
+    assert executor._placed == 1
+    assert tracker.explicit_error == "追单失败，具体原因未确认"
+    tracker.explicit_error = None
+    assert tracker.explicit_error == "追单失败，具体原因未确认"
+    monkeypatch.setattr(executor, "cancel_order", cancel)
+    tracker._check_and_chase()
+    assert tracker.explicit_error is None
+
+
+def test_market_fallback_clears_only_its_own_error(monkeypatch):
+    executor = _ChaseExecutor()
+    tracker = OrderTracker(executor=executor)
+    tracker._set_order_error("A", "A 未恢复")
+    tracker._set_order_error("B", "B 未恢复")
+    monkeypatch.setattr(tracker, "_is_market_fallback_price_safe", lambda *args: True)
+    tracker._submit_market_fallback_batch(
+        _build_pending_order("B"), {"symbol": executor.symbol, "direction": OrderDirection.BUY}
+    )
+    assert tracker.explicit_error == "A 未恢复"
+    tracker._submit_market_fallback_batch(
+        _build_pending_order("A"), {"symbol": executor.symbol, "direction": OrderDirection.BUY}
+    )
+    assert tracker.explicit_error is None
 
 
 def test_market_fallback_cancel_propagates_ctp_session_recovery_without_marking_failure() -> None:

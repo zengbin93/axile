@@ -6,6 +6,9 @@ from datetime import datetime
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from axile.executor.models.unified_account_assets import is_degraded_snapshot_source
+from axile.server.execution.legacy_compat import normalize_legacy_result
+
 SHANGHAI = ZoneInfo("Asia/Shanghai")
 
 
@@ -91,9 +94,33 @@ def _trade(raw: Any, symbol: str, result: dict, orders: dict, created_at: str) -
     }
 
 
+def execution_list_payload(payload: dict) -> dict:
+    """裁剪新旧绩效投影的逐单证据，只保留列表状态、结论与统计。"""
+    record = mapping(payload.get("record"))
+    # 缓存中的旧投影同样读时归一，列表与详情两条路径拿到一致形状。
+    raw = mapping(normalize_legacy_result(record.get("raw_result")))
+    results = mapping(raw.get("symbol_results"))
+    compact = {
+        key: raw[key]
+        for key in ("status", "task_status", "error", "outcome", "outcome_reason", "msg", "execution_kind")
+        if key in raw
+    }
+    if isinstance(raw.get("symbol_results"), dict):
+        compact["symbol_results"] = {
+            symbol: {key: result[key] for key in ("status", "error", "outcome", "outcome_reason") if key in result}
+            for symbol, value in results.items()
+            for result in [mapping(value)]
+        }
+    trade_count = payload.get("tradeCount")
+    if trade_count is None and any(isinstance(mapping(value).get("trades"), list) for value in results.values()):
+        trade_count = sum(len(sequence(mapping(value).get("trades"))) for value in results.values())
+    return {**payload, "record": {**record, "raw_result": compact}, "tradeCount": trade_count}
+
+
 def project_execution(record) -> tuple[dict, list[dict]]:
     """Strip large raw JSON after extracting costs, status and record identity."""
-    raw = mapping(record.raw_result)
+    # 旧记录读时归一：投影层拿到的一律是带 status/error 的契约形状。
+    raw = mapping(normalize_legacy_result(record.raw_result))
     results = {symbol: mapping(value) for symbol, value in mapping(raw.get("symbol_results")).items()}
     trades = []
     has_fill = False
@@ -119,9 +146,6 @@ def project_execution(record) -> tuple[dict, list[dict]]:
         )
     )
     raw = dict(raw)
-    raw["outcome_symbols"] = [
-        symbol for symbol, result in results.items() if result.get("outcome") in {"not_reached", "blocked"}
-    ]
     duration = number(raw.get("execution_time"))
     payload = {
         "key": str(record.id),
@@ -132,11 +156,21 @@ def project_execution(record) -> tuple[dict, list[dict]]:
             "is_success": record.is_success,
             "raw_result": {
                 key: raw[key]
-                for key in ("status", "task_status", "outcome", "outcome_reason", "outcome_symbols")
+                for key in (
+                    "status",
+                    "task_status",
+                    "error",
+                    "outcome",
+                    "outcome_reason",
+                    "msg",
+                    "execution_kind",
+                    "symbol_results",
+                )
                 if key in raw
             },
         },
         "noop": noop,
+        "tradeCount": len(trades),
         "durationSec": duration if duration is not None and duration >= 0 else None,
         "symbolCount": len({trade["symbol"] for trade in trades if trade["quantity"] is not None}),
         "positionCount": position_count(raw.get("account_assets")),
@@ -147,7 +181,7 @@ def project_execution(record) -> tuple[dict, list[dict]]:
         if record.is_success != 1 or raw.get("status") == "PARTIAL" or raw.get("task_status") == "TERMINATED"
         else [],
     }
-    return payload, trades
+    return execution_list_payload(payload), trades
 
 
 def attempted_trades(results: dict) -> list[dict]:
@@ -224,7 +258,7 @@ def position_count(value: Any) -> int | None:
     """Unknown or degraded snapshots must never be classified as flat."""
     assets = mapping(value)
     positions = assets.get("positions")
-    if assets.get("source") in ("assumed", "error", "unavailable") or not isinstance(positions, list):
+    if is_degraded_snapshot_source(assets.get("source")) or not isinstance(positions, list):
         return None
     quantities = [number(mapping(position).get("volume")) for position in positions]
     if any(quantity is None for quantity in quantities):

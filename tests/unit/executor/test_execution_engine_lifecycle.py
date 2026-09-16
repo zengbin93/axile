@@ -323,4 +323,63 @@ def test_symbol_error_capture_still_converts_generic_error_to_failed_result() ->
 
     assert result.symbol == "ag2612"
     assert result.status == ExecutionStatus.FAILED
-    assert "boom" in (result.error or "")
+    assert result.error == "执行失败，具体原因未确认"
+
+
+@pytest.mark.parametrize("status", [ExecutionStatus.BLOCKED, ExecutionStatus.FAILED])
+def test_final_account_query_failure_does_not_rewrite_non_position_conclusions(monkeypatch, status):
+    from unittest.mock import Mock
+
+    from axile.executor.models.execution_result import AlgorithmResult
+
+    executor = _LifecycleRecorderExecutor()
+    executor.logger = Mock()
+    monkeypatch.setattr(executor, "get_account_assets", Mock(side_effect=RuntimeError("native query error")))
+    result = AlgorithmResult(symbol="A", algorithm="test", status=status, error="当前不在交易时段")
+    output = ExecutionEngine(executor)._create_standard_output_from_results(_standard_input(), [result])
+    assert output.status == status
+    assert output.error == "当前不在交易时段"
+    assert output.symbol_results == {"A": result}
+    assert output.account_assets.source == "unavailable"
+
+
+@pytest.mark.parametrize(
+    "status, expected",
+    [(ExecutionStatus.SUCCEEDED, ExecutionStatus.PARTIAL), (ExecutionStatus.NOOP, ExecutionStatus.FAILED)],
+)
+def test_final_account_query_failure_keeps_symbol_results(monkeypatch, status, expected):
+    from unittest.mock import Mock
+
+    from axile.executor.models.execution_result import AlgorithmResult
+
+    executor = _LifecycleRecorderExecutor()
+    executor.logger = Mock()
+    monkeypatch.setattr(executor, "get_account_assets", Mock(side_effect=RuntimeError("native query error")))
+    result = AlgorithmResult(symbol="A", algorithm="test", status=status)
+    output = ExecutionEngine(executor)._create_standard_output_from_results(_standard_input(), [result])
+    assert output.status == expected
+    assert output.error == "最终持仓查询失败，具体原因未确认"
+    assert output.symbol_results == {"A": result}
+
+
+@pytest.mark.parametrize("source", ["unavailable", "error", "assumed", "real", "simulation", "custom-channel"])
+@pytest.mark.parametrize(
+    "status, expected",
+    [(ExecutionStatus.SUCCEEDED, ExecutionStatus.PARTIAL), (ExecutionStatus.NOOP, ExecutionStatus.FAILED)],
+)
+def test_final_account_observation_source_controls_output(monkeypatch, source, status, expected):
+    """降级收尾快照不能报成功，同时保留快照与品种结果。"""
+    from axile.executor.models.execution_result import AlgorithmResult
+
+    executor = _LifecycleRecorderExecutor()
+    assets = UnifiedAccountAssets.unavailable().model_copy(update={"source": source})
+    monkeypatch.setattr(executor, "get_account_assets", lambda: assets)
+    result = AlgorithmResult(symbol="A", algorithm="test", status=status)
+
+    output = ExecutionEngine(executor)._create_standard_output_from_results(_standard_input(), [result])
+
+    assert output.status == (status if source in {"real", "simulation", "custom-channel"} else expected)
+    assert output.success is (source in {"real", "simulation", "custom-channel"})
+    assert output.error == (None if source in {"real", "simulation", "custom-channel"} else "最终持仓尚未确认")
+    assert output.account_assets == assets
+    assert output.symbol_results == {"A": result}

@@ -42,10 +42,18 @@ def _build_error_payload(exc: Exception) -> WorkerBackendErrorPayload:
     WorkerBackendErrorPayload
         结构化错误信息。
     """
-    # 错误响应只保留协议稳定字段，避免把不可序列化的异常细节直接泄漏到进程边界外。
+    # 错误响应只保留协议稳定字段；message 会流入执行记录的 error 展示给用户，
+    # 只回放渠道在错误发生处写的人话，异常原文留在 worker 日志与 type 里给排障。
+    explicit = getattr(exc, "execution_error", None)
+    if isinstance(explicit, str) and explicit:
+        message = explicit
+    elif isinstance(exc, TimeoutError):
+        message = "执行请求超时，结果尚未确认"
+    else:
+        message = "worker 执行失败，具体原因未确认"
     return WorkerBackendErrorPayload(
         type=_camel_to_snake(exc.__class__.__name__),
-        message=str(exc) or exc.__class__.__name__,
+        message=message,
         retryable=isinstance(exc, TimeoutError) or bool(getattr(exc, "requires_session_recovery", False)),
     )
 

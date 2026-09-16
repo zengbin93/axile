@@ -1,7 +1,7 @@
 """执行输出落库与审计输入辅助函数."""
 
 from axile.domain.execution import ExecutionEventStatus, ExecutionKind
-from axile.executor.models.execution_result import ExecutionStatus
+from axile.executor.models.execution_result import ExecutionStatus, outcome_from_status
 from axile.executor.models.unified_input import UnifiedStandardInput
 from axile.executor.models.unified_output import UnifiedStandardOutput
 from axile.server.db.models import Account, ExecuteRecord
@@ -84,7 +84,8 @@ async def append_execute_record_from_output(
         持久化后的执行记录。
     """
     result["execution_kind"] = execution_kind.value
-    result["outcome"] = output.outcome.value if output.outcome is not None else "unknown"
+    # 落库边界按当前 status 重新派生展示结论，防止绕过校验器的中途改写造成两套结论分离。
+    result["outcome"] = outcome_from_status(output.status).value
     result["outcome_reason"] = output.outcome_reason
     if output.success:
         return await append_success_execute_record(

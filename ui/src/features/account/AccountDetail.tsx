@@ -1,4 +1,5 @@
 import { executionOutcome } from '@/features/account/executionOutcome'
+import { formatRecentExecution } from '@/lib/scheduleTime'
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react'
 import { useViewTransitionState } from 'react-router'
 import { ArrowLeft, RefreshCw } from 'lucide-react'
@@ -231,7 +232,7 @@ export function AccountDetail({
   const isQueued = isBusy && !isExecuting
   const runKind = live?.kind ?? (runner.kind === 'clear' ? 'clear' : 'rebalance')
   const latestRecord = recordList[0]
-  const latestOutcome = latestRecord ? executionOutcome(latestRecord.raw_result) : null
+  const latestOutcome = latestRecord ? executionOutcome(latestRecord) : null
   const idleStatusTextClass = latestOutcome
     ? latestOutcome.warning ? 'text-warn' : 'text-ink-1'
     : INTEGRITY_TEXT_CLASS[state.integrity]
@@ -470,10 +471,16 @@ export function AccountDetail({
             </span>
           )}
         </div>
-        <ScheduleSummary
-          lastExecutedAt={item.last_exec_at}
-          nextRunAt={nextRun.data?.next_execution_times[0] ?? null}
-        />
+        {latestRecord && latestOutcome ? (
+          <div className="mt-1.5 text-[14px] text-ink-3">
+            上次 {formatRecentExecution(latestRecord.created_at, Date.now())}
+            {latestOutcome.symbolCount > 0 ? ` · 涉及 ${latestOutcome.symbolCount} 个品种` : ''}
+            {latestOutcome.tradeCount > 0 ? ` · ${latestOutcome.tradeCount} 笔成交` : ' · 未记录成交'}
+          </div>
+        ) : <ScheduleSummary lastExecutedAt={null} nextRunAt={nextRun.data?.next_execution_times[0] ?? null} />}
+        <div className={`grid transition-[grid-template-rows] duration-200 ${!isBusy && latestOutcome && ['BLOCKED', 'PARTIAL', 'FAILED'].includes(latestOutcome.state) && latestOutcome.reason ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'}`}>
+          <div className="min-h-0 overflow-hidden"><p className="mt-1 text-[14px] text-warn">{latestOutcome?.reason}</p></div>
+        </div>
 
         <div className="mt-6 border-t border-line pt-4">
           <div className="flex items-center gap-1.5 text-[14px] text-ink-2">
@@ -773,7 +780,7 @@ export function AccountDetail({
                     <span className="num w-28 flex-none text-[14px] text-ink-3">{fmt(row.time)}</span>
                     {row.type === 'fill' && (
                       <>
-                        <span className="w-4 flex-none text-center text-ok">✓</span>
+                        <span className="w-4 flex-none text-center text-ink-3">✓</span>
                         <OverflowText className="min-w-0 flex-1" text={recentRowText(row)} />
                         <RecentAmount amount={row.amount} currency={item.currency} />
                       </>
@@ -781,7 +788,7 @@ export function AccountDetail({
                     {row.type === 'partial' && (
                       <>
                         <span className="w-4 flex-none text-center text-warn">⚠</span>
-                        <OverflowText className="min-w-0 flex-1 text-ink-1" text={recentRowText(row)} />
+                        <OverflowText className="min-w-0 flex-1 text-warn" text={recentRowText(row)} />
                         <RecentAmount amount={row.amount} currency={item.currency} />
                       </>
                     )}
@@ -800,13 +807,13 @@ export function AccountDetail({
                     {row.type === 'fail' && (
                       <>
                         <span className="w-4 flex-none text-center text-warn">⚠</span>
-                        <OverflowText className="min-w-0 flex-1 text-ink-1" text={recentRowText(row)} />
+                        <OverflowText className="min-w-0 flex-1 text-warn" text={recentRowText(row)} />
                       </>
                     )}
                     {row.type === 'terminated' && (
                       <>
-                        <span className="w-4 flex-none text-center text-ink-3">■</span>
-                        <OverflowText className="min-w-0 flex-1 text-ink-2" text={recentRowText(row)} />
+                        <span className="w-4 flex-none text-center text-warn">■</span>
+                        <OverflowText className="min-w-0 flex-1 text-warn" text={recentRowText(row)} />
                       </>
                     )}
                     {row.type === 'skip' && (
@@ -817,8 +824,8 @@ export function AccountDetail({
                     )}
                     {row.type === 'blocked' && (
                       <>
-                        <span className="w-4 flex-none text-center text-ink-3">–</span>
-                        <OverflowText className="min-w-0 flex-1 text-ink-2" text={recentRowText(row)} />
+                        <span className="w-4 flex-none text-center text-warn">–</span>
+                        <OverflowText className="min-w-0 flex-1 text-warn" text={recentRowText(row)} />
                       </>
                     )}
                   </div>

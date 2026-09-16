@@ -142,13 +142,17 @@ async def _execute_portfolio_function(
             raise result.error or ValueError("自定义组合脚本执行失败")
         return result.target
     except Exception as e:
-        msg = f"执行自定义Python脚本失败 | 错误原因={str(e)}"
+        # 脚本错误行号对用户有定位价值；异常原文属于技术证据，只进 technical_detail 与日志。
+        line = getattr(e, "error_line", None)
+        where = f"（第 {line} 行）" if isinstance(line, int) else ""
+        msg = f"自定义组合脚本执行失败{where}，具体原因见执行证据"
         await append_error_execute_record(
             account_id=account.id,
             msg=msg,
             execution_id=execution_id,
+            raw_result={"technical_detail": str(e)},
         )
-        raise ValueError(msg)
+        raise ValueError(msg) from e
 
 
 async def _load_rebalance_account(

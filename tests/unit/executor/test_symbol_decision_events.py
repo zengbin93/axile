@@ -60,13 +60,13 @@ def test_emit_symbol_decision_events_covers_each_symbol() -> None:
     assert ag["event_type"] == ExecutionEventType.SYMBOL_DECISION_MADE
     assert ag["status"] == ExecutionEventStatus.ERROR
     assert ag["reason_code"] == "COMMON.SYMBOL_DECISION_MADE"
-    assert ag["details"]["debug"]["error"] == "boom"
+    assert ag["details"]["error"] == "boom"
 
     rb = by_symbol["rb2610"]
     assert rb["event_type"] == ExecutionEventType.SYMBOL_SKIPPED
     assert rb["status"] == ExecutionEventStatus.SUCCESS
     assert rb["reason_code"] == "COMMON.SYMBOL_SKIPPED"
-    assert "debug" not in rb["details"]
+    assert "error" not in rb["details"]
 
     au = by_symbol["au2612"]
     assert au["event_type"] == ExecutionEventType.SYMBOL_DECISION_MADE

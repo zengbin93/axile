@@ -14,6 +14,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
 from axile.domain.execution import ExecutionKind, ExecutionTaskStatus, ExecutionTerminateMode
+from axile.executor.models.execution_result import ExecutionStatus
 from axile.executor.termination import TERMINATION_TRIGGER_OPERATOR
 from axile.server.asset_observations import is_asset_observation
 from axile.server.core.db import SessionLocal
@@ -145,6 +146,9 @@ async def append_error_execute_record(
         已写入数据库的失败执行记录。
     """
     persisted_raw_result = dict(raw_result or {"msg": msg})
+    # 柔和版契约：status/error 为权威结论，outcome 同步保留供旧展示路径消费。
+    persisted_raw_result.setdefault("status", ExecutionStatus.FAILED.value)
+    persisted_raw_result.setdefault("error", msg)
     persisted_raw_result.setdefault("outcome", "error")
     persisted_raw_result.setdefault("outcome_reason", msg)
     logger.error("{}", msg)

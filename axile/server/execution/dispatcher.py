@@ -142,6 +142,7 @@ async def recover_intents_on_startup() -> None:
             account_id=intent.account_id,
             msg=PROCESS_INTERRUPTED_REASON,
             raw_result={
+                "status": "FAILED",
                 "error": PROCESS_INTERRUPTED_REASON,
                 "interrupt_reason": "process_interrupted",
                 "outcome": "error",

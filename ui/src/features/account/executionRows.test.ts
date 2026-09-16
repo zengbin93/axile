@@ -24,17 +24,17 @@ describe('symbolRows', () => {
     expect(rows).toEqual([{ symbol: 'rb2610', status: 'SUCCESS', reason: '' }])
   })
 
-  it('失败事件把 details.debug.error 作为原因显出', () => {
+  it('失败事件把 details.error 作为原因显出', () => {
     const rows = symbolRows([
       ev({
         event_type: 'symbol_decision_made',
         symbol: 'ag2612',
         status: 'ERROR',
-        details: { debug: { error: "'dict' object has no attribute 'max_wait_seconds'" } },
+        details: { error: '报单失败，具体原因未确认' },
       }),
     ])
     expect(rows[0]?.status).toBe('ERROR')
-    expect(rows[0]?.reason).toContain('max_wait_seconds')
+    expect(rows[0]?.reason).toBe('报单失败，具体原因未确认')
   })
 
   it('普通跳过不把内部 reason_code 暴露为原因', () => {
@@ -58,7 +58,7 @@ describe('lifecycleNotes', () => {
       ev({
         event_type: 'execution_failed',
         status: 'ERROR',
-        details: { debug: { error: "算法 'SINGLE-MAKER' 的参数非法: max_wait_seconds …" } },
+        details: { error: "算法 'SINGLE-MAKER' 的参数非法" },
       }),
     ])
     expect(notes).toHaveLength(1)
@@ -68,7 +68,7 @@ describe('lifecycleNotes', () => {
 
   it('排除逐只事件，避免与 symbolRows 重复', () => {
     const notes = lifecycleNotes([
-      ev({ event_type: 'symbol_decision_made', symbol: 'ag2612', status: 'ERROR', details: { debug: { error: 'x' } } }),
+      ev({ event_type: 'symbol_decision_made', symbol: 'ag2612', status: 'ERROR', details: { error: 'x' } }),
     ])
     expect(notes).toHaveLength(0)
   })

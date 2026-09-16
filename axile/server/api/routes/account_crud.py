@@ -39,6 +39,7 @@ from axile.server.db.models import (
 from axile.server.db.models.account import _check_algorithm_channel_compat
 from axile.server.execution.account_runtime_sync import enqueue_account_runtime_sync, reconcile_account_runtime
 from axile.server.execution.ctp_channels import drop_account_worker
+from axile.server.execution.legacy_compat import normalize_legacy_result
 from axile.server.execution.live import live_hub
 from axile.server.execution.registry import (
     execution_record_output_status,
@@ -678,8 +679,15 @@ async def list_execute_records(
     )
     records = (await session.execute(statement)).scalars().all()
 
+    data = [
+        # 旧记录读时归一：列表响应与新记录同形，前端不需要 legacy 分支。
+        ExecuteRecordPublic.model_validate(record).model_copy(
+            update={"raw_result": normalize_legacy_result(record.raw_result)}
+        )
+        for record in records
+    ]
     return ExecuteRecordListPublic(
-        data=[ExecuteRecordPublic.model_validate(record) for record in records],
+        data=data,
         count=count,
     )
 

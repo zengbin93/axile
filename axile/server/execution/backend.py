@@ -137,7 +137,8 @@ async def _run_rebalance_via_worker_process(request: RebalanceBackendRequest) ->
         request.logger.warning(f"交易被终止 trigger={request.trigger_source}")
         raise
     except Exception as exc:
-        msg = f"调仓执行失败, 错误原因: {exc}"
+        # 异常原文只进日志（opt(exception=...)）；用户可读说明用固定文案。
+        msg = "调仓执行失败，具体原因未确认"
         await _append_rebalance_error_record(request, msg)
         request.logger.opt(exception=exc).error("{}", msg)
         raise
@@ -347,7 +348,7 @@ async def _record_rebalance_inline_failure(
     error: Exception,
 ) -> None:
     """记录调仓 inline 路径的失败审计与错误记录。"""
-    msg = f"调仓执行失败, 错误原因: {error}"
+    msg = "调仓执行失败，具体原因未确认"
     if request.execution_id and executor is not None:
         # inline 路径失败时 runtime 仍在当前进程内，可直接沿用 executor 的 audit seq 记失败事件。
         await append_execution_event(
@@ -360,7 +361,8 @@ async def _record_rebalance_inline_failure(
             reason_family=ExecutionReasonFamily.SYSTEM,
             reason_code="COMMON.EXECUTION_FAILED",
             seq=executor.next_audit_seq(),
-            details={"debug": {"error": str(error), "trigger_source": request.trigger_source}},
+            # 人话错误进公共层；异常原文只留日志（logger.opt(exception=...)）。
+            details={"error": msg, "debug": {"trigger_source": request.trigger_source}},
         )
     await _append_rebalance_error_record(request, msg)
     request.logger.opt(exception=error).error("{}", msg)
@@ -432,7 +434,7 @@ async def _run_clear_positions_via_worker_process(request: ClearPositionsBackend
         raise
     except Exception as exc:
         await _record_clear_positions_failure(request, error=exc)
-        raise ValueError(f"清除持仓失败 | 错误原因={exc}") from exc
+        raise ValueError("清仓执行失败，具体原因未确认") from exc
 
 
 async def _run_clear_positions_inline(request: ClearPositionsBackendRequest) -> ExecuteRecord:
@@ -473,7 +475,7 @@ async def _run_clear_positions_inline(request: ClearPositionsBackendRequest) -> 
         raise
     except Exception as exc:
         await _record_clear_positions_failure(request, error=exc, executor=executor)
-        raise ValueError(f"清除持仓失败 | 错误原因={exc}") from exc
+        raise ValueError("清仓执行失败，具体原因未确认") from exc
     finally:
         await execution_lifecycle.cleanup_executor_runtime(executor)
 
@@ -545,7 +547,7 @@ async def _record_clear_positions_failure(
     executor: AbstractExecutor | None = None,
 ) -> None:
     """记录清仓失败路径的审计事件与错误执行记录。"""
-    msg = f"清除持仓失败 | 错误原因={error}"
+    msg = "清仓执行失败，具体原因未确认"
     await append_execution_event(
         execution_id=request.execution_id,
         account_id=cast("int", request.account.id),
@@ -557,7 +559,8 @@ async def _record_clear_positions_failure(
         reason_code="COMMON.EXECUTION_FAILED",
         # worker 侧有可能在 executor 尚未完成 prepare 前就失败，此时退回到 seq=0。
         seq=0 if executor is None else executor.next_audit_seq(),
-        details={"debug": {"error": str(error), "trigger_source": request.trigger_source}},
+        # 人话错误进公共层；异常原文只留日志（logger.opt(exception=...)）。
+        details={"error": msg, "debug": {"trigger_source": request.trigger_source}},
     )
     await _append_clear_positions_error_record(request, msg)
     request.logger.opt(exception=error).error("{}", msg)

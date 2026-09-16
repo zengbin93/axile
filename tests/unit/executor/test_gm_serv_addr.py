@@ -442,6 +442,17 @@ def test_strategy_bridge_invalid_token_fails_without_waiting_full_timeout() -> N
     assert time.monotonic() - started_at < 0.5
 
 
+@pytest.mark.parametrize("message", ['{"status": 1000}', "token invalid", "错误或无效的token"])
+def test_gm_unstructured_text_does_not_become_authentication_error(message):
+    from axile.executor.gm.core.strategy_bridge import _normalize_startup_error
+
+    original = RuntimeError(message)
+    normalized = _normalize_startup_error(original)
+    assert not isinstance(normalized, GMAuthenticationError)
+    assert normalized.execution_error == "GM 启动失败，具体原因未确认"
+    assert str(original) == message
+
+
 def test_strategy_bridge_stop_accepts_late_thread_exit_without_warning(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

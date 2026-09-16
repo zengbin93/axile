@@ -1,35 +1,70 @@
 import { expect, test } from 'bun:test'
-import { executionOutcome } from './executionOutcome'
-import { describeRunOutcome } from './runOutcome'
 
-test('只接受明确结论，旧状态和错误文本都不推断成败', () => {
-  for (const raw of [{}, { status: 'FAILED', error: '断开', is_success: 0 }, { status: 'SUCCEEDED' }, { outcome: 'invalid' }]) {
-    expect(executionOutcome(raw)).toMatchObject({ outcome: 'legacy', text: '历史执行记录', warning: false })
-  }
-})
-test('摘要最多显示三个未到位品种，不包含已完成品种', () => {
-  const view = executionOutcome({ outcome: 'not_reached', symbol_results: { A: { outcome: 'completed' }, B: { outcome: 'not_reached' }, C: { outcome: 'not_reached' }, D: { outcome: 'blocked' }, E: { outcome: 'not_reached' } } })
-  expect(view.text).toBe('执行不到位 · B、C、D 等 4 个品种')
-  expect(view.symbols).toEqual(['B', 'C', 'D', 'E'])
-})
-test('清仓只使用本次结论，完成保持中性', () => {
-  expect(executionOutcome({ outcome: 'completed', execution_kind: 'clear_positions', status: 'FAILED' })).toMatchObject({ text: '清仓完成', warning: false })
-})
-test('结束提示与概览结论一致，即使任务因旧控制口径标记 FAILED', () => {
-  const payload = { outcome: 'not_reached', outcome_symbols: ['m2701'] }
-  expect(describeRunOutcome('exec', payload)).toEqual({ kind: 'not_reached', toast: executionOutcome(payload).text })
+import { executionRecordSummary, executionRecordView } from './executionOutcome'
+import { withCurrency } from '@/lib/format'
+import { buildExecutionDetail, executionHeadline } from './executionDetail'
+import type { ExecutionArtifact } from '@/types/api'
+
+test('摘要只统计已有品种和成交，缺失证据不补零个品种或零笔成交', () => {
+  expect(executionRecordSummary({})).toBe('调仓 · 未记录成交')
+  expect(executionRecordSummary({ execution_kind: 'clear_positions', symbol_results: { A: { trades: [] }, B: {} } })).toBe('清仓 · 涉及 2 个品种 · 未记录成交')
+  const symbol_results = Object.fromEntries(Array.from({ length: 30 }, (_, i) => [`symbol${i}`, { trades: i === 0 ? [{}, {}, {}, {}] : [] }]))
+  expect(executionRecordSummary({ symbol_results })).toBe('调仓 · 涉及 30 个品种 · 4 笔成交')
 })
 
-test('账户结论和结束提示直接展示后端原因', () => {
-  const raw = Object.freeze({ outcome: 'blocked' as const, outcome_reason: '非交易时段' })
-  expect(executionOutcome(raw).text).toBe('未执行 · 非交易时段')
-  expect(describeRunOutcome('exec', raw)).toEqual({ kind: 'blocked', toast: '未执行 · 非交易时段' })
-  expect(raw.outcome_reason).toBe('非交易时段')
-  expect(executionOutcome({ outcome: 'blocked', outcome_reason: ' ' }).text).toBe('未执行')
+test('只从旧结果字段生成受阻展示', () => {
+  const view = executionRecordView({
+    status: 'BLOCKED', error: '当前不在交易时段',
+    symbol_results: { rb2610: { status: 'BLOCKED', trades: [] }, ag2612: { status: 'BLOCKED', trades: [] } },
+  })
+  expect(view).toMatchObject({ title: '未执行 · 2 个品种执行受阻', reason: '当前不在交易时段', affectedCount: 2, tradeCount: 0, tone: 'warn' })
 })
 
-test('前端不翻译历史原因码', () => {
-  for (const reason of ['CLOSED', 'CALENDAR_UNAVAILABLE', 'QUOTE_TRADING_TIME_UNAVAILABLE']) {
-    expect(executionOutcome({ outcome: 'blocked', outcome_reason: reason }).text).toBe('未执行 · ' + reason)
-  }
+test('缺少状态不从错误文本推断结论', () => {
+  expect(executionRecordView({ error: 'CLOSED' })).toMatchObject({ title: '执行状态未知', tone: 'neutral' })
+})
+
+test('30 个品种只展示数量，成交按原始数组统计', () => {
+  const symbol_results = Object.fromEntries(Array.from({ length: 30 }, (_, i) => [`SYMBOL${i}`, {
+    status: i < 2 ? 'PARTIAL' : 'SUCCEEDED', trades: i < 4 ? [{}] : [],
+  }]))
+  expect(executionRecordView({ raw_result: { status: 'PARTIAL', symbol_results } })).toMatchObject({
+    title: '执行未全部完成', symbolCount: 30, affectedCount: 2, tradeCount: 4, tone: 'warn',
+  })
+})
+
+test.each([
+  ['SUCCEEDED', '调仓完成', 'neutral'], ['NOOP', '无需调仓', 'neutral'],
+  ['BLOCKED', '未执行', 'warn'], ['PARTIAL', '执行未全部完成', 'warn'],
+  ['FAILED', '执行失败', 'warn'], ['invalid', '执行状态未知', 'neutral'],
+])('详情和记录视图状态一致：%s', (status, title, tone) => {
+  const raw = { status, error: '旧裸错误' }
+  const artifacts: ExecutionArtifact[] = [{ id: 1, execution_id: 'test', created_at: '2026-09-15', artifact_type: 'execution_summary', content: raw }]
+  expect(executionRecordView(raw)).toMatchObject({ title, tone, reason: '旧裸错误' })
+  expect(executionHeadline(buildExecutionDetail([], artifacts)).text).toBe(title)
+})
+
+test('错误只按明确字段顺序回放，品种同因和不同因分别汇总', () => {
+  expect(executionRecordView({ error: '第一', msg: '第二', memory: { message: '第三' } }).reason).toBe('第一')
+  expect(executionRecordView({ msg: 'CLOSED', memory: { message: '第三' } }).reason).toBe('')
+  expect(executionRecordView({ memory: { message: 'CLOSED', last_error: '不读' } }).reason).toBe('')
+  const raw = { status: 'BLOCKED', symbol_results: { A: { status: 'BLOCKED', error: '休市' }, B: { status: 'BLOCKED', error: '休市' } } }
+  expect(executionRecordView(raw).reason).toBe('休市，2 个品种执行受阻')
+  raw.symbol_results.B.error = '行情不可用'
+  expect(executionRecordView(raw).reason).toBe('2 个品种执行受阻，原因不同')
+})
+
+test('终止优先，旧完成摘要不能覆盖生命周期终止', () => {
+  expect(executionRecordView({ task_status: 'TERMINATED', raw_result: { status: 'SUCCEEDED' } }).title).toBe('执行已终止')
+})
+
+test('详情逐只状态使用原始结果，不把受阻且缺仓位的品种显示为到位', () => {
+  const content = { status: 'BLOCKED', symbol_results: { A: { status: 'BLOCKED', error: '休市', orders: [], trades: [] } } }
+  const artifacts: ExecutionArtifact[] = [{ id: 1, execution_id: 'test', created_at: '2026-09-15', artifact_type: 'execution_summary', content }]
+  const symbol = buildExecutionDetail([], artifacts).symbols[0]
+  expect(symbol).toMatchObject({ status: 'BLOCKED', action: 'skipped', observedAfter: null, reason: '休市', broken: true })
+})
+
+test.each(['USD', 'EUR', 'JPY', 'CNY', ''])('币种原样保留：%s', currency => {
+  expect(withCurrency('10', currency)).toBe(currency === 'CNY' ? '¥10' : currency ? `10 ${currency}` : '10')
 })

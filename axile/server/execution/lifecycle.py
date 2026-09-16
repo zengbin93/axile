@@ -210,10 +210,11 @@ def _mark_execution_finished(
         record_id=None if record is None else record.id,
         is_success=0 if error is not None else None if record is None else record.is_success,
         # 异常优先；业务失败（如全员 BLOCKED）没有异常，必须从记录里把原因带出来。
-        error=str(error) if error is not None else execution_record_output_error(raw_result),
-        output_status=execution_record_output_status(raw_result),
+        # 异常原文属于技术证据，只进日志；用户可读说明用固定文案。
+        error="执行失败，具体原因未确认" if error is not None else execution_record_output_error(raw_result),
+        output_status="FAILED" if error is not None else execution_record_output_status(raw_result),
         **(
-            {"outcome": "error", "outcome_reason": str(error)}
+            {"outcome": "error", "outcome_reason": "执行失败，具体原因未确认"}
             if error is not None
             else execution_record_outcome(raw_result)
         ),

@@ -7,6 +7,7 @@ from typing import Any
 import sqlalchemy as sa
 from sqlmodel import col
 
+from axile.executor.models.unified_account_assets import DEGRADED_SNAPSHOT_SOURCES, is_degraded_snapshot_source
 from axile.server.db.models import AccountAssetSnapshot, ExecuteRecord
 
 
@@ -40,8 +41,6 @@ def _worker_placeholder(result: Mapping[str, Any]) -> bool:
 def _blocked_placeholder(result: Mapping[str, Any]) -> bool:
     return (
         result.get("status") == "BLOCKED"
-        and result.get("outcome") == "BLOCKED"
-        and result.get("outcome_reason") == "当前不在交易时间"
         and result.get("error") == "当前不在交易时间"
         and result.get("memory") == {"message": "当前不在交易时间"}
         and isinstance(result.get("inputs"), dict)
@@ -52,7 +51,7 @@ def _blocked_placeholder(result: Mapping[str, Any]) -> bool:
 
 def is_asset_observation(assets: object, result: Mapping[str, Any] | None = None) -> bool:
     """真实零余额有效；缺失、非有限权益与未取得资产均不是观测。"""
-    if not isinstance(assets, dict) or assets.get("source") in ("assumed", "error", "unavailable"):
+    if not isinstance(assets, dict) or is_degraded_snapshot_source(assets.get("source")):
         return False
     value = assets.get("total_asset")
     return (
@@ -95,8 +94,6 @@ def legacy_placeholder_condition(document):
     )
     blocked = sa.and_(
         get("$.status") == "BLOCKED",
-        get("$.outcome") == "BLOCKED",
-        get("$.outcome_reason") == "当前不在交易时间",
         get("$.error") == "当前不在交易时间",
         get("$.memory.message") == "当前不在交易时间",
         sa.select(sa.func.count())
@@ -139,7 +136,7 @@ def valid_asset_snapshot_condition():
         )
     )
     return sa.and_(
-        sa.or_(source.is_(None), source.not_in(["assumed", "error", "unavailable"])),
+        sa.or_(source.is_(None), source.not_in(sorted(DEGRADED_SNAPSHOT_SOURCES))),
         _numeric(assets, "$.total_asset"),
         value >= -sys.float_info.max,
         value <= sys.float_info.max,
