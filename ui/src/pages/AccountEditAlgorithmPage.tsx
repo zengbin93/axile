@@ -122,14 +122,24 @@ function AccountAlgorithmForm({ accountId }: { accountId: number }) {
   const tradeSynopsis = trade
     ? describeAlgorithmRef(trade)
     : (savedTradeSum ?? cachedConfig?.algorithm ?? null)
-  // 「下单」值与 hero 配置带同文才挂共享名（草稿改了就退化为整页交叉淡，不做内容 morph）。
+  const savedEmptySum = acc ? describeAlgorithmRef(algorithmRefOf(acc.empty_positions_algorithm)) : null
+  // 清仓草稿可合法为 null（未设置）；未就绪时走真源 / 缓存，保证摘要节点常挂、FLIP 有落点。
+  const emptySynopsis = isReady
+    ? describeAlgorithmRef(empty)
+    : (savedEmptySum ?? cachedConfig?.emptyAlgorithm ?? null)
+  // 「下单 / 清仓」值与 hero 配置带同文才挂共享名（草稿改了就退化为整页交叉淡，不做内容 morph）。
   const tradeSame = trade == null || tradeSynopsis === savedTradeSum
+  const emptySame = !isReady || describeAlgorithmRef(empty) === savedEmptySum
   const tradeVtStyle: CSSProperties | undefined =
     tSelf && tradeSame
       ? { viewTransitionName: accountConfigVtName(accountId, 'algorithm') }
       : undefined
+  const emptyVtStyle: CSSProperties | undefined =
+    tSelf && emptySame
+      ? { viewTransitionName: accountConfigVtName(accountId, 'empty') }
+      : undefined
 
-  /** 标题 + 当前配置摘要：加载与就绪两态共用（同位同节点）；清仓行待就绪后追加。 */
+  /** 标题 + 当前配置摘要：加载与就绪两态共用（同位同节点）；下单 / 清仓都常挂。 */
   const synopsis = tradeSynopsis != null && (
     <EditSynopsis note={isReady ? '保存后用于后续执行，已在途任务不变。' : undefined}>
       <div className="grid grid-cols-[3rem_minmax(0,1fr)] gap-x-3 gap-y-0.5">
@@ -137,12 +147,10 @@ function AccountAlgorithmForm({ accountId }: { accountId: number }) {
         <span className="inline-block" style={tradeVtStyle}>
           {tradeSynopsis}
         </span>
-        {isReady && (
-          <>
-            <span className="font-normal text-ink-3">清仓</span>
-            <span>{describeAlgorithmRef(empty)}</span>
-          </>
-        )}
+        <span className="font-normal text-ink-3">清仓</span>
+        <span className="inline-block" style={emptyVtStyle}>
+          {emptySynopsis ?? '—'}
+        </span>
       </div>
     </EditSynopsis>
   )

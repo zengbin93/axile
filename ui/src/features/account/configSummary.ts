@@ -1,5 +1,5 @@
 /**
- * 账户配置人话摘要（杠杆 / 品种控制 / 算法）与其共享元素 FLIP 协议。
+ * 账户配置人话摘要（杠杆 / 品种控制 / 下单算法 / 清仓算法）与其共享元素 FLIP 协议。
  *
  * Hero 配置带的值 ↔ 各编辑分区页「当前配置」摘要值是**同一句话的两个落点**，
  * 挂同一个 ``viewTransitionName`` 做平移 + 微缩（account-name / equity-amount 同族语汇）。
@@ -11,8 +11,8 @@
 import type { Account } from '@/types/api'
 import { algorithmRefOf, describeAlgorithmRef } from '@/features/setup/algorithms'
 
-/** 参与 FLIP 的配置项种类；与 hero 配置带三件套一一对应。 */
-export type AccountConfigKind = 'leverage' | 'symbols' | 'algorithm'
+/** 参与 FLIP 的配置项种类；与 hero 配置带四件套一一对应。 */
+export type AccountConfigKind = 'leverage' | 'symbols' | 'algorithm' | 'empty'
 
 /**
  * Hero 配置带值 ↔ 编辑分区页摘要值 的共享元素名。
@@ -56,12 +56,14 @@ export function describeSymbolControl(
     .join('、')
 }
 
-/** 三项配置摘要的一份快照。 */
+/** 四项配置摘要的一份快照。 */
 export interface AccountConfigSummary {
   leverage: string
   symbols: string
   /** 主交易（下单）算法摘要。 */
   algorithm: string
+  /** 清仓算法摘要；未设置为「未设置」。 */
+  emptyAlgorithm: string
 }
 
 const cache = new Map<number, AccountConfigSummary>()
@@ -85,5 +87,6 @@ export function writeAccountConfigSummary(
     leverage: describeLeverage(acc.long_leverage, acc.short_leverage, showShortLeverage),
     symbols: describeSymbolControl(acc.forbidden_symbols, acc.risk_symbols),
     algorithm: describeAlgorithmRef(algorithmRefOf(acc.algorithm)),
+    emptyAlgorithm: describeAlgorithmRef(algorithmRefOf(acc.empty_positions_algorithm)),
   })
 }

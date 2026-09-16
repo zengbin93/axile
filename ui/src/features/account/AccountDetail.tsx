@@ -283,6 +283,9 @@ export function AccountDetail({
   const algorithmText = acc
     ? describeAlgorithmRef(algorithmRefOf(acc.algorithm))
     : (cachedConfig?.algorithm ?? null)
+  const emptyAlgorithmText = acc
+    ? describeAlgorithmRef(algorithmRefOf(acc.empty_positions_algorithm))
+    : (cachedConfig?.emptyAlgorithm ?? null)
   const onToggleStarted = async () => {
     const next = !isStarted
     setStartedOverride(next)
@@ -545,7 +548,7 @@ export function AccountDetail({
          * 配置带：hero 最后一层（名称 → 状态 → 资产 → 配置），label 领值的「· 外分组」
          * 形态——每项是独立 inline 单元，折行只发生在项间，算法参数句内部的「·」不再
          * 与分段符糊成一片。带常挂（缓存/骨架占位），卡高不随账户详情到位而长个。
-         * 算法项吃剩余宽、OverflowText 截断 + hover 播全句；整项可点跳编辑分区。
+         * 四项等距左对齐；算法名过长时 OverflowText 截断。整项可点跳编辑分区。
          * 值文本挂共享名：与目标编辑页的「当前配置」摘要值配对 FLIP（各自门控）。
          */}
         <div className="mt-4 flex flex-wrap items-center gap-x-6 gap-y-1.5 border-t border-line pt-3.5 text-[14px]">
@@ -568,8 +571,14 @@ export function AccountDetail({
             to={`/accounts/${accountId}/edit/algorithm`}
             title="执行算法"
             value={configLoading ? null : (algorithmText ?? '—')}
-            grow
             vtName={tEditAlgorithm ? accountConfigVtName(accountId, 'algorithm') : undefined}
+          />
+          <HeroConfigItem
+            label="清仓"
+            to={`/accounts/${accountId}/edit/algorithm`}
+            title="清仓算法"
+            value={configLoading ? null : (emptyAlgorithmText ?? '—')}
+            vtName={tEditAlgorithm ? accountConfigVtName(accountId, 'empty') : undefined}
           />
         </div>
       </Card>
@@ -1014,7 +1023,8 @@ export function AccountDetailSkeleton() {
         <div className="mt-4 flex gap-6 border-t border-line pt-3.5">
           <Skeleton className="h-3.5 w-28" />
           <Skeleton className="h-3.5 w-24" />
-          <Skeleton className="h-3.5 w-64" />
+          <Skeleton className="h-3.5 w-40" />
+          <Skeleton className="h-3.5 w-40" />
         </div>
       </Card>
       <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-3">
