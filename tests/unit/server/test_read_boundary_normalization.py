@@ -119,7 +119,7 @@ def test_execution_artifacts_normalize_summary_only(monkeypatch, pagination):
     )
     by_type = {item.artifact_type: item for item in payload.data}
     assert by_type["execution_summary"].content["status"] == "BLOCKED"
-    assert by_type["execution_summary"].content["error"] == "账户风控拦截，未执行"
+    assert by_type["execution_summary"].content["error"] == "执行受阻，具体原因见执行证据"
     assert by_type["execution_summary"].content["summary"] == {"symbols_total": 1}
     # 目标快照不是执行结果，不做任何推断。
     assert by_type["target_snapshot"].content == {"target": {"rb2610": 1}}
