@@ -2,7 +2,7 @@ import { executionOutcome } from '@/features/account/executionOutcome'
 import { formatRecentExecution } from '@/lib/scheduleTime'
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react'
 import { useViewTransitionState } from 'react-router'
-import { ArrowLeft, RefreshCw } from 'lucide-react'
+import { ArrowLeft, ArrowLeftRight, RefreshCw } from 'lucide-react'
 import { cardPerformance, currentEquity } from '@/features/dashboard/performance'
 import { Link, useNavigate } from '@/components/ui/nav'
 import { Card, Chip } from '@/components/ui/Card'
@@ -525,18 +525,29 @@ export function AccountDetail({
                     <NumberTicker value={Math.abs(pct)} format={{ minimumFractionDigits: 2, maximumFractionDigits: 2 }} suffix="%" />
                   </span>
                 )}
-                {portfolioId != null && (
-                  <>
-                    {' · 组合 '}
-                    {/* 组合名是自由文本、长度无界：槽位截断 + hover 原地播全名（OverflowText 既有模式）。 */}
-                    <Link
-                      to={`/portfolios/${portfolioId}/edit`}
-                      className="inline-flex min-w-0 max-w-60 align-middle font-semibold text-accent hover:underline"
-                    >
-                      <OverflowText className="min-w-0" text={portfolioName ?? `#${portfolioId}`} />
-                    </Link>
-                  </>
+                {' · 组合 '}
+                {portfolioId != null ? (
+                  <Link
+                    to={`/portfolios/${portfolioId}/edit`}
+                    className="inline-flex min-w-0 max-w-60 align-middle font-semibold text-accent hover:underline"
+                  >
+                    {/* 组合名是自由文本、长度无界：槽位截断 + hover 原地播全名。 */}
+                    <OverflowText className="min-w-0" text={portfolioName ?? `#${portfolioId}`} />
+                  </Link>
+                ) : (
+                  <span className="align-middle text-ink-3">未绑定</span>
                 )}
+                <Tooltip content={portfolioId != null ? '更换组合' : '绑定组合'}>
+                  <span className="ml-0.5 inline-flex align-middle">
+                    <Link
+                      to={`/accounts/${accountId}/edit/portfolio`}
+                      aria-label={portfolioId != null ? '更换组合' : '绑定组合'}
+                      className="grid h-5 w-5 place-items-center rounded-md text-ink-3 hover:bg-fill hover:text-ink-1"
+                    >
+                      <ArrowLeftRight size={13} aria-hidden />
+                    </Link>
+                  </span>
+                </Tooltip>
               </div>
             </div>
             {/* 仅账户累计收益线展开；专用导航关闭此次金额/标题共享过渡。 */}
