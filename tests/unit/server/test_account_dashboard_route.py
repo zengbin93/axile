@@ -166,11 +166,66 @@ def test_dashboard_aggregates_account(monkeypatch: pytest.MonkeyPatch) -> None:
     assert "equity_series" not in item
     assert "today_pct" not in item
     assert item["asset_observed_at"] == "2026-07-02T09:03:00"
+    assert item["previous_close"] is None
     assert item["last_is_success"] == 1
     assert item["last_output_status"] is None
     assert item["off_symbol_count"] is None
     assert item["is_scheduled"] is True
     assert item["next_run_time"] is None
+
+
+def test_dashboard_previous_close_is_day_before_asset_observation(monkeypatch: pytest.MonkeyPatch) -> None:
+    account = build_account(id=1, name="acc", is_started=True)
+    snapshots = [_snapshot(101544.39, [], "2026-09-17T15:47:50")]
+
+    async def _empty(_session: object, *_args: object, **_kwargs: object) -> dict:
+        return {}
+
+    async def _snapshots(_session: object, _account_ids: object, limit: int = 20) -> dict[int, list[object]]:
+        return {1: list(snapshots)}
+
+    async def _performance(_session: object, account_ids: list[int]) -> dict:
+        assert account_ids == [1]
+        return {
+            1: {
+                "snapshot_id": "published",
+                "status": "ready",
+                "account_equity": 101480.0,
+                "account_daily_return": 0.0148,
+                "points": [
+                    {
+                        "date": "2026-09-16T09:00:00",
+                        "observed_at": "2026-09-16T09:00:00",
+                        "account_equity": 100000.0,
+                        "account_return": 0.0,
+                    },
+                    {
+                        "date": "2026-09-16",
+                        "observed_at": "2026-09-16T17:00:00",
+                        "account_equity": 100000.0,
+                        "account_daily_return": 0.0,
+                    },
+                    {
+                        "date": "2026-09-17",
+                        "observed_at": "2026-09-17T09:00:00",
+                        "account_equity": 101480.0,
+                        "account_daily_return": 0.0148,
+                    },
+                ],
+            }
+        }
+
+    monkeypatch.setattr(account_crud, "get_portfolios_every_account", _empty)
+    monkeypatch.setattr(account_crud, "get_recent_execute_records_for_accounts", _empty)
+    monkeypatch.setattr(account_crud, "get_recent_account_asset_snapshots_for_accounts", _snapshots)
+    monkeypatch.setattr(account_crud, "read_performance_summaries", _performance)
+    monkeypatch.setattr(account_crud, "get_latest_account_target_snapshots_for_accounts", _empty)
+
+    item = (
+        TestClient(_build_app(_Session([account]), _Scheduler(_Job(None)))).get("/account/dashboard").json()["data"][0]
+    )
+    assert item["total_asset"] == 101544.39
+    assert item["previous_close"] == 100000.0
 
 
 def test_dashboard_handles_account_without_records(monkeypatch: pytest.MonkeyPatch) -> None:

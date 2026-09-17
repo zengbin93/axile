@@ -54,3 +54,12 @@ test('当前资产独立于历史绩效，零余额与未查询有区别', () =>
   expect(currentEquity({ total_asset: 100000, asset_observed_at: '2026-09-15' })).toBe(100000)
   expect(cardPerformance(summary).equity).toBe(117128.71)
 })
+
+test('有前收时日涨跌用当前权益除以前收', () => {
+  const now = Date.parse('2026-09-07T15:47:50+08:00')
+  const live = { equity: 101544.39, observedAt: '2026-09-07T15:47:50+08:00', previousClose: 100000 }
+  expect(cardPerformance(summary, now, live)).toMatchObject({ dayLabel: '今日' })
+  expect(cardPerformance(summary, now, live).pct).toBeCloseTo(1.54439)
+  expect(cardPerformance(summary, now, { ...live, equity: null }).pct).toBeCloseTo(-1.2)
+  expect(cardPerformance(summary, now, { ...live, previousClose: null }).pct).toBeCloseTo(-1.2)
+})

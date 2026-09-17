@@ -21,7 +21,7 @@ from axile.server.api.deps import get_db
 from axile.server.api.routes.account_performance import router
 from axile.server.db.models import AccountCreate, AccountPublic, AccountUpdate, ExecuteRecord, PortfolioAccount
 from axile.server.db.models.performance import PerformanceSettings
-from axile.server.performance import Observation, build_wbt_input, calculate_performance, observation
+from axile.server.performance import Observation, build_wbt_input, calculate_performance, close_before, observation
 from axile.server.performance_analysis import AnalysisManager
 from tests.unit.server._execution_test_support import build_account
 from tests.unit.server.test_initial_migration import _MIGRATIONS_DIR, _load_migration
@@ -43,6 +43,15 @@ def run(items, mode="ts", fee=0, range_key="all"):
     return calculate_performance(
         items, PerformanceSettings(backtest_weight_type=mode, backtest_fee_rate=fee), range_key
     )
+
+
+def test_close_before_uses_last_day_end_before_observation():
+    result = run([obs(1, asset=100), obs(2, asset=110), obs(3, asset=99)])
+    assert close_before(result.points, "2026-01-01") == pytest.approx(100)
+    assert close_before(result.points, "2026-01-02") == pytest.approx(100)
+    assert close_before(result.points, "2026-01-03") == pytest.approx(110)
+    assert close_before(result.points, "2026-01-04") == pytest.approx(99)
+    assert close_before([], "2026-01-01") is None
 
 
 def test_real_wbt_and_account_compound_returns():

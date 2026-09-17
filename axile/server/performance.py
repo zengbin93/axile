@@ -248,6 +248,36 @@ def _merge_daily(
     return points
 
 
+def _point_fields(point: PerformancePoint | dict[str, object]) -> tuple[str, float | None]:
+    if isinstance(point, dict):
+        date = str(point.get("date") or "")
+        raw = point.get("account_equity")
+    else:
+        date = point.date
+        raw = point.account_equity
+    if isinstance(raw, bool) or not isinstance(raw, (int, float)):
+        return date, None
+    value = float(raw)
+    return date, value if math.isfinite(value) and value > 0 else None
+
+
+def close_before(points: list[PerformancePoint] | list[dict[str, object]], day: str) -> float | None:
+    """``day`` 之前最近一日末权益；没有更早日则用基准点。"""
+    last_before = None
+    baseline = None
+    for point in points:
+        date, equity = _point_fields(point)
+        if equity is None:
+            continue
+        # 日点 date 是日历日；基准点 date 是完整时间，见 _merge_daily。
+        if "T" in date:
+            baseline = equity
+            continue
+        if date < day:
+            last_before = equity
+    return last_before if last_before is not None else baseline
+
+
 def calculate_performance(
     observations: list[Observation],
     settings: PerformanceSettings,

@@ -501,6 +501,8 @@ class AccountDashboardItemPublic(SQLModel):
         已发布的全区间绩效，金额、日收益与曲线同版。
     asset_observed_at : Optional[str]
         最近一次账户资产观测时间；无快照时为 ``None``。
+    previous_close : Optional[float]
+        该观测日之前的绩效日末权益；无观测或无更早绩效时为 ``None``。
     last_is_success : Optional[int]
         最近一次执行是否成功（1/0）；无记录时为 ``None``。
     last_exec_at : Optional[str]
@@ -534,6 +536,7 @@ class AccountDashboardItemPublic(SQLModel):
     position_weights: List[float]
     performance: PerformanceSummary = Field(default_factory=PerformanceSummary)
     asset_observed_at: Optional[str] = None
+    previous_close: Optional[float] = None
     last_is_success: Optional[int] = None
     last_exec_at: Optional[str] = None
     last_output_status: Optional[str] = None

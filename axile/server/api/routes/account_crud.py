@@ -50,6 +50,7 @@ from axile.server.execution.registry import (
 from axile.server.execution.runtime_locks import account_runtime_lock
 from axile.server.execution.scheduler import delete_job
 from axile.server.integrity import plan_executable_target
+from axile.server.performance import close_before, local_time
 from axile.server.performance_analysis import read_performance_summaries
 from axile.server.repositories import (
     add_record_portfolio_account,
@@ -368,6 +369,7 @@ async def account_dashboard(session: SessionDep, sched: SchedDep) -> AccountDash
     Notes
     -----
     当前金额、持仓与偏离来自有效资产观测；日收益与曲线来自已发布历史绩效。
+    ``previous_close`` 是该观测日之前的绩效日末，供卡片用当前权益算日涨跌。
     执行记录、资产、目标与绩效均批量读取，避免逐账户查询。
     """
     accounts = (await session.execute(select(Account))).scalars().all()
@@ -440,6 +442,15 @@ async def account_dashboard(session: SessionDep, sched: SchedDep) -> AccountDash
             running_phase = "queued"
 
         last_output_status = None if latest is None else execution_record_output_status(latest.raw_result)
+        performance = performance_by_account.get(account_id, {})
+        points = getattr(performance, "points", None)
+        if points is None:
+            points = performance.get("points") if isinstance(performance, dict) else []
+        previous_close = (
+            close_before(points or [], local_time(latest_snapshot.created_at).date().isoformat())
+            if latest_snapshot is not None
+            else None
+        )
         target_snapshot = targets_by_account.get(account_id)
         target_weights = None if target_snapshot is None else target_snapshot.normalized_weights
         off_symbol_count = None
@@ -467,8 +478,9 @@ async def account_dashboard(session: SessionDep, sched: SchedDep) -> AccountDash
                 currency=str(currency),
                 holdings_count=holdings_count,
                 position_weights=position_weights,
-                performance=performance_by_account.get(account_id, {}),
+                performance=performance,
                 asset_observed_at=latest_snapshot.created_at if latest_snapshot is not None else None,
+                previous_close=previous_close,
                 last_is_success=latest.is_success if latest is not None else None,
                 last_exec_at=latest.created_at if latest is not None else None,
                 last_output_status=last_output_status,

@@ -202,8 +202,12 @@ export function AccountDetail({
   const latestAssets = assetSnapshots.data?.data[0]?.assets
   const snapshotPositions = positionsOfAssets(latestAssets)
   const positions = snapshotPositions
-  const { pct, dayLabel, statusLabel } = cardPerformance(item.performance)
   const equity = currentEquity(item)
+  const { pct, dayLabel, statusLabel } = cardPerformance(item.performance, Date.now(), {
+    equity,
+    observedAt: item.asset_observed_at,
+    previousClose: item.previous_close,
+  })
   const holdingsCount = latestAssets ? snapshotPositions.length : item.holdings_count
   const comparisonLoading = comparison.data === null && comparison.loading
   const comparisonError = comparison.error

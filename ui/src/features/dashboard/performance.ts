@@ -3,11 +3,20 @@ import { shanghaiDay } from '@/features/history/costs'
 import { performanceViews, performanceViewports } from '@/features/history/viewState'
 import { checkPerformance } from '@/features/history/performanceCache'
 
-export function cardPerformance(summary?: PerformanceSummary, now = Date.now()) {
-  const day = summary?.observed_at ? shanghaiDay(summary.observed_at) : null
+export function cardPerformance(
+  summary?: PerformanceSummary,
+  now = Date.now(),
+  live?: { equity: number | null; observedAt?: string | null; previousClose?: number | null },
+) {
+  const liveDay = live?.observedAt ? shanghaiDay(live.observedAt) : null
+  const day = liveDay ?? (summary?.observed_at ? shanghaiDay(summary.observed_at) : null)
+  const livePct =
+    live?.equity != null && live.previousClose != null && live.previousClose > 0
+      ? (live.equity / live.previousClose - 1) * 100
+      : null
   return {
     equity: summary?.account_equity ?? null,
-    pct: summary?.account_daily_return == null ? null : summary.account_daily_return * 100,
+    pct: livePct ?? (summary?.account_daily_return == null ? null : summary.account_daily_return * 100),
     dayLabel: day == null ? '日涨跌' : day === shanghaiDay(new Date(now).toISOString()) ? '今日' : day,
     statusLabel: !summary || summary.status === 'empty' ? '暂无绩效' : summary.status === 'failed' ? '绩效更新失败' : summary.status === 'pending' || summary.status === 'stale' ? '绩效更新中' : '',
   }
