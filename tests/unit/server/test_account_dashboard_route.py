@@ -13,6 +13,7 @@ from fastapi.testclient import TestClient
 from axile.server.api.deps import get_db, get_scheduler
 from axile.server.api.routes import account as account_routes
 from axile.server.api.routes import account_crud
+from axile.server.db.models.performance import PerformanceSummary
 from tests.unit.server._execution_test_support import build_account
 
 
@@ -136,9 +137,9 @@ def test_dashboard_aggregates_account(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(account_crud, "get_recent_execute_records_for_accounts", _recent)
     monkeypatch.setattr(account_crud, "get_recent_account_asset_snapshots_for_accounts", _snapshots)
 
-    async def _performance(_session: object, account_ids: list[int]) -> dict:
+    async def _performance(_session: object, account_ids: list[int]) -> dict[int, PerformanceSummary]:
         assert account_ids == [1]
-        return {1: {"snapshot_id": "published", "status": "ready", "account_equity": 5000.0}}
+        return {1: PerformanceSummary(snapshot_id="published", status="ready", account_equity=5000.0)}
 
     monkeypatch.setattr(account_crud, "read_performance_summaries", _performance)
 
@@ -184,15 +185,15 @@ def test_dashboard_previous_close_is_day_before_asset_observation(monkeypatch: p
     async def _snapshots(_session: object, _account_ids: object, limit: int = 20) -> dict[int, list[object]]:
         return {1: list(snapshots)}
 
-    async def _performance(_session: object, account_ids: list[int]) -> dict:
+    async def _performance(_session: object, account_ids: list[int]) -> dict[int, PerformanceSummary]:
         assert account_ids == [1]
         return {
-            1: {
-                "snapshot_id": "published",
-                "status": "ready",
-                "account_equity": 101480.0,
-                "account_daily_return": 0.0148,
-                "points": [
+            1: PerformanceSummary(
+                snapshot_id="published",
+                status="ready",
+                account_equity=101480.0,
+                account_daily_return=0.0148,
+                points=[
                     {
                         "date": "2026-09-16T09:00:00",
                         "observed_at": "2026-09-16T09:00:00",
@@ -212,7 +213,7 @@ def test_dashboard_previous_close_is_day_before_asset_observation(monkeypatch: p
                         "account_daily_return": 0.0148,
                     },
                 ],
-            }
+            )
         }
 
     monkeypatch.setattr(account_crud, "get_portfolios_every_account", _empty)
