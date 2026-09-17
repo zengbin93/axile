@@ -16,7 +16,7 @@ from axile.server.db.models.analysis import analysis_snapshot as snapshots
 from axile.server.db.models.analysis import analysis_state as states
 from axile.server.db.models.analysis import cost_execution as executions
 from axile.server.db.models.analysis import cost_trade as trades
-from axile.server.db.models.performance import PerformanceBinding, PerformanceSettings
+from axile.server.db.models.performance import PerformanceBinding, PerformanceSettings, PerformanceSummary
 from axile.server.execution.legacy_compat import normalize_legacy_result
 from axile.server.performance import calculate_performance, local_time, observation
 from axile.server.performance_costs import SHANGHAI, daily_costs, project_execution, summarize, timestamp
@@ -118,10 +118,8 @@ def _snapshot_response(joined, range_key: str) -> dict:
     }
 
 
-async def read_performance_summaries(session, account_ids: list[int]) -> dict:
+async def read_performance_summaries(session, account_ids: list[int]) -> dict[int, PerformanceSummary]:
     """一次读取已发布绩效；卡片不读取执行历史、不触发计算。"""
-    from axile.server.db.models.performance import PerformanceSummary
-
     if not account_ids:
         return {}
     rows = (

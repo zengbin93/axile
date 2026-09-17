@@ -37,6 +37,7 @@ from axile.server.db.models import (
     PortfolioAccountPublic,
 )
 from axile.server.db.models.account import _check_algorithm_channel_compat
+from axile.server.db.models.performance import PerformanceSummary
 from axile.server.execution.account_runtime_sync import enqueue_account_runtime_sync, reconcile_account_runtime
 from axile.server.execution.ctp_channels import drop_account_worker
 from axile.server.execution.legacy_compat import normalize_legacy_result
@@ -442,12 +443,9 @@ async def account_dashboard(session: SessionDep, sched: SchedDep) -> AccountDash
             running_phase = "queued"
 
         last_output_status = None if latest is None else execution_record_output_status(latest.raw_result)
-        performance = performance_by_account.get(account_id, {})
-        points = getattr(performance, "points", None)
-        if points is None:
-            points = performance.get("points") if isinstance(performance, dict) else []
+        performance = performance_by_account.get(account_id, PerformanceSummary())
         previous_close = (
-            close_before(points or [], local_time(latest_snapshot.created_at).date().isoformat())
+            close_before(performance.points, local_time(latest_snapshot.created_at).date().isoformat())
             if latest_snapshot is not None
             else None
         )
