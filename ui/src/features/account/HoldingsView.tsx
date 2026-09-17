@@ -1,9 +1,9 @@
 import { OverflowText } from '@/components/ui/OverflowText'
 import { SizingEvidence } from '@/features/account/SizingEvidence'
 import {
+  executableTargetFallbackText,
   isQuantizedZero,
   quantityText,
-  sizingAvailabilityText,
   weightText,
 } from '@/features/account/sizingEvidenceModel'
 import { rebalancePlanOfServer, type RebalanceRow } from '@/lib/derive'
@@ -160,12 +160,6 @@ export function HoldingsView({
         {' · '}净敞口 {signedPct(plan.netExposure)} → 目标 {signedPct(plan.targetNet)}
       </div>
 
-      {!available && sizing && (
-        <div className={`mb-2 text-[12.5px] ${sizing.status === 'pending_execution' ? 'text-ink-3' : 'text-warn'}`}>
-          {sizingAvailabilityText(sizing.status)}
-        </div>
-      )}
-
       <div className="hidden grid-cols-[minmax(88px,0.55fr)_minmax(220px,1.2fr)_minmax(240px,1.45fr)_minmax(140px,0.8fr)] gap-4 py-1.5 text-[12px] text-ink-3 md:grid">
         <span>代码</span>
         <span className="text-center">空 ◄ 0 ► 多</span>
@@ -178,9 +172,7 @@ export function HoldingsView({
         const current = actual.get(row.symbol) ?? 0
         const aligned = row.action === 'aligned'
         const quantized = isQuantizedZero(evidence)
-        const actualText = available
-          ? quantityText(current, quantityLabel)
-          : weightText(row.cur / 100)
+        const actualText = quantityText(current, quantityLabel)
         const state = aligned ? (quantized ? '无需下单' : '到位') : '待调整'
 
         return (
@@ -199,7 +191,11 @@ export function HoldingsView({
                 <SizingEvidence row={evidence} quantityLabel={quantityLabel} currency={currency} />
               ) : (
                 <div className="num min-h-8 py-1.5 text-[13.5px] text-ink-2">
-                  {weightText(target[row.symbol] ?? 0)} → 可执行数量—
+                  {weightText(target[row.symbol] ?? 0)}
+                  <span className="text-ink-3">
+                    {' → '}
+                    {executableTargetFallbackText(sizing?.status, evidence, quantityLabel)}
+                  </span>
                 </div>
               )}
             </div>

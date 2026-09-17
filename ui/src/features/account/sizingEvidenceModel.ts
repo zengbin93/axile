@@ -59,3 +59,14 @@ export function sizingAvailabilityText(status: TargetSizingAvailability): string
   if (status === 'unavailable') return '当次换算依据不完整'
   return ''
 }
+
+export function executableTargetFallbackText(
+  status: TargetSizingAvailability | null | undefined,
+  row?: TargetSizingRow | null,
+  quantityLabel = '',
+): string {
+  if (status === 'legacy') return '当时未记'
+  if (status === 'unavailable') return row ? sizingReasonText(row, quantityLabel) : '无法换算'
+  if (status === 'available') return '无法换算'
+  return '待换算'
+}
