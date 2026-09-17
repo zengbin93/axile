@@ -9,7 +9,7 @@ import pytest
 from axile.common.trade_channel import TradeChannel
 from axile.domain.execution import ExecutionReasonFamily
 from axile.executor.account_control.exceptions import AccountControlBlockedError
-from axile.executor.models.execution_result import AlgorithmResult, ExecutionStatus
+from axile.executor.models.execution_result import AlgorithmResult, ExecutionStatus, TargetSizingStatus
 from axile.executor.models.unified_account_assets import UnifiedAccountAssets
 from axile.executor.models.unified_input import TQAccountConfig, UnifiedStandardInput
 from axile.executor.models.unified_order import OrderDirection, OrderType
@@ -265,6 +265,18 @@ def test_engine_blocks_symbol_sessions_without_market_io(monkeypatch: pytest.Mon
                 )
             ),
         )
+        instance._quotes["rb2610"] = UnifiedPriceData(
+            symbol="rb2610",
+            last_price=100,
+            bid_price=99,
+            ask_price=101,
+            bid_volume=1,
+            ask_volume=1,
+            volume=1,
+            turnover=100,
+            timestamp=1,
+            update_time="2026-08-24T11:29:00",
+        )
 
         output = instance.execute(
             UnifiedStandardInput(
@@ -287,6 +299,9 @@ def test_engine_blocks_symbol_sessions_without_market_io(monkeypatch: pytest.Mon
         "symbol_decision_reason_code": TQTradingTimeStatus.CLOSED.value,
         "symbol_decision_reason_family": ExecutionReasonFamily.MARKET_RULE.value,
     }
+    assert blocked.sizing is not None
+    assert blocked.sizing.target_quantity == 1.0
+    assert blocked.target_volume == 1.0
     assert market_requests == [["ag2612"]]
 
 
@@ -364,6 +379,8 @@ def test_execute_blocks_unresolved_symbol_without_stopping_sibling(monkeypatch: 
         "symbol_decision_reason_code": TQTradingTimeStatus.QUOTE_TRADING_TIME_UNAVAILABLE.value,
         "symbol_decision_reason_family": ExecutionReasonFamily.MARKET_RULE.value,
     }
+    assert blocked.sizing is not None
+    assert blocked.sizing.status is TargetSizingStatus.UNAVAILABLE
     assert market_requests == [["rb2610"]]
 
 
@@ -408,6 +425,66 @@ def test_engine_blocks_all_symbol_sessions_without_execution_io(monkeypatch: pyt
     assert "2 个品种未执行" in output.error
     assert output.error == "非交易时段，2 个品种未执行"
     assert cancel_calls == 0
+    for symbol in ("rb2610", "ag2612"):
+        result = output.symbol_results[symbol]
+        assert result.status is ExecutionStatus.BLOCKED
+        assert result.sizing is not None
+        assert result.sizing.status is TargetSizingStatus.UNAVAILABLE
+        assert result.target_volume is None
+
+
+def test_engine_sizes_closed_symbols_from_cached_quotes(monkeypatch: pytest.MonkeyPatch) -> None:
+    api = FakeApi()
+    monkeypatch.setattr(TQExecutor, "_build_api", staticmethod(lambda _config: api))
+    instance = TQExecutor(TQAccountConfig(account_mode="kq", tq_username="user", tq_password="secret"))
+    try:
+        monkeypatch.setattr(instance, "_check_trading_time", lambda: True)
+        monkeypatch.setattr(
+            instance,
+            "_check_symbol_trading_time",
+            lambda _symbol: TQTradingTimeCheck(TQTradingTimeStatus.CLOSED),
+        )
+        monkeypatch.setattr(
+            instance,
+            "get_account_assets",
+            lambda: UnifiedAccountAssets(available_cash=1_000, total_asset=1_000, market_value=0, positions=[]),
+        )
+        monkeypatch.setattr(instance, "_calculate_generic_volume", lambda *_args, **_kwargs: 1.0)
+        monkeypatch.setattr(instance, "get_market_data", lambda _symbols: pytest.fail("不应读取行情"))
+        monkeypatch.setattr(instance, "cancel_all_orders", lambda: pytest.fail("不应撤单"))
+        instance._quotes["rb2610"] = UnifiedPriceData(
+            symbol="rb2610",
+            last_price=100,
+            bid_price=99,
+            ask_price=101,
+            bid_volume=1,
+            ask_volume=1,
+            volume=1,
+            turnover=100,
+            timestamp=1,
+            update_time="2026-08-24T11:29:00",
+        )
+        output = instance.execute(
+            UnifiedStandardInput(
+                channel_type=TradeChannel.TQ,
+                account_config=TQAccountConfig(account_mode="kq", tq_username="user", tq_password="secret"),
+                curr_target={"rb2610": 0.1, "ag2612": 0.2},
+                algorithm={"method": "SINGLE-MAKER"},
+            ),
+            cleanup=False,
+        )
+    finally:
+        instance.close()
+
+    assert output.status is ExecutionStatus.BLOCKED
+    sized = output.symbol_results["rb2610"]
+    missing = output.symbol_results["ag2612"]
+    assert sized.status is ExecutionStatus.BLOCKED
+    assert sized.sizing is not None
+    assert sized.sizing.target_quantity == 1.0
+    assert sized.target_volume == 1.0
+    assert missing.sizing is not None
+    assert missing.sizing.status is TargetSizingStatus.UNAVAILABLE
 
 
 def test_market_gap_blocks_before_symbol_planning(monkeypatch: pytest.MonkeyPatch) -> None:

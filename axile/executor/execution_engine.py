@@ -419,6 +419,16 @@ class ExecutionEngine:
             return self._run_symbol_algorithms_in_parallel(tasks)
         return self._run_symbol_algorithms_serially(tasks)
 
+    def _symbol_session_block(self, symbol: str) -> tuple[str, str] | None:
+        """返回该品种因交易时段不能下单时的 ``(reason_code, message)``；可下单则 ``None``.
+
+        Notes
+        -----
+        时段只拦 dispatch，不拦换算。默认渠道没有品种级时段。
+        """
+        _ = symbol
+        return None
+
     def _build_symbol_algorithm_plans(
         self,
         standard_input: UnifiedStandardInput,
@@ -467,45 +477,83 @@ class ExecutionEngine:
         )
         plans: list[_PlannedSymbolAlgorithm] = []
         for symbol in symbols:
-            resolved_algorithm = standard_input.get_resolved_symbol_algorithm(symbol)
-            algorithm_name = self._get_symbol_algorithm_name(standard_input, symbol)
-            sizing = sizing_decisions.get(symbol)
-            target_volume = sizing.target_quantity if sizing is not None else None
-            if sizing is None or target_volume is None:
-                planning_failures.append(
-                    self._build_failed_algorithm_result(
-                        symbol=symbol,
-                        algorithm_name=algorithm_name,
-                        error=self._build_target_volume_planning_error(
-                            symbol,
-                            effective_curr_target,
-                            planning_market_data,
-                        ),
-                        account_assets=account_assets,
-                        first_tick=clone_price_data(planning_market_data.get(symbol)),
-                        sizing=sizing,
-                    )
-                )
-                continue
-            current_volume = self._owner.get_current_volume(symbol, account_assets)
-            sizing.current_quantity = current_volume
-            plans.append(
-                _PlannedSymbolAlgorithm(
-                    symbol=symbol,
-                    algorithm_name=algorithm_name,
-                    params=resolved_algorithm.get("params"),
-                    trade_rule=dict(standard_input.trade_rules.get(symbol, {})),
-                    audit_context=self._build_symbol_audit_context(standard_input, symbol, algorithm_name),
-                    current_volume=current_volume,
-                    final_target_volume=target_volume,
-                    sizing=sizing,
-                )
+            planned = self._plan_or_block_symbol(
+                symbol=symbol,
+                standard_input=standard_input,
+                account_assets=account_assets,
+                effective_curr_target=effective_curr_target,
+                planning_market_data=planning_market_data,
+                sizing_decisions=sizing_decisions,
             )
+            if isinstance(planned, AlgorithmResult):
+                planning_failures.append(planned)
+            else:
+                plans.append(planned)
         return _DispatchPlanningResult(
             plans=plans,
             planning_failures=planning_failures,
             account_assets=account_assets,
             market_data=planning_market_data,
+        )
+
+    def _plan_or_block_symbol(
+        self,
+        *,
+        symbol: str,
+        standard_input: UnifiedStandardInput,
+        account_assets: UnifiedAccountAssets,
+        effective_curr_target: dict[str, float],
+        planning_market_data: dict[str, UnifiedPriceData],
+        sizing_decisions: dict[str, TargetSizingDecision],
+    ) -> _PlannedSymbolAlgorithm | AlgorithmResult:
+        """先换算，再按时段决定是计划下单还是 BLOCKED 带走证据."""
+        resolved_algorithm = standard_input.get_resolved_symbol_algorithm(symbol)
+        algorithm_name = self._get_symbol_algorithm_name(standard_input, symbol)
+        sizing = sizing_decisions.get(symbol)
+        target_volume = sizing.target_quantity if sizing is not None else None
+        session_block = self._symbol_session_block(symbol)
+        if session_block is not None:
+            reason_code, message = session_block
+            if sizing is not None:
+                sizing.current_quantity = self._owner.get_current_volume(symbol, account_assets)
+            return self._build_failed_algorithm_result(
+                symbol=symbol,
+                algorithm_name=algorithm_name,
+                error=message,
+                status=ExecutionStatus.BLOCKED,
+                account_assets=account_assets,
+                target_volume=target_volume,
+                first_tick=clone_price_data(planning_market_data.get(symbol)),
+                memory={
+                    "symbol_decision_reason_code": reason_code,
+                    "symbol_decision_reason_family": ExecutionReasonFamily.MARKET_RULE.value,
+                },
+                sizing=sizing,
+            )
+        if sizing is None or target_volume is None:
+            return self._build_failed_algorithm_result(
+                symbol=symbol,
+                algorithm_name=algorithm_name,
+                error=self._build_target_volume_planning_error(
+                    symbol,
+                    effective_curr_target,
+                    planning_market_data,
+                ),
+                account_assets=account_assets,
+                first_tick=clone_price_data(planning_market_data.get(symbol)),
+                sizing=sizing,
+            )
+        current_volume = self._owner.get_current_volume(symbol, account_assets)
+        sizing.current_quantity = current_volume
+        return _PlannedSymbolAlgorithm(
+            symbol=symbol,
+            algorithm_name=algorithm_name,
+            params=resolved_algorithm.get("params"),
+            trade_rule=dict(standard_input.trade_rules.get(symbol, {})),
+            audit_context=self._build_symbol_audit_context(standard_input, symbol, algorithm_name),
+            current_volume=current_volume,
+            final_target_volume=target_volume,
+            sizing=sizing,
         )
 
     def _build_effective_curr_target(
@@ -519,6 +567,20 @@ class ExecutionEngine:
             standard_input.forbidden_symbols,
             standard_input.risk_symbols,
         )
+
+    def _planning_market_data(self, symbols: list[str]) -> dict[str, UnifiedPriceData]:
+        """可下单品种走阻塞行情；时段阻断品种只 peek 缓存，避免 CTP 等全列表合法盘口."""
+        blocking = [symbol for symbol in symbols if self._symbol_session_block(symbol) is None]
+        blocked = [symbol for symbol in symbols if symbol not in set(blocking)]
+        market_data = dict(self._owner.get_market_data(blocking)) if blocking else {}
+        cached = getattr(self._owner, "_quotes", None)
+        if not isinstance(cached, dict):
+            return market_data
+        for symbol in blocked:
+            quote = cached.get(symbol)
+            if quote is not None and symbol not in market_data:
+                market_data[symbol] = quote
+        return market_data
 
     def _plan_target_volumes_for_symbols(
         self,
@@ -537,7 +599,7 @@ class ExecutionEngine:
         scoped_last_target = {
             symbol: weight for symbol, weight in standard_input.last_target.items() if symbol in set(symbols)
         }
-        planning_market_data = self._owner.get_market_data(symbols)
+        planning_market_data = self._planning_market_data(symbols)
         sizing_decisions = self._owner.calculate_target_sizing(
             scoped_curr_target,
             account_assets,

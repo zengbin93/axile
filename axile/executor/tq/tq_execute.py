@@ -11,11 +11,10 @@ from uuid import uuid4
 from zoneinfo import ZoneInfo
 
 from axile.common.trade_channel import TradeChannel
-from axile.domain.execution import ExecutionReasonFamily
 from axile.executor.abstract_executor.base import AbstractExecutor
 from axile.executor.account_control.exceptions import AccountControlBlockedError
 from axile.executor.china_futures_session import is_within_possible_china_futures_session
-from axile.executor.execution_engine import ExecutionEngine, _DispatchPlanningResult
+from axile.executor.execution_engine import ExecutionEngine
 from axile.executor.futures_order_intent import is_close_intent, plan_futures_close_orders, single_close_offset
 from axile.executor.models.execution_result import AlgorithmResult, ExecutionStatus, TargetSizingDecision
 from axile.executor.models.unified_account_assets import UnifiedAccountAssets
@@ -136,36 +135,11 @@ class TQTradingTimeCheck:
 class TQExecutionEngine(ExecutionEngine):
     """TQ 品种时段筛选编排器。"""
 
-    def _build_symbol_algorithm_plans(self, standard_input: UnifiedStandardInput) -> _DispatchPlanningResult:
-        account_assets, effective_curr_target, symbols = self._build_symbol_planning_context(standard_input)
-        owner = cast("TQExecutor", self._owner)
-        allowed_symbols: list[str] = []
-        planning_failures: list[AlgorithmResult] = []
-        for symbol in symbols:
-            check = owner._check_symbol_trading_time(symbol)
-            if check.error is None:
-                allowed_symbols.append(symbol)
-                continue
-            planning_failures.append(
-                self._build_failed_algorithm_result(
-                    symbol=symbol,
-                    algorithm_name=self._get_symbol_algorithm_name(standard_input, symbol),
-                    error=check.message or "无法确认品种交易时段",
-                    status=ExecutionStatus.BLOCKED,
-                    account_assets=account_assets,
-                    memory={
-                        "symbol_decision_reason_code": check.error,
-                        "symbol_decision_reason_family": ExecutionReasonFamily.MARKET_RULE.value,
-                    },
-                )
-            )
-        return self._build_symbol_algorithm_plans_for_symbols(
-            standard_input=standard_input,
-            account_assets=account_assets,
-            symbols=allowed_symbols,
-            effective_curr_target=effective_curr_target,
-            planning_failures=planning_failures,
-        )
+    def _symbol_session_block(self, symbol: str) -> tuple[str, str] | None:
+        check = cast("TQExecutor", self._owner)._check_symbol_trading_time(symbol)
+        if check.error is None:
+            return None
+        return check.error, check.message or "无法确认品种交易时段"
 
     def _derive_dispatch_error(
         self,

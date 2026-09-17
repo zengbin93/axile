@@ -10,7 +10,7 @@ from axile.common.trade_channel import TradeChannel
 from axile.domain.execution import ExecutionReasonFamily
 from axile.executor.abstract_executor.base import AbstractExecutor
 from axile.executor.ctp.ctp_execute import CtpExecutionEngine
-from axile.executor.models.execution_result import AlgorithmResult, ExecutionStatus
+from axile.executor.models.execution_result import AlgorithmResult, ExecutionStatus, TargetSizingStatus
 from axile.executor.models.unified_account_assets import UnifiedAccountAssets
 from axile.executor.models.unified_input import CTPAccountConfig, UnifiedStandardInput
 from axile.executor.models.unified_order import OrderDirection, OrderStatus, OrderType, TradeRecord, UnifiedOrder
@@ -57,6 +57,9 @@ class _CtpSessionExecutor(AbstractExecutor):
         return UnifiedAccountAssets(available_cash=1000, total_asset=1000, market_value=0, positions=[])
 
     def get_market_data(self, symbols: list[str]) -> dict[str, UnifiedPriceData]:
+        blocked = [symbol for symbol in symbols if self.decisions.get(symbol)]
+        if blocked:
+            raise TimeoutError(f"CLOSED 品种进入阻塞行情: {blocked}")
         self.market_data_requests.append(symbols)
         return {
             symbol: UnifiedPriceData(
@@ -184,9 +187,58 @@ def test_ctp_engine_only_queries_and_dispatches_session_allowed_symbols(monkeypa
         "symbol_decision_reason_code": "CTP.SESSION.CLOSED",
         "symbol_decision_reason_family": ExecutionReasonFamily.MARKET_RULE.value,
     }
+    assert output.symbol_results["IF2609"].sizing is not None
+    assert output.symbol_results["IF2609"].sizing.status is TargetSizingStatus.UNAVAILABLE
     assert executor.market_data_requests == [["ag2612"]]
     assert all("IF2609" not in request for request in executor.websocket_requests)
     assert executor.cancel_all_orders_calls == 1
+    assert dispatched_symbols == ["ag2612"]
+
+
+def test_ctp_engine_sizes_closed_symbol_from_cached_quote_without_blocking_io(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from axile.executor import execution_engine as engine_module
+
+    executor = _CtpSessionExecutor({"IF2609": "CTP.SESSION.CLOSED", "ag2612": None})
+    executor._quotes = {
+        "IF2609": UnifiedPriceData(
+            symbol="IF2609",
+            last_price=100,
+            bid_price=99,
+            ask_price=101,
+            bid_volume=1,
+            ask_volume=1,
+            volume=1,
+            turnover=100,
+            timestamp=1,
+            update_time="2026-08-25T11:29:00",
+        )
+    }
+    dispatched_symbols: list[str] = []
+    monkeypatch.setattr(
+        engine_module,
+        "resolve_algorithm",
+        lambda _name, _session: (
+            lambda _session, algorithm_input: (
+                dispatched_symbols.append(algorithm_input.symbol)
+                or AlgorithmResult(
+                    symbol=algorithm_input.symbol,
+                    algorithm="SINGLE-MAKER",
+                    target_volume=algorithm_input.target_volume,
+                )
+            )
+        ),
+    )
+
+    output = executor.execute(_input(), cleanup=False)
+
+    blocked = output.symbol_results["IF2609"]
+    assert blocked.status == ExecutionStatus.BLOCKED
+    assert blocked.sizing is not None
+    assert blocked.sizing.target_quantity == pytest.approx(1.0)
+    assert blocked.target_volume == pytest.approx(1.0)
+    assert executor.market_data_requests == [["ag2612"]]
     assert dispatched_symbols == ["ag2612"]
 
 
@@ -237,6 +289,11 @@ def test_ctp_engine_blocks_all_session_rejections_without_execution_io() -> None
     assert executor.market_data_requests == []
     assert executor.websocket_requests == []
     assert executor.cancel_all_orders_calls == 0
+    for symbol in ("IF2609", "ag2612"):
+        result = output.symbol_results[symbol]
+        assert result.status == ExecutionStatus.BLOCKED
+        assert result.sizing is not None
+        assert result.sizing.status is TargetSizingStatus.UNAVAILABLE
 
 
 class _AuditRuntime:

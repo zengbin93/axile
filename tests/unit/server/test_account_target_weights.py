@@ -143,6 +143,11 @@ def _patch_resolution(
         fake_append_target_weight_snapshot,
     )
 
+    async def fake_previous(*_args: object, **_kwargs: object) -> list[TargetWeightSnapshot]:
+        return []
+
+    monkeypatch.setattr(account_execution_routes, "get_previous_account_target_snapshots", fake_previous)
+
     return saved
 
 
@@ -362,7 +367,7 @@ def test_account_target_snapshot_returns_complete_execution_sizing(monkeypatch) 
                     content={"reconciliation": {"symbols": []}},
                 ),
             ],
-            "unavailable",
+            "pending_execution",
         ),
         (
             [
@@ -407,3 +412,314 @@ def test_account_target_snapshot_reports_sizing_evidence_state(
     body = response.json()
     assert body["sizing"]["status"] == expected_status
     assert body["quantities"] is None
+
+
+def _complete_sizing_artifacts(
+    execution_id: str, *, symbol: str = "TA701", quantity: float = -1.0
+) -> list[ExecutionArtifact]:
+    return [
+        ExecutionArtifact(
+            execution_id=execution_id,
+            artifact_type=ExecutionArtifactType.TARGET_SNAPSHOT,
+            schema_version=2,
+            content={"sizing_context": {"weight_precision": 0.01}},
+        ),
+        ExecutionArtifact(
+            execution_id=execution_id,
+            artifact_type=ExecutionArtifactType.EXECUTION_SUMMARY,
+            schema_version=2,
+            content={
+                "reconciliation": {
+                    "symbols": [
+                        {
+                            "symbol": symbol,
+                            "sizing": {
+                                "symbol": symbol,
+                                "reason_code": "COMMON.SIZING.QUANTIZED",
+                                "account_weight": -0.32,
+                                "target_quantity": quantity,
+                                "quantity_step": 1.0,
+                            },
+                        }
+                    ]
+                }
+            },
+        ),
+    ]
+
+
+def _empty_summary_artifacts(execution_id: str) -> list[ExecutionArtifact]:
+    return [
+        ExecutionArtifact(
+            execution_id=execution_id,
+            artifact_type=ExecutionArtifactType.TARGET_SNAPSHOT,
+            schema_version=2,
+            content={"sizing_context": {"weight_precision": 0.01}},
+        ),
+        ExecutionArtifact(
+            execution_id=execution_id,
+            artifact_type=ExecutionArtifactType.EXECUTION_SUMMARY,
+            schema_version=2,
+            content={"reconciliation": {"symbols": []}},
+        ),
+    ]
+
+
+def _unavailable_sizing_artifacts(execution_id: str, *, symbol: str = "TA701") -> list[ExecutionArtifact]:
+    return [
+        ExecutionArtifact(
+            execution_id=execution_id,
+            artifact_type=ExecutionArtifactType.TARGET_SNAPSHOT,
+            schema_version=2,
+            content={"sizing_context": {"weight_precision": 0.01}},
+        ),
+        ExecutionArtifact(
+            execution_id=execution_id,
+            artifact_type=ExecutionArtifactType.EXECUTION_SUMMARY,
+            schema_version=2,
+            content={
+                "reconciliation": {
+                    "symbols": [
+                        {
+                            "symbol": symbol,
+                            "sizing": {
+                                "symbol": symbol,
+                                "reason_code": "COMMON.SIZING.MISSING_MARKET_DATA",
+                                "account_weight": -0.32,
+                                "target_quantity": None,
+                            },
+                        }
+                    ]
+                }
+            },
+        ),
+    ]
+
+
+def test_account_target_snapshot_falls_back_to_same_weight_complete_sizing(monkeypatch) -> None:
+    """最新 BLOCKED 没手数时，沿用同一套权重上一次完整换算."""
+    artifacts = _empty_summary_artifacts("exec-blocked") + _complete_sizing_artifacts("exec-sized")
+    session = _RouteSession(_build_account(), _build_portfolio(), artifacts)
+    _patch_resolution(monkeypatch, portfolio_id=7, raw_target={})
+
+    async def fake_latest(_session: object, _account_id: int, _portfolio_id: int) -> TargetWeightSnapshot:
+        return TargetWeightSnapshot(
+            id=20,
+            portfolio_id=7,
+            account_id=1,
+            raw_weights={"TA2701": -0.1067},
+            normalized_weights={"TA2701": -0.32},
+            source="execution",
+            execution_id="exec-blocked",
+            calculated_at="2026-09-17T11:34:00",
+        )
+
+    async def fake_previous(*_args: object, **_kwargs: object) -> list[TargetWeightSnapshot]:
+        return [
+            TargetWeightSnapshot(
+                id=19,
+                portfolio_id=7,
+                account_id=1,
+                raw_weights={"TA2701": -0.1067},
+                normalized_weights={"TA2701": -0.32},
+                source="execution",
+                execution_id="exec-sized",
+                calculated_at="2026-09-17T11:19:00",
+            )
+        ]
+
+    monkeypatch.setattr(account_execution_routes, "get_latest_account_target_snapshot", fake_latest)
+    monkeypatch.setattr(account_execution_routes, "get_previous_account_target_snapshots", fake_previous)
+
+    body = TestClient(_build_app(session)).get("/account/1/target_snapshot").json()
+    assert body["weights"] == {"TA701": -0.32}
+    assert body["quantities"] == {"TA701": -1.0}
+    assert body["sizing"]["status"] == "available"
+    assert body["sizing"]["execution_id"] == "exec-sized"
+    assert body["sizing"]["calculated_at"] == "2026-09-17T11:19:00"
+    assert body["execution_id"] == "exec-blocked"
+    assert body["calculated_at"] == "2026-09-17T11:34:00"
+
+
+def test_account_target_snapshot_does_not_reuse_lots_when_weights_changed(monkeypatch) -> None:
+    artifacts = _empty_summary_artifacts("exec-blocked") + _complete_sizing_artifacts("exec-sized")
+    session = _RouteSession(_build_account(), _build_portfolio(), artifacts)
+    _patch_resolution(monkeypatch, portfolio_id=7, raw_target={})
+
+    async def fake_latest(_session: object, _account_id: int, _portfolio_id: int) -> TargetWeightSnapshot:
+        return TargetWeightSnapshot(
+            id=20,
+            portfolio_id=7,
+            account_id=1,
+            raw_weights={"TA2701": -0.2},
+            normalized_weights={"TA2701": -0.6},
+            source="execution",
+            execution_id="exec-blocked",
+            calculated_at="2026-09-17T11:34:00",
+        )
+
+    async def fake_previous(*_args: object, **_kwargs: object) -> list[TargetWeightSnapshot]:
+        return [
+            TargetWeightSnapshot(
+                id=19,
+                portfolio_id=7,
+                account_id=1,
+                raw_weights={"TA2701": -0.1067},
+                normalized_weights={"TA2701": -0.32},
+                source="execution",
+                execution_id="exec-sized",
+                calculated_at="2026-09-17T11:19:00",
+            )
+        ]
+
+    monkeypatch.setattr(account_execution_routes, "get_latest_account_target_snapshot", fake_latest)
+    monkeypatch.setattr(account_execution_routes, "get_previous_account_target_snapshots", fake_previous)
+
+    body = TestClient(_build_app(session)).get("/account/1/target_snapshot").json()
+    assert body["quantities"] is None
+    assert body["sizing"]["status"] == "pending_execution"
+    assert body["sizing"]["execution_id"] == "exec-blocked"
+
+
+def test_account_target_snapshot_falls_back_when_current_quantities_are_null(monkeypatch) -> None:
+    artifacts = _unavailable_sizing_artifacts("exec-now") + _complete_sizing_artifacts("exec-sized")
+    session = _RouteSession(_build_account(), _build_portfolio(), artifacts)
+    _patch_resolution(monkeypatch, portfolio_id=7, raw_target={})
+
+    async def fake_latest(_session: object, _account_id: int, _portfolio_id: int) -> TargetWeightSnapshot:
+        return TargetWeightSnapshot(
+            id=20,
+            portfolio_id=7,
+            account_id=1,
+            raw_weights={"TA2701": -0.1067},
+            normalized_weights={"TA2701": -0.32},
+            source="execution",
+            execution_id="exec-now",
+            calculated_at="2026-09-17T11:34:00",
+        )
+
+    async def fake_previous(*_args: object, **_kwargs: object) -> list[TargetWeightSnapshot]:
+        return [
+            TargetWeightSnapshot(
+                id=19,
+                portfolio_id=7,
+                account_id=1,
+                raw_weights={"TA2701": -0.1067},
+                normalized_weights={"TA2701": -0.32},
+                source="execution",
+                execution_id="exec-sized",
+                calculated_at="2026-09-17T11:19:00",
+            )
+        ]
+
+    monkeypatch.setattr(account_execution_routes, "get_latest_account_target_snapshot", fake_latest)
+    monkeypatch.setattr(account_execution_routes, "get_previous_account_target_snapshots", fake_previous)
+
+    body = TestClient(_build_app(session)).get("/account/1/target_snapshot").json()
+    assert body["quantities"] == {"TA701": -1.0}
+    assert body["sizing"]["status"] == "available"
+    assert body["sizing"]["execution_id"] == "exec-sized"
+
+
+def test_account_target_snapshot_keeps_unavailable_without_complete_history(monkeypatch) -> None:
+    session = _RouteSession(_build_account(), _build_portfolio(), _unavailable_sizing_artifacts("exec-now"))
+    _patch_resolution(monkeypatch, portfolio_id=7, raw_target={})
+
+    async def fake_latest(_session: object, _account_id: int, _portfolio_id: int) -> TargetWeightSnapshot:
+        return TargetWeightSnapshot(
+            id=20,
+            portfolio_id=7,
+            account_id=1,
+            raw_weights={"TA2701": -0.1067},
+            normalized_weights={"TA2701": -0.32},
+            source="execution",
+            execution_id="exec-now",
+            calculated_at="2026-09-17T11:34:00",
+        )
+
+    monkeypatch.setattr(account_execution_routes, "get_latest_account_target_snapshot", fake_latest)
+
+    body = TestClient(_build_app(session)).get("/account/1/target_snapshot").json()
+    assert body["quantities"] is None
+    assert body["sizing"]["status"] == "unavailable"
+
+
+def test_account_target_snapshot_does_not_union_partial_histories(monkeypatch) -> None:
+    artifacts = (
+        _empty_summary_artifacts("exec-now")
+        + _complete_sizing_artifacts("exec-a", symbol="TA701", quantity=-1.0)
+        + _complete_sizing_artifacts("exec-b", symbol="rb2610", quantity=2.0)
+    )
+    session = _RouteSession(_build_account(), _build_portfolio(), artifacts)
+    _patch_resolution(monkeypatch, portfolio_id=7, raw_target={})
+
+    async def fake_latest(_session: object, _account_id: int, _portfolio_id: int) -> TargetWeightSnapshot:
+        return TargetWeightSnapshot(
+            id=30,
+            portfolio_id=7,
+            account_id=1,
+            raw_weights={"TA2701": -0.1067, "rb2610": 0.1},
+            normalized_weights={"TA2701": -0.32, "rb2610": 0.3},
+            source="execution",
+            execution_id="exec-now",
+            calculated_at="2026-09-17T11:34:00",
+        )
+
+    async def fake_previous(*_args: object, **_kwargs: object) -> list[TargetWeightSnapshot]:
+        return [
+            TargetWeightSnapshot(
+                id=29,
+                portfolio_id=7,
+                account_id=1,
+                raw_weights={"TA2701": -0.1067},
+                normalized_weights={"TA2701": -0.32},
+                source="execution",
+                execution_id="exec-a",
+                calculated_at="2026-09-17T11:19:00",
+            ),
+            TargetWeightSnapshot(
+                id=28,
+                portfolio_id=7,
+                account_id=1,
+                raw_weights={"rb2610": 0.1},
+                normalized_weights={"rb2610": 0.3},
+                source="execution",
+                execution_id="exec-b",
+                calculated_at="2026-09-17T11:18:00",
+            ),
+        ]
+
+    monkeypatch.setattr(account_execution_routes, "get_latest_account_target_snapshot", fake_latest)
+    monkeypatch.setattr(account_execution_routes, "get_previous_account_target_snapshots", fake_previous)
+
+    body = TestClient(_build_app(session)).get("/account/1/target_snapshot").json()
+    assert body["quantities"] is None
+    assert body["sizing"]["status"] == "pending_execution"
+
+
+def test_account_target_refresh_reuses_same_weight_lots(monkeypatch) -> None:
+    artifacts = _complete_sizing_artifacts("exec-sized")
+    session = _RouteSession(_build_account(), _build_portfolio(), artifacts)
+    _patch_resolution(monkeypatch, portfolio_id=7, raw_target={"TA2701": -0.1067})
+
+    async def fake_previous(*_args: object, **_kwargs: object) -> list[TargetWeightSnapshot]:
+        return [
+            TargetWeightSnapshot(
+                id=19,
+                portfolio_id=7,
+                account_id=1,
+                raw_weights={"TA2701": -0.1067},
+                normalized_weights={"TA2701": -0.32},
+                source="execution",
+                execution_id="exec-sized",
+                calculated_at="2026-09-17T11:19:00",
+            )
+        ]
+
+    monkeypatch.setattr(account_execution_routes, "get_previous_account_target_snapshots", fake_previous)
+
+    body = TestClient(_build_app(session)).post("/account/1/target_snapshot/refresh").json()
+    assert body["source"] == "manual"
+    assert body["quantities"] == {"TA701": -1.0}
+    assert body["sizing"]["status"] == "available"
+    assert body["sizing"]["execution_id"] == "exec-sized"

@@ -19,7 +19,6 @@ from openctp_ctp import thosttraderapi as td
 
 from axile.channels.cn_futures import canonicalize_cn_futures_symbol, czce_is_option_instrument
 from axile.common.trade_channel import TradeChannel
-from axile.domain.execution import ExecutionReasonFamily
 from axile.executor.abstract_executor.base import AbstractExecutor
 from axile.executor.account_control.decorators import run_controlled_call
 from axile.executor.account_control.exceptions import AccountControlBlockedError
@@ -67,7 +66,7 @@ from axile.executor.ctp_product_sessions import (
     get_ctp_product_sessions,
 )
 from axile.executor.ctp_query_wait import QueryIdleClock
-from axile.executor.execution_engine import ExecutionEngine, _DispatchPlanningResult
+from axile.executor.execution_engine import ExecutionEngine
 from axile.executor.futures_order_intent import is_close_intent, plan_futures_close_orders, single_close_offset
 from axile.executor.models.execution_result import AlgorithmResult, ExecutionStatus, TargetSizingDecision
 from axile.executor.models.unified_account_assets import UnifiedAccountAssets
@@ -159,36 +158,11 @@ def _session_block_message(reason_code: str) -> str:
 class CtpExecutionEngine(ExecutionEngine):
     """CTP 的品种时段筛选与 scoped cancel 编排器。"""
 
-    def _build_symbol_algorithm_plans(self, standard_input: UnifiedStandardInput) -> _DispatchPlanningResult:
-        account_assets, effective_curr_target, symbols = self._build_symbol_planning_context(standard_input)
-        owner = cast("CTPExecutor", self._owner)
-        allowed_symbols: list[str] = []
-        planning_failures: list[AlgorithmResult] = []
-        for symbol in symbols:
-            reason_code = owner._get_ctp_session_block_reason(symbol)
-            if reason_code is None:
-                allowed_symbols.append(symbol)
-                continue
-            planning_failures.append(
-                self._build_failed_algorithm_result(
-                    symbol=symbol,
-                    algorithm_name=self._get_symbol_algorithm_name(standard_input, symbol),
-                    error=_session_block_message(reason_code),
-                    status=ExecutionStatus.BLOCKED,
-                    account_assets=account_assets,
-                    memory={
-                        "symbol_decision_reason_code": reason_code,
-                        "symbol_decision_reason_family": ExecutionReasonFamily.MARKET_RULE.value,
-                    },
-                )
-            )
-        return self._build_symbol_algorithm_plans_for_symbols(
-            standard_input=standard_input,
-            account_assets=account_assets,
-            symbols=allowed_symbols,
-            effective_curr_target=effective_curr_target,
-            planning_failures=planning_failures,
-        )
+    def _symbol_session_block(self, symbol: str) -> tuple[str, str] | None:
+        reason_code = cast("CTPExecutor", self._owner)._get_ctp_session_block_reason(symbol)
+        if reason_code is None:
+            return None
+        return reason_code, _session_block_message(reason_code)
 
     def _derive_dispatch_error(
         self,

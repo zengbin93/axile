@@ -70,6 +70,30 @@ async def get_latest_account_target_snapshot(
     )
 
 
+async def get_previous_account_target_snapshots(
+    session: AsyncSession,
+    account_id: int,
+    portfolio_id: int,
+    *,
+    before_id: int,
+    limit: int = 50,
+) -> list[TargetWeightSnapshot]:
+    """读取同一账户组合下、早于指定快照的近期归一化权重快照."""
+    result = await session.execute(
+        select(TargetWeightSnapshot)
+        .where(
+            TargetWeightSnapshot.account_id == account_id,
+            TargetWeightSnapshot.portfolio_id == portfolio_id,
+            col(TargetWeightSnapshot.normalized_weights).is_not(None),
+            col(TargetWeightSnapshot.execution_id).is_not(None),
+            col(TargetWeightSnapshot.id) < before_id,
+        )
+        .order_by(desc(TargetWeightSnapshot.id))
+        .limit(limit)
+    )
+    return list(result.scalars().all())
+
+
 async def get_latest_account_target_snapshots_for_accounts(
     session: AsyncSession,
     pairs: list[tuple[int, int]],
