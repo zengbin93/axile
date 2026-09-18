@@ -7,7 +7,7 @@
 - ``error`` 仅在缺失时回填：旧文案说人话则沿用，异常类名/SDK 原文只进
   ``technical_detail``（仅审计视图可消费），主展示用固定人话兜底；
 - 递归处理 ``symbol_results`` 与 ``reconciliation.symbols``；
-- ``reason_code`` 仅在缺失时从旧渠道码或 BLOCKED 的整句 ``error`` 回填，已有码不覆盖。
+- ``reason_code`` 仅在缺失时从曾经落库的旧渠道码或 BLOCKED 整句 ``error`` 回填；已有码不覆盖。活路径不走这张表。
 
 与数据迁移的本质差异：不写库、幂等、映射修正即时全局生效。
 """
@@ -15,11 +15,11 @@
 import re
 from typing import Any
 
-from axile.executor.session_closed import (
-    COMMON_SESSION_CLOSED,
-    LEGACY_SESSION_CLOSED_CODES,
-    LEGACY_SESSION_CLOSED_ERRORS,
-)
+from axile.executor.session_closed import COMMON_SESSION_CLOSED, SESSION_CLOSED_MESSAGE
+
+# 只覆盖曾经落库的写法；禁止为新渠道加行。活路径必须直出 COMMON_SESSION_CLOSED。
+_SESSION_CLOSED_CODES = frozenset({COMMON_SESSION_CLOSED, "CLOSED", "CTP.SESSION.CLOSED"})
+_SESSION_CLOSED_ERRORS = frozenset({SESSION_CLOSED_MESSAGE, "当前不在交易时段", "当前不在交易时间"})
 
 _STATUS_FROM_OUTCOME = {
     "completed": "SUCCEEDED",
@@ -146,14 +146,14 @@ def _as_reason_code(value: object) -> str | None:
     text = _text(value)
     if text is None:
         return None
-    return COMMON_SESSION_CLOSED if text in LEGACY_SESSION_CLOSED_CODES else text
+    return COMMON_SESSION_CLOSED if text in _SESSION_CLOSED_CODES else text
 
 
 def _fill_reason_code(result: dict[str, Any]) -> None:
     """只补缺失的 ``reason_code``；不覆盖已有码，不用包含匹配。"""
     existing = _text(result.get("reason_code"))
     if existing is not None:
-        if existing in LEGACY_SESSION_CLOSED_CODES and existing != COMMON_SESSION_CLOSED:
+        if existing in _SESSION_CLOSED_CODES and existing != COMMON_SESSION_CLOSED:
             result["reason_code"] = COMMON_SESSION_CLOSED
         return
 
@@ -163,7 +163,7 @@ def _fill_reason_code(result: dict[str, Any]) -> None:
         result["reason_code"] = from_memory
         return
 
-    if result.get("status") == "BLOCKED" and result.get("error") in LEGACY_SESSION_CLOSED_ERRORS:
+    if result.get("status") == "BLOCKED" and result.get("error") in _SESSION_CLOSED_ERRORS:
         result["reason_code"] = COMMON_SESSION_CLOSED
         return
 

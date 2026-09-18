@@ -84,7 +84,7 @@ from axile.executor.order_volume_limits import (
     effective_max_order_volume,
     ensure_order_volume_allowed,
 )
-from axile.executor.session_closed import map_session_closed
+from axile.executor.session_closed import COMMON_SESSION_CLOSED, SESSION_CLOSED_MESSAGE
 from axile.executor.trading_calendar import CHINA_CALENDAR_ID, ShinnyTradingCalendar
 
 _SHANGHAI = ZoneInfo("Asia/Shanghai")
@@ -147,9 +147,8 @@ def _copy_native_row(row):
 
 
 def _session_block_message(reason_code: str) -> str:
-    """只翻译明确的交易时段检查结果。"""
+    """翻译非闭市的时段检查结果。闭市由 ``_symbol_session_block`` 直出公共码。"""
     return {
-        "CTP.SESSION.CLOSED": "当前不在交易时段",
         "CTP.SESSION.NO_METADATA": "合约资料不可用，交易时段尚未确认",
         "CTP.SESSION.NO_SESSION_TABLE": "未配置合约交易时段",
         "CTP.SESSION.CALENDAR_UNAVAILABLE": "交易日历不可用，交易时段尚未确认",
@@ -163,9 +162,8 @@ class CtpExecutionEngine(ExecutionEngine):
         reason_code = cast("CTPExecutor", self._owner)._get_ctp_session_block_reason(symbol)
         if reason_code is None:
             return None
-        mapped = map_session_closed(reason_code)
-        if mapped is not None:
-            return mapped
+        if reason_code == "CTP.SESSION.CLOSED":
+            return COMMON_SESSION_CLOSED, SESSION_CLOSED_MESSAGE
         return reason_code, _session_block_message(reason_code)
 
     def _derive_dispatch_error(
