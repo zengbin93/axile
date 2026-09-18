@@ -405,7 +405,7 @@ requires-dist = [
     { name = "tomlkit", specifier = ">=0.15.0" },
     { name = "tqsdk", marker = "extra == 'tqsdk'", specifier = ">=3.10.2,<3.11" },
     { name = "typer", specifier = ">=0.20.1" },
-    { name = "wbt", specifier = "==0.8.2", index = "https://pypi.org/simple/" },
+    { name = "wbt", specifier = "==0.9.1", index = "https://pypi.org/simple/" },
 ]
 provides-extras = ["ctp", "gm", "tqsdk", "all"]
 
@@ -4252,7 +4252,7 @@ wheels = [
 
 [[package]]
 name = "wbt"
-version = "0.8.2"
+version = "0.9.1"
 source = { registry = "https://pypi.org/simple/" }
 dependencies = [
     { name = "loguru" },
@@ -4263,13 +4263,13 @@ dependencies = [
     { name = "polars" },
     { name = "pyarrow" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/be/ef/b570d65da8153e5cc0d6aafea77a2d9c599c830f8b2f18c65456f70e3604/wbt-0.8.2.tar.gz", hash = "sha256:c431e7b1365d52da4c2f27043515b76e6e28b4049d9db59e35608641297f75af", size = 2348361, upload-time = "2026-09-01T03:36:52.39Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/75/00/f48e91be00b7387341351b92090daca525b9dec940de45910d3b0ab8cbef/wbt-0.9.1.tar.gz", hash = "sha256:68c7d854eaf96de6a3af9ba6a92bcb7bb27b94b9b4b9ab0de9e1128653aed343", size = 2453246, upload-time = "2026-09-10T16:30:16.215Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/01/87/5d845ed1d87644d51467ae96817c5c66f212b15f96e648c522acc4a25613/wbt-0.8.2-cp310-abi3-macosx_10_12_x86_64.whl", hash = "sha256:eb3bcfa7723c02012252d5b131875b9bfb5c10af4bb59287cec9679e12fd145c", size = 18547475, upload-time = "2026-09-01T03:36:34.492Z" },
-    { url = "https://files.pythonhosted.org/packages/11/ac/fbefa69818b368f270836d9f4cac449c20f9d77911c991a6eb6b849e30cc/wbt-0.8.2-cp310-abi3-macosx_11_0_arm64.whl", hash = "sha256:55982508a3621237d11f735fa25800bf48772377ac5153f44d4c9ce8fcaf57b8", size = 16844748, upload-time = "2026-09-01T03:36:38.332Z" },
-    { url = "https://files.pythonhosted.org/packages/b0/56/c3329830e519e416206dfff89aeda21f435aea85ad9a67b4de604de38d4a/wbt-0.8.2-cp310-abi3-manylinux_2_28_aarch64.whl", hash = "sha256:1052b0e00075a08e34b760700b48c2ff6bd2551ddc44807caa2837d204a0a5e1", size = 17469658, upload-time = "2026-09-01T03:36:42.472Z" },
-    { url = "https://files.pythonhosted.org/packages/b5/e8/88777f661f81db272e4642bc054ce9d67137f7f57e6f9c24447ca4b89f2e/wbt-0.8.2-cp310-abi3-manylinux_2_28_x86_64.whl", hash = "sha256:642f831a0290eba04bd1644e648f74c6c0ac6fc0358530ea7a24ff4f8ec5b374", size = 19065113, upload-time = "2026-09-01T03:36:46.106Z" },
-    { url = "https://files.pythonhosted.org/packages/60/ae/fe8e462f3158b56f1c0bd2f03706083698e4da34e9e09851009815fb69f3/wbt-0.8.2-cp310-abi3-win_amd64.whl", hash = "sha256:5a0530d0fbd1790cd846caa46739b9388cbc5b434eec3c2183da2be3d27be0f6", size = 20860289, upload-time = "2026-09-01T03:36:49.89Z" },
+    { url = "https://files.pythonhosted.org/packages/ca/0f/77c08758baaf0c96c1b69df2006b3271267420147903981cbf787f35487f/wbt-0.9.1-cp310-abi3-macosx_10_12_x86_64.whl", hash = "sha256:e378e989f4a8e1a75e4ea074034187cc7b89ff6b18999ff87e8c18e6f40a4cac", size = 18571672, upload-time = "2026-09-10T16:30:03.741Z" },
+    { url = "https://files.pythonhosted.org/packages/53/04/acdc468e89426040d2621491840976b7fd0a93fb816ba430068cb2dc23e5/wbt-0.9.1-cp310-abi3-macosx_11_0_arm64.whl", hash = "sha256:b2b53bfbe707223339c354df3abdd0c57ccd17a8648f1f6799a7028d987b9833", size = 16847757, upload-time = "2026-09-10T16:30:06.107Z" },
+    { url = "https://files.pythonhosted.org/packages/c6/94/2d87b59cc5f2552639da281ebd360f3bc870fa32ce4f39835a51116eaaa6/wbt-0.9.1-cp310-abi3-manylinux_2_28_aarch64.whl", hash = "sha256:b2a6d137afc1745a99d04e32c8e7b0097f403dca9689f4ae4b496a30b700627c", size = 17487532, upload-time = "2026-09-10T16:30:08.784Z" },
+    { url = "https://files.pythonhosted.org/packages/6e/38/b3a1a496bcc00021e14254521d272ba9aa56ed17910e509f42f0cbcfe8e3/wbt-0.9.1-cp310-abi3-manylinux_2_28_x86_64.whl", hash = "sha256:c35ff1ad6fc8e4d6acfc6dcd540a5097e0c0831691f46d62d70703c4afd1ecc4", size = 19089601, upload-time = "2026-09-10T16:30:11.205Z" },
+    { url = "https://files.pythonhosted.org/packages/53/a9/00c9a90200b088765d6bfdd6fb81a3538a89ccaeff835377165478d5bfb9/wbt-0.9.1-cp310-abi3-win_amd64.whl", hash = "sha256:7a7cc8d1f011b35608013e86036ded379bb009ef32e5fbabbbf64420d71547ec", size = 20881512, upload-time = "2026-09-10T16:30:13.818Z" },
 ]
 
 [[package]]
