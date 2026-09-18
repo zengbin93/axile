@@ -182,9 +182,10 @@ def test_ctp_engine_only_queries_and_dispatches_session_allowed_symbols(monkeypa
 
     assert output.status == ExecutionStatus.PARTIAL
     assert output.symbol_results["IF2609"].status == ExecutionStatus.BLOCKED
-    assert output.symbol_results["IF2609"].error == "当前不在交易时段"
+    assert output.symbol_results["IF2609"].error == "非交易时段"
+    assert output.symbol_results["IF2609"].reason_code == "COMMON.SESSION.CLOSED"
     assert output.symbol_results["IF2609"].memory == {
-        "symbol_decision_reason_code": "CTP.SESSION.CLOSED",
+        "symbol_decision_reason_code": "COMMON.SESSION.CLOSED",
         "symbol_decision_reason_family": ExecutionReasonFamily.MARKET_RULE.value,
     }
     assert output.symbol_results["IF2609"].sizing is not None
@@ -285,6 +286,7 @@ def test_ctp_engine_blocks_all_session_rejections_without_execution_io() -> None
     assert output.error is not None
     assert "2 个品种" in output.error
     assert output.error == "2 个品种执行受阻"
+    assert output.reason_code is None
     assert set(output.symbol_results) == {"IF2609", "ag2612"}
     assert executor.market_data_requests == []
     assert executor.websocket_requests == []

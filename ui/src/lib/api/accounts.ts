@@ -87,8 +87,9 @@ export interface ActivityExecutionRecord {
   error?: string | null
   outcome?: string | null
   outcome_reason?: string | null
+  reason_code?: string | null
   execution_kind?: string | null
-  symbol_results?: Record<string, { status?: string; error?: string; outcome?: string; outcome_reason?: string }>
+  symbol_results?: Record<string, { status?: string; error?: string; outcome?: string; outcome_reason?: string; reason_code?: string }>
   total_asset?: number | null
   summary: CostSummary
   duration_sec: number | null

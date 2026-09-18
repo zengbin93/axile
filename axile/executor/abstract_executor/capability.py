@@ -21,6 +21,7 @@ from axile.executor.models.unified_account_assets import Position, PositionDirec
 from axile.executor.models.unified_input import UnifiedStandardInput
 from axile.executor.models.unified_output import UnifiedStandardOutput
 from axile.executor.models.unified_price import UnifiedPriceData
+from axile.executor.session_closed import COMMON_SESSION_CLOSED, SESSION_CLOSED_MESSAGE
 
 if TYPE_CHECKING:
     from axile.executor.abstract_executor.base import AbstractExecutor
@@ -102,12 +103,13 @@ class AbstractExecutorCapabilityMixin:
 
         return UnifiedStandardOutput(
             account_assets=empty_assets,
-            memory={"message": "当前不在交易时间"},
+            memory={"message": SESSION_CLOSED_MESSAGE},
             symbol_results={},
             outcome=ExecutionOutcome.BLOCKED,
-            outcome_reason="当前不在交易时间",
+            outcome_reason=SESSION_CLOSED_MESSAGE,
             status=ExecutionStatus.BLOCKED,
-            error="当前不在交易时间",
+            error=SESSION_CLOSED_MESSAGE,
+            reason_code=COMMON_SESSION_CLOSED,
             execution_time=runtime.elapsed_seconds(),
             channel_type=executor.channel_type,
             inputs=standard_input,

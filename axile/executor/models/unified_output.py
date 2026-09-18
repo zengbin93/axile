@@ -59,6 +59,23 @@ def _derive_output_error(
     return None
 
 
+def _derive_output_reason_code(
+    symbol_results: dict[str, AlgorithmResult],
+    status: ExecutionStatus,
+) -> str | None:
+    """仅整单 BLOCKED 且未成功品种原因码完全相同时提升到账户级。"""
+    if status != ExecutionStatus.BLOCKED:
+        return None
+    failed = [result for result in symbol_results.values() if not is_success_status(result.status)]
+    if not failed:
+        return None
+    codes = {result.reason_code for result in failed}
+    if len(codes) != 1:
+        return None
+    code = next(iter(codes))
+    return code if isinstance(code, str) and code else None
+
+
 class UnifiedStandardOutput(BaseModel):
     """
     统一标准输出数据模型.
@@ -90,6 +107,7 @@ class UnifiedStandardOutput(BaseModel):
     symbol_results: dict[str, AlgorithmResult] = Field(default_factory=dict, description="各品种执行结果")
     status: ExecutionStatus = Field(..., description="本次执行的整体状态")
     error: str | None = Field(default=None, description="本次执行的整体失败原因")
+    reason_code: str | None = Field(default=None, description="整体失败或受阻的稳定原因码；原因不同时为空")
     outcome: ExecutionOutcome | None = Field(default=None, description="执行展示结论")
     outcome_reason: str | None = Field(default=None, description="展示结论的具体原因")
 
@@ -136,6 +154,9 @@ class UnifiedStandardOutput(BaseModel):
 
         if ("error" not in self.model_fields_set or self.error is None) and self.error is None:
             self.error = _derive_output_error(self.symbol_results, self.status)
+
+        if "reason_code" not in self.model_fields_set or self.reason_code is None:
+            self.reason_code = _derive_output_reason_code(self.symbol_results, self.status)
 
         if self.outcome is None:
             self.outcome = outcome_from_status(self.status)

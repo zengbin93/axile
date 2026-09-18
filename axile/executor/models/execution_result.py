@@ -171,6 +171,7 @@ class AlgorithmResult(BaseModel):
     memory: dict[str, object] = Field(default_factory=dict, description="算法附加信息")
     status: ExecutionStatus = Field(default=ExecutionStatus.SUCCEEDED, description="该品种执行状态")
     error: str | None = Field(default=None, description="该品种失败原因")
+    reason_code: str | None = Field(default=None, description="该品种失败或受阻的稳定原因码")
     account_assets: UnifiedAccountAssets | None = Field(
         default=None,
         exclude=True,

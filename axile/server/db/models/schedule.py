@@ -48,6 +48,7 @@ class ActivityExecutionRecord(SQLModel):
     error: str | None = None
     outcome: str | None = None
     outcome_reason: str | None = None
+    reason_code: str | None = None
     execution_kind: str | None = None
     symbol_results: dict[str, dict[str, Any]] = Field(default_factory=dict)
     total_asset: float | None = None

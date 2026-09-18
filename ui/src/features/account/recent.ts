@@ -187,13 +187,14 @@ export function buildRecentActivity(
         executionId: latest.execution_id ?? null,
       })
     } else if (k === 'blocked') {
+      const view = executionOutcome(latest)
       all.push({
         type: 'blocked',
         key: `b${i}`,
         time: latest.created_at,
         count: run.length,
         executionId: latest.execution_id ?? null,
-        reason: executionOutcome(latest).reason,
+        reason: view.title.startsWith('未执行 · ') ? view.title.slice('未执行 · '.length) : '',
       })
     } else if (k === 'partial') {
       all.push(partialRow(latest, i, run.length, saturated))

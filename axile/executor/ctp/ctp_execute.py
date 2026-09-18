@@ -84,6 +84,7 @@ from axile.executor.order_volume_limits import (
     effective_max_order_volume,
     ensure_order_volume_allowed,
 )
+from axile.executor.session_closed import map_session_closed
 from axile.executor.trading_calendar import CHINA_CALENDAR_ID, ShinnyTradingCalendar
 
 _SHANGHAI = ZoneInfo("Asia/Shanghai")
@@ -162,6 +163,9 @@ class CtpExecutionEngine(ExecutionEngine):
         reason_code = cast("CTPExecutor", self._owner)._get_ctp_session_block_reason(symbol)
         if reason_code is None:
             return None
+        mapped = map_session_closed(reason_code)
+        if mapped is not None:
+            return mapped
         return reason_code, _session_block_message(reason_code)
 
     def _derive_dispatch_error(

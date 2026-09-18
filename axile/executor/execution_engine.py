@@ -524,6 +524,7 @@ class ExecutionEngine:
                 account_assets=account_assets,
                 target_volume=target_volume,
                 first_tick=clone_price_data(planning_market_data.get(symbol)),
+                reason_code=reason_code,
                 memory={
                     "symbol_decision_reason_code": reason_code,
                     "symbol_decision_reason_family": ExecutionReasonFamily.MARKET_RULE.value,
@@ -883,6 +884,7 @@ class ExecutionEngine:
             final_volume=current.final_volume,
             status=merged_status,
             error=merged_error,
+            reason_code=current.reason_code or previous.reason_code,
             symbol=previous.symbol,
             algorithm=current.algorithm or previous.algorithm,
         )
@@ -990,7 +992,7 @@ class ExecutionEngine:
                 continue
             is_skipped = result.status == ExecutionStatus.NOOP
             event_type = ExecutionEventType.SYMBOL_SKIPPED if is_skipped else ExecutionEventType.SYMBOL_DECISION_MADE
-            decision_reason_code = result.memory.get("symbol_decision_reason_code")
+            decision_reason_code = result.reason_code or result.memory.get("symbol_decision_reason_code")
             decision_reason_family = result.memory.get("symbol_decision_reason_family")
             reason_code = (
                 decision_reason_code
@@ -1043,6 +1045,7 @@ class ExecutionEngine:
         first_tick: UnifiedPriceData | None = None,
         memory: dict[str, object] | None = None,
         sizing: TargetSizingDecision | None = None,
+        reason_code: str | None = None,
     ) -> AlgorithmResult:
         """构造失败或明确阻断结果。"""
         return AlgorithmResult(
@@ -1054,6 +1057,7 @@ class ExecutionEngine:
             memory=dict(memory or {}),
             status=status,
             error=error,
+            reason_code=reason_code,
             symbol=symbol,
             algorithm=algorithm_name,
         )

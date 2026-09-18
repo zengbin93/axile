@@ -217,5 +217,7 @@ def test_non_trading_producer_does_not_claim_zero_balance():
         ),
     )
     assert result.status == "BLOCKED"
+    assert result.error == "非交易时段"
+    assert result.reason_code == "COMMON.SESSION.CLOSED"
     assert result.account_assets.source == "unavailable"
     assert not is_asset_observation(result.account_assets.model_dump())

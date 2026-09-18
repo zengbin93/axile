@@ -48,7 +48,7 @@ test('完成逐条保留，明确 NOOP 可以折叠', () => {
 })
 test('终止与前置受阻单独分类', () => {
   const result = rows([execution(23, undefined, { task_status: 'TERMINATED' }), execution(22, 'BLOCKED', { error: '当前不在交易时间' })])
-  expect(result.rows.map(recentRowText)).toEqual(['执行已终止', '未执行 · 当前不在交易时间'])
+  expect(result.rows.map(recentRowText)).toEqual(['执行已终止', '未执行'])
 })
 test('窗口拉满才显示饱和，限制折叠后的行数', () => {
   const items = [execution(23, 'PARTIAL'), execution(22, 'PARTIAL')]
@@ -64,8 +64,15 @@ test('排程跳过与执行相互切断分组', () => {
 })
 
 test('近期记录展示后端受阻和失败原因', () => {
-  const result = rows([execution(23, 'BLOCKED', { error: '非交易时段' }), execution(22, 'FAILED', { error: '交易日历不可用' })])
+  const result = rows([
+    execution(23, 'BLOCKED', { error: '非交易时段', reason_code: 'COMMON.SESSION.CLOSED' }),
+    execution(22, 'FAILED', { error: '交易日历不可用' }),
+  ])
   expect(result.rows.map(recentRowText)).toEqual(['未执行 · 非交易时段', '执行失败 · 最近：交易日历不可用'])
+})
+
+test('没有 reason_code 的 BLOCKED 不把中文 error 升成非交易时段标题', () => {
+  expect(recentRowText(rows([execution(22, 'BLOCKED', { error: '非交易时段' })]).rows[0])).toBe('未执行')
 })
 
 test('清仓 NOOP 和 PARTIAL 沿用清仓标题，不与调仓合并', () => {

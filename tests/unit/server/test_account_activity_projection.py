@@ -110,7 +110,7 @@ def test_activity_list_publishes_summary_without_execution_raw_material():
     assert record.status == "SUCCEEDED"
     assert record.execution_kind == "rebalance"
     assert record.total_asset == 10000.0
-    assert set(symbol) <= {"status", "error", "outcome", "outcome_reason"}
+    assert set(symbol) <= {"status", "error", "outcome", "outcome_reason", "reason_code"}
     assert "trades" not in symbol
     assert "first_tick" not in symbol
     assert "sizing" not in symbol

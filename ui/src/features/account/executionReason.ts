@@ -21,6 +21,7 @@ const REASON_CODE_LABEL: Record<string, string> = {
   'CALENDAR.CLOSED': '休市，已跳过',
   'CALENDAR.NO_NIGHT_SESSION': '无对应夜盘，已跳过',
   'CALENDAR.SESSION_CLOSED': '非交易时段，已跳过',
+  'COMMON.SESSION.CLOSED': '非交易时段', // 与 axile.executor.session_closed 对齐；排程跳过仍用上一行
   BUSY: '已有执行在途，本次排程跳过',
   'RISK.FORBIDDEN': '受账户交易限制',
 }

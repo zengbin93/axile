@@ -23,7 +23,7 @@ export interface PerformanceSnapshot {
 }
 export interface CostExecutionRow {
   key: string
-  record: { id: number; execution_id: string | null; created_at: string; is_success: number; raw_result: { status?: string; task_status?: string; error?: string; execution_kind?: string; symbol_results?: Record<string, unknown> } }
+  record: { id: number; execution_id: string | null; created_at: string; is_success: number; raw_result: { status?: string; task_status?: string; error?: string; reason_code?: string; execution_kind?: string; symbol_results?: Record<string, unknown> } }
   noop: boolean
   durationSec?: number | null
   symbolCount: number

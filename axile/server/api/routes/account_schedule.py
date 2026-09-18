@@ -75,6 +75,7 @@ def _compact_execution_activity(row: ExecuteRecord) -> ExecutionActivity:
             error=_text_or_none(raw.get("error")),
             outcome=_text_or_none(raw.get("outcome")),
             outcome_reason=_text_or_none(raw.get("outcome_reason")),
+            reason_code=_text_or_none(raw.get("reason_code")),
             execution_kind=_text_or_none(raw.get("execution_kind")),
             symbol_results=mapping(raw.get("symbol_results")),
             total_asset=float(total) if total is not None else None,

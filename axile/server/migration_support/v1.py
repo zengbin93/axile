@@ -19,7 +19,7 @@ PUBLIC_CODES = {
         "QUOTE_TRADING_TIME_UNAVAILABLE": "无法获取品种交易时段",
     },
     "CTP": {
-        "CTP.SESSION.CLOSED": "当前不在交易时段",
+        "CTP.SESSION.CLOSED": "非交易时段",
         "CTP.SESSION.NO_METADATA": "合约资料不可用，交易时段尚未确认",
         "CTP.SESSION.NO_SESSION_TABLE": "未配置合约交易时段",
         "CTP.SESSION.CALENDAR_UNAVAILABLE": "交易日历不可用，交易时段尚未确认",

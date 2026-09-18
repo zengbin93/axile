@@ -22,6 +22,7 @@ from axile.executor.models.unified_callback import OrderUpdateCallback, PriceDat
 from axile.executor.models.unified_input import AccountConfig, TQAccountConfig, UnifiedStandardInput
 from axile.executor.models.unified_order import OrderDirection, OrderType, TradeRecord, UnifiedOrder
 from axile.executor.models.unified_price import UnifiedPriceData
+from axile.executor.session_closed import map_session_closed
 from axile.executor.tq.converters import account_to_unified, order_to_unified, quote_to_unified, trade_to_unified
 from axile.executor.tq.runtime import TQRuntime, snapshot_entity
 
@@ -139,6 +140,9 @@ class TQExecutionEngine(ExecutionEngine):
         check = cast("TQExecutor", self._owner)._check_symbol_trading_time(symbol)
         if check.error is None:
             return None
+        mapped = map_session_closed(check.error)
+        if mapped is not None:
+            return mapped
         return check.error, check.message or "无法确认品种交易时段"
 
     def _derive_dispatch_error(

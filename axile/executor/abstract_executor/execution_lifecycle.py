@@ -90,7 +90,7 @@ class AbstractExecutorExecutionLifecycleMixin(AbstractExecutorExecutionRuntimeFa
 
             # 非交易时间直接在入口层返回阻断结果，避免继续进入规划和下单阶段。
             if not executor._check_trading_time():
-                executor.logger.warning("当前不在交易时间")
+                executor.logger.warning("非交易时段")
                 output = executor._create_non_trading_output(standard_input)
             else:
                 executor._validate_input(standard_input)

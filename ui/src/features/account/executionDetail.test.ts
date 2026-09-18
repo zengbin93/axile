@@ -611,11 +611,11 @@ it('最新真实快照与算法先前持仓不同时，数量和到位度使用�
 
 it('详情头条与品种原因展示后端说明，原始附件保留', () => {
   const summary = art('execution_summary', {
-    status: 'BLOCKED', error: '非交易时段',
+    status: 'BLOCKED', error: '非交易时段', reason_code: 'COMMON.SESSION.CLOSED',
     reconciliation: { account: { source_before: 'real', source_after: 'real' }, symbols: [{ symbol: 'm2609', status: 'BLOCKED', error: '非交易时段', before: 0, after: 0, target: 1 }] },
   })
   const model = buildExecutionDetail([], [summary])
-  expect(executionHeadline(model).text).toBe('未执行')
+  expect(executionHeadline(model).text).toBe('未执行 · 非交易时段')
   expect(model.symbols[0].reason).toBe('非交易时段')
   expect(summary.content.error).toBe('非交易时段')
 })

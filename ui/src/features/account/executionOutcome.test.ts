@@ -20,6 +20,19 @@ test('只从旧结果字段生成受阻展示', () => {
   expect(view).toMatchObject({ title: '未执行 · 2 个品种执行受阻', reason: '当前不在交易时段', affectedCount: 2, tradeCount: 0, tone: 'warn' })
 })
 
+test('BLOCKED 标题只认 reason_code，不从中文 error 推断', () => {
+  const session = executionRecordView({
+    status: 'BLOCKED', error: '非交易时段，6 个品种未执行', reason_code: 'COMMON.SESSION.CLOSED',
+    symbol_results: { ag2612: { status: 'BLOCKED', error: '非交易时段' } },
+  })
+  expect(session).toMatchObject({ title: '未执行 · 非交易时段', reason: '非交易时段，6 个品种未执行' })
+  const chineseOnly = executionRecordView({
+    status: 'BLOCKED', error: '非交易时段',
+    symbol_results: { ag2612: { status: 'BLOCKED', error: '非交易时段' } },
+  })
+  expect(chineseOnly.title).toBe('未执行 · 1 个品种执行受阻')
+})
+
 test('缺少状态不从错误文本推断结论', () => {
   expect(executionRecordView({ error: 'CLOSED' })).toMatchObject({ title: '执行状态未知', tone: 'neutral' })
 })

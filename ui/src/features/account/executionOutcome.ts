@@ -1,4 +1,5 @@
-/** 只读取执行记录已有字段，不从错误文本推断结果。 */
+/** 只读取执行记录已有字段，不从错误文本推断机器态。BLOCKED 标题认 reason_code，不解析 error。 */
+const SESSION_CLOSED = 'COMMON.SESSION.CLOSED'
 type Dict = Record<string, unknown>
 const dict = (value: unknown): Dict => value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Dict : {}
 const text = (value: unknown): string => typeof value === 'string' ? value : ''
@@ -38,10 +39,14 @@ export function executionRecordView(value: unknown, clear = false): OutcomeView 
   const status = text(raw.status)
   const state: ViewState = taskStatus === 'TERMINATED' ? 'TERMINATED' : ['SUCCEEDED', 'NOOP', 'BLOCKED', 'PARTIAL', 'FAILED'].includes(status) ? status as ViewState : 'UNKNOWN'
   const isClear = clear || raw.execution_kind === 'clear_positions'
+  const reasonCode = text(record.reason_code) || text(raw.reason_code)
+  const blockedTitle = reasonCode === SESSION_CLOSED
+    ? '未执行 · 非交易时段'
+    : `未执行${affectedCount ? ` · ${affectedCount} 个品种执行受阻` : ''}`
   const title = {
     SUCCEEDED: isClear ? '清仓完成' : '调仓完成',
     NOOP: isClear ? '无需清仓' : '无需调仓',
-    BLOCKED: `未执行${affectedCount ? ` · ${affectedCount} 个品种执行受阻` : ''}`,
+    BLOCKED: blockedTitle,
     PARTIAL: '执行未全部完成',
     FAILED: '执行失败', TERMINATED: '执行已终止', UNKNOWN: '执行状态未知',
   }[state]

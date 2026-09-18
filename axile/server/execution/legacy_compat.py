@@ -6,13 +6,20 @@
 - ``status`` 仅在缺失时从旧 ``outcome`` 回填，已有明确状态一律不覆盖；
 - ``error`` 仅在缺失时回填：旧文案说人话则沿用，异常类名/SDK 原文只进
   ``technical_detail``（仅审计视图可消费），主展示用固定人话兜底；
-- 递归处理 ``symbol_results`` 与 ``reconciliation.symbols``。
+- 递归处理 ``symbol_results`` 与 ``reconciliation.symbols``；
+- ``reason_code`` 仅在缺失时从旧渠道码或 BLOCKED 的整句 ``error`` 回填，已有码不覆盖。
 
 与数据迁移的本质差异：不写库、幂等、映射修正即时全局生效。
 """
 
 import re
 from typing import Any
+
+from axile.executor.session_closed import (
+    COMMON_SESSION_CLOSED,
+    LEGACY_SESSION_CLOSED_CODES,
+    LEGACY_SESSION_CLOSED_ERRORS,
+)
 
 _STATUS_FROM_OUTCOME = {
     "completed": "SUCCEEDED",
@@ -129,9 +136,47 @@ def normalize_legacy_result(raw: object) -> object:
     symbols = result.get("symbol_results")
     if isinstance(symbols, dict):
         result["symbol_results"] = {symbol: normalize_legacy_result(item) for symbol, item in symbols.items()}
+    _fill_reason_code(result)
     # reconciliation.symbols 是持仓证据行（before/after/reached），不是结果记录，
     # 不得对其回填 status/error——那是把结论编造进证据。
     return result
+
+
+def _as_reason_code(value: object) -> str | None:
+    text = _text(value)
+    if text is None:
+        return None
+    return COMMON_SESSION_CLOSED if text in LEGACY_SESSION_CLOSED_CODES else text
+
+
+def _fill_reason_code(result: dict[str, Any]) -> None:
+    """只补缺失的 ``reason_code``；不覆盖已有码，不用包含匹配。"""
+    existing = _text(result.get("reason_code"))
+    if existing is not None:
+        if existing in LEGACY_SESSION_CLOSED_CODES and existing != COMMON_SESSION_CLOSED:
+            result["reason_code"] = COMMON_SESSION_CLOSED
+        return
+
+    memory = result.get("memory") if isinstance(result.get("memory"), dict) else {}
+    from_memory = _as_reason_code(memory.get("symbol_decision_reason_code"))
+    if from_memory is not None:
+        result["reason_code"] = from_memory
+        return
+
+    if result.get("status") == "BLOCKED" and result.get("error") in LEGACY_SESSION_CLOSED_ERRORS:
+        result["reason_code"] = COMMON_SESSION_CLOSED
+        return
+
+    symbols = result.get("symbol_results")
+    if not isinstance(symbols, dict) or not symbols:
+        return
+    failed_codes: set[str | None] = set()
+    for item in symbols.values():
+        if not isinstance(item, dict) or not _is_unsuccessful(item.get("status")):
+            continue
+        failed_codes.add(_text(item.get("reason_code")))
+    if failed_codes == {COMMON_SESSION_CLOSED}:
+        result["reason_code"] = COMMON_SESSION_CLOSED
 
 
 def _is_unsuccessful(status: object) -> bool:

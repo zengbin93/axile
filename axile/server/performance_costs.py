@@ -102,12 +102,25 @@ def execution_list_payload(payload: dict) -> dict:
     results = mapping(raw.get("symbol_results"))
     compact = {
         key: raw[key]
-        for key in ("status", "task_status", "error", "outcome", "outcome_reason", "msg", "execution_kind")
+        for key in (
+            "status",
+            "task_status",
+            "error",
+            "outcome",
+            "outcome_reason",
+            "reason_code",
+            "msg",
+            "execution_kind",
+        )
         if key in raw
     }
     if isinstance(raw.get("symbol_results"), dict):
         compact["symbol_results"] = {
-            symbol: {key: result[key] for key in ("status", "error", "outcome", "outcome_reason") if key in result}
+            symbol: {
+                key: result[key]
+                for key in ("status", "error", "outcome", "outcome_reason", "reason_code")
+                if key in result
+            }
             for symbol, value in results.items()
             for result in [mapping(value)]
         }
@@ -162,6 +175,7 @@ def project_execution(record) -> tuple[dict, list[dict]]:
                     "error",
                     "outcome",
                     "outcome_reason",
+                    "reason_code",
                     "msg",
                     "execution_kind",
                     "symbol_results",

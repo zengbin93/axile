@@ -294,9 +294,9 @@ def test_engine_blocks_symbol_sessions_without_market_io(monkeypatch: pytest.Mon
     assert output.status is ExecutionStatus.PARTIAL
     assert blocked.status is ExecutionStatus.BLOCKED
     assert blocked.error == "非交易时段"
-    assert blocked.memory["symbol_decision_reason_code"] == "CLOSED"
+    assert blocked.reason_code == "COMMON.SESSION.CLOSED"
     assert blocked.memory == {
-        "symbol_decision_reason_code": TQTradingTimeStatus.CLOSED.value,
+        "symbol_decision_reason_code": "COMMON.SESSION.CLOSED",
         "symbol_decision_reason_family": ExecutionReasonFamily.MARKET_RULE.value,
     }
     assert blocked.sizing is not None
@@ -424,6 +424,7 @@ def test_engine_blocks_all_symbol_sessions_without_execution_io(monkeypatch: pyt
     assert output.error is not None
     assert "2 个品种未执行" in output.error
     assert output.error == "非交易时段，2 个品种未执行"
+    assert output.reason_code == "COMMON.SESSION.CLOSED"
     assert cancel_calls == 0
     for symbol in ("rb2610", "ag2612"):
         result = output.symbol_results[symbol]
@@ -516,7 +517,8 @@ def test_market_gap_blocks_before_symbol_planning(monkeypatch: pytest.MonkeyPatc
         instance.close()
 
     assert output.status is ExecutionStatus.BLOCKED
-    assert output.error == "当前不在交易时间"
+    assert output.error == "非交易时段"
+    assert output.reason_code == "COMMON.SESSION.CLOSED"
     assert output.symbol_results == {}
 
 
