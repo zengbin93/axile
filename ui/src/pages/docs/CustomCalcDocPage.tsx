@@ -50,7 +50,7 @@ export function CustomCalcDocPage() {
   }
 
   return (
-    <div className="min-h-screen bg-bg text-ink-1">
+    <div className="h-full overflow-y-auto bg-bg text-ink-1">
       <header className="border-b border-line">
         <div className="mx-auto flex max-w-[1180px] flex-col gap-5 px-5 py-9 sm:px-8 md:flex-row md:items-end md:justify-between">
           <div className="max-w-[760px]">

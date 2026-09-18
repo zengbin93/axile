@@ -15,7 +15,7 @@ export function AppShell() {
   )
 
   return (
-    <div className="flex h-screen flex-col overflow-hidden bg-bg">
+    <div className="flex h-full flex-col overflow-hidden bg-bg">
       <TopBar navigationTriggerRef={navigationTriggerRef} onOpenNavigation={() => setNavigationOpen(true)} />
       <div className="flex min-h-0 flex-1">
         <AppSidebar

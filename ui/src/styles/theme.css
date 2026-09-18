@@ -128,10 +128,12 @@
 }
 
 @layer base {
+  /* 高度只走 100% 链；锁死根滚动，避免与工作区 overflow-y-auto 叠出双槽。 */
   html,
   body,
   #root {
     height: 100%;
+    overflow: hidden;
   }
 
   body {
