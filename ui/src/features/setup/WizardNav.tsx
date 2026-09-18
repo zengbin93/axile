@@ -2,6 +2,25 @@ import { useState } from 'react'
 import { useNavigate } from '@/components/ui/nav'
 import type { ReactNode } from 'react'
 
+/** 向导页头：kicker / 标题 / 引导语。可单独塞进两列布局的左列。 */
+export function WizardHeading({
+  kicker,
+  title,
+  lead,
+}: {
+  kicker: string
+  title: string
+  lead?: string
+}) {
+  return (
+    <>
+      <div className="mb-1.5 text-xs font-semibold tracking-wide text-accent">{kicker}</div>
+      <div className="text-[23px] font-[680] tracking-tight">{title}</div>
+      {lead ? <div className="mt-1.5 max-w-[560px] text-[15px] text-ink-2">{lead}</div> : null}
+    </>
+  )
+}
+
 /** 向导页容器：统一留白 + kicker/标题/引导语。宽屏统一 1080 自适应，两侧留白适度。 */
 export function WizardPage({
   kicker,
@@ -16,9 +35,7 @@ export function WizardPage({
 }) {
   return (
     <div className="mx-auto max-w-[1728px] px-5 pt-8 pb-6 sm:px-12">
-      <div className="mb-1.5 text-xs font-semibold tracking-wide text-accent">{kicker}</div>
-      <div className="text-[23px] font-[680] tracking-tight">{title}</div>
-      {lead && <div className="mt-1.5 max-w-[560px] text-[15px] text-ink-2">{lead}</div>}
+      <WizardHeading kicker={kicker} title={title} lead={lead} />
       <div className="mt-[18px]">{children}</div>
     </div>
   )

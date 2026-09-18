@@ -2,8 +2,8 @@
  * 定时任务编辑器（向导「定时」步与账户编辑页共用）。
  *
  * 总开关 + 快捷|高级|自定义 + 补发 + 排程预览。
- * ``layout='step'``（默认，向导窄栏）：单栏，预览在底部。
- * ``layout='page'``（账户编辑页宽栏）：两列通高；左列可插入 ``leading``
+ * ``layout='step'``（默认，窄栏）：单栏，预览在底部。
+ * ``layout='page'``（账户编辑页与向导「定时」步）：两列通高；左列可插入 ``leading``
  * （标题 / 当前配置），预览从标题行起与左列顶对齐，条数按右栏高度自适应。
  * 动效与 :component:`AcctTimer` 原实现一致：panel-fade / grid 展开 / Segmented 滑块。
  */
@@ -109,13 +109,15 @@ export interface TimerEditorProps {
   value: TimerEditorState
   onChange: (next: TimerEditorState | ((prev: TimerEditorState) => TimerEditorState)) => void
   /**
-   * 排布上下文。``'step'``（默认）：向导窄栏单栏，预览在底部；
-   * ``'page'``：账户编辑页宽栏，预览为右侧通高列（高度由页面高度链决定、
+   * 排布上下文。``'step'``（默认）：窄栏单栏，预览在底部；
+   * ``'page'``：宽栏，预览为右侧通高列（高度由页面高度链决定、
    * 与左列解耦，两列各自滚动、页面不滚；窄视口自动退回单栏）。
+   * 向导「定时」步与账户编辑页都走 ``'page'``。
    */
   layout?: 'page' | 'step'
   /**
-   * ``layout='page'`` 时插入左列顶部，与预览顶对齐。账户编辑页传入标题和当前配置。
+   * ``layout='page'`` 时插入左列顶部，与预览顶对齐。账户编辑页传入标题和当前配置；
+   * 向导传入 kicker / 标题 / 引导语。
    */
   leading?: ReactNode
 }
@@ -629,8 +631,9 @@ export function TimerEditor({ tradeChannel, scheduleKind, nightSchedule, value, 
   )
 
   if (layout === 'page') {
-    // 高度链：AppShell(h-full) → section(h-full flex-col) → 包装(flex-1 min-h-0)
+    // 高度链：外壳(h-full) → section(h-full flex-col) → 包装(flex-1 min-h-0)
     // → 此处 h-full → grid 单行 minmax(0,1fr)，两列拉伸充满、各自滚动。
+    // 账户编辑页走 AppShell；向导定时步走 WizardLayout 内容列。
     // leading 进左列，预览与标题顶对齐。
     return (
       <div className="min-[1120px]:h-full">

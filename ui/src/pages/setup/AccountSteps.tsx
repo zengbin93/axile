@@ -5,7 +5,7 @@ import { ExecutionTimeoutInput } from '@/features/account/ExecutionTimeoutInput'
 import { executionTimeoutError } from '@/features/account/executionTimeout'
 import { LeverageInput } from '@/features/account/LeverageInput'
 import { leverageError } from '@/features/account/leverage'
-import { WizardPage, WizardNav } from '@/features/setup/WizardNav'
+import { WizardHeading, WizardPage, WizardNav } from '@/features/setup/WizardNav'
 import { Segmented } from '@/components/ui/Segmented'
 import { ConditionalReveal } from '@/components/ui/ConditionalReveal'
 import { Skeleton } from '@/components/ui/Skeleton'
@@ -629,33 +629,52 @@ export function AcctTimer() {
     selectedRuleId: acct.selectedRuleId,
   }
 
+  const heading = (
+    <WizardHeading
+      kicker="账户设置 · 5 / 6"
+      title="什么时候自动执行？"
+      lead="开启后 axile 按下面的节奏自动调仓。时间均为北京时间。"
+    />
+  )
+
+  // 与账户编辑定时页同一套 page 布局：标题进左列，预览从标题通高到导航条。
+  // 宽视口撑高度链、两列各自滚；窄视口退回单列，本层滚动、底栏钉住。
   return (
-    <div className="flex h-full flex-col">
-      <div className="flex-1 overflow-y-auto">
-        <WizardPage kicker="账户设置 · 5 / 6" title="什么时候自动执行？" lead="开启后 axile 按下面的节奏自动调仓。时间均为北京时间。">
+    <div className="flex h-full min-h-0 flex-col min-[1120px]:overflow-hidden">
+      <div className="min-h-0 flex-1 overflow-y-auto min-[1120px]:overflow-hidden">
+        <div className="mx-auto h-full max-w-[1728px] px-5 pt-8 pb-6 sm:px-12 min-[1120px]:flex min-[1120px]:min-h-0 min-[1120px]:flex-col min-[1120px]:pb-4">
           {scheduleKind ? (
-            <TimerEditor
-              tradeChannel={acct.channel}
-              scheduleKind={scheduleKind}
-              nightSchedule={descriptor?.schedule.night}
-              value={timerValue}
-              onChange={(next) => {
-                const v = typeof next === 'function' ? next(timerValue) : next
-                setAcct({
-                  autoOn: v.autoOn,
-                  presetIds: v.presetIds,
-                  nightOn: v.nightOn,
-                  supN: v.supN,
-                  supM: v.supM,
-                  rawCron: v.rawCron,
-                  timerTab: v.timerTab,
-                  scheduleRules: v.scheduleRules,
-                  selectedRuleId: v.selectedRuleId,
-                })
-              }}
-            />
-          ) : <p className="text-[15px] text-ink-2">渠道能力加载中…</p>}
-        </WizardPage>
+            <div className="min-[1120px]:min-h-0 min-[1120px]:flex-1">
+              <TimerEditor
+                tradeChannel={acct.channel}
+                scheduleKind={scheduleKind}
+                nightSchedule={descriptor?.schedule.night}
+                value={timerValue}
+                layout="page"
+                leading={heading}
+                onChange={(next) => {
+                  const v = typeof next === 'function' ? next(timerValue) : next
+                  setAcct({
+                    autoOn: v.autoOn,
+                    presetIds: v.presetIds,
+                    nightOn: v.nightOn,
+                    supN: v.supN,
+                    supM: v.supM,
+                    rawCron: v.rawCron,
+                    timerTab: v.timerTab,
+                    scheduleRules: v.scheduleRules,
+                    selectedRuleId: v.selectedRuleId,
+                  })
+                }}
+              />
+            </div>
+          ) : (
+            <>
+              {heading}
+              <p className="mt-[18px] text-[15px] text-ink-2">渠道能力加载中…</p>
+            </>
+          )}
+        </div>
       </div>
       <WizardNav prevTo="/setup/acct/trade" nextTo="/setup/acct/confirm" nextDisabled={!scheduleKind} />
     </div>
