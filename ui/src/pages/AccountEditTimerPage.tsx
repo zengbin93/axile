@@ -1,7 +1,8 @@
 /**
  * 账户定时子页 /accounts/:id/edit/timer。
  *
- * 完整 :component:`TimerEditor`；保存只 PATCH ``cron_expr``，保存与取消都不离开本页。
+ * 完整 :component:`TimerEditor`；标题与当前配置经 ``leading`` 进入左列，预览从标题通高。
+ * 保存只 PATCH ``cron_expr``，保存与取消都不离开本页。
  */
 
 import { useCallback, useEffect, useState } from 'react'
@@ -111,21 +112,25 @@ export function AccountEditTimerPage() {
   }
 
   // 宽视口下撑起高度链（h-full → flex-1 min-h-0），让 TimerEditor 的预览右列通高；
+  // 标题 / 当前配置经 leading 进左列，预览与标题顶对齐。
   // EditSaveBar 自己按实际高度占位，窄视口保持自然流。
   return (
     <section className="min-[1120px]:flex min-[1120px]:h-full min-[1120px]:flex-col">
-      {title}
-      <EditSynopsis note="时间均为北京时间；保存只更新自动执行计划，不改启停状态。">
-        {timerSummary}
-      </EditSynopsis>
-
-      <div className="mt-6 min-[1120px]:min-h-0 min-[1120px]:flex-1">
+      <div className="min-[1120px]:min-h-0 min-[1120px]:flex-1">
         <TimerEditor
           tradeChannel={acc.trade_channel}
           scheduleKind={scheduleKind}
           nightSchedule={descriptor.schedule.night}
           value={timer}
           layout="page"
+          leading={(
+            <>
+              {title}
+              <EditSynopsis note="时间均为北京时间；保存只更新自动执行计划，不改启停状态。">
+                {timerSummary}
+              </EditSynopsis>
+            </>
+          )}
           onChange={(next) =>
             { setSaveError(null); setTimer((prev) => (typeof next === 'function' ? next(prev as TimerEditorState) : next)) }
           }

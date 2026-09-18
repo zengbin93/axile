@@ -3,8 +3,8 @@
  *
  * 总开关 + 快捷|高级|自定义 + 补发 + 排程预览。
  * ``layout='step'``（默认，向导窄栏）：单栏，预览在底部。
- * ``layout='page'``（账户编辑页宽栏）：页面级两列，预览为右侧通高列，
- * 预览条数按右栏实际可视高度自适应。
+ * ``layout='page'``（账户编辑页宽栏）：两列通高；左列可插入 ``leading``
+ * （标题 / 当前配置），预览从标题行起与左列顶对齐，条数按右栏高度自适应。
  * 动效与 :component:`AcctTimer` 原实现一致：panel-fade / grid 展开 / Segmented 滑块。
  */
 
@@ -111,9 +111,13 @@ export interface TimerEditorProps {
   /**
    * 排布上下文。``'step'``（默认）：向导窄栏单栏，预览在底部；
    * ``'page'``：账户编辑页宽栏，预览为右侧通高列（高度由页面高度链决定、
-   * 与编辑列解耦，两列各自滚动、页面不滚；窄视口自动退回单栏）。
+   * 与左列解耦，两列各自滚动、页面不滚；窄视口自动退回单栏）。
    */
   layout?: 'page' | 'step'
+  /**
+   * ``layout='page'`` 时插入左列顶部，与预览顶对齐。账户编辑页传入标题和当前配置。
+   */
+  leading?: ReactNode
 }
 
 /**
@@ -143,7 +147,7 @@ function calendarSummary(preview: SchedulePreview | null): { text: string; warni
   }
 }
 
-export function TimerEditor({ tradeChannel, scheduleKind, nightSchedule, value, onChange, layout = 'step' }: TimerEditorProps) {
+export function TimerEditor({ tradeChannel, scheduleKind, nightSchedule, value, onChange, layout = 'step', leading }: TimerEditorProps) {
   const v = value
   const tabFade = useRemountFade(v.timerTab)
   const [schedulePreview, setSchedulePreview] = useState<SchedulePreview | null>(null)
@@ -582,9 +586,9 @@ export function TimerEditor({ tradeChannel, scheduleKind, nightSchedule, value, 
     <p className="text-[14px] text-ink-3">选择有效节奏后显示。</p>
   )
 
-  // page 布局：预览是页面级右列——与编辑流同起于开关行，高度由外层高度链（视口）
-  // 决定、与左列内容完全解耦，两列各自内部滚动，页面本身不滚。常挂载：关自动调仓
-  // 时显示提示而非整列消失，避免开关切换引发布局跳动。step 布局：底部通栏。
+  // page 布局：预览是右列，与左列（leading + 开关 + 编辑）同起于顶部，高度由外层
+  // 高度链决定、与左列内容解耦，两列各自内部滚动，页面本身不滚。常挂载：关自动
+  // 调仓时显示提示而非整列消失，避免开关切换引发布局跳动。step 布局：底部通栏。
   const previewPanel = layout === 'page' ? (
     <aside className="flex flex-col rounded-[14px] border border-line bg-surface px-4 py-3.5 min-[1120px]:min-h-0">
       <div className="flex-none">{previewHeader}</div>
@@ -627,12 +631,16 @@ export function TimerEditor({ tradeChannel, scheduleKind, nightSchedule, value, 
   if (layout === 'page') {
     // 高度链：AppShell(h-full) → section(h-full flex-col) → 包装(flex-1 min-h-0)
     // → 此处 h-full → grid 单行 minmax(0,1fr)，两列拉伸充满、各自滚动。
+    // leading 进左列，预览与标题顶对齐。
     return (
       <div className="min-[1120px]:h-full">
         <div className="grid grid-cols-1 gap-6 min-[1120px]:h-full min-[1120px]:grid-cols-[minmax(0,1fr)_300px] min-[1120px]:grid-rows-[minmax(0,1fr)]">
-          <div className="min-w-0 space-y-5 min-[1120px]:min-h-0 min-[1120px]:overflow-y-auto">
-            {switchRow}
-            {autoOnCollapse(<div className="space-y-5">{editorColumn}</div>)}
+          <div className="min-w-0 min-[1120px]:min-h-0 min-[1120px]:overflow-y-auto">
+            {leading ? <div className="mb-6">{leading}</div> : null}
+            <div className="space-y-5">
+              {switchRow}
+              {autoOnCollapse(<div className="space-y-5">{editorColumn}</div>)}
+            </div>
           </div>
           {previewPanel}
         </div>
