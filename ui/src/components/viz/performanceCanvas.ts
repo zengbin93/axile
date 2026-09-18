@@ -3,10 +3,12 @@ import { axisPercent, niceReturnAxis } from '@/features/history/performance'
 import { amount, shanghaiTime, type CostSummary } from '@/features/history/costs'
 import { pointTime, timeLabel, type ChartSelection, type Viewport } from '@/features/history/chartModel'
 import type { TimeScale } from '@/features/history/timeScale'
-import { closedDaysBetween } from '@/features/history/timeScale'
+import { closedDaysBetween, closedRangeLabel } from '@/features/history/timeScale'
 
 export const CHART_HEIGHT = 600
 export const PLOT = { left: 12, right: 78, top: 16, bottom: 379, binding: 408, bindingHeight: 24, costTop: 464, costBottom: 504, navTop: 548, navBottom: 582 }
+const CALENDAR_MARK_Y = PLOT.costBottom + 12
+const TIME_AXIS_Y = PLOT.costBottom + 31
 export type SeriesKey = 'account_return' | 'portfolio_return' | 'account_daily_return' | 'portfolio_daily_return'
 export interface CanvasTheme { bg: string; surface: string; ink: string; muted: string; line: string; accent: string; warn: string; fill: string; font: string }
 export interface ChartScene {
@@ -171,7 +173,7 @@ function drawTimeAxis(ctx: CanvasRenderingContext2D, scene: ChartScene, exclude?
     ctx.textAlign = i === 0 ? 'left' : i === count ? 'right' : 'center'
     const textWidth = ctx.measureText(label).width
     const left = x - (i === 0 ? 0 : i === count ? textWidth : textWidth / 2)
-    if (!exclude || left + textWidth < exclude.left || left > exclude.right) ctx.fillText(label, x, PLOT.costBottom + 25)
+    if (!exclude || left + textWidth < exclude.left || left > exclude.right) ctx.fillText(label, x, TIME_AXIS_Y)
   }
   ctx.textAlign = 'left'
 }
@@ -237,10 +239,15 @@ function drawCalendarMarks(ctx: CanvasRenderingContext2D, scene: ChartScene) {
     if (!days) continue
     const left = xPosition(scene.times[index], scene.width, scene.viewport, scene.scale)
     const right = xPosition(scene.times[index + 1], scene.width, scene.viewport, scene.scale)
-    const x = (left + right) / 2
-    if (x < PLOT.left || x > plotRight(scene.width)) continue
-    ctx.fillStyle = scene.theme.muted; ctx.textAlign = 'center'
-    ctx.fillText(right - left >= 76 ? `// 休市 ${days} 日` : '//', x, PLOT.costBottom + 25)
+    const visibleLeft = Math.max(PLOT.left, left), visibleRight = Math.min(plotRight(scene.width), right)
+    const available = visibleRight - visibleLeft
+    if (available <= 4) continue
+    ctx.fillStyle = scene.theme.fill; ctx.globalAlpha = 0.55
+    ctx.fillRect(visibleLeft + 2, CALENDAR_MARK_Y - 10, Math.max(0, available - 4), 14)
+    ctx.globalAlpha = 1; ctx.fillStyle = scene.theme.muted; ctx.textAlign = 'center'
+    const full = `休市 ${days} 日`
+    const label = closedRangeLabel(available, days, ctx.measureText(full).width, ctx.measureText('休市').width)
+    if (label) ctx.fillText(label, (visibleLeft + visibleRight) / 2, CALENDAR_MARK_Y)
   }
   ctx.textAlign = 'left'
 }
@@ -281,8 +288,8 @@ export function drawOverlay(canvas: HTMLCanvasElement, scene: ChartScene, hover:
     ctx.fillStyle = theme.ink; ctx.fillText(axisPercent(value, axis.step), right + 8, cursor.y + 4)
     const label = timeLabel(cursor.time), labelWidth = ctx.measureText(label).width + 12
     const labelX = Math.max(PLOT.left, Math.min(right - labelWidth, x - labelWidth / 2))
-    ctx.fillStyle = theme.ink; ctx.fillRect(labelX, PLOT.costBottom + 10, labelWidth, 22)
-    ctx.fillStyle = theme.bg; ctx.fillText(label, labelX + 6, PLOT.costBottom + 25)
+    ctx.fillStyle = theme.ink; ctx.fillRect(labelX, PLOT.costBottom + 18, labelWidth, 22)
+    ctx.fillStyle = theme.bg; ctx.fillText(label, labelX + 6, TIME_AXIS_Y + 2)
     return
   }
   if (hover == null || !data.points[hover] || selection?.kind === 'execution') return
@@ -302,10 +309,10 @@ export function drawOverlay(canvas: HTMLCanvasElement, scene: ChartScene, hover:
   const label = timeLabel(times[hover])
   const labelWidth = ctx.measureText(label).width + 12
   const labelX = Math.max(PLOT.left, Math.min(right - labelWidth, x - labelWidth / 2))
-  ctx.fillStyle = theme.bg; ctx.fillRect(PLOT.left, PLOT.costBottom + 9, right - PLOT.left, 25)
+  ctx.fillStyle = theme.bg; ctx.fillRect(PLOT.left, PLOT.costBottom + 5, right - PLOT.left, PLOT.navTop - PLOT.costBottom - 7)
   drawTimeAxis(ctx, scene, { left: labelX - 8, right: labelX + labelWidth + 8 })
-  ctx.fillStyle = theme.ink; ctx.fillRect(labelX, PLOT.costBottom + 10, labelWidth, 22)
-  ctx.fillStyle = theme.bg; ctx.fillText(label, labelX + 6, PLOT.costBottom + 25)
+  ctx.fillStyle = theme.ink; ctx.fillRect(labelX, PLOT.costBottom + 18, labelWidth, 22)
+  ctx.fillStyle = theme.bg; ctx.fillText(label, labelX + 6, TIME_AXIS_Y + 2)
 }
 
 export function bindingAt(data: AccountPerformance, time: number) {

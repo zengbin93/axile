@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { closedDaysBetween, createTimeScale } from './timeScale'
+import { closedDaysBetween, closedRangeLabel, createTimeScale } from './timeScale'
 
 describe('performance time scale', () => {
   test('natural scale is identity', () => {
@@ -20,5 +20,11 @@ describe('performance time scale', () => {
     const end = new Date('2026-09-21T09:00:00+08:00').getTime()
     expect(closedDaysBetween(start, end, [{ start: '2026-09-19', end: '2026-09-20' }])).toBe(2)
     expect(closedDaysBetween(start, end, [{ start: '2026-09-18', end: '2026-09-20' }])).toBe(2)
+  })
+
+  test('closed range labels degrade without symbolic slashes', () => {
+    expect(closedRangeLabel(90, 7, 52, 22)).toBe('休市 7 日')
+    expect(closedRangeLabel(40, 7, 52, 22)).toBe('休市')
+    expect(closedRangeLabel(20, 7, 52, 22)).toBe('')
   })
 })

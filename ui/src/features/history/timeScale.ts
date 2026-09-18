@@ -50,6 +50,12 @@ export function closedDaysBetween(start: number, end: number, ranges: CalendarRa
   return count
 }
 
+export function closedRangeLabel(available: number, days: number, fullWidth: number, shortWidth: number): string {
+  if (available >= fullWidth + 16) return `休市 ${days} 日`
+  if (available >= shortWidth + 12) return '休市'
+  return ''
+}
+
 export function observationAnchors(points: PerformancePoint[]): number[] {
   return points.map(point => new Date(`${point.observed_at ?? point.date}${/[zZ]|[+-]\d\d:\d\d$/.test(point.observed_at ?? point.date) ? '' : '+08:00'}`).getTime())
 }
