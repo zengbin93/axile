@@ -4,6 +4,7 @@ import type { AlgorithmRef } from '@/features/setup/algorithms'
 import { getChannelDescriptor } from '@/stores/channels'
 import type { TradeChannel } from '@/types/api'
 import {
+  defaultNightOn,
   defaultScheduleRule,
   DEFAULT_PRESET,
   type ScheduleKind,
@@ -59,7 +60,7 @@ export function initialTimerForSchedule(schedule: ScheduleKind) {
   return {
     autoOn: true,
     presetIds: [DEFAULT_PRESET[schedule]] as string[],
-    nightOn: false,
+    nightOn: defaultNightOn(schedule),
     supN: 2,
     supM: 1,
     rawCron: '',

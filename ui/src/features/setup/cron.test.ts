@@ -4,6 +4,8 @@ import {
   buildCronList,
   compileCustom,
   compileScheduleRule,
+  defaultNightOn,
+  defaultTimerEditorState,
   describeCron,
   describeRule,
   makeEmptySlot,
@@ -109,6 +111,19 @@ describe('期货渠道夜盘快捷节奏', () => {
     expect(state.presetIds).toEqual(['m60'])
     expect(state.nightOn).toBe(true)
     expect(timerStateToCronExpr('cn_futures', state, night)).toBe(expr)
+  })
+
+  it('期货草稿默认开夜盘，A 股 / 连续交易默认关', () => {
+    expect(defaultNightOn('cn_futures')).toBe(true)
+    expect(defaultNightOn('cn_stock')).toBe(false)
+    expect(defaultNightOn('continuous')).toBe(false)
+    expect(defaultTimerEditorState('cn_futures').nightOn).toBe(true)
+    expect(defaultTimerEditorState('cn_stock').nightOn).toBe(false)
+  })
+
+  it('空 cron 期货草稿带夜盘，已有日盘-only 表达式仍关', () => {
+    expect(parseTimerIntent('cn_futures', '', night).nightOn).toBe(true)
+    expect(parseTimerIntent('cn_futures', '55 14 * * *', night).nightOn).toBe(false)
   })
 })
 

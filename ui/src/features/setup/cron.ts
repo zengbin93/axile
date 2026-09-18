@@ -36,6 +36,11 @@ export const DEFAULT_PRESET: Record<ScheduleKind, string> = {
   cn_stock: 'open',
 }
 
+/** 期货快捷节奏默认并入夜盘；A 股 / 连续交易没有夜盘开关。 */
+export function defaultNightOn(market: ScheduleKind): boolean {
+  return market === 'cn_futures'
+}
+
 /** 渠道市场钟（左闭右开）。空数组 = 连续交易。 */
 export interface SessionWindow {
   start: string
@@ -744,7 +749,7 @@ export function defaultTimerEditorState(market: ScheduleKind): TimerEditorState 
   return {
     autoOn: false,
     presetIds: [DEFAULT_PRESET[market]],
-    nightOn: false,
+    nightOn: defaultNightOn(market),
     supN: 0,
     supM: 1,
     rawCron: '',
