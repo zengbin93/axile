@@ -21,8 +21,16 @@ from axile.server.api.deps import get_db
 from axile.server.api.routes.account_performance import router
 from axile.server.db.models import AccountCreate, AccountPublic, AccountUpdate, ExecuteRecord, PortfolioAccount
 from axile.server.db.models.performance import PerformanceSettings
-from axile.server.performance import Observation, build_wbt_input, calculate_performance, close_before, observation
+from axile.server.performance import (
+    Observation,
+    build_wbt_input,
+    calculate_performance,
+    close_before,
+    observation,
+    performance_calendar,
+)
 from axile.server.performance_analysis import AnalysisManager
+from axile.server.trading_calendar import CalendarDayDecision, CalendarDecisionStatus
 from tests.unit.server._execution_test_support import build_account
 from tests.unit.server.test_initial_migration import _MIGRATIONS_DIR, _load_migration
 
@@ -43,6 +51,44 @@ def run(items, mode="ts", fee=0, range_key="all"):
     return calculate_performance(
         items, PerformanceSettings(backtest_weight_type=mode, backtest_fee_rate=fee), range_key
     )
+
+
+def test_performance_calendar_merges_closed_days_and_preserves_unknown(monkeypatch):
+    closed = {"2026-01-02", "2026-01-03", "2026-01-05"}
+    unknown = {"2026-01-04"}
+
+    def evaluate(channel, day):
+        status = (
+            CalendarDecisionStatus.UNAVAILABLE
+            if day.isoformat() in unknown
+            else CalendarDecisionStatus.AVAILABLE_CLOSED
+            if day.isoformat() in closed
+            else CalendarDecisionStatus.AVAILABLE_OPEN
+        )
+        return CalendarDayDecision(
+            channel=str(channel), day=day, status=status, calendar_id="china", label="中国交易日"
+        )
+
+    monkeypatch.setattr("axile.server.performance.evaluate_channel_calendar_day", evaluate)
+    result = performance_calendar("ctp", "2026-01-01T09:00:00", "2026-01-05T16:00:00")
+    assert result.status == "partial"
+    assert [(item.start, item.end) for item in result.closed_ranges] == [
+        ("2026-01-02", "2026-01-03"),
+        ("2026-01-05", "2026-01-05"),
+    ]
+    assert [(item.start, item.end) for item in result.unavailable_ranges] == [("2026-01-04", "2026-01-04")]
+
+
+def test_performance_calendar_not_required(monkeypatch):
+    monkeypatch.setattr(
+        "axile.server.performance.evaluate_channel_calendar_day",
+        lambda channel, day: CalendarDayDecision(
+            channel=str(channel), day=day, status=CalendarDecisionStatus.NOT_REQUIRED
+        ),
+    )
+    result = performance_calendar("always-open", "2026-01-01", "2026-01-03")
+    assert result.status == "not_required"
+    assert result.closed_ranges == []
 
 
 def test_close_before_uses_last_day_end_before_observation():

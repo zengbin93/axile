@@ -47,7 +47,7 @@ export function ChartTradingOverlay({ scene, rows, accountId, currency, units, c
   const pinned = selection?.kind === 'execution' ? rows.find(row => row.record.id === selection.recordId) ?? null : null
   const row = pinned ?? (cursor ? holdingAt(rows, cursor.time) : null)
   const visible = !!pinned || !!cursor
-  const anchor = pinned && selection?.kind === 'execution' ? { x: xPosition(selection.time, scene.width, scene.viewport), y: 70 } : cursor ?? { x: 20, y: 20 }
+  const anchor = pinned && selection?.kind === 'execution' ? { x: xPosition(selection.time, scene.width, scene.viewport, scene.scale), y: 70 } : cursor ?? { x: 20, y: 20 }
   const width = Math.min(370, scene.width - 16)
   const left = Math.max(8, Math.min(scene.width - width - 8, anchor.x > scene.width / 2 ? anchor.x - width - 20 : anchor.x + 20))
   const preview = pinned?.transactions ?? []

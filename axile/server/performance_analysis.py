@@ -22,7 +22,7 @@ from axile.server.performance import calculate_performance, local_time, observat
 from axile.server.performance_costs import SHANGHAI, daily_costs, project_execution, summarize, timestamp
 
 # PARTIAL 只描述执行未全部完成；重建旧缓存中的「未到位」事件文案。
-LOGIC_VERSION = "10"
+LOGIC_VERSION = "11"
 ENGINE_VERSION = version("wbt")
 RETRY_DELAYS = (5, 30, 120)
 
@@ -205,7 +205,9 @@ def _events(records, bindings, skips) -> list[dict]:
     return sorted(events, key=lambda event: timestamp(event["time"]), reverse=True)
 
 
-def compute_batch(records, targets, bindings, skips, settings: PerformanceSettings) -> tuple[dict, list, list]:
+def compute_batch(
+    records, targets, bindings, skips, settings: PerformanceSettings, trade_channel: str | None = None
+) -> tuple[dict, list, list]:
     """Read history once, independently rebase each range, and share daily/cumulative results."""
     fallback = {item.execution_id: item.normalized_weights for item in targets if item.execution_id}
     observations = [observation(record, fallback.get(record.execution_id or "")) for record in records]
@@ -242,7 +244,7 @@ def compute_batch(records, targets, bindings, skips, settings: PerformanceSettin
     events = _events(records, bindings, skips)
     ranges = {}
     for range_key in ("30", "90", "all"):
-        result = calculate_performance(observations, settings, range_key)
+        result = calculate_performance(observations, settings, range_key, trade_channel=trade_channel)
         start, end = timestamp(result.baseline) if result.baseline else 0, timestamp(result.end) if result.end else -1
         result.bindings = [
             PerformanceBinding(time=local_time(binding.created_at).isoformat(), portfolio_id=binding.portfolio_id)
@@ -365,7 +367,7 @@ class AnalysisManager:
                 history.append(
                     (await session.execute(sa.select(model).where(model.account_id == account_id))).scalars().all()
                 )
-            return (*history, settings)
+            return (*history, settings, str(account.trade_channel))
 
     async def run_once(self) -> bool:
         """Claim one durable job, compute outside DB transactions, then compare-and-publish."""
@@ -377,9 +379,11 @@ class AnalysisManager:
                 inputs = await self._load(row["account_id"])
                 if inputs is None:
                     return True
-                records, targets, bindings, skips, settings = inputs
-                result = await run_in_threadpool(compute_batch, records, targets, bindings, skips, settings)
-                await self._publish(row, inputs[-1], result)
+                records, targets, bindings, skips, settings, trade_channel = inputs
+                result = await run_in_threadpool(
+                    compute_batch, records, targets, bindings, skips, settings, trade_channel
+                )
+                await self._publish(row, settings, result)
             except Exception:
                 logger.exception("Performance calculation failed for account {}", row["account_id"])
                 await self._fail(row)
