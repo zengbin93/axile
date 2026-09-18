@@ -31,7 +31,7 @@ from axile.channels.contracts import (
 from axile.channels.schedule_clock import (
     CN_FUTURES_WINDOWS,
     CN_STOCK_WINDOWS,
-    last_tradable_hhmm,
+    close_lead_hhmm,
     overnight_windows,
     rhythm_hhmm,
 )
@@ -52,7 +52,7 @@ _CN_FUTURES_NIGHT_WINDOWS = overnight_windows(CN_FUTURES_WINDOWS)
 _CHINA_FUTURES_NIGHT = ChannelNightSchedule(
     label="夜盘",
     range_label="21:00–次日 02:30",
-    close=(last_tradable_hhmm(*_CN_FUTURES_NIGHT_WINDOWS[0]),),
+    close=(close_lead_hhmm(*_CN_FUTURES_NIGHT_WINDOWS[0]),),
     m15=tuple(rhythm_hhmm(_CN_FUTURES_NIGHT_WINDOWS, 15)),
     m60=tuple(rhythm_hhmm(_CN_FUTURES_NIGHT_WINDOWS, 60)),
 )

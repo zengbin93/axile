@@ -119,8 +119,8 @@ def test_builtin_channels_have_stable_order_and_descriptor_shape() -> None:
     assert [plugin.descriptor.schedule.kind for plugin in plugins] == ["cn_futures", "cn_stock", "cn_futures"]
     assert plugins[0].descriptor.schedule.night == plugins[2].descriptor.schedule.night
     assert plugins[0].descriptor.schedule.night is not None
-    assert plugins[0].descriptor.schedule.night.close == ("02:29",)
-    assert plugins[0].descriptor.schedule.night.m15[0] == "21:15"
+    assert plugins[0].descriptor.schedule.night.close == ("02:25",)
+    assert plugins[0].descriptor.schedule.night.m15[0] == "21:00"
     assert plugins[0].descriptor.schedule.night.m15[-1] == "02:29"
     assert [window.start for window in plugins[0].descriptor.schedule.windows] == ["09:00", "13:00", "21:00"]
     assert [window.end for window in plugins[1].descriptor.schedule.windows] == ["11:30", "15:00"]

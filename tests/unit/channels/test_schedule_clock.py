@@ -9,6 +9,7 @@ from axile.channels.schedule_clock import (
     CN_FUTURES_WINDOWS,
     CN_STOCK_WINDOWS,
     bar_windows,
+    close_lead_hhmm,
     day_windows,
     is_within_schedule_windows,
     last_tradable_hhmm,
@@ -58,20 +59,23 @@ def test_empty_windows_are_always_open() -> None:
 
 def test_stock_m15_clamps_session_close_and_keeps_lunch_out() -> None:
     times = rhythm_hhmm(day_windows(CN_STOCK_WINDOWS), 15)
+    assert times[0] == "09:30"
     assert "11:15" in times
     assert "11:29" in times
     assert "11:30" not in times
+    assert "13:00" in times
     assert "13:15" in times
     assert "14:59" in times
     assert "15:00" not in times
 
 
-def test_futures_m15_adds_index_afternoon_open_and_keeps_1500() -> None:
+def test_futures_m15_fires_at_session_open() -> None:
     bars = bar_windows("cn_futures", day_windows(CN_FUTURES_WINDOWS))
     times = rhythm_hhmm(bars, 15, clock_windows=day_windows(CN_FUTURES_WINDOWS))
-    assert times[:3] == ["09:15", "09:30", "09:45"]
+    assert times[:4] == ["09:00", "09:15", "09:30", "09:45"]
     assert "11:29" in times
     assert "11:30" not in times
+    assert "13:00" in times
     assert "13:15" in times
     assert "13:30" in times
     assert "15:00" in times
@@ -86,12 +90,16 @@ def test_replenish_offsets_do_not_cross_lunch() -> None:
     assert "11:33" not in times
 
 
-def test_stock_m120_uses_last_open_minute() -> None:
-    assert rhythm_hhmm(day_windows(CN_STOCK_WINDOWS), 120) == ["11:29", "14:59"]
+def test_stock_m120_uses_open_and_last_open_minute() -> None:
+    assert rhythm_hhmm(day_windows(CN_STOCK_WINDOWS), 120) == ["09:30", "11:29", "13:00", "14:59"]
 
 
 def test_night_close_is_last_open_minute() -> None:
     night = overnight_windows(CN_FUTURES_WINDOWS)
     assert last_tradable_hhmm(*night[0]) == "02:29"
+    assert close_lead_hhmm("13:00", "15:00") == "14:55"
+    assert close_lead_hhmm(*night[0]) == "02:25"
+    assert rhythm_hhmm(night, 15)[0] == "21:00"
     assert rhythm_hhmm(night, 15)[-1] == "02:29"
+    assert rhythm_hhmm(night, 60)[0] == "21:00"
     assert "02:30" not in rhythm_hhmm(night, 60)

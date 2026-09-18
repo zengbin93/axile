@@ -66,17 +66,19 @@ describe('compileCustom · 时段市场按锚点落点', () => {
     expect(compileCustom('cn_stock', 'd1', 'close', 0, 0)).toEqual(['50 14 * * *'])
   })
 
-  it('CTP 日线 close=15:00', () => {
-    expect(compileCustom('cn_futures', 'd1', 'close', 0, 0)).toEqual(['0 15 * * *'])
+  it('CTP 日线 close=14:55', () => {
+    expect(compileCustom('cn_futures', 'd1', 'close', 0, 0)).toEqual(['55 14 * * *'])
   })
 
   it('m240 与日线同锚点', () => {
     expect(compileCustom('cn_stock', 'm240', 'close', 0, 0)).toEqual(['50 14 * * *'])
   })
 
-  it('A股 m120 落在可报单最后一分钟，不含 11:30/15:00', () => {
+  it('A股 m120 开盘打一枪，收盘钳到可报单最后一分钟', () => {
     expect(compileCustom('cn_stock', 'm120', 'open', 0, 0)).toEqual([
+      '0 13 * * *',
       '29 11 * * *',
+      '30 9 * * *',
       '59 14 * * *',
     ])
   })
@@ -92,9 +94,9 @@ describe('期货渠道夜盘快捷节奏', () => {
   }
 
   it('关闭时保持既有日盘表达式，开启时合并渠道夜盘时点', () => {
-    expect(buildCronList('cn_futures', ['close'], 0, 1, night, false)).toEqual(['0 15 * * *'])
+    expect(buildCronList('cn_futures', ['close'], 0, 1, night, false)).toEqual(['55 14 * * *'])
     expect(buildCronList('cn_futures', ['close'], 0, 1, night, true)).toEqual([
-      '0 15 * * *',
+      '55 14 * * *',
       '30 2 * * *',
     ])
   })
@@ -191,6 +193,11 @@ describe('buildCronList · 补发放大偏移', () => {
     expect(expr).not.toContain('30 11')
     expect(expr).not.toContain('31 11')
     expect(expr).not.toContain('0 15')
+  })
+
+  it('期货 15 分下午从 13:00 开盘打一枪', () => {
+    const lines = buildCronList('cn_futures', ['m15'], 0, 0)
+    expect(lines.some((line) => line.startsWith('0 ') && /\b13\b/.test(line))).toBe(true)
   })
 })
 

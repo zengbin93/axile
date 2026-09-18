@@ -111,6 +111,15 @@ def last_tradable_hhmm(start: str, end: str) -> str:
     return _from_minutes(_as_minutes(begin) + span - 1)
 
 
+def close_lead_hhmm(start: str, end: str, lead_minutes: int = 5) -> str:
+    """收盘前 ``lead_minutes`` 分钟，且仍落在窗内."""
+    if lead_minutes <= 0:
+        raise ValueError("lead_minutes 必须为正")
+    begin = parse_hhmm(start)
+    span = window_span_minutes(begin, parse_hhmm(end))
+    return _from_minutes(_as_minutes(begin) + max(0, span - lead_minutes))
+
+
 def hhmm_in_windows(label: str, windows: Sequence[ClockWindow]) -> bool:
     """判断一个 ``HH:MM`` 是否落在可报单窗内."""
     if not windows:
@@ -128,7 +137,7 @@ def rhythm_hhmm(
 ) -> list[str]:
     """按频率把窗口切成可报单时刻.
 
-    每个窗口从开盘起每 ``freq_minutes`` 一格。格点必须市场钟仍开。
+    每个窗口开盘先打一枪，再每 ``freq_minutes`` 一格。格点必须市场钟仍开。
     频率打在 bar 窗右端点时：若市场钟在该时刻仍开则保留端点（期货 15:00），
     否则钳到前一分钟（11:29 / 14:59）。补发越出市场钟则丢弃。
     """
@@ -141,7 +150,7 @@ def rhythm_hhmm(
         begin = parse_hhmm(start_text)
         span = window_span_minutes(begin, parse_hhmm(end_text))
         bases: list[int] = []
-        step = freq_minutes
+        step = 0
         while step < span:
             bases.append(step)
             step += freq_minutes
@@ -166,6 +175,7 @@ __all__ = [
     "CN_STOCK_WINDOWS",
     "ClockWindow",
     "bar_windows",
+    "close_lead_hhmm",
     "day_windows",
     "hhmm_in_windows",
     "is_overnight_window",

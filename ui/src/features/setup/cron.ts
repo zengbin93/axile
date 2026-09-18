@@ -2,6 +2,7 @@
  * 定时任务 → crontab 编译（从原型移植为纯函数）。
  *
  * 第一性原理：执行时刻 = 账户节奏 ∩ 渠道市场钟（左闭右开可报单窗）。
+ * 每段开盘先打一枪，再按频率走；收盘点不能下单则钳到最后一分钟。
  * 前台只给频率/补发，时刻从市场钟推出来再编成 crontab（北京时间）。
  * 多条规则用 ``|`` 拼接（后端 `parse_cron_expr` 支持）。
  */
@@ -60,7 +61,7 @@ const SESSION_OPEN: Record<Exclude<ScheduleKind, 'continuous'>, string> = {
 }
 const SESSION_CLOSE: Record<Exclude<ScheduleKind, 'continuous'>, string> = {
   cn_stock: '14:50',
-  cn_futures: '15:00',
+  cn_futures: '14:55',
 }
 
 function parseHm(value: string): number {
@@ -107,7 +108,7 @@ function rhythmTimes(windows: SessionWindow[], freq: number, clock: SessionWindo
     const begin = parseHm(window.start)
     const span = spanMinutes(window)
     const bases: number[] = []
-    let step = freq
+    let step = 0
     while (step < span) {
       bases.push(step)
       step += freq
@@ -199,7 +200,7 @@ export const PRESETS: Record<ScheduleKind, Preset[]> = {
     { id: 'm60', label: '盘中每 60 分', build: (o) => timesToCron(sessionTimes('cn_stock', 60), '*', o, CLOCK_WINDOWS.cn_stock) },
   ],
   cn_futures: [
-    { id: 'close', label: '日盘收盘', sub: '15:00', build: (o) => timesToCron([SESSION_CLOSE.cn_futures], '*', o, CLOCK_WINDOWS.cn_futures) },
+    { id: 'close', label: '日盘收盘', sub: '14:55', build: (o) => timesToCron([SESSION_CLOSE.cn_futures], '*', o, CLOCK_WINDOWS.cn_futures) },
     { id: 'm15', label: '日盘每 15 分', build: (o) => timesToCron(sessionTimes('cn_futures', 15), '*', o, CLOCK_WINDOWS.cn_futures) },
     { id: 'm60', label: '日盘每 60 分', build: (o) => timesToCron(sessionTimes('cn_futures', 60), '*', o, CLOCK_WINDOWS.cn_futures) },
   ],
@@ -257,7 +258,7 @@ export function compileCustom(
     {
       id: '_',
       freq,
-      time: freq === 'd1' ? (market === 'continuous' ? '08:00' : anchor === 'close' ? (market === 'cn_stock' ? '14:50' : '15:00') : market === 'cn_stock' ? '09:30' : '09:00') : '00:00',
+      time: freq === 'd1' ? (market === 'continuous' ? '08:00' : anchor === 'close' ? SESSION_CLOSE[market as Exclude<ScheduleKind, 'continuous'>] : SESSION_OPEN[market as Exclude<ScheduleKind, 'continuous'>]) : '00:00',
       days: [],
       anchor,
       draft: false,
@@ -335,7 +336,7 @@ export function defaultScheduleRule(market: ScheduleKind): ScheduleRule {
   if (market === 'cn_stock') {
     return { id: newRuleId(), freq: 'd1', time: '09:30', days: [], anchor: 'open', draft: false }
   }
-  return { id: newRuleId(), freq: 'd1', time: '15:00', days: [], anchor: 'close', draft: false }
+  return { id: newRuleId(), freq: 'd1', time: SESSION_CLOSE.cn_futures, days: [], anchor: 'close', draft: false }
 }
 
 /** 由快捷预设 id 展开为一条高级规则。 */
@@ -355,7 +356,7 @@ export function ruleFromPreset(market: ScheduleKind, presetId: string): Schedule
   }
   if (presetId === 'm15') return { ...base, id: newRuleId(), freq: 'm15', time: '00:00' }
   if (presetId === 'm60') return { ...base, id: newRuleId(), freq: 'm60', time: '00:00' }
-  return { ...base, id: newRuleId(), freq: 'd1', time: '15:00', anchor: 'close' }
+  return { ...base, id: newRuleId(), freq: 'd1', time: SESSION_CLOSE.cn_futures, anchor: 'close' }
 }
 
 /**
