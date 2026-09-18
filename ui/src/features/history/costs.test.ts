@@ -10,7 +10,12 @@ function record(trades: Record<string, unknown>[], result: Record<string, unknow
       trades, orders: [{ order_id: 'b', direction: 'buy' }, { order_id: 's', direction: 'sell' }], ...result } } } }
 }
 const trade = (price: number, side = 'b', extra: Record<string, unknown> = {}) => ({ trade_price: price, trade_volume: 2, order_id: side, extra })
-const activity = (r: ExecuteRecord): AccountActivity => ({ kind: 'execution', occurred_at: r.created_at, record: r })
+const listRow = (id: number, created_at: string): AccountActivity => ({
+  kind: 'execution', occurred_at: created_at, record: {
+    id, execution_id: `e${id}`, created_at, is_success: 1, symbol_results: {},
+    summary: summarizeCosts([]), duration_sec: null, trade_count: 0,
+  },
+})
 
 test('买卖成本按乘数计算，价格改善为负，混合方向逐笔相加', () => {
   const trades = costTrades(record([trade(101), trade(99), trade(99, 's'), trade(101, 's')]))
@@ -59,18 +64,18 @@ test('失败、终止和部分成交都计成本；同目标有成交不为空�
     const r = record([trade(101)])
     r.raw_result.task_status = status
     r.raw_result.status = status
-    expect(costExecutions([activity(r)])[0].summary.cost).toBe(20)
-    expect(costExecutions([activity(r)])[0].noop).toBe(false)
+    expect(costExecutions([r])[0].summary.cost).toBe(20)
+    expect(costExecutions([r])[0].noop).toBe(false)
   }
   const r = record([]); r.raw_result.status = 'NOOP'
-  expect(costExecutions([activity(r)])[0].noop).toBe(true)
+  expect(costExecutions([r])[0].noop).toBe(true)
   const filled = record([], { orders: [{ filled_volume: 2 }] }); filled.raw_result.status = 'NOOP'
-  expect(costExecutions([activity(filled)])[0].noop).toBe(false)
+  expect(costExecutions([filled])[0].noop).toBe(false)
 })
 
 test('上海跨年日分组，逐日和逐执行及品种汇总一致，无成交日不存在', () => {
   const r = record([{ ...trade(101), trade_time: '2025-12-31T16:01:00Z' }, { ...trade(99, 's'), trade_time: '2026-01-02T00:01:00+08:00' }])
-  const executions = costExecutions([activity(r)])
+  const executions = costExecutions([r])
   const days = dailyCosts(executions)
   expect([...days.keys()]).toEqual(['2026-01-01', '2026-01-02'])
   expect([...days.values()].reduce((sum, s) => sum + s.cost!, 0)).toBe(executions[0].summary.cost!)
@@ -81,7 +86,7 @@ test('上海跨年日分组，逐日和逐执行及品种汇总一致，无成�
 })
 
 test('上海时间完整分页超过 500 条，边界包含基准与截止毫秒', async () => {
-  const rows = Array.from({ length: 601 }, (_, i) => activity({ ...record([]), id: i, created_at: `2026-01-01T${i === 600 ? '08' : '09'}:00:00` }))
+  const rows = Array.from({ length: 601 }, (_, i) => listRow(i, `2026-01-01T${i === 600 ? '08' : '09'}:00:00`))
   const calls: number[] = []
   const loaded = await loadJournal(1, { start: shanghaiTime('2026-01-01T09:00:00'), end: shanghaiTime('2026-01-01T09:00:00') + 1 }, new AbortController().signal,
     async skip => { calls.push(skip); return { count: rows.length, data: rows.slice(skip, skip + 500) } }, shanghaiTime)
@@ -94,19 +99,19 @@ test('同数量原地变更与复读失败均不发布，稳定数据完整返�
   let calls = 0
   await expect(loadPerformanceActivity(1, window, new AbortController().signal, async () => {
     calls++
-    return { count: 1, data: [activity(record([trade(calls === 1 ? 101 : 102)]))] }
+    return { count: 1, data: [listRow(calls, '2026-01-01T09:00:00')] }
   })).rejects.toThrow('发生变化')
   calls = 0
   await expect(loadPerformanceActivity(1, window, new AbortController().signal, async () => {
     if (++calls === 2) throw new Error('network error')
-    return { count: 1, data: [activity(record([]))] }
+    return { count: 1, data: [listRow(1, '2026-01-01T09:00:00')] }
   })).rejects.toThrow('network error')
-  const rows = [activity(record([trade(101)]))]
+  const rows = [listRow(1, '2026-01-01T09:00:00')]
   expect(await loadPerformanceActivity(1, window, new AbortController().signal, async () => ({ count: 1, data: rows }))).toEqual(rows)
 })
 
 test('选日只汇总当天成交，跨日执行不会重复计成本，清除恢复区间', () => {
-  const executions = costExecutions([activity(record([{ ...trade(101), trade_time: '2026-01-01T23:59:00' }, { ...trade(99, 's'), trade_time: '2026-01-02T00:01:00' }]))])
+  const executions = costExecutions([record([{ ...trade(101), trade_time: '2026-01-01T23:59:00' }, { ...trade(99, 's'), trade_time: '2026-01-02T00:01:00' }])])
   expect(executionsOnDay(executions, '2026-01-01')[0].summary.cost).toBe(20)
   expect(executionsOnDay(executions, '2026-01-02')[0].summary.cost).toBe(20)
   expect(executionsOnDay(executions, '2026-01-03')).toEqual([])

@@ -1,9 +1,9 @@
 import { executionOutcome, executionRecordSummary } from '@/features/account/executionOutcome'
 import type { AccountActivity } from '@/lib/api/accounts'
 import { buildRecentActivity, recentRowText } from '@/features/account/recent'
-import { dict, number } from '@/features/account/executionValues'
-import { costTrades, summarizeCosts, shanghaiTime, type CostTrade, type CostSummary } from '@/features/history/costs'
-export { loadJournal, type TimeWindow } from '@/features/account/journalActivity'
+import { dict } from '@/features/account/executionValues'
+import { summarizeCosts, shanghaiTime, type CostTrade, type CostSummary } from '@/features/history/costs'
+export { activityWindowQuery, loadJournal, type TimeWindow } from '@/features/account/journalActivity'
 export { dict, number, sideOf } from '@/features/account/executionValues'
 
 export type JournalRange = '7' | '30' | '90' | 'custom'
@@ -40,19 +40,15 @@ export function journalExecutions(activity: AccountActivity[]): JournalExecution
   return activity.map((a) => {
     const recent = buildRecentActivity([a], { fetchLimit: 2 }).rows[0]
     const record = a.kind === 'execution' ? a.record : null
-    const trades = record ? costTrades(record).map((t, i) => journalTrade(t, `${record.id ?? record.execution_id}:${i}`)) : []
     const view = record ? executionOutcome(record) : null
     const status = view?.title ?? '已跳过'
-    const symbols = record ? [...new Set([
-      ...Object.keys(dict(record.raw_result.symbol_results)),
-      ...Object.keys(record.raw_input.curr_target ?? {}), ...Object.keys(record.raw_input.last_target ?? {}),
-    ])] : []
+    const symbols = record ? Object.keys(dict(record.symbol_results)) : []
     return {
       key: a.kind === 'execution' ? `execution:${record?.id ?? record?.execution_id}` : `skip:${a.id}`,
       time: a.occurred_at, executionId: record?.execution_id ?? null, status,
       warning: view?.warning ?? false,
-      description: record ? executionRecordSummary(record) : recentRowText(recent),
-      symbols, trades, summary: summarizeCosts(trades), recordId: record?.id ?? null, durationSec: number(record?.raw_result.execution_time),
+      description: record ? executionRecordSummary(record, record.trade_count) : recentRowText(recent),
+      symbols, trades: [], summary: record?.summary ?? summarizeCosts([]), recordId: record?.id ?? null, durationSec: record?.duration_sec ?? null,
     }
   })
 }

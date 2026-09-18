@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime
-from typing import Literal, cast
+from typing import Annotated, Literal, cast
 
 from apscheduler.triggers.cron import CronTrigger  # type: ignore[import-not-found]
 from fastapi import APIRouter, HTTPException, Query, status
@@ -19,13 +19,18 @@ from axile.server.cron import SCHEDULER_TIMEZONE, is_blank_cron_expr, parse_cron
 from axile.server.db.models import (
     AccountActivityListPublic,
     ExecuteRecord,
-    ExecuteRecordPublic,
     ExecutionActivity,
     ScheduleSkip,
     ScheduleSkipActivity,
 )
-from axile.server.db.models.schedule import ScheduleSkipReason
-from axile.server.execution.legacy_compat import normalize_legacy_result
+from axile.server.db.models.performance import CostSummary
+from axile.server.db.models.schedule import (
+    ActivityExecutionRecord,
+    ActivitySymbolListPublic,
+    ActivitySymbolRowPublic,
+    ScheduleSkipReason,
+)
+from axile.server.performance_costs import mapping, project_execution, summarize
 from axile.server.trading_calendar import (
     CalendarDecisionStatus,
     CalendarSkipReason,
@@ -34,6 +39,64 @@ from axile.server.trading_calendar import (
 )
 
 router = APIRouter()
+
+
+def _time_clauses(column, since: str | None, until: str | None):
+    """把可选时间窗编成列比较；``since`` 含、``until`` 不含。"""
+    clauses = []
+    if since:
+        clauses.append(column >= since)
+    if until:
+        clauses.append(column < until)
+    return clauses
+
+
+def _text_or_none(value: object) -> str | None:
+    return value if isinstance(value, str) and value else None
+
+
+def _compact_execution_activity(row: ExecuteRecord) -> ExecutionActivity:
+    """列表只发布状态、摘要数字和 total_asset。"""
+    payload, trades = project_execution(row)
+    raw = mapping(payload["record"].get("raw_result"))
+    total = mapping(mapping(row.raw_result).get("account_assets")).get("total_asset")
+    if isinstance(total, bool) or not isinstance(total, (int, float)):
+        total = None
+    duration = payload.get("durationSec")
+    return ExecutionActivity(
+        occurred_at=row.created_at,
+        record=ActivityExecutionRecord(
+            id=row.id,
+            execution_id=row.execution_id,
+            created_at=row.created_at,
+            is_success=row.is_success,
+            status=_text_or_none(raw.get("status")),
+            task_status=_text_or_none(raw.get("task_status")),
+            error=_text_or_none(raw.get("error")),
+            outcome=_text_or_none(raw.get("outcome")),
+            outcome_reason=_text_or_none(raw.get("outcome_reason")),
+            execution_kind=_text_or_none(raw.get("execution_kind")),
+            symbol_results=mapping(raw.get("symbol_results")),
+            total_asset=float(total) if total is not None else None,
+            summary=CostSummary.model_validate(summarize(trades)),
+            duration_sec=duration if isinstance(duration, (int, float)) and not isinstance(duration, bool) else None,
+            trade_count=len(trades),
+        ),
+    )
+
+
+def _projected_trades(row: ExecuteRecord) -> list[dict]:
+    """把一次执行投影成带身份的成交行。"""
+    _, trades = project_execution(row)
+    return [{**trade, "record_id": row.id, "execution_id": row.execution_id} for trade in trades]
+
+
+def _matches_trade(trade: dict, symbol: str | None, side: str | None) -> bool:
+    if symbol and trade.get("symbol") != symbol:
+        return False
+    if side and trade.get("side") != side:
+        return False
+    return True
 
 
 class SchedulePreviewRequest(BaseModel):
@@ -187,27 +250,76 @@ async def schedule_preview(payload: SchedulePreviewRequest) -> SchedulePreviewRe
     )
 
 
+@router.get("/{account_id}/activity/symbols", response_model=ActivitySymbolListPublic)
+async def account_activity_symbols(
+    session: SessionDep,
+    account_id: int,
+    since: str,
+    until: str,
+    symbol: Annotated[str | None, Query()] = None,
+) -> ActivitySymbolListPublic:
+    """实时按品种汇总；时间窗必填。"""
+    await _get_account_or_404(session, account_id)
+    rows = (
+        (
+            await session.execute(
+                select(ExecuteRecord)
+                .where(
+                    col(ExecuteRecord.account_id) == account_id,
+                    *_time_clauses(col(ExecuteRecord.created_at), since, until),
+                )
+                .order_by(desc(col(ExecuteRecord.created_at)), desc(col(ExecuteRecord.id)))
+            )
+        )
+        .scalars()
+        .all()
+    )
+    grouped: dict[str, list[dict]] = {}
+    for row in rows:
+        for trade in _projected_trades(row):
+            if not _matches_trade(trade, symbol, None):
+                continue
+            grouped.setdefault(str(trade["symbol"]), []).append(trade)
+    data = [
+        ActivitySymbolRowPublic(
+            symbol=name,
+            summary=CostSummary.model_validate(summarize(fills)),
+            last_time=int(max(fill["time"] for fill in fills)),
+            n_trades=len(fills),
+            trades=fills if symbol else [],
+        )
+        for name, fills in grouped.items()
+    ]
+    return ActivitySymbolListPublic(data=data, count=len(data))
+
+
 @router.get("/{account_id}/activity", response_model=AccountActivityListPublic)
 async def account_activity(
     session: SessionDep,
     account_id: int,
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=500),
+    since: Annotated[str | None, Query()] = None,
+    until: Annotated[str | None, Query()] = None,
 ) -> AccountActivityListPublic:
     """合并执行与休市记录，按发生时间倒序分页。"""
     await _get_account_or_404(session, account_id)
-    execution_count = await session.scalar(
-        select(func.count()).select_from(ExecuteRecord).where(col(ExecuteRecord.account_id) == account_id)
-    )
-    skip_count = await session.scalar(
-        select(func.count()).select_from(ScheduleSkip).where(col(ScheduleSkip.account_id) == account_id)
-    )
+    execution_where = [
+        col(ExecuteRecord.account_id) == account_id,
+        *_time_clauses(col(ExecuteRecord.created_at), since, until),
+    ]
+    skip_where = [
+        col(ScheduleSkip.account_id) == account_id,
+        *_time_clauses(col(ScheduleSkip.triggered_at), since, until),
+    ]
+    execution_count = await session.scalar(select(func.count()).select_from(ExecuteRecord).where(*execution_where))
+    skip_count = await session.scalar(select(func.count()).select_from(ScheduleSkip).where(*skip_where))
     window = skip + limit
     execution_rows = (
         (
             await session.execute(
                 select(ExecuteRecord)
-                .where(col(ExecuteRecord.account_id) == account_id)
+                .where(*execution_where)
                 .order_by(desc(col(ExecuteRecord.created_at)), desc(col(ExecuteRecord.id)))
                 .limit(window)
             )
@@ -219,7 +331,7 @@ async def account_activity(
         (
             await session.execute(
                 select(ScheduleSkip)
-                .where(col(ScheduleSkip.account_id) == account_id)
+                .where(*skip_where)
                 .order_by(desc(col(ScheduleSkip.triggered_at)), desc(col(ScheduleSkip.id)))
                 .limit(window)
             )
@@ -228,18 +340,8 @@ async def account_activity(
         .all()
     )
 
-    def _public_record(row: ExecuteRecord) -> ExecuteRecordPublic:
-        # 旧记录读时归一：活动流里的执行记录与新记录同形。
-        return ExecuteRecordPublic.model_validate(row).model_copy(
-            update={"raw_result": normalize_legacy_result(row.raw_result)}
-        )
-
     activities: list[ExecutionActivity | ScheduleSkipActivity] = [
-        ExecutionActivity(
-            occurred_at=row.created_at,
-            record=_public_record(row),
-        )
-        for row in execution_rows
+        _compact_execution_activity(row) for row in execution_rows
     ]
     activities.extend(
         ScheduleSkipActivity(
@@ -271,5 +373,7 @@ __all__ = [
     "SchedulePreviewItem",
     "SchedulePreviewRequest",
     "SchedulePreviewResponse",
+    "account_activity",
+    "account_activity_symbols",
     "router",
 ]

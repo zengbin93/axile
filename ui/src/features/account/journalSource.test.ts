@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test'
-import { parseJournalScope, performanceJournalPath, loadCostGroups, compareJournal, snapshotExecution, filterLiveExecutions, journalTotals } from '@/features/account/journalSource'
-import { summarizeCosts, combineCosts, costTrades } from '@/features/history/costs'
+import { parseJournalScope, performanceJournalPath, loadCostGroups, compareJournal, snapshotExecution, filterLiveExecutions } from '@/features/account/journalSource'
+import { summarizeCosts } from '@/features/history/costs'
 import { journalExecutions } from '@/features/account/executionJournal'
 import type { CostPage } from '@/lib/api/performance'
 import type { ExecuteRecord } from '@/types/api'
@@ -28,14 +28,18 @@ test('invalid or mixed snapshot filters never fall back to live activity', () =>
   expect(parseJournalScope(new URLSearchParams('range=30')).scope).toBeNull()
 })
 
-test('journal and performance agree including incomplete amounts and known direction coverage', () => {
-  const rows = journalExecutions([{ kind: 'execution', occurred_at: record.created_at, record }])
-  expect(rows[0].summary).toEqual(summarizeCosts(costTrades(record)))
-  const perSymbol = ['A', 'B', 'C'].map(symbol => summarizeCosts(rows[0].trades.filter(t => t.symbol === symbol)))
-  expect(combineCosts(perSymbol)).toEqual(rows[0].summary)
-  expect(journalTotals(filterLiveExecutions(rows, 'b'))).toEqual(perSymbol[1])
-  expect(rows[0].summary.amountComplete).toBe(false)
-  expect(rows[0].summary.cost).toBe(30)
+test('live keyword filter keeps whole-execution summaries and matches symbol names', () => {
+  const summary = { ...summarizeCosts([]), value: 30, cost: 30, count: 4, amountComplete: false }
+  const rows = journalExecutions([{
+    kind: 'execution', occurred_at: record.created_at, record: {
+      id: 5, execution_id: 'e5', created_at: record.created_at, is_success: 1, status: 'SUCCEEDED',
+      symbol_results: { A: { status: 'SUCCEEDED' }, B: { status: 'SUCCEEDED' }, C: { status: 'SUCCEEDED' } },
+      summary, duration_sec: null, trade_count: 4,
+    },
+  }])
+  expect(filterLiveExecutions(rows, 'b')).toEqual(rows)
+  expect(filterLiveExecutions(rows, 'z')).toEqual([])
+  expect(rows[0].summary).toEqual(summary)
 })
 
 test('cost sorting puts unknown last, improvements after losses and ties in stable order', () => {
@@ -69,9 +73,18 @@ test('裁剪后的绩效投影使用独立统计，成交分页不影响整次�
 })
 
 test('普通列表与快照列表摘要显示执行规模，状态列单独显示结论', () => {
-  const completed = { ...record, id: 5, raw_result: { ...record.raw_result, status: 'SUCCEEDED' } }
-  const live = journalExecutions([{ kind: 'execution', occurred_at: completed.created_at, record: completed }])[0]
-  const snapshot = snapshotExecution({ key: '5', record: completed, noop: false, symbolCount: 99, summary: summarizeCosts([]), reason: '调仓完成' })
+  const live = journalExecutions([{
+    kind: 'execution', occurred_at: record.created_at, record: {
+      id: 5, execution_id: 'e5', created_at: record.created_at, is_success: 1, status: 'SUCCEEDED',
+      symbol_results: { A: { status: 'SUCCEEDED' }, B: { status: 'SUCCEEDED' }, C: { status: 'SUCCEEDED' } },
+      summary: summarizeCosts([]), duration_sec: null, trade_count: 4,
+    },
+  }])[0]
+  const snapshot = snapshotExecution({
+    key: '5',
+    record: { id: 5, execution_id: 'e5', created_at: record.created_at, is_success: 1, raw_result: { status: 'SUCCEEDED', symbol_results: { A: { status: 'SUCCEEDED' }, B: { status: 'SUCCEEDED' }, C: { status: 'SUCCEEDED' } } } },
+    noop: false, symbolCount: 99, summary: summarizeCosts([]), tradeCount: 4, reason: '调仓完成',
+  })
   for (const row of [live, snapshot]) {
     expect(row.description).toBe('调仓 · 涉及 3 个品种 · 4 笔成交')
     expect(row.status).toBe('调仓完成')

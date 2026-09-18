@@ -1,5 +1,6 @@
 /** 账户相关接口。 */
 import { apiGet, apiSend } from '@/lib/api/client'
+import type { CostSummary, CostTrade } from '@/features/history/costs'
 import type {
   Account,
   AccountRuntimeSync,
@@ -76,10 +77,41 @@ export interface ScheduleSkipActivity {
   calendar_label: string
 }
 
+export interface ActivityExecutionRecord {
+  id: number | null
+  execution_id: string | null
+  created_at: string
+  is_success: number
+  status?: string | null
+  task_status?: string | null
+  error?: string | null
+  outcome?: string | null
+  outcome_reason?: string | null
+  execution_kind?: string | null
+  symbol_results?: Record<string, { status?: string; error?: string; outcome?: string; outcome_reason?: string }>
+  total_asset?: number | null
+  summary: CostSummary
+  duration_sec: number | null
+  trade_count: number
+}
+
 export interface ExecutionActivity {
   kind: 'execution'
   occurred_at: string
-  record: ExecuteRecordList['data'][number]
+  record: ActivityExecutionRecord
+}
+
+export interface ActivitySymbolRow {
+  symbol: string
+  summary: CostSummary
+  last_time: number
+  n_trades: number
+  trades?: CostTrade[]
+}
+
+export interface ActivitySymbolList {
+  data: ActivitySymbolRow[]
+  count: number
 }
 
 export type AccountActivity = ExecutionActivity | ScheduleSkipActivity
@@ -152,17 +184,31 @@ export function previewSchedule(
   }, signal)
 }
 
+function queryString(params: Record<string, string | number | undefined | null>): string {
+  const query = new URLSearchParams()
+  for (const [key, value] of Object.entries(params)) {
+    if (value != null && value !== '') query.set(key, String(value))
+  }
+  const suffix = query.size ? `?${query}` : ''
+  return suffix
+}
+
 /** 执行与休市跳过组成的账户活动流。 */
 export function getAccountActivity(
   id: number,
-  params: { skip?: number; limit?: number } = {},
+  params: { skip?: number; limit?: number; since?: string; until?: string } = {},
   signal?: AbortSignal,
 ): Promise<AccountActivityList> {
-  const query = new URLSearchParams()
-  if (params.skip != null) query.set('skip', String(params.skip))
-  if (params.limit != null) query.set('limit', String(params.limit))
-  const suffix = query.size ? `?${query}` : ''
-  return apiGet<AccountActivityList>(`/account/${id}/activity${suffix}`, signal)
+  return apiGet<AccountActivityList>(`/account/${id}/activity${queryString(params)}`, signal)
+}
+
+/** 实时按品种汇总。 */
+export function getActivitySymbols(
+  id: number,
+  params: { since: string; until: string; symbol?: string },
+  signal?: AbortSignal,
+): Promise<ActivitySymbolList> {
+  return apiGet<ActivitySymbolList>(`/account/${id}/activity/symbols${queryString(params)}`, signal)
 }
 
 /** 只读账户当前组合下最近一次成功计算的执行器口径目标快照。 */

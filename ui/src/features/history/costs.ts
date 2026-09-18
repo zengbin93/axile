@@ -1,4 +1,4 @@
-import type { AccountActivity, AccountActivityList } from '@/lib/api/accounts'
+import type { AccountActivityList } from '@/lib/api/accounts'
 import type { ExecuteRecord } from '@/types/api'
 import { dict, number, sideOf, shanghaiTime } from '@/features/account/executionValues'
 import { loadJournal, type TimeWindow } from '@/features/account/journalActivity'
@@ -126,15 +126,14 @@ export function executionsOnDay(executions: CostExecution[], day: string | null)
   })
 }
 
-export function costExecutions(activity: AccountActivity[]): CostExecution[] {
-  return activity.flatMap(a => {
-    if (a.kind !== 'execution') return []
-    const trades = costTrades(a.record)
-    const results = Object.values(dict(a.record.raw_result.symbol_results)).map(dict)
+export function costExecutions(records: ExecuteRecord[]): CostExecution[] {
+  return records.map(record => {
+    const trades = costTrades(record)
+    const results = Object.values(dict(record.raw_result.symbol_results)).map(dict)
     const hasOrderFill = results.some(r => (Array.isArray(r.orders) ? r.orders : []).some(o => (number(dict(o).filled_volume) ?? 0) > 0))
-    const noop = a.record.is_success === 1 && !trades.length && !hasOrderFill &&
-      (a.record.raw_result.status === 'NOOP' || (results.length > 0 && results.every(r => r.status === 'NOOP')))
-    return [{ key: String(a.record.id ?? a.record.execution_id), record: a.record, trades, summary: summarizeCosts(trades), noop }]
+    const noop = record.is_success === 1 && !trades.length && !hasOrderFill &&
+      (record.raw_result.status === 'NOOP' || (results.length > 0 && results.every(r => r.status === 'NOOP')))
+    return { key: String(record.id ?? record.execution_id), record, trades, summary: summarizeCosts(trades), noop }
   })
 }
 

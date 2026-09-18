@@ -1,18 +1,14 @@
 import { describe, expect, it } from 'bun:test'
-import { journalExecutions, journalSymbols, journalWindow, loadJournal, qualityOf } from '@/features/account/executionJournal'
-import type { AccountActivity } from '@/lib/api/accounts'
+import { activityWindowQuery, journalExecutions, journalWindow, loadJournal } from '@/features/account/executionJournal'
+import { summarizeCosts } from '@/features/history/costs'
+import type { AccountActivity, ActivityExecutionRecord } from '@/lib/api/accounts'
 
-function execution(id: number, result: Record<string, unknown> = {}): AccountActivity {
+const empty = summarizeCosts([])
+function execution(id: number, extra: Partial<ActivityExecutionRecord> = {}): AccountActivity {
   return { kind: 'execution', occurred_at: '2026-09-07T10:00:00', record: {
     id, execution_id: `exec-${id}`, created_at: '2026-09-07T10:00:00', is_success: 1,
-    raw_input: {}, raw_result: { status: 'SUCCEEDED', ...result },
+    status: 'SUCCEEDED', symbol_results: {}, summary: empty, duration_sec: null, trade_count: 0, ...extra,
   } }
-}
-function symbol(price = 99, value: number | null = 1000, tick = true, direction = 'BUY') {
-  return { status: 'SUCCEEDED', sizing: value == null ? {} : { unit_multiplier: value / price }, first_tick: tick ? { bid_price: 99, ask_price: 101 } : {},
-    orders: [{ order_id: 'order', direction }],
-    trades: [{ trade_price: price, trade_volume: 1, trade_value: value, order_id: 'order' }],
-  }
 }
 const window = journalWindow('custom', '2026-09-01', '2026-09-07')!
 
@@ -47,41 +43,37 @@ describe('journal pagination', () => {
 })
 
 describe('journal quality', () => {
-  it('weights loss by projected notional and reports partial coverage', () => {
-    const rows = journalExecutions([execution(1, { symbol_results: { A: symbol(99, 9000), B: symbol(101, 1000), C: symbol(100, 10000, false) } })])
-    const q = qualityOf(rows[0].trades)
-    expect(q.slippage).toBeCloseTo(-80)
-    expect(q.coverage).toBe(0.5)
-    expect(q.value).toBe(20000)
-    expect(journalSymbols(rows, 'b').map((s) => s.symbol)).toEqual(['B'])
-  })
-  it('does not invent direction or futures notional for missing fields', () => {
-    const rows = journalExecutions([execution(1, { symbol_results: { A: symbol(99, null), B: symbol(99, 1000, true, '') } })])
-    const q = qualityOf(rows[0].trades)
-    expect(q.amountComplete).toBe(false)
-    expect(q.slippage).toBeNull()
-    expect(rows[0].trades[1].slippageBps).toBeNull()
-  })
   it('keeps failed, terminated, noop and schedule skip rows individually with detail identities', () => {
     const rows = journalExecutions([
       execution(1), execution(2, { task_status: 'TERMINATED' }),
-      { ...execution(3), kind: 'execution', record: { ...(execution(3) as Extract<AccountActivity, { kind: 'execution' }>).record, is_success: 0, raw_result: { status: 'FAILED' } } },
+      execution(3, { is_success: 0, status: 'FAILED' }),
       { kind: 'schedule_skip', id: 5, occurred_at: '2026-09-07T10:00:00', channel: 'tq', reason_code: 'CALENDAR.CLOSED', calendar_day: '2026-09-07', calendar_id: '', calendar_label: '' },
     ])
     expect(rows.map((r) => r.status)).toEqual(['调仓完成', '执行已终止', '执行失败', '已跳过'])
     expect(rows[0].executionId).toBe('exec-1')
     expect(rows[3].executionId).toBeNull()
   })
-  it('retains equal-time equal-value trades as separate rows', () => {
-    const s = symbol()
-    const rows = journalExecutions([execution(1, { symbol_results: { A: { ...s, trades: [...s.trades, ...s.trades] } } })])
-    expect(new Set(rows[0].trades.map((t) => t.key)).size).toBe(2)
-  })
   it('does not label a NOOP clear as a completed fill', () => {
     const row = journalExecutions([execution(1, { status: 'NOOP', execution_kind: 'clear_positions' })])[0]
     expect(row.status).toBe('无需清仓')
     expect(row.description).toBe('清仓 · 未记录成交')
   })
+})
+
+it('uses the list summary when the activity payload has no fill JSON', () => {
+  const summary = { value: 500, cost: 1, lossBp: 2, coverage: 1, covered: 1, count: 1, amountComplete: true, fees: {}, feeCovered: 0 }
+  const row = journalExecutions([execution(9, {
+    status: 'SUCCEEDED', symbol_results: { A: { status: 'SUCCEEDED' } }, summary, duration_sec: 1.5, trade_count: 4,
+  })])[0]
+  expect(row.trades).toEqual([])
+  expect(row.summary).toEqual(summary)
+  expect(row.durationSec).toBe(1.5)
+  expect(row.description).toBe('调仓 · 涉及 1 个品种 · 4 笔成交')
+})
+
+it('encodes the journal window as Shanghai naive since/until', () => {
+  const window = journalWindow('custom', '2026-09-01', '2026-09-07')!
+  expect(activityWindowQuery(window)).toEqual({ since: '2026-09-01T00:00:00', until: '2026-09-08T00:00:00' })
 })
 
 it('uses today for relative ranges and rejects reversed custom dates', () => {
@@ -91,11 +83,6 @@ it('uses today for relative ranges and rejects reversed custom dates', () => {
   expect(journalWindow('custom', '2026-09-08', '2026-09-07')).toBeNull()
 })
 
-it('retains malformed fills as unknown and rejects overflow calendar dates', () => {
-  const row = journalExecutions([execution(1, { symbol_results: { A: { ...symbol(), trades: [{ trade_volume: 1 }] } } })])[0]
-  expect(row.trades).toHaveLength(1)
-  expect(row.summary.count).toBe(1)
-  expect(row.summary.cost).toBeNull()
-  expect(row.summary.amountComplete).toBe(false)
+it('rejects overflow calendar dates', () => {
   expect(journalWindow('custom', '2026-02-30', '2026-03-01')).toBeNull()
 })

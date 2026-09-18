@@ -9,7 +9,7 @@ import { Select } from '@/components/ui/Select'
 import { AccountPageTitle } from '@/features/account/pageHead'
 import { journalWindow, type JournalRange } from '@/features/account/executionJournal'
 import { ExecutionGroup, SymbolGroup, EXEC_COLS, SYMBOL_COLS, type Expansion } from '@/features/account/JournalRows'
-import { parseJournalScope, scopeLabel, SNAPSHOT_PARAMS, loadSnapshotJournal, loadLiveJournal, filterLiveExecutions, compareJournal, journalTotals } from '@/features/account/journalSource'
+import { parseJournalScope, scopeLabel, SNAPSHOT_PARAMS, loadSnapshotJournal, loadLiveJournal, filterLiveExecutions, compareJournal, journalTotals, activityWindowQuery } from '@/features/account/journalSource'
 import { amount, coverageText, shanghaiLabel, lossClass } from '@/features/history/costs'
 import { usePolling } from '@/lib/hooks/usePolling'
 import { useRemountFade } from '@/lib/viewTransition'
@@ -48,10 +48,11 @@ function ExecutionJournal({ accountId }: { accountId: number }) {
   const scope = useMemo(() => JSON.parse(scopeKey) as typeof parsed.scope, [scopeKey])
   const window = journalWindow(range, from, to)
   const start = window?.start ?? 0, end = window?.end ?? 0
+  const liveWindow = !scope && window ? activityWindowQuery(window) : undefined
   const poll = usePolling(useCallback((signal: AbortSignal) => scope
     ? loadSnapshotJournal(accountId, scope, view, keyword, signal)
-    : loadLiveJournal(accountId, { start, end }, signal), [accountId, scope, view, keyword, start, end]), {
-    queryKey: scope ? `journal:${accountId}:${scopeKey}:${view}:${keyword}` : `journal:${accountId}:${start}:${end}`,
+    : loadLiveJournal(accountId, { start, end }, signal, view), [accountId, scope, view, keyword, start, end]), {
+    queryKey: scope ? `journal:${accountId}:${scopeKey}:${view}:${keyword}` : `journal:${accountId}:${start}:${end}:${view}`,
     intervalMs: 0, enabled: !parsed.error && (!!scope || !!window),
   })
   const filtered = useMemo(() => {
@@ -153,11 +154,11 @@ function ExecutionJournal({ accountId }: { accountId: number }) {
       </div>
       {view === 'executions' ? <>
         <div className={`${EXEC_COLS} hidden border-y border-line px-3 py-2 text-xs text-ink-3 xl:grid`}><span>执行时间</span><span>执行摘要</span><span>状态</span><span className="text-right">成交额 {currency}</span><span className="text-right">滑点损耗 BP</span><span className="text-right">滑点成本 {currency}</span><span className="text-right">耗时</span></div>
-        {filtered.slice(0, count).map(row => <ExecutionGroup key={`${row.key}:${scopeKey}:${keyword}`} row={row} accountId={accountId} scope={scopedQuery} expansion={expanded[row.key] ?? closedExpansion()} update={next => updateExpansion(row.key, next)} detailLink={detailLink} currency={currency} units={descriptor?.units} />)}
+        {filtered.slice(0, count).map(row => <ExecutionGroup key={`${row.key}:${scopeKey}:${keyword}`} row={row} accountId={accountId} scope={scopedQuery} expansion={expanded[row.key] ?? closedExpansion()} update={next => updateExpansion(row.key, next)} detailLink={detailLink} currency={currency} units={descriptor?.units} liveWindow={liveWindow} />)}
         {filtered.length === 0 && <p className="py-16 text-center text-sm text-ink-3">所选范围内无匹配记录</p>}
       </> : <>
         <div className={`${SYMBOL_COLS} hidden border-y border-line px-3 py-2 text-xs text-ink-3 xl:grid`}><span>品种</span><span className="text-right">成交额 {currency}</span><span className="text-right">滑点损耗 BP</span><span className="text-right">滑点成本 {currency}</span><span className="text-right">成交笔数</span><span className="text-right">最近成交</span><span /></div>
-        {symbols.slice(0, count).map(row => <SymbolGroup key={`${row.symbol}:${scopeKey}:${keyword}`} row={row} accountId={accountId} scope={scopedQuery} expansion={expanded[`symbol:${row.symbol}`] ?? closedExpansion()} update={next => updateExpansion(`symbol:${row.symbol}`, next)} detailLink={detailLink} currency={currency} units={descriptor?.units} />)}
+        {symbols.slice(0, count).map(row => <SymbolGroup key={`${row.symbol}:${scopeKey}:${keyword}`} row={row} accountId={accountId} scope={scopedQuery} expansion={expanded[`symbol:${row.symbol}`] ?? closedExpansion()} update={next => updateExpansion(`symbol:${row.symbol}`, next)} detailLink={detailLink} currency={currency} units={descriptor?.units} liveWindow={liveWindow} />)}
         {symbols.length === 0 && <p className="py-16 text-center text-sm text-ink-3">所选范围内无匹配成交</p>}
       </>}
       {(view === 'executions' ? filtered.length : symbols.length) > count && <button className="min-h-9 py-3 text-xs text-accent" onClick={() => setCount(count + 50)}>加载更多记录</button>}

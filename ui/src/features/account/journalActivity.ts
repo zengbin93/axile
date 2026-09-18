@@ -1,14 +1,41 @@
 import { getAccountActivity, type AccountActivity, type AccountActivityList } from '@/lib/api/accounts'
 import { shanghaiTime } from '@/features/account/executionValues'
+import { costTrades, type CostTrade } from '@/features/history/costs'
+import type { ExecuteRecord } from '@/types/api'
 
 export interface TimeWindow { start: number; end: number }
+
+/** 把毫秒窗编成活动流 since/until（上海 naive，与 created_at 同形）。 */
+export function activityWindowQuery(window: TimeWindow): { since: string; until: string } {
+  const iso = (ms: number) => new Date(ms + 8 * 3600000).toISOString().slice(0, 19)
+  return { since: iso(window.start), until: iso(window.end) }
+}
+
+export interface LiveWindow { since: string; until: string }
+
+/** 从执行摘要附件抽出成交；没有附件就是空列表。 */
+export function tradesFromArtifacts(
+  artifacts: Array<{ artifact_type: string; content: unknown }>,
+  record: { id?: number | null; execution_id?: string | null; created_at: string },
+): CostTrade[] {
+  const summary = artifacts.find((item) => item.artifact_type === 'execution_summary')
+  if (!summary || summary.content == null || typeof summary.content !== 'object') return []
+  return costTrades({
+    id: record.id ?? null,
+    execution_id: record.execution_id ?? null,
+    created_at: record.created_at,
+    is_success: 1,
+    raw_input: {},
+    raw_result: summary.content as ExecuteRecord['raw_result'],
+  })
+}
 
 /** 统一活动流按时间倒序分页；读到区间下界才停止，失败不返回半份汇总。 */
 export async function loadJournal(
   accountId: number,
   window: TimeWindow,
   signal: AbortSignal,
-  fetchPage: (skip: number) => Promise<AccountActivityList> = (skip) => getAccountActivity(accountId, { skip, limit: 500 }, signal),
+  fetchPage: (skip: number) => Promise<AccountActivityList> = (skip) => getAccountActivity(accountId, { skip, limit: 500, ...activityWindowQuery(window) }, signal),
   parseTime: (value: string) => number = shanghaiTime,
 ): Promise<AccountActivity[]> {
   const result: AccountActivity[] = []

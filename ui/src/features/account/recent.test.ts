@@ -1,11 +1,13 @@
 import { expect, test } from 'bun:test'
 import { buildRecentActivity, recentRowText } from './recent'
-import type { AccountActivity } from '@/lib/api/accounts'
+import { summarizeCosts } from '@/features/history/costs'
+import type { AccountActivity, ActivityExecutionRecord } from '@/lib/api/accounts'
 
-function execution(id: number, state?: string, extra: Record<string, unknown> = {}): AccountActivity {
+const empty = summarizeCosts([])
+function execution(id: number, state?: string, extra: Partial<ActivityExecutionRecord> = {}): AccountActivity {
   return { kind: 'execution', occurred_at: `2026-09-14T14:${id}:00`, record: {
-    id, execution_id: `e${id}`, created_at: `2026-09-14T14:${id}:00`, is_success: 0, raw_input: {},
-    raw_result: { status: state, ...extra },
+    id, execution_id: `e${id}`, created_at: `2026-09-14T14:${id}:00`, is_success: 0,
+    status: state, symbol_results: {}, summary: empty, duration_sec: null, trade_count: 0, ...extra,
   } }
 }
 const rows = (items: AccountActivity[], cap = 6, fetchLimit = 50) => buildRecentActivity(items, { cap, fetchLimit })

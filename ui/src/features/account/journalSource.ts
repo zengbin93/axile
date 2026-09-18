@@ -1,7 +1,9 @@
+import { getActivitySymbols } from '@/lib/api/accounts'
 import { getPerformanceCosts, selectionQuery, type CostQuery, type CostExecutionRow, type CostSymbolRow, type CostPage, type PerformanceRange } from '@/lib/api/performance'
-import { journalExecutions, journalSymbols, type JournalExecution, type JournalSymbol } from '@/features/account/executionJournal'
-import { loadJournal, type TimeWindow } from '@/features/account/journalActivity'
-import { combineCosts, summarizeCosts, shanghaiTime, shanghaiLabel, type CostSummary } from '@/features/history/costs'
+import { journalExecutions, type JournalExecution, type JournalSymbol } from '@/features/account/executionJournal'
+import { activityWindowQuery, loadJournal, type TimeWindow } from '@/features/account/journalActivity'
+export { activityWindowQuery }
+import { combineCosts, shanghaiTime, shanghaiLabel, type CostSummary } from '@/features/history/costs'
 import type { ChartSelection } from '@/features/history/chartModel'
 import { executionRecordSummary, executionRecordView } from '@/features/account/executionOutcome'
 
@@ -92,17 +94,31 @@ export async function loadSnapshotJournal(accountId: number, scope: SnapshotScop
   const page = await loadCostGroups<CostExecutionRow>(accountId, { ...query, dimension: 'execution' }, signal)
   return { executions: page.data.map(snapshotExecution), symbols: [], dataUntil: page.data_until ?? null }
 }
-export async function loadLiveJournal(accountId: number, window: TimeWindow, signal: AbortSignal): Promise<JournalData> {
-  const executions = journalExecutions(await loadJournal(accountId, window, signal))
-  return { executions, symbols: journalSymbols(executions, ''), dataUntil: null }
+export async function loadLiveJournal(accountId: number, window: TimeWindow, signal: AbortSignal, view = 'executions'): Promise<JournalData> {
+  if (view === 'symbols') {
+    const page = await getActivitySymbols(accountId, activityWindowQuery(window), signal)
+    return {
+      executions: [],
+      dataUntil: null,
+      symbols: page.data.map((row) => ({
+        symbol: row.symbol,
+        summary: row.summary,
+        value: row.summary.value ?? 0,
+        slippage: row.summary.lossBp,
+        coverage: row.summary.coverage ?? 0,
+        amountComplete: row.summary.amountComplete,
+        nTrades: row.n_trades,
+        trades: [],
+        lastTime: row.last_time,
+      })),
+    }
+  }
+  return { executions: journalExecutions(await loadJournal(accountId, window, signal)), symbols: [], dataUntil: null }
 }
 export function filterLiveExecutions(rows: JournalExecution[], keyword: string): JournalExecution[] {
   const word = keyword.trim().toLowerCase()
   if (!word) return rows
-  return rows.filter(row => row.symbols.some(s => s.toLowerCase().includes(word))).map(row => {
-    const trades = row.trades.filter(t => t.symbol.toLowerCase().includes(word))
-    return { ...row, trades, summary: summarizeCosts(trades) }
-  })
+  return rows.filter(row => row.symbols.some(s => s.toLowerCase().includes(word)))
 }
 export function compareJournal(a: { summary: CostSummary; time?: string; lastTime?: number; key?: string; symbol?: string }, b: typeof a, sort: string): number {
   const field = sort === 'slippage' ? 'lossBp' : sort === 'cost' ? 'cost' : 'value'

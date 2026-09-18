@@ -89,8 +89,8 @@ def test_account_activity_normalizes_legacy():
     )
     payload = asyncio.run(_call(account_activity, session=session, account_id=1, skip=0, limit=20))
     activity = payload.data[0]
-    assert activity.record.raw_result["status"] == "FAILED"
-    assert activity.record.raw_result["error"] == "执行失败，具体原因见执行证据"
+    assert activity.record.status == "FAILED"
+    assert activity.record.error == "执行失败，具体原因见执行证据"
 
 
 def test_execution_artifacts_normalize_summary_only(monkeypatch, pagination):

@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 from datetime import date
-from typing import ClassVar, Literal
+from typing import Any, ClassVar, Literal
 
 from sqlalchemy import Column, ForeignKey, Index, Integer, Text
 from sqlmodel import Field, SQLModel
 
 from axile.server.db.models.base import now_str
-from axile.server.db.models.execution import ExecuteRecordPublic
+from axile.server.db.models.performance import CostSummary
 
 type ScheduleSkipReason = Literal[
     "CALENDAR.CLOSED",
@@ -36,12 +36,32 @@ class ScheduleSkip(SQLModel, table=True):
     reason_code: str = Field(default="CALENDAR.CLOSED", sa_column=Column(Text, nullable=False))
 
 
+class ActivityExecutionRecord(SQLModel):
+    """活动流里的执行摘要，不含 raw_input / 成交 / tick。"""
+
+    id: int | None = None
+    execution_id: str | None = None
+    created_at: str
+    is_success: int
+    status: str | None = None
+    task_status: str | None = None
+    error: str | None = None
+    outcome: str | None = None
+    outcome_reason: str | None = None
+    execution_kind: str | None = None
+    symbol_results: dict[str, dict[str, Any]] = Field(default_factory=dict)
+    total_asset: float | None = None
+    summary: CostSummary
+    duration_sec: float | None = None
+    trade_count: int = 0
+
+
 class ExecutionActivity(SQLModel):
     """账户活动流中的执行记录。"""
 
     kind: Literal["execution"] = "execution"
     occurred_at: str
-    record: ExecuteRecordPublic
+    record: ActivityExecutionRecord
 
 
 class ScheduleSkipActivity(SQLModel):
@@ -64,8 +84,28 @@ class AccountActivityListPublic(SQLModel):
     count: int
 
 
+class ActivitySymbolRowPublic(SQLModel):
+    """实时按品种汇总的一行。"""
+
+    symbol: str
+    summary: CostSummary
+    last_time: int
+    n_trades: int
+    trades: list[dict] = Field(default_factory=list)
+
+
+class ActivitySymbolListPublic(SQLModel):
+    """实时按品种汇总列表。"""
+
+    data: list[ActivitySymbolRowPublic]
+    count: int
+
+
 __all__ = [
     "AccountActivityListPublic",
+    "ActivityExecutionRecord",
+    "ActivitySymbolListPublic",
+    "ActivitySymbolRowPublic",
     "ExecutionActivity",
     "ScheduleSkip",
     "ScheduleSkipActivity",
