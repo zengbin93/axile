@@ -23,7 +23,7 @@ export function cardPerformance(
 }
 
 export function openFullPerformance(accountId: number) {
-  performanceViews.set(accountId, { range: 'all', view: 'cumulative', selection: null })
+  performanceViews.set(accountId, { range: 'all', view: 'cumulative', scale: 'observations', selection: null })
   performanceViewports.delete(`${accountId}:all`)
   void checkPerformance(accountId, 'all')
 }

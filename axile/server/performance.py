@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from importlib.metadata import version
 from typing import cast
 from zoneinfo import ZoneInfo
@@ -16,13 +16,67 @@ from axile.server.asset_observations import is_asset_observation
 from axile.server.db.models import ExecuteRecord, ExecuteRecordPublic
 from axile.server.db.models.performance import (
     AccountPerformance,
+    PerformanceCalendar,
+    PerformanceCalendarRange,
     PerformanceGap,
     PerformancePoint,
     PerformanceSettings,
     RangeKey,
 )
+from axile.server.trading_calendar import CalendarDecisionStatus, evaluate_channel_calendar_day
 
 _TIMEZONE = ZoneInfo("Asia/Shanghai")
+
+
+def _calendar_ranges(days: list[date]) -> list[PerformanceCalendarRange]:
+    """把已排序自然日合并为连续闭区间。"""
+    if not days:
+        return []
+    ranges: list[PerformanceCalendarRange] = []
+    start = previous = days[0]
+    for day in days[1:]:
+        if day != previous + timedelta(days=1):
+            ranges.append(PerformanceCalendarRange(start=start.isoformat(), end=previous.isoformat()))
+            start = day
+        previous = day
+    ranges.append(PerformanceCalendarRange(start=start.isoformat(), end=previous.isoformat()))
+    return ranges
+
+
+def performance_calendar(channel: str | None, baseline: str | None, end: str | None) -> PerformanceCalendar:
+    """构造严格裁剪到绩效结果区间的渠道日历事实。"""
+    if channel is None or baseline is None or end is None:
+        return PerformanceCalendar(status="unavailable")
+    first, last = local_time(baseline).date(), local_time(end).date()
+    closed: list[date] = []
+    unavailable: list[date] = []
+    calendar_id = label = None
+    current = first
+    while current <= last:
+        decision = evaluate_channel_calendar_day(channel, current)
+        calendar_id = decision.calendar_id or calendar_id
+        label = decision.label or label
+        if decision.status is CalendarDecisionStatus.NOT_REQUIRED:
+            return PerformanceCalendar(status="not_required")
+        if decision.status is CalendarDecisionStatus.AVAILABLE_CLOSED:
+            closed.append(current)
+        elif decision.status is CalendarDecisionStatus.UNAVAILABLE:
+            unavailable.append(current)
+        current += timedelta(days=1)
+    status = (
+        "partial"
+        if unavailable and len(unavailable) <= (last - first).days
+        else "unavailable"
+        if unavailable
+        else "available"
+    )
+    return PerformanceCalendar(
+        status=status,
+        calendar_id=calendar_id,
+        label=label,
+        closed_ranges=_calendar_ranges(closed),
+        unavailable_ranges=_calendar_ranges(unavailable),
+    )
 
 
 @dataclass
@@ -283,6 +337,7 @@ def calculate_performance(
     settings: PerformanceSettings,
     range_key: RangeKey,
     include_backtest: bool = True,
+    trade_channel: str | None = None,
 ) -> AccountPerformance:
     """使用 WBT 原生费后日收益与资产比值生成收益对比."""
     items = select_range(observations, range_key)
@@ -292,6 +347,7 @@ def calculate_performance(
         engine_version=version("wbt"),
         range=range_key,
         record_count=len(observations),
+        calendar=PerformanceCalendar(status="unavailable"),
     )
     if not items:
         return result
@@ -304,4 +360,5 @@ def calculate_performance(
     result.baseline = result.points[0].date if result.points else None
     result.end = items[-1].time.isoformat()
     result.invalid_asset_count = sum(item.asset is None for item in items)
+    result.calendar = performance_calendar(trade_channel, result.baseline, result.end)
     return result

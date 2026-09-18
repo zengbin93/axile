@@ -10,13 +10,14 @@ export function sparklineCoordinates(data: PerformancePoint[], width: number, he
   const values = valid.map(p => p.account_return!)
   const min = Math.min(...values), max = Math.max(...values)
   const timed = data.filter(p => Number.isFinite(pointTime(p)))
-  const first = pointTime(timed[0]), last = pointTime(timed[timed.length - 1])
-  const span = last - first || 1
+  const anchors = [...new Set(timed.map(pointTime))]
+  const anchorIndex = new Map(anchors.map((time, index) => [time, index]))
+  const span = anchors.length - 1 || 1
   const range = max - min || 1
   return data.map(point => {
     const value = point.account_return, time = pointTime(point)
     if (value == null || !Number.isFinite(value) || !Number.isFinite(time)) return null
-    const x = 3 + (time - first) / span * (width - 6)
+    const x = 3 + (anchorIndex.get(time) ?? 0) / span * (width - 6)
     const y = max === min ? height / 2 : 3 + (max - value) / range * (height - 6)
     return { x, y }
   })

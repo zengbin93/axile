@@ -7,6 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 WeightType = Literal["ts", "cs"]
 FeeRate = Annotated[float, Field(strict=True, ge=0, lt=1, allow_inf_nan=False)]
 RangeKey = Literal["30", "90", "all"]
+CalendarStatus = Literal["available", "partial", "unavailable", "not_required"]
 
 
 class PerformanceSettings(BaseModel):
@@ -54,6 +55,23 @@ class PerformanceBinding(BaseModel):
     portfolio_id: int | None
 
 
+class PerformanceCalendarRange(BaseModel):
+    """按上海自然日表示的连续日历区间。"""
+
+    start: str
+    end: str
+
+
+class PerformanceCalendar(BaseModel):
+    """绩效区间内的渠道交易日历事实。"""
+
+    status: CalendarStatus
+    calendar_id: str | None = None
+    label: str | None = None
+    closed_ranges: list[PerformanceCalendarRange] = Field(default_factory=list)
+    unavailable_ranges: list[PerformanceCalendarRange] = Field(default_factory=list)
+
+
 class AccountPerformance(BaseModel):
     """账户收益与组合回测的只读结果."""
 
@@ -71,6 +89,7 @@ class AccountPerformance(BaseModel):
     points: list[PerformancePoint] = Field(default_factory=list)
     bindings: list[PerformanceBinding] = Field(default_factory=list)
     executions: list[dict] = Field(default_factory=list)
+    calendar: PerformanceCalendar
 
 
 class CostSummary(BaseModel):

@@ -21,9 +21,9 @@ test('金额和日涨跌来自同一观测，日期按上海时间判断', () =>
 
 const point = (day: number, value: number | null): PerformancePoint => ({ date: `2026-01-${String(day).padStart(2, '0')}`, observed_at: `2026-01-${String(day).padStart(2, '0')}T00:00:00+08:00`, account_return: value, portfolio_return: null, account_daily_return: null, portfolio_daily_return: null, difference: null })
 
-test('迷你线按真实时间间隔绘制并保留空值断点', () => {
+test('迷你线按观测锚点等距绘制并保留空值断点', () => {
   const path = sparklinePath([point(1, 0), point(2, .1), point(3, null), point(5, .2), point(6, .3)], 106, 36)
-  expect(path).toBe('M3.00,33.00 L23.00,23.00  M83.00,13.00 L103.00,3.00')
+  expect(path).toBe('M3.00,33.00 L28.00,23.00  M78.00,13.00 L103.00,3.00')
   expect(sparklinePath([point(1, 0), point(2, 0)], 106, 36)).toBe('M3.00,18.00 L103.00,18.00')
   expect(sparklinePath([], 106, 36)).toBe('')
 })
@@ -40,7 +40,7 @@ test('小图入口清除旧区间和缩放，仅预取绩效快照', async () =>
     performanceViewports.set('991:all', { start: 1, end: 2 })
     openFullPerformance(991)
     await performanceEntry(991, 'all').flight
-    expect(performanceViews.get(991)).toEqual({ range: 'all', view: 'cumulative', selection: null })
+    expect(performanceViews.get(991)).toEqual({ range: 'all', view: 'cumulative', scale: 'observations', selection: null })
     expect(performanceViewports.has('991:all')).toBe(false)
     expect(urls).toHaveLength(1)
     expect(urls[0]).toContain('/account/performance/991/snapshot?range=all')

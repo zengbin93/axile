@@ -226,6 +226,16 @@ export interface AccountPerformance {
   points: PerformancePoint[]
   executions?: import('@/lib/api/performance').CostExecutionRow[]
   bindings: Array<{ time: string; portfolio_id: number | null }>
+  calendar: PerformanceCalendar
+}
+
+export interface CalendarRange { start: string; end: string }
+export interface PerformanceCalendar {
+  status: 'available' | 'partial' | 'unavailable' | 'not_required'
+  calendar_id: string | null
+  label: string | null
+  closed_ranges: CalendarRange[]
+  unavailable_ranges: CalendarRange[]
 }
 
 export type FeishuCardConfig =
