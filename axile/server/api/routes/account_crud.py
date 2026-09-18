@@ -168,6 +168,9 @@ def _next_job_execution_times(job: Any, channel: TradeChannel | str, *, limit: i
             continue
         if trigger is None:
             break
+        if decision.reason_code == "CALENDAR.SESSION_CLOSED":
+            current = trigger.get_next_fire_time(current, current)
+            continue
         next_day = datetime.combine(calendar_day + timedelta(days=1), time.min, tzinfo=SCHEDULER_TIMEZONE)
         current = trigger.get_next_fire_time(current, next_day)
     return result

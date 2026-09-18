@@ -30,6 +30,7 @@ from typing import Any, cast, override
 import psutil
 from loguru import logger
 
+from axile.channels.schedule_clock import CN_STOCK_WINDOWS, is_within_schedule_windows
 from axile.common.gm_symbols import GM_SYMBOL_RESOLVER, normalize_gm_standard_input
 from axile.common.trade_channel import TradeChannel
 from axile.executor.abstract_executor.base import AbstractExecutor
@@ -164,8 +165,8 @@ class GMExecutor(AbstractExecutor, UnifiedCallbackClient):
             return False
 
     def _check_trading_time(self) -> bool:
-        """检查当前自然日是否开市。"""
-        return self._is_channel_calendar_open()
+        """检查当前是否处于 A 股可报单窗且自然日开市。"""
+        return is_within_schedule_windows(datetime.now(), CN_STOCK_WINDOWS) and self._is_channel_calendar_open()
 
     # ==================== 回调模式方法 ====================
 

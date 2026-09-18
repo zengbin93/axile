@@ -24,8 +24,16 @@ from axile.channels.contracts import (
     ChannelPlugin,
     ChannelPortfolioPreset,
     ChannelSchedule,
+    ChannelSessionWindow,
     ChannelUi,
     ChannelUnits,
+)
+from axile.channels.schedule_clock import (
+    CN_FUTURES_WINDOWS,
+    CN_STOCK_WINDOWS,
+    last_tradable_hhmm,
+    overnight_windows,
+    rhythm_hhmm,
 )
 from axile.common.order_param_model import OrderParamModel
 from axile.common.trade_channel import TradeChannel
@@ -38,12 +46,15 @@ from axile.executor.models.unified_input_accounts import (
 
 _LEVERAGE = ChannelLeverage(min=0, max=125, step=0.1)
 _SINGLE_MAKER = AlgorithmReference(method="SINGLE-MAKER", params={})
+_CN_STOCK_SESSION_WINDOWS = tuple(ChannelSessionWindow(start=start, end=end) for start, end in CN_STOCK_WINDOWS)
+_CN_FUTURES_SESSION_WINDOWS = tuple(ChannelSessionWindow(start=start, end=end) for start, end in CN_FUTURES_WINDOWS)
+_CN_FUTURES_NIGHT_WINDOWS = overnight_windows(CN_FUTURES_WINDOWS)
 _CHINA_FUTURES_NIGHT = ChannelNightSchedule(
     label="夜盘",
     range_label="21:00–次日 02:30",
-    close=("02:30",),
-    m15=tuple(f"{(total // 60) % 24:02d}:{total % 60:02d}" for total in range(21 * 60 + 15, 26 * 60 + 31, 15)),
-    m60=("22:00", "23:00", "00:00", "01:00", "02:00", "02:30"),
+    close=(last_tradable_hhmm(*_CN_FUTURES_NIGHT_WINDOWS[0]),),
+    m15=tuple(rhythm_hhmm(_CN_FUTURES_NIGHT_WINDOWS, 15)),
+    m60=tuple(rhythm_hhmm(_CN_FUTURES_NIGHT_WINDOWS, 60)),
 )
 
 
@@ -101,7 +112,11 @@ def _ctp_plugin() -> ChannelPlugin:
             description="通过期货公司柜台连接国内期货市场",
             icon="chart-candlestick",
             market="ctp",
-            schedule=ChannelSchedule(kind="cn_futures", night=_CHINA_FUTURES_NIGHT),
+            schedule=ChannelSchedule(
+                kind="cn_futures",
+                night=_CHINA_FUTURES_NIGHT,
+                windows=_CN_FUTURES_SESSION_WINDOWS,
+            ),
             currency="CNY",
             units=ChannelUnits(
                 quantity_kind="contract",
@@ -181,7 +196,7 @@ def _gm_plugin() -> ChannelPlugin:
             description="通过本机终端或 RPC 服务连接掘金量化",
             icon="landmark",
             market="ashare",
-            schedule=ChannelSchedule(kind="cn_stock"),
+            schedule=ChannelSchedule(kind="cn_stock", windows=_CN_STOCK_SESSION_WINDOWS),
             currency="CNY",
             units=ChannelUnits(
                 quantity_kind="share",
@@ -285,7 +300,11 @@ def _tq_plugin() -> ChannelPlugin:
             description="通过天勤连接国内期货、期权与组合市场",
             icon="radio-tower",
             market="ctp",
-            schedule=ChannelSchedule(kind="cn_futures", night=_CHINA_FUTURES_NIGHT),
+            schedule=ChannelSchedule(
+                kind="cn_futures",
+                night=_CHINA_FUTURES_NIGHT,
+                windows=_CN_FUTURES_SESSION_WINDOWS,
+            ),
             currency="CNY",
             units=ChannelUnits(
                 quantity_kind="contract",

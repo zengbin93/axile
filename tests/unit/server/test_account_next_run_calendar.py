@@ -24,6 +24,21 @@ def test_next_execution_times_skip_closed_weekend() -> None:
     ]
 
 
+def test_next_execution_times_skip_lunch_without_jumping_a_day() -> None:
+    trigger = parse_cron_expr("30 11,14 * * *")[0]
+    job = SimpleNamespace(
+        trigger=trigger,
+        next_run_time=datetime(2026, 9, 18, 11, 30, tzinfo=SCHEDULER_TIMEZONE),
+    )
+
+    result = _next_job_execution_times(job, TradeChannel.CTP, limit=2)
+
+    assert result == [
+        "2026-09-18T14:30:00+08:00",
+        "2026-09-21T14:30:00+08:00",
+    ]
+
+
 def test_next_execution_times_keep_uncovered_dates_fail_open() -> None:
     trigger = parse_cron_expr("0 10 * * *")[0]
     job = SimpleNamespace(

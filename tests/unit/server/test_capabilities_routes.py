@@ -55,7 +55,8 @@ def test_channels_reports_all_available_when_deps_present(client: TestClient, mo
     ctp = next(item for item in payload if item["channel"] == TradeChannel.CTP.value)
     assert ctp["ui"]["position_value_label"] == "货值"
     assert ctp["schedule"]["night"]["range_label"] == "21:00–次日 02:30"
-    assert ctp["schedule"]["night"]["m60"] == ["22:00", "23:00", "00:00", "01:00", "02:00", "02:30"]
+    assert ctp["schedule"]["night"]["m60"] == ["22:00", "23:00", "00:00", "01:00", "02:00"]
+    assert ctp["schedule"]["windows"][0] == {"start": "09:00", "end": "11:30"}
     assert gm["ui"]["position_value_label"] == "市值"
 
 

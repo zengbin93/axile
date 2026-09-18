@@ -1,8 +1,8 @@
 /**
  * 定时任务 → crontab 编译（从原型移植为纯函数）。
  *
- * 第一性原理：执行时刻 = 策略 bar 收盘时刻 = f(频率, 市场交易时段)。
- * 前台只给「市场感知的快捷预设」，底层编译成 APScheduler 可用的 crontab（北京时间）。
+ * 第一性原理：执行时刻 = 账户节奏 ∩ 渠道市场钟（左闭右开可报单窗）。
+ * 前台只给频率/补发，时刻从市场钟推出来再编成 crontab（北京时间）。
  * 多条规则用 ``|`` 拼接（后端 `parse_cron_expr` 支持）。
  */
 
@@ -35,24 +35,119 @@ export const DEFAULT_PRESET: Record<ScheduleKind, string> = {
   cn_stock: 'open',
 }
 
-/** 市场交易时段内的 bar 收盘时刻。 */
-const SESS = {
-  cn_stock: {
-    open: '09:30',
-    close: '14:50',
-    dayClose: '15:00',
-    m15: ['09:45', '10:00', '10:15', '10:30', '10:45', '11:00', '11:15', '11:30', '13:15', '13:30', '13:45', '14:00', '14:15', '14:30', '14:45', '15:00'],
-    m60: ['10:30', '11:30', '14:00', '15:00'],
-    m120: ['11:30', '15:00'],
-  },
-  cn_futures: {
-    open: '09:00',
-    close: '15:00',
-    dayClose: '15:00',
-    m15: ['09:15', '09:30', '09:45', '10:00', '10:15', '10:30', '10:45', '11:00', '11:15', '11:30', '13:45', '14:00', '14:15', '14:30', '14:45', '15:00'],
-    m60: ['10:00', '11:00', '14:30', '15:00'],
-    m120: ['11:30', '15:00'],
-  },
+/** 渠道市场钟（左闭右开）。空数组 = 连续交易。 */
+export interface SessionWindow {
+  start: string
+  end: string
+}
+
+const CLOCK_WINDOWS: Record<ScheduleKind, SessionWindow[]> = {
+  continuous: [],
+  cn_stock: [
+    { start: '09:30', end: '11:30' },
+    { start: '13:00', end: '15:00' },
+  ],
+  cn_futures: [
+    { start: '09:00', end: '11:30' },
+    { start: '13:00', end: '15:15' },
+    { start: '21:00', end: '02:30' },
+  ],
+}
+
+const SESSION_OPEN: Record<Exclude<ScheduleKind, 'continuous'>, string> = {
+  cn_stock: '09:30',
+  cn_futures: '09:00',
+}
+const SESSION_CLOSE: Record<Exclude<ScheduleKind, 'continuous'>, string> = {
+  cn_stock: '14:50',
+  cn_futures: '15:00',
+}
+
+function parseHm(value: string): number {
+  const [hour, minute] = value.split(':').map(Number)
+  return hour * 60 + minute
+}
+
+function fromMinutes(total: number): string {
+  const wrapped = ((total % (24 * 60)) + 24 * 60) % (24 * 60)
+  return `${String(Math.floor(wrapped / 60)).padStart(2, '0')}:${String(wrapped % 60).padStart(2, '0')}`
+}
+
+function isOvernight(window: SessionWindow): boolean {
+  return parseHm(window.start) >= parseHm(window.end)
+}
+
+function spanMinutes(window: SessionWindow): number {
+  const start = parseHm(window.start)
+  const end = parseHm(window.end)
+  return start < end ? end - start : 24 * 60 - start + end
+}
+
+function windowContains(window: SessionWindow, label: string): boolean {
+  const clock = parseHm(label)
+  const start = parseHm(window.start)
+  const end = parseHm(window.end)
+  if (start < end) return start <= clock && clock < end
+  return clock >= start || clock < end
+}
+
+function hhmmInWindows(label: string, windows: SessionWindow[]): boolean {
+  return windows.length === 0 || windows.some((window) => windowContains(window, label))
+}
+
+function barWindows(kind: ScheduleKind, windows: SessionWindow[]): SessionWindow[] {
+  if (kind !== 'cn_futures') return windows
+  return windows.map((window) => (window.start === '13:00' && window.end === '15:15' ? { start: window.start, end: '15:00' } : window))
+}
+
+function rhythmTimes(windows: SessionWindow[], freq: number, clock: SessionWindow[] = windows): string[] {
+  const seen: string[] = []
+  const known = new Set<string>()
+  for (const window of windows) {
+    const begin = parseHm(window.start)
+    const span = spanMinutes(window)
+    const bases: number[] = []
+    let step = freq
+    while (step < span) {
+      bases.push(step)
+      step += freq
+    }
+    if (step === span) {
+      const boundary = fromMinutes(begin + span)
+      bases.push(hhmmInWindows(boundary, clock) ? span : span - 1)
+    }
+    for (const base of bases) {
+      const label = fromMinutes(begin + base)
+      if (!hhmmInWindows(label, clock) || known.has(label)) continue
+      known.add(label)
+      seen.push(label)
+    }
+  }
+  return seen
+}
+
+function applyOffsets(times: string[], windows: SessionWindow[], offs: number[]): string[] {
+  const seen: string[] = []
+  const known = new Set<string>()
+  for (const time of times) {
+    for (const offset of offs) {
+      const [hour, minute] = time.split(':').map(Number)
+      const label = fromMinutes(hour * 60 + minute + offset)
+      if ((offset !== 0 && !hhmmInWindows(label, windows)) || known.has(label)) continue
+      known.add(label)
+      seen.push(label)
+    }
+  }
+  return seen
+}
+
+function sessionTimes(kind: Exclude<ScheduleKind, 'continuous'>, freq: 15 | 60 | 120): string[] {
+  const clock = CLOCK_WINDOWS[kind]
+  return rhythmTimes(
+    barWindows(kind, clock).filter((window) => !isOvernight(window)),
+    freq,
+    clock,
+  )
 }
 
 /** 补发偏移集合：0（到点）+ N 次每隔 M 分。 */
@@ -66,22 +161,20 @@ function continuousMinutes(base: number[], offs: number[]): string {
 }
 
 /** 一组 HH:MM × 偏移集 → 按分钟分组的 cron 列表。 */
-function timesToCron(times: string[], dow: string, offs: number[]): string[] {
+function timesToCron(times: string[], dow: string, offs: number[], windows: SessionWindow[] = []): string[] {
+  const points = windows.length ? applyOffsets(times, windows, offs) : times.flatMap((time) => {
+    const [hour, minute] = time.split(':').map(Number)
+    return offs.map((offset) => fromMinutes(hour * 60 + minute + offset))
+  })
   const byMin: Record<number, number[]> = {}
-  for (const t of times) {
-    const [H, M] = t.split(':').map(Number)
-    for (const o of offs) {
-      let m = M + o
-      let h = H + Math.floor(m / 60)
-      m = ((m % 60) + 60) % 60
-      h = ((h % 24) + 24) % 24
-      ;(byMin[m] = byMin[m] || []).push(h)
-    }
+  for (const point of points) {
+    const [hour, minute] = point.split(':').map(Number)
+    ;(byMin[minute] = byMin[minute] || []).push(hour)
   }
   return Object.keys(byMin)
     .map(Number)
     .sort((a, b) => a - b)
-    .map((m) => `${m} ${[...new Set(byMin[m])].sort((a, b) => a - b).join(',')} * * ${dow}`)
+    .map((minute) => `${minute} ${[...new Set(byMin[minute])].sort((a, b) => a - b).join(',')} * * ${dow}`)
 }
 
 export interface Preset {
@@ -100,15 +193,15 @@ export const PRESETS: Record<ScheduleKind, Preset[]> = {
     { id: 'd1', label: '每天', sub: '08:00', build: (o) => [`${continuousMinutes([0], o)} 8 * * *`] },
   ],
   cn_stock: [
-    { id: 'open', label: '每交易日 · 开盘', sub: '09:30', build: (o) => timesToCron([SESS.cn_stock.open], '*', o) },
-    { id: 'close', label: '每交易日 · 临收', sub: '14:50', build: (o) => timesToCron([SESS.cn_stock.close], '*', o) },
-    { id: 'm15', label: '盘中每 15 分', build: (o) => timesToCron(SESS.cn_stock.m15, '*', o) },
-    { id: 'm60', label: '盘中每 60 分', build: (o) => timesToCron(SESS.cn_stock.m60, '*', o) },
+    { id: 'open', label: '每交易日 · 开盘', sub: '09:30', build: (o) => timesToCron([SESSION_OPEN.cn_stock], '*', o, CLOCK_WINDOWS.cn_stock) },
+    { id: 'close', label: '每交易日 · 临收', sub: '14:50', build: (o) => timesToCron([SESSION_CLOSE.cn_stock], '*', o, CLOCK_WINDOWS.cn_stock) },
+    { id: 'm15', label: '盘中每 15 分', build: (o) => timesToCron(sessionTimes('cn_stock', 15), '*', o, CLOCK_WINDOWS.cn_stock) },
+    { id: 'm60', label: '盘中每 60 分', build: (o) => timesToCron(sessionTimes('cn_stock', 60), '*', o, CLOCK_WINDOWS.cn_stock) },
   ],
   cn_futures: [
-    { id: 'close', label: '日盘收盘', sub: '15:00', build: (o) => timesToCron([SESS.cn_futures.dayClose], '*', o) },
-    { id: 'm15', label: '日盘每 15 分', build: (o) => timesToCron(SESS.cn_futures.m15, '*', o) },
-    { id: 'm60', label: '日盘每 60 分', build: (o) => timesToCron(SESS.cn_futures.m60, '*', o) },
+    { id: 'close', label: '日盘收盘', sub: '15:00', build: (o) => timesToCron([SESSION_CLOSE.cn_futures], '*', o, CLOCK_WINDOWS.cn_futures) },
+    { id: 'm15', label: '日盘每 15 分', build: (o) => timesToCron(sessionTimes('cn_futures', 15), '*', o, CLOCK_WINDOWS.cn_futures) },
+    { id: 'm60', label: '日盘每 60 分', build: (o) => timesToCron(sessionTimes('cn_futures', 60), '*', o, CLOCK_WINDOWS.cn_futures) },
   ],
 }
 
@@ -127,7 +220,7 @@ export function buildCronList(
     const p = PRESETS[market].find((x) => x.id === id)
     if (p) out = out.concat(p.build(offs))
     if (nightOn && night && (id === 'close' || id === 'm15' || id === 'm60')) {
-      out = out.concat(timesToCron(night[id], '*', offs))
+      out = out.concat(timesToCron(night[id], '*', offs, CLOCK_WINDOWS.cn_futures))
     }
   }
   return [...new Set(out)]
@@ -333,18 +426,17 @@ export function compileScheduleRule(
     return [`${continuousMinutes(base[f], offs)} ${hr[f]} * * ${dow}`]
   }
 
-  const S = market === 'cn_stock' ? SESS.cn_stock : SESS.cn_futures
-  // 时段市场：日频若有合法时刻则按钟点；否则回退锚点开盘/临收。
+  const clock = CLOCK_WINDOWS[market]
+  const kind = market as Exclude<ScheduleKind, 'continuous'>
   if (rule.freq === 'd1' || rule.freq === 'm240') {
     if (rule.freq === 'd1' && isValidTime(rule.time)) {
-      return timesToCron([rule.time.trim()], dow, offs)
+      return timesToCron([rule.time.trim()], dow, offs, clock)
     }
-    const t = rule.anchor === 'close' ? S.close : S.open
-    return timesToCron([t], dow, offs)
+    const t = rule.anchor === 'close' ? SESSION_CLOSE[kind] : SESSION_OPEN[kind]
+    return timesToCron([t], dow, offs, clock)
   }
-  if (rule.freq === 'm15') return timesToCron(S.m15, dow, offs)
-  if (rule.freq === 'm120') return timesToCron(S.m120, dow, offs)
-  return timesToCron(S.m60, dow, offs)
+  const freq = rule.freq === 'm15' ? 15 : rule.freq === 'm120' ? 120 : 60
+  return timesToCron(sessionTimes(kind, freq), dow, offs, clock)
 }
 
 /** 编译高级规则列表（跳过空槽）。 */

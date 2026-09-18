@@ -9,11 +9,9 @@ from typing import Literal
 from pydantic import BaseModel
 
 from axile.channels import get_channel
+from axile.channels.schedule_clock import is_within_schedule_windows
 from axile.common.trade_channel import TradeChannel
-from axile.executor.china_futures_session import (
-    is_regular_night_session_transition,
-    is_within_possible_china_futures_session,
-)
+from axile.executor.china_futures_session import is_regular_night_session_transition
 from axile.executor.trading_calendar import ShinnyTradingCalendar, TradingCalendar
 
 
@@ -114,7 +112,8 @@ def evaluate_channel_calendar_moment(
     """按渠道时段把一次触发映射到交易日并判断是否执行。"""
     channel_name = str(channel)
     descriptor = get_channel(channel_name).descriptor
-    if descriptor.schedule.kind == "cn_futures" and not is_within_possible_china_futures_session(current):
+    clock_windows = tuple((window.start, window.end) for window in descriptor.schedule.windows)
+    if clock_windows and not is_within_schedule_windows(current, clock_windows):
         # 只把「今日开市」改写成市场缝；日历不可用 / 休市日保持原判定，避免盖掉 fail-open。
         decision = evaluate_channel_calendar_day(channel, current.date(), calendar=calendar)
         if decision.status is CalendarDecisionStatus.AVAILABLE_OPEN:

@@ -162,12 +162,23 @@ class _TradingCalendarStub:
 def test_gm_channel_calendar_preserves_fail_open_contract(
     calendar: _TradingCalendarStub,
     expected: bool,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setattr(gm_execute_module, "is_within_schedule_windows", lambda *_args, **_kwargs: True)
     executor = _build_executor()
     executor._channel_calendar_id = "china"
     executor._trading_calendar = calendar
 
     assert executor._check_trading_time() is expected
+
+
+def test_gm_trading_time_closes_at_lunch(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(gm_execute_module, "is_within_schedule_windows", lambda *_args, **_kwargs: False)
+    executor = _build_executor()
+    executor._channel_calendar_id = "china"
+    executor._trading_calendar = _TradingCalendarStub(True)
+
+    assert executor._check_trading_time() is False
 
 
 def test_convert_gm_order_to_unified_uses_client_order_id_as_unified_order_id() -> None:

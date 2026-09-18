@@ -121,3 +121,31 @@ def test_night_open_is_not_session_gap() -> None:
     )
     assert decision.status is CalendarDecisionStatus.AVAILABLE_OPEN
     assert decision.reason_code is None
+
+
+@pytest.mark.parametrize(
+    ("channel", "moment"),
+    [
+        (TradeChannel.CTP, datetime(2026, 9, 18, 11, 30, tzinfo=_SHANGHAI)),
+        (TradeChannel.CTP, datetime(2026, 9, 18, 12, 0, tzinfo=_SHANGHAI)),
+        (TradeChannel.GM, datetime(2026, 9, 18, 11, 30, tzinfo=_SHANGHAI)),
+        (TradeChannel.GM, datetime(2026, 9, 18, 12, 0, tzinfo=_SHANGHAI)),
+    ],
+)
+def test_lunch_is_session_closed_on_an_open_day(channel: TradeChannel, moment: datetime) -> None:
+    decision = evaluate_channel_calendar_moment(
+        channel,
+        moment,
+        calendar=_Calendar({date(2026, 9, 18): True}),
+    )
+    assert decision.status is CalendarDecisionStatus.AVAILABLE_CLOSED
+    assert decision.reason_code == "CALENDAR.SESSION_CLOSED"
+
+
+def test_futures_tea_break_stays_open_for_index() -> None:
+    decision = evaluate_channel_calendar_moment(
+        TradeChannel.CTP,
+        datetime(2026, 9, 18, 10, 20, tzinfo=_SHANGHAI),
+        calendar=_Calendar({date(2026, 9, 18): True}),
+    )
+    assert decision.status is CalendarDecisionStatus.AVAILABLE_OPEN

@@ -296,11 +296,23 @@ class ChannelNightSchedule(_FrozenDescriptorModel):
     m60: tuple[str, ...] = Field(min_length=1)
 
 
+class ChannelSessionWindow(_FrozenDescriptorModel):
+    """一条左闭右开的渠道可报单窗，时刻为 ``HH:MM``."""
+
+    start: str = Field(pattern=r"^\d{2}:\d{2}$")
+    end: str = Field(pattern=r"^\d{2}:\d{2}$")
+
+
 class ChannelSchedule(_FrozenDescriptorModel):
-    """描述渠道采用的公共定时规则类型。"""
+    """描述渠道采用的公共定时规则类型与可报单窗.
+
+    ``windows`` 是调度市场钟：空元组表示连续交易；隔夜窗 ``start >= end``。
+    节奏 crontab 由频率在这些窗内对齐，真正能否下单还要看交易日历。
+    """
 
     kind: ScheduleKind
     night: ChannelNightSchedule | None = None
+    windows: tuple[ChannelSessionWindow, ...] = ()
 
 
 class ChannelPortfolioPreset(_FrozenDescriptorModel):

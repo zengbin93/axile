@@ -74,10 +74,10 @@ describe('compileCustom · 时段市场按锚点落点', () => {
     expect(compileCustom('cn_stock', 'm240', 'close', 0, 0)).toEqual(['50 14 * * *'])
   })
 
-  it('A股 m120 用时段表 11:30/15:00（含 m120，验证 SESS 已补齐）', () => {
+  it('A股 m120 落在可报单最后一分钟，不含 11:30/15:00', () => {
     expect(compileCustom('cn_stock', 'm120', 'open', 0, 0)).toEqual([
-      '0 15 * * *',
-      '30 11 * * *',
+      '29 11 * * *',
+      '59 14 * * *',
     ])
   })
 })
@@ -183,6 +183,14 @@ describe('buildCronList · 补发放大偏移', () => {
 
   it('A股多选预设拼接多条规则（开盘+临收）', () => {
     expect(buildCronList('cn_stock', ['open', 'close'], 0, 0)).toEqual(['30 9 * * *', '50 14 * * *'])
+  })
+
+  it('A股 15 分补发不走进午休', () => {
+    const expr = buildCronList('cn_stock', ['m15'], 4, 1).join(' | ')
+    expect(expr).toContain('29 11')
+    expect(expr).not.toContain('30 11')
+    expect(expr).not.toContain('31 11')
+    expect(expr).not.toContain('0 15')
   })
 })
 

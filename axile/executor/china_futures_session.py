@@ -2,14 +2,9 @@
 
 from __future__ import annotations
 
-from datetime import date, datetime, time, timedelta
-from zoneinfo import ZoneInfo
+from datetime import date, datetime, timedelta
 
-_SHANGHAI = ZoneInfo("Asia/Shanghai")
-_DAY_OPEN = time(9, 0)
-_DAY_CLOSE = time(15, 15)
-_NIGHT_OPEN = time(21, 0)
-_NIGHT_CLOSE = time(2, 30)
+from axile.channels.schedule_clock import CN_FUTURES_WINDOWS, is_within_schedule_windows
 
 
 def is_regular_night_session_transition(session_start_day: date, trading_day: date) -> bool:
@@ -22,18 +17,15 @@ def is_regular_night_session_transition(session_start_day: date, trading_day: da
 def is_within_possible_china_futures_session(now: datetime) -> bool:
     """判断此刻是否可能存在可交易的中国期货品种.
 
-    日盘 ``09:00 <= t < 15:15``（含国债多出的 15 分钟），夜盘 ``21:00 <= t`` 或
-    ``t < 02:30``。其余为日夜盘缝，全市场没有任何品种可下单。
+    日盘 ``09:00–11:30`` / ``13:00–15:15``（含国债多出的 15 分钟），夜盘
+    ``21:00–02:30``。午休 ``11:30–13:00`` 与日夜盘缝全市场都不可下单。
 
     这是渠道级保守预检，不是完整交易日历：交易日由服务端日历判断，窗口内具体
     品种是否开盘仍由 CTP/TQ 品种时段表判断。09:00–09:30 商品已开、股指未开；
-    15:00–15:15 仅国债。无时区的 ``datetime`` 按上海时间理解。
+    15:00–15:15 仅国债；10:15–10:30 茶歇仅商品停、股指仍开。无时区的
+    ``datetime`` 按上海时间理解。
     """
-    local = now.astimezone(_SHANGHAI) if now.tzinfo is not None else now.replace(tzinfo=_SHANGHAI)
-    clock = local.timetz().replace(tzinfo=None)
-    if _DAY_OPEN <= clock < _DAY_CLOSE:
-        return True
-    return clock >= _NIGHT_OPEN or clock < _NIGHT_CLOSE
+    return is_within_schedule_windows(now, CN_FUTURES_WINDOWS)
 
 
 __all__ = ["is_regular_night_session_transition", "is_within_possible_china_futures_session"]
