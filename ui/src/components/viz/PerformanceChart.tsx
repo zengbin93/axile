@@ -19,7 +19,7 @@ import { chartAxis } from '@/components/viz/performanceCanvas'
 import { amount, feeText, shanghaiTime, type CostSummary } from '@/features/history/costs'
 import { returnText } from '@/features/history/performance'
 import { bindingSelection, clampViewport, intervalReturn, intervalSelection, nearestIndex, pointTime, precisePoints, reconcileSelection, timeLabel, type ChartSelection, type Viewport } from '@/features/history/chartModel'
-import { bindingAt, CHART_HEIGHT, drawOverlay, drawScene, PLOT, plotRight, pointLabel, readCanvasTheme, seriesKeys, xPosition, xTime, type ChartScene } from '@/components/viz/performanceCanvas'
+import { bindingAt, CHART_HEIGHT, drawOverlay, drawScene, hasExecutionMarker, PLOT, plotRight, pointLabel, readCanvasTheme, seriesKeys, xPosition, xTime, type ChartScene } from '@/components/viz/performanceCanvas'
 import { closedDaysBetween, createTimeScale, type TimeScaleMode } from '@/features/history/timeScale'
 
 interface Props {
@@ -99,10 +99,13 @@ function CanvasPerformanceChart({ data, daily, scaleMode, costs, intervalCost, s
   const exact = precisePoints(data.points)
   const shownSelection = draft ?? selection
   selectionRef.current = shownSelection
-  const pointIndex = Math.min(data.points.length - 1, hover ?? (selection && selection.kind !== 'interval' ? nearestIndex(times, selection.time) : data.points.length - 1))
+  const executionPinned = selection?.kind === 'execution'
+  const pointIndex = Math.min(data.points.length - 1, !executionPinned && hover != null ? hover : selection && selection.kind !== 'interval' ? nearestIndex(times, selection.time) : data.points.length - 1)
   const point = data.points[pointIndex]
   const execution = data.executions?.find(row => row.record.id === point.record_id)
-  const selectedExecution = hover == null && selection?.kind === 'execution' ? data.executions?.find(row => row.record.id === selection.recordId) : null
+  // 悬停读数优先用磁吸命中的执行，与点击固定的取数同源；观测点 record_id 可能绑定到同刻另一条执行。
+  const magnetExecution = magnet != null ? data.executions?.find(row => row.record.id === magnet) : null
+  const selectedExecution = executionPinned ? data.executions?.find(row => row.record.id === selection.recordId) : null
   const keys = seriesKeys(daily)
   const summary = draft ? null : intervalCost
   const estimated = summary?.estimated ?? 0
@@ -110,7 +113,7 @@ function CanvasPerformanceChart({ data, daily, scaleMode, costs, intervalCost, s
   const interval = shownSelection?.kind === 'interval'
   const account = interval ? intervalReturn(data.points, shownSelection, 'account_return') : point[keys[0]]
   const portfolio = interval ? intervalReturn(data.points, shownSelection, 'portfolio_return') : point[keys[1]]
-  const readingExecution = selectedExecution ?? execution
+  const readingExecution = selectedExecution ?? magnetExecution ?? execution
   const readingCost = interval ? summary : selection?.kind === 'day' ? daySummary : readingExecution?.summary ?? daySummary
   const costReady = costs != null && (!interval || summary != null)
   const costScope = interval ? '区间' : readingExecution ? '本次执行' : '当日'
@@ -228,7 +231,7 @@ function CanvasPerformanceChart({ data, daily, scaleMode, costs, intervalCost, s
     if (p.y < PLOT.top || p.y > PLOT.bottom) { magnetRecordId.current = null; setMagnet(null); return null }
     const visible = (data.executions ?? []).flatMap(row => {
       const time = shanghaiTime(row.record.created_at)
-      if (time < viewport.start || time > viewport.end) return []
+      if (!hasExecutionMarker(row) || time < viewport.start || time > viewport.end) return []
       return [{ row, time, distance: Math.abs(xPosition(time, size.width, viewport, timeScale) - p.x) }]
     })
     const retained = visible.find(item => item.row.record.id === magnetRecordId.current)
@@ -444,7 +447,7 @@ function CanvasPerformanceChart({ data, daily, scaleMode, costs, intervalCost, s
     {scaleMode === 'observations' && <p className="sr-only">观测序列已压缩 {times.slice(0, -1).reduce((sum, time, index) => sum + closedDaysBetween(time, times[index + 1], data.calendar.closed_ranges), 0)} 个完整休市日。</p>}
     <div className="flex min-h-7 flex-wrap justify-between gap-2 text-[11px] text-ink-3"><span data-testid="chart-viewport">{timeLabel(viewport.start)} → {timeLabel(viewport.end)}</span><span>上海时间 · 收益差 = 回测 − 账户</span></div>
     <p className="text-[11px] leading-5 text-ink-3">账户收益未调整出入金 · 回测单边费率 {Number((data.settings.backtest_fee_rate * 10000).toFixed(8))} BP</p>
-    <p className="text-[11px] leading-5 text-ink-3">{showExecutions ? '圆点为执行事件：靠近会吸附到执行时刻，点击固定查看本次执行 · Ctrl + 滚轮放大' : '执行点已隐藏 · Ctrl + 滚轮放大'}</p>
+    <p className="text-[11px] leading-5 text-ink-3">{showExecutions ? '圆点为有实际成交的执行：靠近会吸附到执行时刻，点击固定查看本次执行 · Ctrl + 滚轮放大' : '执行点已隐藏 · Ctrl + 滚轮放大'}</p>
     <div id="performance-interaction-hint" className="sr-only">
       <span>Ctrl + 滚轮缩放</span><span>拖动框选区间 · 底部导航条平移 · 双击恢复时间范围</span><span>聚焦图表后：← → 查看 · Home / End 首末点 · Enter / 空格选择 · Esc 清除 · + / - 缩放 · 0 重置</span>
     </div>

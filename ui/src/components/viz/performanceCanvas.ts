@@ -42,6 +42,11 @@ export function executionMarkerTone(row: CostExecutionRow): ExecutionMarkerTone 
   return 'normal'
 }
 
+/** 有真实成交才画点，部分成交也算；无成交的执行不留针脚、不参与磁吸。 */
+export function hasExecutionMarker(row: CostExecutionRow): boolean {
+  return (row.transactions?.length ?? 0) > 0
+}
+
 export function executionMarkerPoint(scene: ChartScene, row: CostExecutionRow): { x: number; y: number } | null {
   const time = shanghaiTime(row.record.created_at)
   const { times, data, width, viewport } = scene
@@ -174,6 +179,7 @@ function drawExecutionMarkers(ctx: CanvasRenderingContext2D, scene: ChartScene) 
   const { theme } = scene
   ctx.save(); ctx.beginPath(); ctx.rect(PLOT.left, PLOT.top, plotRight(scene.width) - PLOT.left, PLOT.bottom - PLOT.top); ctx.clip()
   for (const row of rows) {
+    if (!hasExecutionMarker(row)) continue
     const point = executionMarkerPoint(scene, row)
     if (!point) continue
     // 常态是挖空的中性圈，曲线从圈心穿过；琥珀实心点只留给异常执行。
