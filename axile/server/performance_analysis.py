@@ -22,7 +22,7 @@ from axile.server.performance import calculate_performance, local_time, observat
 from axile.server.performance_costs import SHANGHAI, daily_costs, project_execution, summarize, timestamp
 
 # PARTIAL 只描述执行未全部完成；重建旧缓存中的「未到位」事件文案。
-LOGIC_VERSION = "13"
+LOGIC_VERSION = "14"
 ENGINE_VERSION = version("wbt")
 RETRY_DELAYS = (5, 30, 120)
 

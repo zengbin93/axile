@@ -3,7 +3,7 @@
 组合回测回放可执行权重：``symbol_results[*].sizing`` 证据完整（全品种 SIZED 且权重口径）时
 以 ``target_quantity * unit_notional / equity`` 逐行还原整手离散后的真实敞口；证据不完整
 （历史记录、lots 口径、UNAVAILABLE）回退到 ``curr_target`` 理论权重。2026-08-27 之前的
-记录无换算证据，一律按理论权重回放。
+记录无换算证据，一律按理论权重回放。盯市价与柜台对齐取最新价，无有效最新价回退中间价。
 """
 
 from __future__ import annotations
@@ -115,10 +115,14 @@ def _mapping(value: object) -> dict[str, object]:
     return cast("dict[str, object]", value) if isinstance(value, dict) else {}
 
 
-def _mid_price(raw_tick: object) -> float | None:
+def _mark_price(raw_tick: object) -> float | None:
+    """盯市价与柜台对齐取最新价；盘口无效或无最新价回退买卖中间价."""
     tick = _mapping(raw_tick)
     if tick.get("book_valid") is False:
         return None
+    last = _number(tick.get("last_price"))
+    if last is not None and last > 0:
+        return last
     bid, ask = tick.get("bid_price"), tick.get("ask_price")
     bid = _number(bid[0] if isinstance(bid, list) and bid else bid)
     ask = _number(ask[0] if isinstance(ask, list) and ask else ask)
@@ -143,7 +147,7 @@ def _prices(result: dict[str, object]) -> dict[str, float]:
     return {
         symbol: price
         for symbol, tick in ticks.items()
-        if isinstance(symbol, str) and (price := _mid_price(tick)) is not None
+        if isinstance(symbol, str) and (price := _mark_price(tick)) is not None
     }
 
 

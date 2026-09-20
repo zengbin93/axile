@@ -302,6 +302,32 @@ def sized(status="SIZED", mode="weight", qty=1.0, notional=237015.0, equity=1023
     return {"sizing": row}
 
 
+def test_mark_price_prefers_last_with_mid_fallback():
+    def record_with_tick(tick):
+        return SimpleNamespace(
+            id=1,
+            execution_id="x",
+            created_at="2026-01-01T01:00:00Z",
+            raw_input={},
+            raw_result={"account_assets": {"total_asset": 100}, "first_ticks": {"A": tick}},
+            is_success=1,
+        )
+
+    # 最新价有效时优先于买卖中间价。
+    assert observation(record_with_tick({"last_price": 98.0, "bid_price": 90, "ask_price": 110})).prices == {"A": 98.0}
+    # 无最新价回退中间价；仅最新价无盘口也可用。
+    assert observation(record_with_tick({"bid_price": 99, "ask_price": 101})).prices == {"A": 100.0}
+    assert observation(record_with_tick({"last_price": 97.0})).prices == {"A": 97.0}
+    # 最新价无效回退中间价；盘口无效仍然剔除。
+    assert observation(record_with_tick({"last_price": 0.0, "bid_price": 99, "ask_price": 101})).prices == {"A": 100.0}
+    assert (
+        observation(
+            record_with_tick({"last_price": 98.0, "bid_price": 99, "ask_price": 101, "book_valid": False})
+        ).prices
+        == {}
+    )
+
+
 def sized_record(symbol_results, curr_target=None, tick=100.0, kind=None):
     result = {"account_assets": {"total_asset": 102335.888}, "symbol_results": symbol_results}
     if kind:
