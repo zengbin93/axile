@@ -165,7 +165,7 @@ function AccountHistory({ accountId }: { accountId: number }) {
         />
         {data ? <dl className="flex min-w-0 flex-wrap items-baseline text-xs text-ink-3">
           <div className="whitespace-nowrap"><dt className="sr-only">基准</dt><dd className="inline">{data.baseline ? <time dateTime={data.baseline} title={shanghaiLabel(data.baseline)}>{shanghaiDay(data.baseline)}</time> : '—'}</dd><span aria-hidden="true">&nbsp;→&nbsp;</span><dt className="sr-only">截止</dt><dd className="inline">{data.end ? <time dateTime={data.end} title={shanghaiLabel(data.end)}>{shanghaiDay(data.end)}</time> : '—'}</dd><span aria-hidden="true">&nbsp;·</span></div>
-          <div className="whitespace-nowrap"><dt className="sr-only">有效回测记录</dt><dd className="inline">回测 {data.backtest_included ? data.used_record_count : 0}</dd><span aria-hidden="true">&nbsp;·</span></div>
+          <div className="whitespace-nowrap"><dt className="sr-only">有效回测记录</dt><dd className="inline">回测 {data.backtest_included ? (data.skips?.count ? `${data.used_record_count}/${data.observation_count}` : data.used_record_count) : 0}</dd><span aria-hidden="true">&nbsp;·</span></div>
           <div className="whitespace-nowrap"><dt className="sr-only">历史记录</dt><dd className="inline">历史 {data.record_count}</dd></div>
         </dl> : <span className="shrink-0 text-xs text-ink-3">{snapshot?.data_until ? `数据截止 ${shanghaiLabel(snapshot.data_until)}` : '暂无绩效快照'}</span>}
       </div>
@@ -189,7 +189,7 @@ function AccountHistory({ accountId }: { accountId: number }) {
     {!data && <PerformanceChartPlaceholder accountId={accountId} controls={controls} loading={backtestBusy || !snapshot && !calculationError} failed={!!calculationError} />}
     {data && <div className="pb-4">
       <PerformanceChart key={range} accountId={accountId} snapshotId={snapshot?.snapshot_id} viewKey={`${accountId}:${range}`} data={data} daily={daily} scaleMode={scale} costs={costs} intervalCost={intervalCosts.error || intervalCosts.loading ? null : intervalCosts.data?.summary ?? null} onSelect={value => { setSelectionNotice(false); setSelection(value) }} selection={selection} portfolioNames={portfolioNames} controls={controls} showExecutions={markers} />
-      {data.gap && <p role="status" className="mt-3 break-words text-sm text-warn">组合收益自 {data.gap.time.replace('T', ' ')} 中断：{data.gap.reason}{data.gap.symbols.length ? `（${data.gap.symbols.join('、')}）` : ''}</p>}
+      {data.skips?.count ? <p role="status" className="mt-2 text-xs text-warn">{data.skips.count} 条执行快照未参与回测（{[data.skips.missing_target ? `目标权重缺失 ${data.skips.missing_target} 条` : null, data.skips.missing_ticks ? `缺少首笔盘口 ${data.skips.missing_ticks} 条` : null].filter(Boolean).join('、')}），组合收益按最后持仓延续估算</p> : null}
       {data.invalid_asset_count > 0 && <p className="mt-2 text-xs text-warn">{data.invalid_asset_count} 条账户资产快照不可用</p>}
     </div>}
     <div className="border-t border-line py-4">
