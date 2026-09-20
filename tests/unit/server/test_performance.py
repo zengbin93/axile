@@ -293,6 +293,124 @@ def test_tick_formats_and_failed_records(layout):
     assert observation(record).target == {}
 
 
+def sized(status="SIZED", mode="weight", qty=1.0, notional=237015.0, equity=102335.888, reason="COMMON.SIZING.EXACT"):
+    row = {"sizing_mode": mode, "status": status, "reason_code": reason, "account_weight": 1.05, "equity": equity}
+    if qty is not None:
+        row["target_quantity"] = qty
+    if notional is not None:
+        row["unit_notional"] = notional
+    return {"sizing": row}
+
+
+def sized_record(symbol_results, curr_target=None, tick=100.0, kind=None):
+    result = {"account_assets": {"total_asset": 102335.888}, "symbol_results": symbol_results}
+    if kind:
+        result["execution_kind"] = kind
+    raw_input = {"curr_target": curr_target} if curr_target is not None else {}
+    return SimpleNamespace(
+        id=1,
+        execution_id="x",
+        created_at="2026-01-01T01:00:00Z",
+        raw_input=raw_input,
+        raw_result=result,
+        is_success=1,
+    )
+
+
+def test_below_min_quantity_replays_zero_executable_weight():
+    record = sized_record(
+        {
+            "X": {
+                **sized(qty=0.0, reason="COMMON.SIZING.BELOW_MIN_QUANTITY"),
+                "first_tick": {"bid_price": 99, "ask_price": 101},
+            }
+        },
+        curr_target={"X": 1.05},
+    )
+    assert observation(record).target == {"X": 0.0}
+
+
+def test_quantized_quantity_replays_lot_weight_per_row_equity():
+    record = sized_record({"X": sized(qty=2.0), "S": sized(qty=-3.0, notional=34780.0, equity=101000.0)})
+    target = observation(record).target
+    assert target["X"] == pytest.approx(2 * 237015.0 / 102335.888)
+    assert target["S"] == pytest.approx(-3 * 34780.0 / 101000.0)
+
+
+def test_zero_target_row_keeps_explicit_zero_without_notional():
+    record = sized_record(
+        {"X": sized(qty=0.0, notional=None, reason="COMMON.SIZING.ZERO_TARGET"), "S": sized(qty=1.0, notional=34780.0)}
+    )
+    assert observation(record).target == {"X": 0.0, "S": pytest.approx(34780.0 / 102335.888)}
+
+
+def test_lots_mode_falls_back_to_curr_target():
+    record = sized_record({"X": sized(mode="lots", qty=2.0, notional=None)}, curr_target={"X": 1.05})
+    assert observation(record).target == {"X": 1.05}
+
+
+def test_partial_sizing_evidence_falls_back_whole_record():
+    record = sized_record(
+        {"X": sized(qty=1.0), "S": {"first_tick": {"bid_price": 99, "ask_price": 101}}},
+        curr_target={"X": 0.6, "S": 0.4},
+    )
+    assert observation(record).target == {"X": 0.6, "S": 0.4}
+
+
+def test_unavailable_sizing_falls_back_whole_record():
+    record = sized_record(
+        {"X": sized(status="UNAVAILABLE", qty=None, notional=None, reason="COMMON.SIZING.INVALID_PRICE")},
+        curr_target={"X": 1.05},
+    )
+    assert observation(record).target == {"X": 1.05}
+
+
+def test_nonpositive_equity_or_missing_notional_falls_back():
+    record = sized_record({"X": sized(qty=1.0, equity=0.0)}, curr_target={"X": 1.05})
+    assert observation(record).target == {"X": 1.05}
+    record = sized_record({"X": sized(qty=1.0, notional=None)}, curr_target={"X": 1.05})
+    assert observation(record).target == {"X": 1.05}
+
+
+def test_clear_positions_with_full_sizing_still_empties_target():
+    record = sized_record({"X": sized(qty=1.0)}, kind="clear_positions")
+    assert observation(record).target == {}
+
+
+def test_forbidden_symbol_absent_from_derived_vector_participates():
+    record = sized_record(
+        {"A": {**sized(qty=1.0, notional=100.0), "first_tick": {"bid_price": 99, "ask_price": 101}}},
+        curr_target={"F": 0.4, "A": 0.6},
+    )
+    assert observation(record).target == {"A": pytest.approx(100.0 / 102335.888)}
+
+
+def test_below_min_weight_excluded_from_portfolio_pnl():
+    items = []
+    for day, x_price in ((1, 100.0), (2, 90.0)):
+        record = sized_record(
+            {
+                "X": {
+                    **sized(qty=0.0, reason="COMMON.SIZING.BELOW_MIN_QUANTITY", notional=None),
+                    "first_tick": {"bid_price": x_price - 1, "ask_price": x_price + 1},
+                },
+                "S": {
+                    **sized(qty=1.0, notional=100.0, equity=102335.888),
+                    "first_tick": {"bid_price": 99, "ask_price": 101},
+                },
+            },
+            curr_target={"X": 1.05, "S": 0.0},
+        )
+        record.created_at = f"2026-01-0{day}T01:00:00Z"
+        items.append(observation(record))
+    result = run(items)
+    assert result.skips.count == 0
+    assert result.used_record_count == 2
+    # X 不足一手为 0 敞口（旧口径会重放 1.05×-10%）；S 一手等值现金价格持平，组合收益恰为零。
+    assert result.points[-1].portfolio_return == 0
+    assert result.points[-1].difference == 0
+
+
 @pytest.mark.parametrize("fee", [True, None, "0.01", float("nan"), float("inf"), -0.1, 1.0])
 def test_invalid_settings_rejected(fee):
     with pytest.raises(ValidationError):

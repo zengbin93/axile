@@ -1,4 +1,10 @@
-"""从执行快照构建 WBT 输入与同基准账户收益，不访问交易渠道."""
+"""从执行快照构建 WBT 输入与同基准账户收益，不访问交易渠道.
+
+组合回测回放可执行权重：``symbol_results[*].sizing`` 证据完整（全品种 SIZED 且权重口径）时
+以 ``target_quantity * unit_notional / equity`` 逐行还原整手离散后的真实敞口；证据不完整
+（历史记录、lots 口径、UNAVAILABLE）回退到 ``curr_target`` 理论权重。2026-08-27 之前的
+记录无换算证据，一律按理论权重回放。
+"""
 
 from __future__ import annotations
 
@@ -153,17 +159,49 @@ def _target(raw: object) -> dict[str, float] | None:
     return target
 
 
+def _executable_weight(sizing: dict[str, object]) -> float | None:
+    """从单条权重口径换算证据推导可执行权重；证据不完整时返回 None."""
+    if str(sizing.get("sizing_mode", "weight")) != "weight" or sizing.get("status") != "SIZED":
+        return None
+    quantity, notional = _number(sizing.get("target_quantity")), _number(sizing.get("unit_notional"))
+    equity = _number(sizing.get("equity"))
+    if equity is None or equity <= 0 or quantity is None:
+        return None
+    if quantity == 0:
+        # ZERO_TARGET、不足一手（BELOW_MIN_QUANTITY）或取整到 0：账户真实敞口为零。
+        return 0.0
+    if notional is None or notional <= 0:
+        return None
+    return quantity * notional / equity
+
+
+def _executable_target(result: dict[str, object]) -> dict[str, float] | None:
+    """全部品种均有可推导换算证据时返回可执行权重；任一品种证据不足返回 None."""
+    results = _mapping(result.get("symbol_results"))
+    if not results:
+        return None
+    target: dict[str, float] = {}
+    for symbol, value in results.items():
+        weight = _executable_weight(_mapping(_mapping(value).get("sizing")))
+        if weight is None or not isinstance(symbol, str) or not symbol:
+            return None
+        target[symbol] = weight
+    return target
+
+
 def observation(
     record: ExecuteRecord | ExecuteRecordPublic,
     fallback_weights: dict[str, float] | None = None,
 ) -> Observation:
-    """兼容历史行情结构；仅用相同执行 ID 的目标快照补缺."""
+    """兼容历史行情结构；有换算证据时回放可执行权重，快照仅补缺."""
     result = _mapping(record.raw_result)
     assets = _mapping(result.get("account_assets"))
     asset = _number(assets.get("total_asset"))
     if not is_asset_observation(assets, result):
         asset = None
-    target = _target(record.raw_input.get("curr_target", fallback_weights))
+    target = _executable_target(result)
+    if target is None:
+        target = _target(record.raw_input.get("curr_target", fallback_weights))
     if result.get("execution_kind") == "clear_positions":
         target = {}
     return Observation(
