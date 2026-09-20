@@ -34,6 +34,9 @@ const VIEWS: Array<{ value: 'cumulative' | 'daily'; label: string }> = [
 const SCALES: Array<{ value: TimeScaleMode; label: string }> = [
   { value: 'observations', label: '观测序列' }, { value: 'natural', label: '自然时间' },
 ]
+const MARKERS: Array<{ value: 'on' | 'off'; label: string }> = [
+  { value: 'on', label: '显示执行点' }, { value: 'off', label: '隐藏执行点' },
+]
 
 export function AccountHistoryPage() {
   const { id } = useParams()
@@ -47,7 +50,8 @@ function AccountHistory({ accountId }: { accountId: number }) {
   const [view, setView] = useState<'cumulative' | 'daily'>(() => performanceViews.get(accountId)?.view ?? 'cumulative')
   const [scale, setScale] = useState<TimeScaleMode>(() => performanceViews.get(accountId)?.scale ?? 'observations')
   const [selection, setSelection] = useState<ChartSelection>(() => performanceViews.get(accountId)?.selection ?? null)
-  useEffect(() => { performanceViews.set(accountId, { ...performanceViews.get(accountId), range, view, scale, selection }) }, [accountId, range, view, scale, selection])
+  const [markers, setMarkers] = useState(() => performanceViews.get(accountId)?.markers ?? true)
+  useEffect(() => { performanceViews.set(accountId, { ...performanceViews.get(accountId), range, view, scale, selection, markers }) }, [accountId, range, view, scale, selection, markers])
   const [showEvents, setShowEvents] = useState(false)
   const [draft, setDraft] = useState<{ mode: 'ts' | 'cs'; fee: string } | null>(null)
   const [saved, setSaved] = useState<PerformanceSettings | null>(null)
@@ -146,6 +150,7 @@ function AccountHistory({ accountId }: { accountId: number }) {
         </div>
         <Segmented size="sm" value={view} options={VIEWS} onChange={value => withViewTransition(() => setView(value))} />
         <fieldset><legend className="sr-only">横轴尺度</legend><Segmented size="sm" value={scale} options={SCALES} onChange={setScale} /></fieldset>
+        <fieldset><legend className="sr-only">执行点</legend><Segmented size="sm" value={markers ? 'on' : 'off'} options={MARKERS} onChange={value => setMarkers(value === 'on')} /></fieldset>
         </div>
 
   return <section className="min-w-0 [&_button]:min-h-9">
@@ -183,7 +188,7 @@ function AccountHistory({ accountId }: { accountId: number }) {
     <ErrorNotice title="区间成本读取失败" error={intervalCosts.error} variant="compact" onRetry={intervalCosts.refresh} />
     {!data && <PerformanceChartPlaceholder accountId={accountId} controls={controls} loading={backtestBusy || !snapshot && !calculationError} failed={!!calculationError} />}
     {data && <div className="pb-4">
-      <PerformanceChart key={range} accountId={accountId} snapshotId={snapshot?.snapshot_id} viewKey={`${accountId}:${range}`} data={data} daily={daily} scaleMode={scale} costs={costs} intervalCost={intervalCosts.error || intervalCosts.loading ? null : intervalCosts.data?.summary ?? null} onSelect={value => { setSelectionNotice(false); setSelection(value) }} selection={selection} portfolioNames={portfolioNames} controls={controls} />
+      <PerformanceChart key={range} accountId={accountId} snapshotId={snapshot?.snapshot_id} viewKey={`${accountId}:${range}`} data={data} daily={daily} scaleMode={scale} costs={costs} intervalCost={intervalCosts.error || intervalCosts.loading ? null : intervalCosts.data?.summary ?? null} onSelect={value => { setSelectionNotice(false); setSelection(value) }} selection={selection} portfolioNames={portfolioNames} controls={controls} showExecutions={markers} />
       {data.gap && <p role="status" className="mt-3 break-words text-sm text-warn">组合收益自 {data.gap.time.replace('T', ' ')} 中断：{data.gap.reason}{data.gap.symbols.length ? `（${data.gap.symbols.join('、')}）` : ''}</p>}
       {data.invalid_asset_count > 0 && <p className="mt-2 text-xs text-warn">{data.invalid_asset_count} 条账户资产快照不可用</p>}
     </div>}

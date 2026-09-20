@@ -24,6 +24,8 @@ export interface ChartScene {
   portfolioNames: Map<number, string>
   theme: CanvasTheme
   scale?: TimeScale
+  /** 是否绘制执行事件针脚；缺省绘制。关闭后磁吸交互由组件侧一并失效。 */
+  showExecutions?: boolean
 }
 
 export type ExecutionMarkerTone = 'normal' | 'warn'
@@ -265,7 +267,7 @@ export function drawScene(canvas: HTMLCanvasElement, scene: ChartScene) {
   const ctx = prepareCanvas(canvas, scene.width)
   if (!ctx) return
   ctx.font = `11px ${scene.theme.font}`
-  drawCalendar(ctx, scene); drawReturns(ctx, scene); drawExecutionMarkers(ctx, scene); drawBindings(ctx, scene); drawCosts(ctx, scene); drawTimeAxis(ctx, scene); drawNavigator(ctx, scene); drawCalendarMarks(ctx, scene)
+  drawCalendar(ctx, scene); drawReturns(ctx, scene); if (scene.showExecutions !== false) drawExecutionMarkers(ctx, scene); drawBindings(ctx, scene); drawCosts(ctx, scene); drawTimeAxis(ctx, scene); drawNavigator(ctx, scene); drawCalendarMarks(ctx, scene)
 }
 
 function drawCalendar(ctx: CanvasRenderingContext2D, scene: ChartScene) {

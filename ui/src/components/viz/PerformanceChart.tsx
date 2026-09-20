@@ -35,6 +35,7 @@ interface Props {
   onSelect: (selection: ChartSelection) => void
   portfolioNames: Map<number, string>
   controls?: ReactNode
+  showExecutions: boolean
 }
 type DragKind = 'pan' | 'compare' | 'start' | 'end' | 'nav' | 'navStart' | 'navEnd'
 interface Drag { kind: DragKind; x: number; y: number; viewport: Viewport; anchor: number; moved: boolean; pending: ChartSelection; bindingTime: number | null }
@@ -50,7 +51,7 @@ export function PerformanceChart(props: Props) {
   return <CanvasPerformanceChart {...props} />
 }
 
-function CanvasPerformanceChart({ data, daily, scaleMode, costs, intervalCost, selection, onSelect, portfolioNames, controls, viewKey, accountId, snapshotId }: Props) {
+function CanvasPerformanceChart({ data, daily, scaleMode, costs, intervalCost, selection, onSelect, portfolioNames, controls, viewKey, accountId, snapshotId, showExecutions }: Props) {
   const accountInfo = useDomainStore(s => s.accounts?.find(a => a.account_id === accountId))
   const descriptor = useChannelDescriptor(accountInfo?.trade_channel)
   const times = useMemo(() => data.points.map(pointTime), [data.points])
@@ -121,7 +122,7 @@ function CanvasPerformanceChart({ data, daily, scaleMode, costs, intervalCost, s
   const coverageNeedsAttention = costReady && readingCost != null && readingCost.count > 0 && (costIncomplete || readingCost.coverage == null)
   const binding = bindingAt(data, bindingTime ?? times[pointIndex])
   const bindingName = !binding || binding.binding.portfolio_id == null ? '未绑定' : portfolioNames.get(binding.binding.portfolio_id) ?? `组合 #${binding.binding.portfolio_id}`
-  const tradingScene = useMemo<ChartScene>(() => ({ data, times, width: size.width, viewport, daily, returnRange, costs, portfolioNames, domain: full, scale: timeScale, theme: container.current ? readCanvasTheme(container.current) : { bg: '', surface: '', ink: '', muted: '', line: '', accent: '', warn: '', fill: '', font: '' } }), [data, times, size, viewport, daily, returnRange, costs, portfolioNames, full, timeScale])
+  const tradingScene = useMemo<ChartScene>(() => ({ data, times, width: size.width, viewport, daily, returnRange, costs, portfolioNames, domain: full, scale: timeScale, showExecutions, theme: container.current ? readCanvasTheme(container.current) : { bg: '', surface: '', ink: '', muted: '', line: '', accent: '', warn: '', fill: '', font: '' } }), [data, times, size, viewport, daily, returnRange, costs, portfolioNames, full, timeScale, showExecutions])
 
   const paintOverlay = useCallback(() => {
     if (overlay.current && scene.current) drawOverlay(overlay.current, scene.current, hoverRef.current, selectionRef.current, bindingTimeRef.current, cursorRef.current, magnet)
@@ -223,6 +224,7 @@ function CanvasPerformanceChart({ data, daily, scaleMode, costs, intervalCost, s
    * 已吸附的点使用更宽的退出阈值，避免相邻点之间来回抖动。
    */
   const magneticExecution = (p: { x: number; y: number }) => {
+    if (!showExecutions) { magnetRecordId.current = null; setMagnet(null); return null }
     if (p.y < PLOT.top || p.y > PLOT.bottom) { magnetRecordId.current = null; setMagnet(null); return null }
     const visible = (data.executions ?? []).flatMap(row => {
       const time = shanghaiTime(row.record.created_at)
@@ -312,7 +314,7 @@ function CanvasPerformanceChart({ data, daily, scaleMode, costs, intervalCost, s
       }
     } else if (p.y >= PLOT.costTop && p.y <= PLOT.costBottom) onSelect({ kind: 'day', day: data.points[p.index].date.slice(0, 10), time: times[p.index] })
     else {
-      const magnet = magneticExecution(p)
+      const magnet = showExecutions ? magneticExecution(p) : null
       const row = magnet?.row ?? holdingAt(data.executions ?? [], p.time)
       if (row) onSelect(executionSelection(row))
       else selectPoint(p.index)
@@ -442,7 +444,7 @@ function CanvasPerformanceChart({ data, daily, scaleMode, costs, intervalCost, s
     {scaleMode === 'observations' && <p className="sr-only">观测序列已压缩 {times.slice(0, -1).reduce((sum, time, index) => sum + closedDaysBetween(time, times[index + 1], data.calendar.closed_ranges), 0)} 个完整休市日。</p>}
     <div className="flex min-h-7 flex-wrap justify-between gap-2 text-[11px] text-ink-3"><span data-testid="chart-viewport">{timeLabel(viewport.start)} → {timeLabel(viewport.end)}</span><span>上海时间 · 收益差 = 回测 − 账户</span></div>
     <p className="text-[11px] leading-5 text-ink-3">账户收益未调整出入金 · 回测单边费率 {Number((data.settings.backtest_fee_rate * 10000).toFixed(8))} BP</p>
-    <p className="text-[11px] leading-5 text-ink-3">圆点为执行事件：靠近会吸附到执行时刻，点击固定查看本次执行 · Ctrl + 滚轮放大</p>
+    <p className="text-[11px] leading-5 text-ink-3">{showExecutions ? '圆点为执行事件：靠近会吸附到执行时刻，点击固定查看本次执行 · Ctrl + 滚轮放大' : '执行点已隐藏 · Ctrl + 滚轮放大'}</p>
     <div id="performance-interaction-hint" className="sr-only">
       <span>Ctrl + 滚轮缩放</span><span>拖动框选区间 · 底部导航条平移 · 双击恢复时间范围</span><span>聚焦图表后：← → 查看 · Home / End 首末点 · Enter / 空格选择 · Esc 清除 · + / - 缩放 · 0 重置</span>
     </div>
