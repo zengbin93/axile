@@ -35,7 +35,7 @@ const SCALES: Array<{ value: TimeScaleMode; label: string }> = [
   { value: 'observations', label: '观测序列' }, { value: 'natural', label: '自然时间' },
 ]
 const MARKERS: Array<{ value: 'on' | 'off'; label: string }> = [
-  { value: 'on', label: '显示执行点' }, { value: 'off', label: '隐藏执行点' },
+  { value: 'on', label: '显示成交点' }, { value: 'off', label: '隐藏成交点' },
 ]
 
 export function AccountHistoryPage() {
@@ -150,7 +150,7 @@ function AccountHistory({ accountId }: { accountId: number }) {
         </div>
         <Segmented size="sm" value={view} options={VIEWS} onChange={value => withViewTransition(() => setView(value))} />
         <fieldset><legend className="sr-only">横轴尺度</legend><Segmented size="sm" value={scale} options={SCALES} onChange={setScale} /></fieldset>
-        <fieldset><legend className="sr-only">执行点</legend><Segmented size="sm" value={markers ? 'on' : 'off'} options={MARKERS} onChange={value => setMarkers(value === 'on')} /></fieldset>
+        <fieldset><legend className="sr-only">成交点</legend><Segmented size="sm" value={markers ? 'on' : 'off'} options={MARKERS} onChange={value => setMarkers(value === 'on')} /></fieldset>
         </div>
 
   return <section className="min-w-0 [&_button]:min-h-9">

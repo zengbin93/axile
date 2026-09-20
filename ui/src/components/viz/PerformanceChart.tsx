@@ -447,7 +447,7 @@ function CanvasPerformanceChart({ data, daily, scaleMode, costs, intervalCost, s
     {scaleMode === 'observations' && <p className="sr-only">观测序列已压缩 {times.slice(0, -1).reduce((sum, time, index) => sum + closedDaysBetween(time, times[index + 1], data.calendar.closed_ranges), 0)} 个完整休市日。</p>}
     <div className="flex min-h-7 flex-wrap justify-between gap-2 text-[11px] text-ink-3"><span data-testid="chart-viewport">{timeLabel(viewport.start)} → {timeLabel(viewport.end)}</span><span>上海时间 · 收益差 = 回测 − 账户</span></div>
     <p className="text-[11px] leading-5 text-ink-3">账户收益未调整出入金 · 回测单边费率 {Number((data.settings.backtest_fee_rate * 10000).toFixed(8))} BP</p>
-    <p className="text-[11px] leading-5 text-ink-3">{showExecutions ? '圆点为有实际成交的执行：靠近会吸附到执行时刻，点击固定查看本次执行 · Ctrl + 滚轮放大' : '执行点已隐藏 · Ctrl + 滚轮放大'}</p>
+    <p className="text-[11px] leading-5 text-ink-3">{showExecutions ? '圆点为成交执行：靠近会吸附到执行时刻，点击固定查看本次执行 · Ctrl + 滚轮放大' : '成交点已隐藏 · Ctrl + 滚轮放大'}</p>
     <div id="performance-interaction-hint" className="sr-only">
       <span>Ctrl + 滚轮缩放</span><span>拖动框选区间 · 底部导航条平移 · 双击恢复时间范围</span><span>聚焦图表后：← → 查看 · Home / End 首末点 · Enter / 空格选择 · Esc 清除 · + / - 缩放 · 0 重置</span>
     </div>
