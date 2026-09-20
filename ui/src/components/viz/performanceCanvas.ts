@@ -176,7 +176,7 @@ function drawExecutionMarkers(ctx: CanvasRenderingContext2D, scene: ChartScene) 
     if (!point) continue
     // 常态是挖空的中性圈，曲线从圈心穿过；琥珀实心点只留给异常执行。
     const warn = executionMarkerTone(row) === 'warn'
-    ctx.beginPath(); ctx.arc(point.x, point.y, warn ? 2.2 : 2.5, 0, Math.PI * 2)
+    ctx.beginPath(); ctx.arc(point.x, point.y, warn ? 1.9 : 2.1, 0, Math.PI * 2)
     if (warn) { ctx.fillStyle = theme.warn; ctx.fill() }
     else { ctx.fillStyle = theme.bg; ctx.fill(); ctx.strokeStyle = theme.muted; ctx.stroke() }
   }
