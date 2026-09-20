@@ -1,4 +1,5 @@
 import type { AccountPerformance, PerformancePoint } from '@/types/api'
+import type { CostExecutionRow } from '@/lib/api/performance'
 import { axisPercent, niceReturnAxis } from '@/features/history/performance'
 import { amount, shanghaiTime, type CostSummary } from '@/features/history/costs'
 import { pointTime, timeLabel, type ChartSelection, type Viewport } from '@/features/history/chartModel'
@@ -23,6 +24,39 @@ export interface ChartScene {
   portfolioNames: Map<number, string>
   theme: CanvasTheme
   scale?: TimeScale
+}
+
+export type ExecutionMarkerTone = 'normal' | 'warn'
+
+/**
+ * 执行针脚只保留两态：失败或成交覆盖不全走琥珀实心点，其余一律中性空心圈。
+ *
+ * 红绿只属于收益曲线本身；有利/不利的质量细节由成本面板三态承载，
+ * 针脚不复述，颜色预算留给「偏离」。
+ */
+export function executionMarkerTone(row: CostExecutionRow): ExecutionMarkerTone {
+  const { summary } = row
+  if (row.record.is_success !== 1 || (!row.noop && (summary.coverage == null || summary.covered < summary.count))) return 'warn'
+  return 'normal'
+}
+
+export function executionMarkerPoint(scene: ChartScene, row: CostExecutionRow): { x: number; y: number } | null {
+  const time = shanghaiTime(row.record.created_at)
+  const { times, data, width, viewport } = scene
+  if (time < viewport.start || time > viewport.end) return null
+  const key = seriesKeys(scene.daily)[0]
+  const exact = data.points.findIndex(point => point.record_id === row.record.id)
+  let before = exact, after = exact
+  if (exact < 0) {
+    after = times.findIndex(value => value >= time)
+    before = after - 1
+  }
+  if (before < 0 || after < 0 || after >= times.length) return null
+  const a = data.points[before][key], b = data.points[after][key]
+  if (a == null || b == null || !Number.isFinite(a) || !Number.isFinite(b)) return null
+  const fraction = before === after ? 0 : (time - times[before]) / (times[after] - times[before] || 1)
+  const value = a + (b - a) * Math.max(0, Math.min(1, fraction))
+  return { x: xPosition(time, width, viewport, scene.scale), y: returnY(value, chartAxis(scene)) }
 }
 
 export function readCanvasTheme(element: HTMLElement): CanvasTheme {
@@ -132,6 +166,23 @@ function drawReturns(ctx: CanvasRenderingContext2D, scene: ChartScene) {
   ctx.restore(); ctx.lineWidth = 1
 }
 
+function drawExecutionMarkers(ctx: CanvasRenderingContext2D, scene: ChartScene) {
+  const rows = scene.data.executions ?? []
+  if (!rows.length) return
+  const { theme } = scene
+  ctx.save(); ctx.beginPath(); ctx.rect(PLOT.left, PLOT.top, plotRight(scene.width) - PLOT.left, PLOT.bottom - PLOT.top); ctx.clip()
+  for (const row of rows) {
+    const point = executionMarkerPoint(scene, row)
+    if (!point) continue
+    // 常态是挖空的中性圈，曲线从圈心穿过；琥珀实心点只留给异常执行。
+    const warn = executionMarkerTone(row) === 'warn'
+    ctx.beginPath(); ctx.arc(point.x, point.y, warn ? 2.2 : 2.5, 0, Math.PI * 2)
+    if (warn) { ctx.fillStyle = theme.warn; ctx.fill() }
+    else { ctx.fillStyle = theme.bg; ctx.fill(); ctx.strokeStyle = theme.muted; ctx.stroke() }
+  }
+  ctx.restore(); ctx.lineWidth = 1
+}
+
 function drawCosts(ctx: CanvasRenderingContext2D, scene: ChartScene) {
   const { data, times, costs, width, viewport, theme } = scene
   ctx.fillStyle = theme.muted; ctx.fillText('每日滑点成本', PLOT.left, PLOT.costTop - 10)
@@ -214,7 +265,7 @@ export function drawScene(canvas: HTMLCanvasElement, scene: ChartScene) {
   const ctx = prepareCanvas(canvas, scene.width)
   if (!ctx) return
   ctx.font = `11px ${scene.theme.font}`
-  drawCalendar(ctx, scene); drawReturns(ctx, scene); drawBindings(ctx, scene); drawCosts(ctx, scene); drawTimeAxis(ctx, scene); drawNavigator(ctx, scene); drawCalendarMarks(ctx, scene)
+  drawCalendar(ctx, scene); drawReturns(ctx, scene); drawExecutionMarkers(ctx, scene); drawBindings(ctx, scene); drawCosts(ctx, scene); drawTimeAxis(ctx, scene); drawNavigator(ctx, scene); drawCalendarMarks(ctx, scene)
 }
 
 function drawCalendar(ctx: CanvasRenderingContext2D, scene: ChartScene) {
@@ -252,7 +303,7 @@ function drawCalendarMarks(ctx: CanvasRenderingContext2D, scene: ChartScene) {
   ctx.textAlign = 'left'
 }
 
-export function drawOverlay(canvas: HTMLCanvasElement, scene: ChartScene, hover: number | null, selection: ChartSelection, bindingTime: number | null = null, cursor: { time: number; x: number; y: number } | null = null) {
+export function drawOverlay(canvas: HTMLCanvasElement, scene: ChartScene, hover: number | null, selection: ChartSelection, bindingTime: number | null = null, cursor: { time: number; x: number; y: number } | null = null, magnetRecordId: number | null = null) {
   const ctx = prepareCanvas(canvas, scene.width)
   if (!ctx) return
   const { width, viewport, theme, times, data } = scene
@@ -267,6 +318,18 @@ export function drawOverlay(canvas: HTMLCanvasElement, scene: ChartScene, hover:
     ctx.globalAlpha = 1
     line(ctx, a, PLOT.binding + PLOT.bindingHeight - 1, b, PLOT.binding + PLOT.bindingHeight - 1, theme.accent)
   }
+  if (magnetRecordId != null && selection?.kind !== 'execution') {
+    const row = data.executions?.find(value => value.record.id === magnetRecordId)
+    if (row) {
+      const point = executionMarkerPoint(scene, row)
+      if (point) {
+        // 吸附/选中是交互反馈，统一走 accent，不继承执行点自身颜色。
+        ctx.strokeStyle = theme.accent; ctx.lineWidth = 1.25; ctx.globalAlpha = 0.55
+        ctx.beginPath(); ctx.arc(point.x, point.y, 5.5, 0, Math.PI * 2); ctx.stroke()
+        ctx.globalAlpha = 1; ctx.lineWidth = 1
+      }
+    }
+  }
   if (selection) {
     const a = xPosition(selection.kind !== 'interval' ? selection.time : selection.start, width, viewport, scene.scale)
     const b = selection.kind === 'interval' ? xPosition(selection.end, width, viewport, scene.scale) : a
@@ -277,6 +340,17 @@ export function drawOverlay(canvas: HTMLCanvasElement, scene: ChartScene, hover:
       ctx.fillStyle = theme.accent; ctx.fillRect(x - 3, PLOT.top, 6, 15)
     }
     ctx.restore()
+    if (selection.kind === 'execution') {
+      const row = data.executions?.find(value => value.record.id === selection.recordId)
+      if (row) {
+        const point = executionMarkerPoint(scene, row)
+        if (point) {
+          ctx.strokeStyle = theme.accent; ctx.lineWidth = 1.25; ctx.globalAlpha = 0.75
+          ctx.beginPath(); ctx.arc(point.x, point.y, 7, 0, Math.PI * 2); ctx.stroke()
+          ctx.globalAlpha = 1; ctx.lineWidth = 1
+        }
+      }
+    }
   }
   if (cursor && selection?.kind !== 'execution') {
     const x = xPosition(cursor.time, width, viewport, scene.scale)

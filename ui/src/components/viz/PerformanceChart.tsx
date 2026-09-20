@@ -79,6 +79,7 @@ function CanvasPerformanceChart({ data, daily, scaleMode, costs, intervalCost, s
   const [draft, setDraft] = useState<ChartSelection>(null)
   const [size, setSize] = useState({ width: 900, revision: 0 })
   const [cursor, setCursor] = useState<{ time: number; x: number; y: number } | null>(null)
+  const [magnet, setMagnet] = useState<number | null>(null)
   const cursorRef = useRef(cursor)
   cursorRef.current = cursor
   const container = useRef<HTMLDivElement>(null)
@@ -89,6 +90,7 @@ function CanvasPerformanceChart({ data, daily, scaleMode, costs, intervalCost, s
   const frame = useRef(0)
   const hoverRef = useRef<number | null>(null)
   const pointer = useRef({ x: 0, y: 0 })
+  const magnetRecordId = useRef<number | null>(null)
   const scene = useRef<ChartScene | null>(null)
   const selectionRef = useRef(selection)
   const bindingTimeRef = useRef(bindingTime)
@@ -122,8 +124,8 @@ function CanvasPerformanceChart({ data, daily, scaleMode, costs, intervalCost, s
   const tradingScene = useMemo<ChartScene>(() => ({ data, times, width: size.width, viewport, daily, returnRange, costs, portfolioNames, domain: full, scale: timeScale, theme: container.current ? readCanvasTheme(container.current) : { bg: '', surface: '', ink: '', muted: '', line: '', accent: '', warn: '', fill: '', font: '' } }), [data, times, size, viewport, daily, returnRange, costs, portfolioNames, full, timeScale])
 
   const paintOverlay = useCallback(() => {
-    if (overlay.current && scene.current) drawOverlay(overlay.current, scene.current, hoverRef.current, selectionRef.current, bindingTimeRef.current, cursorRef.current)
-  }, [])
+    if (overlay.current && scene.current) drawOverlay(overlay.current, scene.current, hoverRef.current, selectionRef.current, bindingTimeRef.current, cursorRef.current, magnet)
+  }, [magnet])
   const schedule = useCallback(() => {
     if (frame.current) return
     frame.current = requestAnimationFrame(() => {
@@ -216,6 +218,25 @@ function CanvasPerformanceChart({ data, daily, scaleMode, costs, intervalCost, s
     const time = xTime(Math.max(PLOT.left, Math.min(plotRight(size.width), x)), size.width, viewport, timeScale)
     return { x, y, time, index: nearestIndex(times, time) }
   }
+  /**
+   * 执行点以时间轴为磁场，而不挪动点本身；这样吸附手感不会伪造执行时刻。
+   * 已吸附的点使用更宽的退出阈值，避免相邻点之间来回抖动。
+   */
+  const magneticExecution = (p: { x: number; y: number }) => {
+    if (p.y < PLOT.top || p.y > PLOT.bottom) { magnetRecordId.current = null; setMagnet(null); return null }
+    const visible = (data.executions ?? []).flatMap(row => {
+      const time = shanghaiTime(row.record.created_at)
+      if (time < viewport.start || time > viewport.end) return []
+      return [{ row, time, distance: Math.abs(xPosition(time, size.width, viewport, timeScale) - p.x) }]
+    })
+    const retained = visible.find(item => item.row.record.id === magnetRecordId.current)
+    if (retained && retained.distance <= 18) { setMagnet(retained.row.record.id); return retained }
+    const nearest = visible.reduce<typeof visible[number] | null>((best, item) => !best || item.distance < best.distance ? item : best, null)
+    if (!nearest || nearest.distance > 12) { magnetRecordId.current = null; setMagnet(null); return null }
+    magnetRecordId.current = nearest.row.record.id
+    setMagnet(nearest.row.record.id)
+    return nearest
+  }
   const showHover = (index: number | null) => { hoverRef.current = index; setHover(previous => previous === index ? previous : index); schedule() }
   const startDrag = (event: PointerEvent<HTMLElement>) => {
     if (!event.isPrimary || event.button !== 0) return
@@ -242,8 +263,10 @@ function CanvasPerformanceChart({ data, daily, scaleMode, costs, intervalCost, s
     const active = drag.current
     if (!active) {
       const inside = p.x >= PLOT.left && p.x <= plotRight(size.width) && p.y >= PLOT.top && p.y <= PLOT.costBottom
-      setCursor(inside && p.y <= PLOT.bottom ? { x: p.x, y: p.y, time: p.time } : null)
-      showHover(inside ? p.index : null)
+      const snapped = inside ? magneticExecution(p) : null
+      const time = snapped?.time ?? p.time
+      setCursor(inside && p.y <= PLOT.bottom ? { x: p.x, y: p.y, time } : null)
+      showHover(inside ? nearestIndex(times, time) : null)
       setBindingTime(inside && p.y >= PLOT.binding && p.y <= PLOT.binding + PLOT.bindingHeight ? p.time : null)
       return
     }
@@ -289,7 +312,8 @@ function CanvasPerformanceChart({ data, daily, scaleMode, costs, intervalCost, s
       }
     } else if (p.y >= PLOT.costTop && p.y <= PLOT.costBottom) onSelect({ kind: 'day', day: data.points[p.index].date.slice(0, 10), time: times[p.index] })
     else {
-      const row = holdingAt(data.executions ?? [], p.time)
+      const magnet = magneticExecution(p)
+      const row = magnet?.row ?? holdingAt(data.executions ?? [], p.time)
       if (row) onSelect(executionSelection(row))
       else selectPoint(p.index)
     }
@@ -348,7 +372,7 @@ function CanvasPerformanceChart({ data, daily, scaleMode, costs, intervalCost, s
       <canvas ref={baseCanvas} aria-hidden="true" className="absolute inset-0 h-full w-full" />
       <canvas ref={overlay} data-testid="performance-chart" tabIndex={0} role="group" aria-label={daily ? '每日收益与执行成本' : '累计收益与执行成本'} aria-describedby="performance-keyboard-reading performance-interaction-hint" className="absolute inset-0 h-full w-full cursor-crosshair touch-pan-y outline-none"
         onPointerDown={startDrag} onPointerMove={move} onPointerUp={finish} onPointerCancel={() => { drag.current = null; setDraft(null); showHover(null) }} onLostPointerCapture={() => { drag.current = null; setDraft(null) }}
-        onPointerLeave={event => { if (!drag.current) { showHover(null); setCursor(null); if (event.pointerType !== 'touch') setBindingTime(null) } }} onBlur={() => { if (!drag.current) showHover(null) }} onDoubleClick={() => setViewport(full)}
+        onPointerLeave={event => { if (!drag.current) { magnetRecordId.current = null; setMagnet(null); showHover(null); setCursor(null); if (event.pointerType !== 'touch') setBindingTime(null) } }} onBlur={() => { if (!drag.current) showHover(null) }} onDoubleClick={() => setViewport(full)}
         onKeyDown={event => {
           const index = hoverRef.current ?? pointIndex
           if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') { event.preventDefault(); focusPoint(Math.max(0, Math.min(times.length - 1, index + (event.key === 'ArrowLeft' ? -1 : 1)))) }
@@ -363,7 +387,7 @@ function CanvasPerformanceChart({ data, daily, scaleMode, costs, intervalCost, s
         onPointerDown={startDrag} onPointerMove={move} onPointerUp={finish}
         onPointerCancel={() => { drag.current = null; setDraft(null); showHover(null) }}
         onLostPointerCapture={() => { drag.current = null; setDraft(null) }}
-        onPointerLeave={event => { if (!drag.current) { showHover(null); setCursor(null); if (event.pointerType !== 'touch') setBindingTime(null) } }}
+        onPointerLeave={event => { if (!drag.current) { magnetRecordId.current = null; setMagnet(null); showHover(null); setCursor(null); if (event.pointerType !== 'touch') setBindingTime(null) } }}
         onDoubleClick={() => setViewport(full)}>
         {data.bindings.map((period, index) => {
           const start = Math.max(PLOT.left, xPosition(shanghaiTime(period.time), size.width, viewport, timeScale))
@@ -418,7 +442,7 @@ function CanvasPerformanceChart({ data, daily, scaleMode, costs, intervalCost, s
     {scaleMode === 'observations' && <p className="sr-only">观测序列已压缩 {times.slice(0, -1).reduce((sum, time, index) => sum + closedDaysBetween(time, times[index + 1], data.calendar.closed_ranges), 0)} 个完整休市日。</p>}
     <div className="flex min-h-7 flex-wrap justify-between gap-2 text-[11px] text-ink-3"><span data-testid="chart-viewport">{timeLabel(viewport.start)} → {timeLabel(viewport.end)}</span><span>上海时间 · 收益差 = 回测 − 账户</span></div>
     <p className="text-[11px] leading-5 text-ink-3">账户收益未调整出入金 · 回测单边费率 {Number((data.settings.backtest_fee_rate * 10000).toFixed(8))} BP</p>
-    <p className="text-[11px] leading-5 text-ink-3">移动十字光标查看持仓 · 点击曲线查看成交 · Ctrl + 滚轮放大</p>
+    <p className="text-[11px] leading-5 text-ink-3">圆点为执行事件：靠近会吸附到执行时刻，点击固定查看本次执行 · Ctrl + 滚轮放大</p>
     <div id="performance-interaction-hint" className="sr-only">
       <span>Ctrl + 滚轮缩放</span><span>拖动框选区间 · 底部导航条平移 · 双击恢复时间范围</span><span>聚焦图表后：← → 查看 · Home / End 首末点 · Enter / 空格选择 · Esc 清除 · + / - 缩放 · 0 重置</span>
     </div>
