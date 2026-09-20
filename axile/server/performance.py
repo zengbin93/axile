@@ -4,6 +4,9 @@
 以 ``target_quantity * unit_notional / equity`` 逐行还原整手离散后的真实敞口；证据不完整
 （历史记录、lots 口径、UNAVAILABLE）回退到 ``curr_target`` 理论权重。2026-08-27 之前的
 记录无换算证据，一律按理论权重回放。盯市价与柜台对齐取最新价，无有效最新价回退中间价。
+账户与组合优先在同一批参与记录上配对采样：有参与记录的日子取当日最后一条参与记录，
+闭市心跳不再单独移动账户日点，从而把差异收敛为纯执行落差；无参与记录的日子保留账户
+观察，组合按持仓延续。
 """
 
 from __future__ import annotations
@@ -239,6 +242,28 @@ def select_range(items: list[Observation], range_key: RangeKey) -> list[Observat
     return [item for item in ordered if item.time >= cutoff]
 
 
+def _required_symbols(item: Observation, previous: dict[str, float]) -> set[str] | None:
+    """返回参与回测所需的品种集合；目标缺失时返回 None."""
+    target = item.target
+    if target is None:
+        return None
+    required = {symbol for symbol, weight in previous.items() if weight != 0}
+    required.update(symbol for symbol, weight in target.items() if weight != 0)
+    return required
+
+
+def participating_items(items: list[Observation]) -> list[Observation]:
+    """返回可构建回测 bar 的观察序列；参与条件依赖延续中的上一目标."""
+    participants: list[Observation] = []
+    previous: dict[str, float] = {}
+    for item in items:
+        required = _required_symbols(item, previous)
+        if required is not None and not (required - item.prices.keys()):
+            participants.append(item)
+            previous = item.target or {}
+    return participants
+
+
 @dataclass
 class BacktestInput:
     """WBT 输入与参与统计；未参与观测不产生行，权重自然延续."""
@@ -247,6 +272,7 @@ class BacktestInput:
     used: int
     skips: PerformanceSkips
     backtest_start: datetime | None
+    participants: list[Observation]
 
 
 def build_wbt_input(items: list[Observation]) -> BacktestInput:
@@ -255,6 +281,7 @@ def build_wbt_input(items: list[Observation]) -> BacktestInput:
     previous: dict[str, float] = {}
     used = 0
     backtest_start: datetime | None = None
+    participants: list[Observation] = []
     missing_target = 0
     missing_ticks = 0
     first_time: str | None = None
@@ -281,6 +308,7 @@ def build_wbt_input(items: list[Observation]) -> BacktestInput:
         backtest_start = backtest_start or item.time
         previous = target
         used += 1
+        participants.append(item)
     skipped = missing_target + missing_ticks
     frame = pd.DataFrame(rows, columns=["dt", "symbol", "weight", "price"])
     return BacktestInput(
@@ -294,6 +322,7 @@ def build_wbt_input(items: list[Observation]) -> BacktestInput:
             last_time=last_time if skipped else None,
         ),
         backtest_start=backtest_start,
+        participants=participants,
     )
 
 
@@ -314,12 +343,18 @@ def _merge_daily(
     items: list[Observation],
     daily: dict[str, float] | None,
     backtest_start: datetime | None,
+    participants: list[Observation] | None = None,
 ) -> list[PerformancePoint]:
     base = next((item for item in items if item.asset is not None and item.asset > 0), None)
     if base is None or base.asset is None:
         return []
+    # 账户与组合优先在同一批参与记录上配对采样；无参与记录的日子保留账户观察，
+    # 组合按持仓延续，闭市心跳不会单独移动账户日点。
     by_day: dict[str, Observation] = {}
     for item in items:
+        if item.time >= base.time:
+            by_day[item.time.date().isoformat()] = item
+    for item in participants or ():
         if item.time >= base.time:
             by_day[item.time.date().isoformat()] = item
     nav = 1.0
@@ -426,6 +461,7 @@ def calculate_performance(
     result.observation_count = len(items)
     daily = None
     backtest_start: datetime | None = None
+    participants: list[Observation] | None = None
     if include_backtest:
         built = build_wbt_input(items)
         result.used_record_count = built.used
@@ -433,7 +469,11 @@ def calculate_performance(
         backtest_start = built.backtest_start
         # 空帧必须归 None：单观测帧的 WBT 日收益同样为空，但语义是尚未起息而非无回测。
         daily = None if built.frame.empty else _portfolio_daily(built.frame, settings)
-    result.points = _merge_daily(items, daily, backtest_start)
+        participants = built.participants or None
+    else:
+        # 快速路径用同一参与谓词配对采样，不构建也不运行回测。
+        participants = participating_items(items) or None
+    result.points = _merge_daily(items, daily, backtest_start, participants)
     result.baseline = result.points[0].date if result.points else None
     result.end = items[-1].time.isoformat()
     result.invalid_asset_count = sum(item.asset is None for item in items)

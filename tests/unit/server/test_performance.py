@@ -206,10 +206,37 @@ def test_failure_burst_is_carried_and_counted_as_missing_target():
     assert result.skips.last_time == burst[-1].time.isoformat()
     assert result.used_record_count == 2
     assert result.used_record_count + result.skips.count == result.observation_count
-    # 基准日起每天都有组合收益：突发日按持仓延续计 0，末点以 A 退出行结算。
+    # 无参与记录的突发日保留账户观察，组合按持仓延续计 0，恢复日以 A 退出行结算。
     assert all(point.portfolio_return is not None for point in result.points)
     assert [point.portfolio_daily_return for point in result.points[1:-1]] == [0, 0, 0, 0]
     assert result.points[-1].portfolio_return == pytest.approx(0.2)
+
+
+def test_day_point_samples_last_participant_not_last_record():
+    # 当日最后一条是闭市心跳（无目标）时，账户与组合都取最后一条参与记录。
+    items = [obs(1), obs(2, {"A": 110.0}, asset=110), obs(2, asset=120)]
+    items[2].target = None
+    items[2].id = 99
+    items[2].time = items[1].time + timedelta(hours=2)
+    result = run(items)
+    assert [p.date for p in result.points] == ["2026-01-01T00:00:00", "2026-01-01", "2026-01-02"]
+    day2 = result.points[-1]
+    assert day2.observed_at == items[1].time.isoformat()
+    assert day2.record_id == items[1].id
+    assert day2.account_return == pytest.approx(0.1)
+    assert day2.portfolio_return == pytest.approx(0.1)
+
+
+def test_quick_path_pairs_day_points_with_same_participants():
+    items = [obs(1), obs(2, {"A": 110.0}, asset=110), obs(2, asset=120), obs(3, {"A": 121.0}, asset=121)]
+    items[2].target = None
+    items[2].id = 99
+    settings = PerformanceSettings(backtest_weight_type="ts", backtest_fee_rate=0)
+    full = calculate_performance(items, settings, "all")
+    quick = calculate_performance(items, settings, "all", include_backtest=False)
+    assert [(p.date, p.observed_at, p.account_return) for p in quick.points] == [
+        (p.date, p.observed_at, p.account_return) for p in full.points
+    ]
 
 
 def test_all_unusable_observations_keep_portfolio_null_not_flat_zero():
