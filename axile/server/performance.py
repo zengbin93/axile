@@ -1,4 +1,4 @@
-"""从执行快照构建 WBT 输入与同基准账户收益，不访问交易渠道.
+"""从执行快照构建 WBT 输入与同基准账户收益；交易日历经渠道插件读取，渠道缺失或读取失败时降级为不可用.
 
 组合回测回放可执行权重：``symbol_results[*].sizing`` 证据完整（全品种 SIZED 且权重口径）时
 以 ``target_quantity * unit_notional / equity`` 逐行还原整手离散后的真实敞口；证据不完整
@@ -61,17 +61,21 @@ def performance_calendar(channel: str | None, baseline: str | None, end: str | N
     unavailable: list[date] = []
     calendar_id = label = None
     current = first
-    while current <= last:
-        decision = evaluate_channel_calendar_day(channel, current)
-        calendar_id = decision.calendar_id or calendar_id
-        label = decision.label or label
-        if decision.status is CalendarDecisionStatus.NOT_REQUIRED:
-            return PerformanceCalendar(status="not_required")
-        if decision.status is CalendarDecisionStatus.AVAILABLE_CLOSED:
-            closed.append(current)
-        elif decision.status is CalendarDecisionStatus.UNAVAILABLE:
-            unavailable.append(current)
-        current += timedelta(days=1)
+    try:
+        while current <= last:
+            # get_channel 对未注册渠道抛 KeyError；这里按缺日历降级而不是上抛。
+            decision = evaluate_channel_calendar_day(channel, current)
+            calendar_id = decision.calendar_id or calendar_id
+            label = decision.label or label
+            if decision.status is CalendarDecisionStatus.NOT_REQUIRED:
+                return PerformanceCalendar(status="not_required")
+            if decision.status is CalendarDecisionStatus.AVAILABLE_CLOSED:
+                closed.append(current)
+            elif decision.status is CalendarDecisionStatus.UNAVAILABLE:
+                unavailable.append(current)
+            current += timedelta(days=1)
+    except KeyError:
+        return PerformanceCalendar(status="unavailable")
     status = (
         "partial"
         if unavailable and len(unavailable) <= (last - first).days
@@ -288,11 +292,9 @@ def build_wbt_input(items: list[Observation]) -> BacktestInput:
     last_time: str | None = None
     for item in items:
         target = item.target
-        required = {symbol for symbol, weight in previous.items() if weight != 0}
-        if target is not None:
-            required.update(symbol for symbol, weight in target.items() if weight != 0)
-        missing = required - item.prices.keys()
-        if target is None or missing:
+        required = _required_symbols(item, previous)
+        missing = required is not None and bool(required - item.prices.keys())
+        if required is None or missing:
             # 跳过：不产生行、不更新延续目标，WBT 按上一已知持仓延续。
             missing_target += target is None
             missing_ticks += target is not None
@@ -392,7 +394,7 @@ def _merge_daily(
             )
         )
     # 独立基准点保留执行时间，以便基准当天仍有后续执行时不覆盖日末收益。
-    from_backtest = daily is not None and backtest_start is not None and backtest_start.date() == base.time.date()
+    from_backtest = daily is not None and backtest_start is not None and backtest_start <= base.time
     points.insert(
         0,
         PerformancePoint(

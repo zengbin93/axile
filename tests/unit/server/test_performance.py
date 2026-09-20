@@ -91,6 +91,16 @@ def test_performance_calendar_not_required(monkeypatch):
     assert result.closed_ranges == []
 
 
+def test_performance_calendar_degrades_to_unavailable_on_unregistered_channel(monkeypatch):
+    def evaluate(channel, day):
+        raise KeyError(channel)
+
+    monkeypatch.setattr("axile.server.performance.evaluate_channel_calendar_day", evaluate)
+    result = performance_calendar("not-registered", "2026-01-01", "2026-01-03")
+    assert result.status == "unavailable"
+    assert result.closed_ranges == []
+
+
 def test_close_before_uses_last_day_end_before_observation():
     result = run([obs(1, asset=100), obs(2, asset=110), obs(3, asset=99)])
     assert close_before(result.points, "2026-01-01") == pytest.approx(100)
@@ -258,6 +268,20 @@ def test_portfolio_unknown_before_first_participating_observation():
     assert result.points[0].portfolio_return is None
     assert result.points[1].portfolio_return is None
     assert result.points[2].portfolio_return == 0
+
+
+def test_anchor_portfolio_unknown_when_participation_starts_after_base_same_day():
+    # 基准点仅资产、同日晚些时候才有首个参与观测：锚点回测收益按时刻比较回归 None，
+    # 不得因同日就伪装成 0.0 起投。
+    items = [obs(1, asset=100), obs(2, {"A": 100.0}, asset=None)]
+    items[0].target = None
+    items[0].time = datetime(2026, 1, 1, 9, 0)
+    items[1].time = datetime(2026, 1, 1, 14, 0)
+    result = run(items)
+    anchor = result.points[0]
+    assert anchor.account_return == 0
+    assert anchor.portfolio_return is None
+    assert anchor.difference is None
 
 
 def test_clear_positions_still_participates_after_holding():
