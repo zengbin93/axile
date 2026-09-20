@@ -355,7 +355,7 @@ def test_mark_price_prefers_last_with_mid_fallback():
     )
 
 
-def sized_record(symbol_results, curr_target=None, tick=100.0, kind=None):
+def sized_record(symbol_results, curr_target=None, kind=None):
     result = {"account_assets": {"total_asset": 102335.888}, "symbol_results": symbol_results}
     if kind:
         result["execution_kind"] = kind

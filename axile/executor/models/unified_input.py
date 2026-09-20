@@ -414,24 +414,6 @@ class UnifiedStandardInput(BaseModel):
         algorithm_name = str(algorithm.get("method", self.algorithm.get("method", "SINGLE-MAKER")))
         return self._parse_algorithm_config_params(algorithm, algorithm_name)
 
-    def parse_symbol_algorithm_params(self, symbol: str) -> None:
-        """
-        为指定品种的覆盖算法解析参数模型.
-
-        Parameters
-        ----------
-        symbol : str
-            需要解析覆盖算法的品种代码。
-        """
-        if symbol not in self.symbol_algorithms:
-            return
-        algorithm = _algorithm_dict(self.symbol_algorithms[symbol])
-        algorithm_name = str(algorithm.get("method", self.algorithm.get("method", "SINGLE-MAKER")))
-        self.symbol_algorithms[symbol] = self._parse_algorithm_config_params(
-            algorithm,
-            algorithm_name,
-        )
-
     def _parse_algorithm_config_params(
         self,
         algorithm: TradeAlgorithm,

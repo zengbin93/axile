@@ -153,23 +153,6 @@ class GMCallbackDispatcher:
             else:
                 logger.warning(f"价格回调已注册: {callback}")
 
-    def register_runtime_log_callback(self, callback: GMRuntimeLogCallback) -> None:
-        """
-        注册 GM runtime 日志回调函数.
-
-        Parameters
-        ----------
-        callback : GMRuntimeLogCallback
-            用于接收 GM runtime 日志事件的回调函数。
-        """
-        with self._callbacks_lock:
-            if callback not in self._runtime_log_callbacks:
-                self._runtime_log_callbacks.append(callback)
-                callback_name = getattr(callback, "__name__", "unknown")
-                logger.info(f"已注册 runtime 日志回调: {callback_name}")
-            else:
-                logger.warning(f"runtime 日志回调已注册: {callback}")
-
     def unregister_order_callback(self, callback: OrderUpdateCallback) -> None:
         """
         注销订单更新回调函数.
@@ -220,23 +203,6 @@ class GMCallbackDispatcher:
                 logger.info(f"已注销价格回调: {callback_name}")
             else:
                 logger.warning(f"价格回调未注册: {callback}")
-
-    def unregister_runtime_log_callback(self, callback: GMRuntimeLogCallback) -> None:
-        """
-        注销 GM runtime 日志回调函数.
-
-        Parameters
-        ----------
-        callback : GMRuntimeLogCallback
-            要注销的 runtime 日志回调函数。
-        """
-        with self._callbacks_lock:
-            if callback in self._runtime_log_callbacks:
-                self._runtime_log_callbacks.remove(callback)
-                callback_name = getattr(callback, "__name__", "unknown")
-                logger.info(f"已注销 runtime 日志回调: {callback_name}")
-            else:
-                logger.warning(f"runtime 日志回调未注册: {callback}")
 
     def dispatch_order_update(self, order: UnifiedOrder) -> None:
         """
@@ -358,26 +324,6 @@ class GMCallbackDispatcher:
             except Exception as e:
                 callback_name = getattr(callback, "__name__", "unknown")
                 logger.error(f"runtime 日志回调 {callback_name} 出错: {e}", exc_info=True)
-
-    def get_recent_runtime_logs(self, limit: int = 100) -> list[GMRuntimeLogEvent]:
-        """
-        获取最近收到的 GM runtime 日志事件.
-
-        Parameters
-        ----------
-        limit : int, default=100
-            返回的最大事件数量。
-
-        Returns
-        -------
-        list[GMRuntimeLogEvent]
-            按接收顺序排列的最近日志事件列表。
-        """
-        effective_limit = max(limit, 0)
-        with self._callbacks_lock:
-            if effective_limit == 0:
-                return []
-            return list(self._runtime_logs)[-effective_limit:]
 
     def get_callback_count(self) -> dict[str, int]:
         """
