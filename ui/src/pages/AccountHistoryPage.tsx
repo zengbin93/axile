@@ -175,7 +175,7 @@ function AccountHistory({ accountId }: { accountId: number }) {
     </div>
     <div className="border-t border-line pt-2">
       {difference != null && difference < 0 && <p className="mt-1 text-xs text-warn">账户收益高于回测，待核对差异</p>}
-      {data && (data.calendar.status === 'partial' || data.calendar.status === 'unavailable') && <p role="status" className="mt-1 text-xs text-warn">部分日期交易日历不可用，休市标记可能不完整</p>}
+      {data && data.observation_count > 0 && (data.calendar.status === 'partial' || data.calendar.status === 'unavailable') && <p role="status" className="mt-1 text-xs text-warn">部分日期交易日历不可用，休市标记可能不完整</p>}
       {!parsed && !editingFee && <p role="alert" className="mt-2 text-xs text-warn">费率须大于等于 0 且小于 10000 BP</p>}
       <ErrorNotice title="参数保存失败" error={saveError} />
       <ErrorNotice title="账户设置读取失败" error={account.error} onRetry={account.refresh} />

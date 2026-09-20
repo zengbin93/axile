@@ -55,10 +55,12 @@ export function executionMarkerPoint(scene: ChartScene, row: CostExecutionRow): 
   const exact = data.points.findIndex(point => point.record_id === row.record.id)
   let before = exact, after = exact
   if (exact < 0) {
+    // 早于首观测/晚于末观测的执行吸附到最近观测点取值，x 仍按真实时间投影。
     after = times.findIndex(value => value >= time)
-    before = after - 1
+    if (after < 0) after = times.length - 1
+    before = Math.max(0, after - 1)
   }
-  if (before < 0 || after < 0 || after >= times.length) return null
+  if (before < 0 || after < 0) return null
   const a = data.points[before][key], b = data.points[after][key]
   if (a == null || b == null || !Number.isFinite(a) || !Number.isFinite(b)) return null
   const fraction = before === after ? 0 : (time - times[before]) / (times[after] - times[before] || 1)
@@ -223,7 +225,9 @@ function drawTimeAxis(ctx: CanvasRenderingContext2D, scene: ChartScene, exclude?
   const { width, viewport, theme } = scene
   const available = plotRight(width) - PLOT.left
   const count = Math.max(1, Math.floor(available / 145))
-  const intraday = viewport.end - viewport.start < 864e5
+  // 粒度判定必须在投影空间做：观测序列尺度下原始毫秒差不代表标签密度。
+  const project = scene.scale?.project ?? ((value: number) => value)
+  const intraday = project(viewport.end) - project(viewport.start) < 864e5
   ctx.fillStyle = theme.muted
   for (let i = 0; i <= count; i++) {
     const x = PLOT.left + available * i / count
@@ -391,7 +395,7 @@ export function drawOverlay(canvas: HTMLCanvasElement, scene: ChartScene, hover:
   const label = timeLabel(times[hover])
   const labelWidth = ctx.measureText(label).width + 12
   const labelX = Math.max(PLOT.left, Math.min(right - labelWidth, x - labelWidth / 2))
-  ctx.fillStyle = theme.bg; ctx.fillRect(PLOT.left, PLOT.costBottom + 5, right - PLOT.left, PLOT.navTop - PLOT.costBottom - 7)
+  ctx.fillStyle = theme.bg; ctx.fillRect(PLOT.left, PLOT.costBottom + 18, right - PLOT.left, PLOT.navTop - PLOT.costBottom - 20)
   drawTimeAxis(ctx, scene, { left: labelX - 8, right: labelX + labelWidth + 8 })
   ctx.fillStyle = theme.ink; ctx.fillRect(labelX, PLOT.costBottom + 18, labelWidth, 22)
   ctx.fillStyle = theme.bg; ctx.fillText(label, labelX + 6, TIME_AXIS_Y + 2)

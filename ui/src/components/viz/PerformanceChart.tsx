@@ -166,7 +166,7 @@ function CanvasPerformanceChart({ data, daily, scaleMode, costs, intervalCost, s
     const next = reconcileSelection(current.selection, data.points)
     if (next !== current.selection) current.onSelect(next)
   }, [data.points, times, navigationTimes])
-  useEffect(() => { setHover(null); hoverRef.current = null; setDraft(null); drag.current = null; setCursor(null) }, [scaleMode])
+  useEffect(() => { setHover(null); hoverRef.current = null; setDraft(null); drag.current = null; setCursor(null); magnetRecordId.current = null; setMagnet(null) }, [scaleMode])
 
   useLayoutEffect(() => {
     if (!container.current || !baseCanvas.current) return
