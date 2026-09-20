@@ -268,7 +268,7 @@ function CanvasPerformanceChart({ data, daily, scaleMode, costs, intervalCost, s
     if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId)
     if (active.kind.startsWith('nav')) {
       if (!active.moved && active.kind === 'nav') {
-        const center = xTime(p.x, size.width, full), half = (viewport.end - viewport.start) / 2
+        const center = xTime(p.x, size.width, full, timeScale), half = (viewport.end - viewport.start) / 2
         changeView({ start: center - half, end: center + half })
       }
     } else if (active.moved) {
