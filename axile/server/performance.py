@@ -18,9 +18,9 @@ from axile.server.db.models.performance import (
     AccountPerformance,
     PerformanceCalendar,
     PerformanceCalendarRange,
-    PerformanceGap,
     PerformancePoint,
     PerformanceSettings,
+    PerformanceSkips,
     RangeKey,
 )
 from axile.server.trading_calendar import CalendarDecisionStatus, evaluate_channel_calendar_day
@@ -197,36 +197,62 @@ def select_range(items: list[Observation], range_key: RangeKey) -> list[Observat
     return [item for item in ordered if item.time >= cutoff]
 
 
-def build_wbt_input(items: list[Observation]) -> tuple[pd.DataFrame, PerformanceGap | None, int]:
-    """构建可信前缀；未知区间不能通过后续行情恢复累计收益."""
+@dataclass
+class BacktestInput:
+    """WBT 输入与参与统计；未参与观测不产生行，权重自然延续."""
+
+    frame: pd.DataFrame
+    used: int
+    skips: PerformanceSkips
+    backtest_start: datetime | None
+
+
+def build_wbt_input(items: list[Observation]) -> BacktestInput:
+    """跳过缺目标或缺盘口的观测；失败执行意味着持仓延续，而非不可恢复的缺口."""
     rows: list[dict[str, object]] = []
     previous: dict[str, float] = {}
     used = 0
-    gap = None
+    backtest_start: datetime | None = None
+    missing_target = 0
+    missing_ticks = 0
+    first_time: str | None = None
+    last_time: str | None = None
     for item in items:
         target = item.target
         required = {symbol for symbol, weight in previous.items() if weight != 0}
         if target is not None:
             required.update(symbol for symbol, weight in target.items() if weight != 0)
-        missing = sorted(required - item.prices.keys())
+        missing = required - item.prices.keys()
         if target is None or missing:
-            gap = PerformanceGap(
-                time=item.time.isoformat(),
-                execution_id=item.execution_id,
-                reason="目标权重缺失或无效" if target is None else "必要标的缺少有效首笔盘口",
-                symbols=missing,
-            )
-            break
+            # 跳过：不产生行、不更新延续目标，WBT 按上一已知持仓延续。
+            missing_target += target is None
+            missing_ticks += target is not None
+            first_time = first_time or item.time.isoformat()
+            last_time = item.time.isoformat()
+            continue
         # 旧仓必须写入显式零权重退出行；其余有报价的零仓也保留供 WBT 建立历史。
         symbols = required | (target.keys() & item.prices.keys())
         rows.extend(
             {"dt": item.time, "symbol": symbol, "weight": target.get(symbol, 0.0), "price": item.prices[symbol]}
             for symbol in sorted(symbols)
         )
+        backtest_start = backtest_start or item.time
         previous = target
         used += 1
+    skipped = missing_target + missing_ticks
     frame = pd.DataFrame(rows, columns=["dt", "symbol", "weight", "price"])
-    return frame.astype({"weight": "float64", "price": "float64"}), gap, used
+    return BacktestInput(
+        frame=frame.astype({"weight": "float64", "price": "float64"}),
+        used=used,
+        skips=PerformanceSkips(
+            count=skipped,
+            missing_target=missing_target,
+            missing_ticks=missing_ticks,
+            first_time=first_time if skipped else None,
+            last_time=last_time if skipped else None,
+        ),
+        backtest_start=backtest_start,
+    )
 
 
 def _portfolio_daily(frame: pd.DataFrame, settings: PerformanceSettings) -> dict[str, float]:
@@ -245,7 +271,7 @@ def _portfolio_daily(frame: pd.DataFrame, settings: PerformanceSettings) -> dict
 def _merge_daily(
     items: list[Observation],
     daily: dict[str, float] | None,
-    gap: PerformanceGap | None,
+    backtest_start: datetime | None,
 ) -> list[PerformancePoint]:
     base = next((item for item in items if item.asset is not None and item.asset > 0), None)
     if base is None or base.asset is None:
@@ -257,7 +283,8 @@ def _merge_daily(
     nav = 1.0
     previous_asset = base.asset
     points: list[PerformancePoint] = []
-    gap_day = gap.time[:10] if gap else None
+    # 回测首个参与观测之前组合收益未知；其后无 WBT 条目的日子按持仓延续计 0.
+    backtest_day = backtest_start.date().isoformat() if backtest_start is not None else None
     for day, last in by_day.items():
         # 日末资产缺失时不拿更早资产伪装同日末值；次日累计仍可由共同基准恢复。
         account = last.asset / base.asset - 1 if last.asset is not None else None
@@ -267,7 +294,9 @@ def _merge_daily(
             else None
         )
         previous_asset = last.asset
-        portfolio_daily = daily.get(day, 0.0) if daily is not None and (gap_day is None or day < gap_day) else None
+        portfolio_daily = (
+            daily.get(day, 0.0) if daily is not None and (backtest_day is None or day >= backtest_day) else None
+        )
         if portfolio_daily is not None:
             nav *= 1 + portfolio_daily
         portfolio = nav - 1 if portfolio_daily is not None else None
@@ -286,6 +315,7 @@ def _merge_daily(
             )
         )
     # 独立基准点保留执行时间，以便基准当天仍有后续执行时不覆盖日末收益。
+    from_backtest = daily is not None and backtest_start is not None and backtest_start.date() == base.time.date()
     points.insert(
         0,
         PerformancePoint(
@@ -295,8 +325,8 @@ def _merge_daily(
             execution_id=base.execution_id,
             account_return=0.0,
             account_equity=base.asset,
-            portfolio_return=0.0 if daily is not None and _is_baseline(base) else None,
-            difference=0.0 if daily is not None and _is_baseline(base) else None,
+            portfolio_return=0.0 if from_backtest else None,
+            difference=0.0 if from_backtest else None,
         ),
     )
     return points
@@ -353,10 +383,15 @@ def calculate_performance(
         return result
     result.observation_count = len(items)
     daily = None
+    backtest_start: datetime | None = None
     if include_backtest:
-        frame, result.gap, result.used_record_count = build_wbt_input(items)
-        daily = _portfolio_daily(frame, settings)
-    result.points = _merge_daily(items, daily, result.gap)
+        built = build_wbt_input(items)
+        result.used_record_count = built.used
+        result.skips = built.skips
+        backtest_start = built.backtest_start
+        # 空帧必须归 None：单观测帧的 WBT 日收益同样为空，但语义是尚未起息而非无回测。
+        daily = None if built.frame.empty else _portfolio_daily(built.frame, settings)
+    result.points = _merge_daily(items, daily, backtest_start)
     result.baseline = result.points[0].date if result.points else None
     result.end = items[-1].time.isoformat()
     result.invalid_asset_count = sum(item.asset is None for item in items)

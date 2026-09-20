@@ -140,20 +140,23 @@ def test_account_weights_are_summed_including_legacy_mode(mode):
 
 def test_exit_row_accounts_for_last_holding_return_and_fee():
     items = [obs(1), obs(2, {"A": 110.0}, {}), obs(3, {"A": 140.0}, {})]
-    frame, gap, _ = build_wbt_input(items)
-    assert gap is None
-    assert frame.iloc[-1]["weight"] == 0
+    built = build_wbt_input(items)
+    assert built.skips.count == 0
+    assert built.frame.iloc[-1]["weight"] == 0
     assert run(items).points[-1].portfolio_return == pytest.approx(0.1)
     assert run(items, fee=0.001).points[-1].portfolio_return == pytest.approx(0.099)
 
 
-def test_missing_exit_price_stops_portfolio_but_not_account():
+def test_missing_exit_price_skips_but_portfolio_holds_and_recovers():
     items = [obs(1), obs(2, {"B": 10.0}, {"B": 1.0}, 110), obs(3, {"A": 120.0, "B": 11.0}, {"B": 1.0}, 120)]
     result = run(items)
-    assert result.gap.symbols == ["A"]
-    assert result.used_record_count == 1
-    assert result.points[-1].portfolio_return is None
-    assert result.points[-1].difference is None
+    assert result.skips.count == 1
+    assert result.skips.missing_ticks == 1
+    assert result.skips.first_time == items[1].time.isoformat()
+    assert result.used_record_count == 2
+    # 跳过期间组合按 A 持仓延续，恢复点以 120 结算 A 退出行。
+    assert result.points[-1].portfolio_return == pytest.approx(0.2)
+    assert result.points[-1].difference == pytest.approx(0)
     assert result.points[-1].account_return == pytest.approx(0.2)
 
 
@@ -161,18 +164,81 @@ def test_missing_target_is_not_a_clear():
     item = obs(2)
     item.target = None
     result = run([obs(1), item, obs(3)])
-    assert result.gap.reason == "目标权重缺失或无效"
-    assert result.points[-1].portfolio_return is None
+    assert result.skips.count == 1
+    assert result.skips.missing_target == 1
+    assert result.skips.first_time == item.time.isoformat()
+    # 缺失目标按持仓延续而非清仓：A@100→A@100 收益为 0。
+    assert result.points[-1].portfolio_return == pytest.approx(0)
 
 
 def test_range_restarts_after_old_gap_and_has_no_500_record_limit():
     items = [obs(i + 1, {"A": float(100 + i)}) for i in range(600)]
     items[2].target = None
-    assert run(items).gap is not None
+    assert run(items).skips.count == 1
+    assert run(items).used_record_count == 599
     recent = run(items, range_key="30")
-    assert recent.gap is None
+    assert recent.skips.count == 0
     assert recent.record_count == 600
     assert recent.used_record_count == 31
+
+
+def test_carry_forward_skip_equals_manually_held_weights():
+    items = [obs(1), obs(2, {"A": 110.0}, asset=110), obs(3, {"A": 120.0}, {}, 120)]
+    items[1].prices = {}
+    skipped = run(items)
+    held = run([items[0], items[2]])
+    assert skipped.points[-1].portfolio_return == pytest.approx(held.points[-1].portfolio_return)
+    assert skipped.points[-1].portfolio_return == pytest.approx(0.2)
+    assert skipped.skips.count == 1
+    assert skipped.used_record_count + skipped.skips.count == skipped.observation_count
+
+
+def test_failure_burst_is_carried_and_counted_as_missing_target():
+    burst = [obs(i, asset=100 + i) for i in (2, 3, 4)]
+    for item in burst:
+        item.target = None
+    items = [obs(1), *burst, obs(5, {"A": 120.0, "B": 10.0}, {"B": 1.0}, 120)]
+    result = run(items)
+    assert result.skips.count == 3
+    assert result.skips.missing_target == 3
+    assert result.skips.missing_ticks == 0
+    assert result.skips.first_time == burst[0].time.isoformat()
+    assert result.skips.last_time == burst[-1].time.isoformat()
+    assert result.used_record_count == 2
+    assert result.used_record_count + result.skips.count == result.observation_count
+    # 基准日起每天都有组合收益：突发日按持仓延续计 0，末点以 A 退出行结算。
+    assert all(point.portfolio_return is not None for point in result.points)
+    assert [point.portfolio_daily_return for point in result.points[1:-1]] == [0, 0, 0, 0]
+    assert result.points[-1].portfolio_return == pytest.approx(0.2)
+
+
+def test_all_unusable_observations_keep_portfolio_null_not_flat_zero():
+    items = [obs(1, asset=100), obs(2, asset=110), obs(3, asset=99)]
+    for item in items:
+        item.target = None
+    result = run(items)
+    assert result.skips.count == 3
+    assert all(point.portfolio_return is None for point in result.points)
+    assert result.points[-1].account_return == pytest.approx(-0.01)
+
+
+def test_portfolio_unknown_before_first_participating_observation():
+    # 无共同基准路径：账户基准先于回测首个参与观测，起点前不得平铺 0 收益。
+    items = [obs(1, asset=100), obs(2, {"A": 110.0}, asset=None)]
+    items[0].target = None
+    result = run(items)
+    assert result.used_record_count == 1
+    assert result.points[0].portfolio_return is None
+    assert result.points[1].portfolio_return is None
+    assert result.points[2].portfolio_return == 0
+
+
+def test_clear_positions_still_participates_after_holding():
+    items = [obs(1), obs(2, {"A": 110.0}, {}, 110)]
+    result = run(items)
+    assert result.skips.count == 0
+    assert result.used_record_count == 2
+    assert result.points[-1].portfolio_return == pytest.approx(0.1)
 
 
 def test_duplicates_keep_last_record_and_zero_assets_are_not_removed():
@@ -306,6 +372,7 @@ def test_account_only_matches_full_without_building_or_running_wbt(monkeypatch, 
     assert all(
         p.portfolio_return is None and p.portfolio_daily_return is None and p.difference is None for p in quick.points
     )
+    assert quick.skips is None
 
 
 @pytest.mark.parametrize(

@@ -39,13 +39,14 @@ class PerformancePoint(BaseModel):
     difference: float | None = None
 
 
-class PerformanceGap(BaseModel):
-    """首个无法继续累计的执行快照."""
+class PerformanceSkips(BaseModel):
+    """区间内未参与组合回测的执行快照统计，收益按最后持仓延续."""
 
-    time: str
-    execution_id: str | None
-    reason: str
-    symbols: list[str] = Field(default_factory=list)
+    count: int = 0
+    missing_target: int = 0
+    missing_ticks: int = 0
+    first_time: str | None = None
+    last_time: str | None = None
 
 
 class PerformanceBinding(BaseModel):
@@ -85,7 +86,7 @@ class AccountPerformance(BaseModel):
     observation_count: int = 0
     used_record_count: int = 0
     invalid_asset_count: int = 0
-    gap: PerformanceGap | None = None
+    skips: PerformanceSkips | None = None
     points: list[PerformancePoint] = Field(default_factory=list)
     bindings: list[PerformanceBinding] = Field(default_factory=list)
     executions: list[dict] = Field(default_factory=list)

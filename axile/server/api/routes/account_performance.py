@@ -104,7 +104,7 @@ async def get_performance(
     result = AccountPerformance.model_validate(snapshot["result"])
     if not include_backtest:
         result.backtest_included = False
-        result.gap = None
+        result.skips = None
         result.used_record_count = 0
         for point in result.points:
             point.portfolio_return = point.portfolio_daily_return = point.difference = None
