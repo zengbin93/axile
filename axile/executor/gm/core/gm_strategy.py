@@ -28,7 +28,7 @@ from axile.executor.gm.common import (
 )
 from axile.executor.gm.core.api_bridge import GMApiBridge, GMBridgeRequestPayload, GMSubscribeSymbolsRequest
 from axile.executor.gm.core.bridge_context import GMStrategyRuntimeContext, get_gm_strategy_runtime_context
-from axile.executor.gm.core.callback_dispatcher import GMRuntimeLogEvent, GMRuntimeLogLevel
+from axile.executor.gm.core.callback_dispatcher import GMRuntimeLogLevel
 from axile.executor.models.unified_order import TradeRecord, UnifiedOrder
 from axile.executor.models.unified_price import UnifiedPriceData
 
@@ -75,40 +75,21 @@ def _increment_error_stat() -> None:
 
 def _emit_runtime_log(level: GMRuntimeLogLevel, message: str) -> None:
     """
-    发送 GM runtime 日志事件.
+    输出 GM runtime 日志.
 
     Parameters
     ----------
-    level : _RuntimeLogLevel
+    level : GMRuntimeLogLevel
         日志级别。
     message : str
         日志正文。
 
     Notes
     -----
-    ``error`` 级别会继续保留原本的 ``print`` 输出；
-    其他级别仅在分发器不可用或分发失败时退回 ``print``。
+    仅 ``error`` 级别保留 ``print`` 输出；其余级别静默，
+    与旧分发器可用时的可观测行为一致。
     """
-    should_print = level == "error"
-    context = _get_bridge_context()
-    dispatcher = None if context is None else context.dispatcher
-
-    if dispatcher is not None:
-        try:
-            dispatcher.dispatch_runtime_log(
-                GMRuntimeLogEvent(
-                    level=level,
-                    message=message,
-                    source="gm_strategy",
-                    timestamp=datetime.now().isoformat(),
-                )
-            )
-        except Exception:
-            should_print = True
-    else:
-        should_print = True
-
-    if should_print:
+    if level == "error":
         print(message, flush=True)
 
 

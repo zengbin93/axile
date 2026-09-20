@@ -6,9 +6,7 @@ GM 回调分发器.
 """
 
 import threading
-from collections import deque
-from dataclasses import dataclass
-from typing import Literal, Protocol, TypeAlias
+from typing import Literal, TypeAlias
 
 from loguru import logger
 
@@ -17,50 +15,6 @@ from axile.executor.models.unified_order import TradeRecord, UnifiedOrder
 from axile.executor.models.unified_price import UnifiedPriceData
 
 GMRuntimeLogLevel: TypeAlias = Literal["info", "warning", "error"]
-
-
-@dataclass(frozen=True, slots=True)
-class GMRuntimeLogEvent:
-    """
-    GM runtime 日志事件.
-
-    Attributes
-    ----------
-    level : GMRuntimeLogLevel
-        日志级别。
-    message : str
-        日志正文。
-    source : str
-        事件来源标识。
-    timestamp : str
-        事件生成时间，使用 ISO 8601 字符串。
-    """
-
-    level: GMRuntimeLogLevel
-    message: str
-    source: str
-    timestamp: str
-
-
-class GMRuntimeLogCallback(Protocol):
-    """
-    GM runtime 日志回调协议.
-
-    Notes
-    -----
-    该协议用于接收 bridge runtime 发出的结构化日志事件。
-    """
-
-    def __call__(self, event: GMRuntimeLogEvent) -> None:
-        """
-        处理 GM runtime 日志事件.
-
-        Parameters
-        ----------
-        event : GMRuntimeLogEvent
-            结构化日志事件对象。
-        """
-        ...
 
 
 class GMCallbackDispatcher:
@@ -74,10 +28,8 @@ class GMCallbackDispatcher:
         self._order_callbacks: list[OrderUpdateCallback] = []
         self._trade_callbacks: list[TradeRecordCallback] = []
         self._price_callbacks: list[PriceDataCallback] = []
-        self._runtime_log_callbacks: list[GMRuntimeLogCallback] = []
         self._order_observers: list[OrderUpdateCallback] = []
         self._trade_observers: list[TradeRecordCallback] = []
-        self._runtime_logs: deque[GMRuntimeLogEvent] = deque(maxlen=200)
         self._callbacks_lock = threading.Lock()
 
         # 统计信息
@@ -85,7 +37,6 @@ class GMCallbackDispatcher:
             "order_updates_received": 0,
             "trade_records_received": 0,
             "price_updates_received": 0,
-            "runtime_logs_received": 0,
         }
 
         logger.debug("CallbackDispatcher 初始化完成")
@@ -297,33 +248,6 @@ class GMCallbackDispatcher:
             except Exception as e:
                 callback_name = getattr(callback, "__name__", "unknown")
                 logger.error(f"价格回调 {callback_name} 出错: {e}", exc_info=True)
-
-    def dispatch_runtime_log(self, event: GMRuntimeLogEvent) -> None:
-        """
-        分发 GM runtime 日志事件.
-
-        Parameters
-        ----------
-        event : GMRuntimeLogEvent
-            结构化 runtime 日志事件。
-        """
-        self._stats["runtime_logs_received"] += 1
-
-        with self._callbacks_lock:
-            # 先保留最近一段 runtime 日志，供后续可能接入 execution audit
-            # 或其他上游消费者时直接复用，不在当前版本引入额外副作用。
-            self._runtime_logs.append(event)
-            callbacks = self._runtime_log_callbacks.copy()
-
-        if not callbacks:
-            return
-
-        for callback in callbacks:
-            try:
-                callback(event)
-            except Exception as e:
-                callback_name = getattr(callback, "__name__", "unknown")
-                logger.error(f"runtime 日志回调 {callback_name} 出错: {e}", exc_info=True)
 
     def get_callback_count(self) -> dict[str, int]:
         """
