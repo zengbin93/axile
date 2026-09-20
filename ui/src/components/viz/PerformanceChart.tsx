@@ -55,6 +55,7 @@ function CanvasPerformanceChart({ data, daily, scaleMode, costs, intervalCost, s
   const accountInfo = useDomainStore(s => s.accounts?.find(a => a.account_id === accountId))
   const descriptor = useChannelDescriptor(accountInfo?.trade_channel)
   const times = useMemo(() => data.points.map(pointTime), [data.points])
+  const closedGapDays = useMemo(() => times.slice(0, -1).map((time, index) => closedDaysBetween(time, times[index + 1], data.calendar.closed_ranges)), [times, data.calendar.closed_ranges])
   const timeScale = useMemo(() => createTimeScale(scaleMode, times), [scaleMode, times])
   const navigationTimes = useMemo(() => [...new Set([...times, ...(data.executions ?? []).flatMap(r => [shanghaiTime(r.record.created_at), ...(r.transactions ?? []).flatMap(t => [t.time, t.endTime])])])].sort((a, b) => a - b), [times, data.executions])
   const full = useMemo(() => ({ start: navigationTimes[0], end: navigationTimes[navigationTimes.length - 1] }), [navigationTimes])
@@ -125,7 +126,7 @@ function CanvasPerformanceChart({ data, daily, scaleMode, costs, intervalCost, s
   const coverageNeedsAttention = costReady && readingCost != null && readingCost.count > 0 && (costIncomplete || readingCost.coverage == null)
   const binding = bindingAt(data, bindingTime ?? times[pointIndex])
   const bindingName = !binding || binding.binding.portfolio_id == null ? '未绑定' : portfolioNames.get(binding.binding.portfolio_id) ?? `组合 #${binding.binding.portfolio_id}`
-  const tradingScene = useMemo<ChartScene>(() => ({ data, times, width: size.width, viewport, daily, returnRange, costs, portfolioNames, domain: full, scale: timeScale, showExecutions, theme: container.current ? readCanvasTheme(container.current) : { bg: '', surface: '', ink: '', muted: '', line: '', accent: '', warn: '', fill: '', font: '' } }), [data, times, size, viewport, daily, returnRange, costs, portfolioNames, full, timeScale, showExecutions])
+  const tradingScene = useMemo<ChartScene>(() => ({ data, times, width: size.width, viewport, daily, returnRange, costs, portfolioNames, domain: full, scale: timeScale, showExecutions, closedGapDays, theme: container.current ? readCanvasTheme(container.current) : { bg: '', surface: '', ink: '', muted: '', line: '', accent: '', warn: '', fill: '', font: '' } }), [data, times, size, viewport, daily, returnRange, costs, portfolioNames, full, timeScale, showExecutions, closedGapDays])
 
   const paintOverlay = useCallback(() => {
     if (overlay.current && scene.current) drawOverlay(overlay.current, scene.current, hoverRef.current, selectionRef.current, bindingTimeRef.current, cursorRef.current, magnet)
@@ -444,7 +445,7 @@ function CanvasPerformanceChart({ data, daily, scaleMode, costs, intervalCost, s
     </div>
 
     <p id="performance-keyboard-reading" className="sr-only" aria-live="polite">{pointLabel(point)}，账户 {returnText(point[keys[0]])}，回测 {returnText(point[keys[1]])}。方向键选点，回车确认，Escape 清除，加减号缩放，0 恢复范围。</p>
-    {scaleMode === 'observations' && <p className="sr-only">观测序列已压缩 {times.slice(0, -1).reduce((sum, time, index) => sum + closedDaysBetween(time, times[index + 1], data.calendar.closed_ranges), 0)} 个完整休市日。</p>}
+    {scaleMode === 'observations' && <p className="sr-only">观测序列已压缩 {closedGapDays.reduce((sum, days) => sum + days, 0)} 个完整休市日。</p>}
     <div className="flex min-h-7 flex-wrap justify-between gap-2 text-[11px] text-ink-3"><span data-testid="chart-viewport">{timeLabel(viewport.start)} → {timeLabel(viewport.end)}</span><span>上海时间 · 收益差 = 回测 − 账户</span></div>
     <p className="text-[11px] leading-5 text-ink-3">账户收益未调整出入金 · 回测单边费率 {Number((data.settings.backtest_fee_rate * 10000).toFixed(8))} BP</p>
     <p className="text-[11px] leading-5 text-ink-3">{showExecutions ? '圆点为成交执行：靠近会吸附到执行时刻，点击固定查看本次执行 · Ctrl + 滚轮放大' : '成交点已隐藏 · Ctrl + 滚轮放大'}</p>

@@ -26,6 +26,8 @@ export interface ChartScene {
   scale?: TimeScale
   /** 是否绘制执行事件针脚；缺省绘制。关闭后磁吸交互由组件侧一并失效。 */
   showExecutions?: boolean
+  /** 相邻观测间完整休市天数缓存（len = times.length - 1）；缺省时退回逐帧现算。 */
+  closedGapDays?: number[]
 }
 
 export type ExecutionMarkerTone = 'normal' | 'warn'
@@ -295,10 +297,22 @@ function drawCalendar(ctx: CanvasRenderingContext2D, scene: ChartScene) {
   ctx.restore()
 }
 
+/** measureText 结果按「字体 + 文本」缓存；休市标签逐帧重画但文本集合有限。 */
+const textWidths = new Map<string, number>()
+function measuredWidth(ctx: CanvasRenderingContext2D, text: string): number {
+  const key = `${ctx.font} ${text}`
+  let width = textWidths.get(key)
+  if (width == null) {
+    width = ctx.measureText(text).width
+    textWidths.set(key, width)
+  }
+  return width
+}
+
 function drawCalendarMarks(ctx: CanvasRenderingContext2D, scene: ChartScene) {
   if (scene.scale?.mode !== 'observations') return
   for (let index = 0; index < scene.times.length - 1; index++) {
-    const days = closedDaysBetween(scene.times[index], scene.times[index + 1], scene.data.calendar.closed_ranges)
+    const days = scene.closedGapDays?.[index] ?? closedDaysBetween(scene.times[index], scene.times[index + 1], scene.data.calendar.closed_ranges)
     if (!days) continue
     const left = xPosition(scene.times[index], scene.width, scene.viewport, scene.scale)
     const right = xPosition(scene.times[index + 1], scene.width, scene.viewport, scene.scale)
@@ -309,7 +323,7 @@ function drawCalendarMarks(ctx: CanvasRenderingContext2D, scene: ChartScene) {
     ctx.fillRect(visibleLeft + 2, CALENDAR_MARK_Y - 10, Math.max(0, available - 4), 14)
     ctx.globalAlpha = 1; ctx.fillStyle = scene.theme.muted; ctx.textAlign = 'center'
     const full = `休市 ${days} 日`
-    const label = closedRangeLabel(available, days, ctx.measureText(full).width, ctx.measureText('休市').width)
+    const label = closedRangeLabel(available, days, measuredWidth(ctx, full), measuredWidth(ctx, '休市'))
     if (label) ctx.fillText(label, (visibleLeft + visibleRight) / 2, CALENDAR_MARK_Y)
   }
   ctx.textAlign = 'left'

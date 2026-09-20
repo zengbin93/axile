@@ -13,7 +13,7 @@ import { getAccount } from '@/lib/api/accounts'
 import { getPortfolios } from '@/lib/api/portfolios'
 import { shanghaiDay, shanghaiLabel } from '@/features/history/costs'
 import { reconcileSelection, type ChartSelection } from '@/features/history/chartModel'
-import { performanceViews } from '@/features/history/viewState'
+import { loadPerformanceView, performanceViews, savePerformanceView } from '@/features/history/viewState'
 import { getPerformanceCosts, selectionQuery, savePerformanceSettings } from '@/lib/api/performance'
 import { usePerformanceSnapshot } from '@/features/history/usePerformanceSnapshot'
 import { snapshotPending } from '@/features/history/performanceCache'
@@ -48,10 +48,13 @@ function AccountHistory({ accountId }: { accountId: number }) {
   const item = useDomainStore(s => s.accounts?.find(account => account.account_id === accountId))
   const [range, setRange] = useState<RangeKey>(() => performanceViews.get(accountId)?.range ?? 'all')
   const [view, setView] = useState<'cumulative' | 'daily'>(() => performanceViews.get(accountId)?.view ?? 'cumulative')
-  const [scale, setScale] = useState<TimeScaleMode>(() => performanceViews.get(accountId)?.scale ?? 'observations')
+  const [scale, setScale] = useState<TimeScaleMode>(() => performanceViews.get(accountId)?.scale ?? loadPerformanceView(accountId).scale ?? 'observations')
   const [selection, setSelection] = useState<ChartSelection>(() => performanceViews.get(accountId)?.selection ?? null)
-  const [markers, setMarkers] = useState(() => performanceViews.get(accountId)?.markers ?? true)
-  useEffect(() => { performanceViews.set(accountId, { ...performanceViews.get(accountId), range, view, scale, selection, markers }) }, [accountId, range, view, scale, selection, markers])
+  const [markers, setMarkers] = useState(() => performanceViews.get(accountId)?.markers ?? loadPerformanceView(accountId).markers ?? true)
+  useEffect(() => {
+    performanceViews.set(accountId, { ...performanceViews.get(accountId), range, view, scale, selection, markers })
+    savePerformanceView(accountId, { scale, markers })
+  }, [accountId, range, view, scale, selection, markers])
   const [showEvents, setShowEvents] = useState(false)
   const [draft, setDraft] = useState<{ mode: 'ts' | 'cs'; fee: string } | null>(null)
   const [saved, setSaved] = useState<PerformanceSettings | null>(null)
