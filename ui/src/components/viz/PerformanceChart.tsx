@@ -109,6 +109,10 @@ function CanvasPerformanceChart({ data, daily, scaleMode, costs, intervalCost, s
   const portfolio = interval ? intervalReturn(data.points, shownSelection, 'portfolio_return') : point[keys[1]]
   const readingExecution = selectedExecution ?? execution
   const readingCost = interval ? summary : selection?.kind === 'day' ? daySummary : readingExecution?.summary ?? daySummary
+  const costReady = costs != null && (!interval || summary != null)
+  const costScope = interval ? '区间' : readingExecution ? '本次执行' : null
+  const showCostReadout = costScope != null || selection?.kind === 'day' && readingCost != null && readingCost.count > 0
+  const costIncomplete = readingCost != null && readingCost.count > 0 && (readingCost.covered < readingCost.count || !readingCost.amountComplete)
   const binding = bindingAt(data, bindingTime ?? times[pointIndex])
   const bindingName = !binding || binding.binding.portfolio_id == null ? '未绑定' : portfolioNames.get(binding.binding.portfolio_id) ?? `组合 #${binding.binding.portfolio_id}`
   const tradingScene = useMemo<ChartScene>(() => ({ data, times, width: size.width, viewport, daily, returnRange, costs, portfolioNames, domain: full, scale: timeScale, theme: container.current ? readCanvasTheme(container.current) : { bg: '', surface: '', ink: '', muted: '', line: '', accent: '', warn: '', fill: '', font: '' } }), [data, times, size, viewport, daily, returnRange, costs, portfolioNames, full, timeScale])
@@ -299,16 +303,25 @@ function CanvasPerformanceChart({ data, daily, scaleMode, costs, intervalCost, s
 
   return <div data-testid="performance-workbench" className="min-w-0">
     <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1">
-    <div className="flex min-h-9 min-w-0 flex-1 basis-[32rem] flex-wrap items-center gap-x-3 gap-y-1 py-1 text-xs text-ink-2" data-testid="chart-readout">
-      <span className="break-words text-ink-3">{interval ? '区间比较' : `日末观测 ${pointLabel(point)}`}</span>
-      <span>账户 <b className="font-medium text-accent">{returnText(account)}</b></span>
-      <span>回测 <b className="font-medium">{returnText(portfolio)}</b></span>
-      <span>收益差 <b className="font-medium">{returnText(account != null && portfolio != null ? portfolio - account : null, ' 个百分点')}</b></span>
-      <span>{interval ? '区间' : selection?.kind !== 'day' && readingExecution ? '本次执行' : '当日'}成交额 {amount(costs ? readingCost?.value ?? null : null)}</span>
-      <span className={lossClass(readingCost?.lossBp)}>滑点损耗 {amount(costs ? readingCost?.lossBp ?? null : null)} BP</span>
-      <span className={lossClass(readingCost?.cost)}>{readingCost && readingCost.covered < readingCost.count ? '已知滑点成本' : '滑点成本'} {slippageCostAmount(costs ? readingCost?.cost ?? null : null)} {accountInfo?.currency ?? ''}</span>
-      <span className="text-ink-3">{costs == null || (interval && !summary) ? '成本数据未就绪' : readingCost ? coverageText(readingCost) : '无成交记录'}</span>
-      {interval && summary && <><span>手续费 {feeText(summary)}</span>{estimated > 0 && <span className="text-warn">{estimated} 笔使用执行时间</span>}</>}
+    <div className="flex min-h-9 min-w-0 flex-1 basis-[32rem] flex-col gap-y-1 py-1 text-xs text-ink-2" data-testid="chart-readout">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+        <span className="break-words text-ink-3">{interval ? '区间比较' : `日末观测 ${pointLabel(point)}`}</span>
+        <span>账户 <b className="font-medium text-accent">{returnText(account)}</b></span>
+        <span>回测 <b className="font-medium">{returnText(portfolio)}</b></span>
+        <span>收益差 <b className="font-medium">{returnText(account != null && portfolio != null ? portfolio - account : null, ' 个百分点')}</b></span>
+      </div>
+      {showCostReadout && <div className="flex min-h-5 flex-wrap items-center gap-x-3 gap-y-1 text-ink-3">
+        {!costReady ? <span>{costScope ?? '当日'}成本数据未就绪</span>
+          : !readingCost || readingCost.count === 0 ? <span>{costScope ?? '当日'} · 无成交</span>
+          : costIncomplete ? <span className="text-warn">{costScope ?? '当日'} · {readingCost.count} 笔成交 · 滑点数据不完整</span>
+          : <>
+            <span>{costScope ?? '当日'}成交额 {amount(readingCost.value)}</span>
+            <span className={lossClass(readingCost.lossBp)}>滑点损耗 {amount(readingCost.lossBp)} BP</span>
+            <span className={lossClass(readingCost.cost)}>滑点成本 {slippageCostAmount(readingCost.cost)} {accountInfo?.currency ?? ''}</span>
+            <span>{coverageText(readingCost)}</span>
+            {interval && <><span>手续费 {feeText(readingCost)}</span>{estimated > 0 && <span className="text-warn">{estimated} 笔使用执行时间</span>}</>}
+          </>}
+      </div>}
     </div>
     <div className="flex flex-wrap items-center gap-2">
       {shownSelection && !interval && <ClearSelectionButton onClick={clear} />}
