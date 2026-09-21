@@ -7,7 +7,7 @@ import pytest
 from axile.executor.algorithms.utils.order_tracker import ChaseConfig, OrderTracker
 from axile.executor.constants.order_status import OrderStatus
 from axile.executor.models.unified_order import OrderDirection
-from tests.unit.executor.algorithms.test_algorithm_issue_fixes import _ClockStub
+from tests.fixtures.algorithm_fakes import ClockStub
 from tests.unit.executor.algorithms.utils.test_order_tracker import (
     _build_pending_order,
     _ChaseExecutor,
@@ -18,7 +18,7 @@ from tests.unit.executor.algorithms.utils.test_order_tracker import (
 
 def test_chase_cancel_wait_uses_remaining_budget(monkeypatch) -> None:
     executor = _UnconfirmedCancelExecutor()
-    clock = _ClockStub()
+    clock = ClockStub()
     tracker = OrderTracker(
         executor=executor,
         clock=clock,
@@ -40,7 +40,7 @@ def test_chase_cancel_wait_uses_remaining_budget(monkeypatch) -> None:
 @pytest.mark.parametrize("cancel_duration, expected_placements", [(0.1, 1), (0.2, 0), (0.3, 0)])
 def test_cancel_confirmation_at_deadline_does_not_replace(monkeypatch, cancel_duration, expected_placements) -> None:
     executor = _ChaseExecutor()
-    clock = _ClockStub()
+    clock = ClockStub()
     tracker = OrderTracker(executor=executor, clock=clock, chase_config=ChaseConfig(enabled=True, interval=0))
     executor.tracker = tracker
     order = _build_pending_order("deadline-confirm")
@@ -65,7 +65,7 @@ def test_cancel_confirmation_at_deadline_does_not_replace(monkeypatch, cancel_du
 
 def test_late_fallback_callback_cannot_submit_or_extend_deadline() -> None:
     executor = _UnconfirmedCancelExecutor()
-    clock = _ClockStub()
+    clock = ClockStub()
     tracker = OrderTracker(executor=executor, clock=clock, chase_config=ChaseConfig(enabled=True, max_count=0))
     executor.tracker = tracker
     order = _build_pending_order("deadline-fallback")
@@ -86,7 +86,7 @@ def test_late_fallback_callback_cannot_submit_or_extend_deadline() -> None:
 
 def test_fallback_batch_checks_deadline_before_each_child(monkeypatch) -> None:
     executor = _ChaseExecutor()
-    clock = _ClockStub()
+    clock = ClockStub()
     tracker = OrderTracker(executor=executor, clock=clock, chase_config=ChaseConfig(enabled=True))
     executor.tracker = tracker
     order = _build_pending_order("deadline-batch").model_copy(update={"volume": 3})

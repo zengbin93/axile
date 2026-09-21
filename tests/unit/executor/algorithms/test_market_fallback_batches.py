@@ -5,12 +5,12 @@ import pytest
 from axile.executor.constants.order_status import OrderStatus
 from axile.executor.ctp.ctp_execute import CtpSessionRecoveryRequired
 from axile.executor.models.unified_order import OrderType, TradeRecord
-from tests.unit.executor.algorithms.test_algorithm_issue_fixes import _build_tracker
+from tests.fixtures.algorithm_fakes import ClockStub, build_fallback_tracker
 
 
 @pytest.mark.parametrize("early_status", [None, OrderStatus.FILLED, OrderStatus.REJECTED])
 def test_market_batch_handles_synchronous_cancel_and_early_callbacks(monkeypatch, early_status):
-    executor, tracker, parent = _build_tracker()
+    executor, tracker, parent = build_fallback_tracker()
     parent.volume = 12
     info = tracker._chase_info[parent.order_id]
     info.update(offset_flag="3", position_side="long", trade_rule={"max_single_order_size": 10})
@@ -79,7 +79,7 @@ def test_market_batch_handles_synchronous_cancel_and_early_callbacks(monkeypatch
 
 @pytest.mark.parametrize("recovery", [False, True])
 def test_market_batch_stops_after_partial_submission(monkeypatch, recovery):
-    executor, tracker, parent = _build_tracker()
+    executor, tracker, parent = build_fallback_tracker()
     parent.volume = 10
     monkeypatch.setattr(executor, "get_order_volume_bounds", lambda *_: (1, 3), raising=False)
     original_place = executor.place_order
@@ -109,7 +109,7 @@ def test_market_batch_stops_after_partial_submission(monkeypatch, recovery):
 
 
 def test_market_batch_records_unrepresentable_tail(monkeypatch):
-    executor, tracker, parent = _build_tracker()
+    executor, tracker, parent = build_fallback_tracker()
     parent.volume = 5
     monkeypatch.setattr(executor, "get_order_volume_bounds", lambda *_: (3, 4), raising=False)
     tracker._fallback_to_market_order()
@@ -119,12 +119,10 @@ def test_market_batch_records_unrepresentable_tail(monkeypatch):
 
 
 def test_wait_entry_does_not_finish_during_submission(monkeypatch):
-    from tests.unit.executor.algorithms.test_algorithm_issue_fixes import _ClockStub
-
-    _executor, tracker, parent = _build_tracker()
+    _executor, tracker, parent = build_fallback_tracker()
     tracker.pending_orders.clear()
     tracker._fallback_submitting.add(parent.order_id)
-    tracker.clock = _ClockStub()
+    tracker.clock = ClockStub()
 
     def waiting(_event, _timeout):
         raise RuntimeError("entered wait loop")

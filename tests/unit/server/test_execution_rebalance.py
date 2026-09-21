@@ -171,6 +171,7 @@ def test_trade_serializes_success_result_to_json_safe_dict(
         # 柔和版保留展示结论字段，值由 status 派生。
         "outcome",
         "outcome_reason",
+        "reason_code",
         "execution_time",
         "success",
         "extra",

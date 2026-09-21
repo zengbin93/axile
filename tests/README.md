@@ -55,3 +55,11 @@ uv run pytest tests/unit/channels/test_registry.py::test_duplicate_channel_regis
 
 新增测试应保持确定性，不依赖执行顺序、真实时钟或公网服务。渠道插件自身的实现测试
 应放在对应插件项目，公共核心只验证开放注册协议与通用行为。
+
+## 维护约定
+
+- 可跨文件复用的 fake、builder 和 clock 放在 `tests/fixtures/`；测试文件之间不得互相导入。
+- 文件名按被验证的业务行为命名，不使用 `test_issue_fixes.py` 一类长期收容回归的名称。
+- 一旦测试需要真实 SQLite、线程、IPC 或子进程，就放入 `tests/integration/` 并标记为 `slow`。
+- UI 纯函数可直接单测，组件输出可用服务端渲染验证；源码文本扫描只用于仓库级边界规则，
+  不用于代替组件交互或浏览器布局验证。

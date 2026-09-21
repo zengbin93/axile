@@ -116,9 +116,9 @@ def test_session_expect_order_ack_noop_when_owner_incapable() -> None:
 
 def test_unsupported_volume_bounds_preserve_fractional_market_order():
     from axile.executor.algorithms.defaults.ctp_target_pos_task.impl import _place_volume_slices
-    from tests.unit.executor.algorithms.test_algorithm_issue_fixes import _FallbackExecutor
+    from tests.fixtures.algorithm_fakes import FallbackExecutor
 
-    owner = _FallbackExecutor()
+    owner = FallbackExecutor()
     owner.channel_type = TradeChannel.GM
     session = ExecutionSession(owner=cast("Any", owner), symbol="rb2610")
     assert session.get_order_volume_bounds(OrderType.MARKET, {"max_single_order_size": 0.1}) is None

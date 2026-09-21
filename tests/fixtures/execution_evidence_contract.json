@@ -71,9 +71,11 @@
             "status": "SUCCEEDED",
             "error": null,
             "outcome": "completed",
-            "outcome_reason": null
+            "outcome_reason": null,
+            "reason_code": null
           }
-        }
+        },
+        "reason_code": null
       },
       "event_label": null
     }
@@ -147,9 +149,11 @@
             "status": "NOOP",
             "error": null,
             "outcome": "completed",
-            "outcome_reason": null
+            "outcome_reason": null,
+            "reason_code": null
           }
-        }
+        },
+        "reason_code": null
       },
       "event_label": null
     }
@@ -224,9 +228,11 @@
             "status": "BLOCKED",
             "error": "当前不在交易时段",
             "outcome": "blocked",
-            "outcome_reason": "当前不在交易时段"
+            "outcome_reason": "当前不在交易时段",
+            "reason_code": "COMMON.SESSION.CLOSED"
           }
-        }
+        },
+        "reason_code": "COMMON.SESSION.CLOSED"
       },
       "event_label": "未执行"
     }
@@ -300,9 +306,11 @@
             "status": "FAILED",
             "error": "最终持仓尚未确认",
             "outcome": "error",
-            "outcome_reason": "最终持仓尚未确认"
+            "outcome_reason": "最终持仓尚未确认",
+            "reason_code": null
           }
-        }
+        },
+        "reason_code": null
       },
       "event_label": "执行失败"
     }
@@ -376,9 +384,11 @@
             "status": "FAILED",
             "error": "最终持仓查询失败，具体原因未确认",
             "outcome": "error",
-            "outcome_reason": "最终持仓查询失败，具体原因未确认"
+            "outcome_reason": "最终持仓查询失败，具体原因未确认",
+            "reason_code": null
           }
-        }
+        },
+        "reason_code": null
       },
       "event_label": "执行失败"
     }
@@ -455,9 +465,11 @@
             "status": "PARTIAL",
             "error": "最终持仓查询失败，具体原因未确认",
             "outcome": "not_reached",
-            "outcome_reason": "最终持仓查询失败，具体原因未确认"
+            "outcome_reason": "最终持仓查询失败，具体原因未确认",
+            "reason_code": null
           }
-        }
+        },
+        "reason_code": null
       },
       "event_label": "执行未全部完成"
     }
@@ -534,9 +546,11 @@
             "status": "SUCCEEDED",
             "error": null,
             "outcome": "completed",
-            "outcome_reason": null
+            "outcome_reason": null,
+            "reason_code": null
           }
-        }
+        },
+        "reason_code": null
       },
       "event_label": "执行未全部完成"
     }
@@ -611,9 +625,11 @@
             "status": "BLOCKED",
             "error": "当前不在交易时段",
             "outcome": "blocked",
-            "outcome_reason": "当前不在交易时段"
+            "outcome_reason": "当前不在交易时段",
+            "reason_code": "COMMON.SESSION.CLOSED"
           }
-        }
+        },
+        "reason_code": "COMMON.SESSION.CLOSED"
       },
       "event_label": "未执行"
     }
@@ -690,9 +706,11 @@
             "status": "PARTIAL",
             "error": "目标未完成: 当前持仓=1.0，目标持仓=2",
             "outcome": "not_reached",
-            "outcome_reason": "目标未完成: 当前持仓=1.0，目标持仓=2"
+            "outcome_reason": "目标未完成: 当前持仓=1.0，目标持仓=2",
+            "reason_code": null
           }
-        }
+        },
+        "reason_code": null
       },
       "event_label": "执行未全部完成"
     }
