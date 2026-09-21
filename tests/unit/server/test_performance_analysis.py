@@ -552,6 +552,45 @@ def test_execution_strip_preserves_intraday_failed_and_empty_records():
     assert result["executions"][2]["record"]["is_success"] == 0
 
 
+def test_short_range_execution_history_is_read_from_all_snapshot(tmp_path):
+    """新快照只保存全量执行列表，旧快照仍可读已保存的范围列表。"""
+
+    async def check():
+        async with database(tmp_path, count=120) as (_, sessions, manager):
+            await queue(sessions)
+            await manager.run_once()
+            async with sessions() as session:
+                stored = (await session.execute(sa.select(snapshots.c.ranges))).scalar_one()
+                assert "executions" in stored["all"]["performance"]
+                assert "executions" not in stored["30"]["performance"]
+                assert "executions" not in stored["90"]["performance"]
+                all_rows = stored["all"]["performance"]["executions"]
+                current = await read_snapshot(session, 2, "30")
+                expected = [
+                    row
+                    for row in all_rows
+                    if timestamp(current["result"]["baseline"])
+                    <= timestamp(row["record"]["created_at"])
+                    <= timestamp(current["result"]["end"])
+                ]
+                assert current["result"]["executions"] == expected
+
+                # 升级前的同一范围副本读取结果与新快照的读时投影完全一致。
+                stored["30"]["performance"]["executions"] = expected
+                await session.execute(snapshots.update().values(ranges=stored))
+                await session.commit()
+                assert await read_snapshot(session, 2, "30") == current
+
+                # 任意旧范围副本仍优先保留，避免改变已有快照的读取结果。
+                legacy = {"legacy": True}
+                stored["30"]["performance"]["executions"] = [legacy]
+                await session.execute(snapshots.update().values(ranges=stored))
+                await session.commit()
+                assert (await read_snapshot(session, 2, "30"))["result"]["executions"] == [legacy]
+
+    asyncio.run(check())
+
+
 def test_failed_execution_preview_exposes_plan_and_confirmed_zero_fills():
     item = record(
         status="FAILED",

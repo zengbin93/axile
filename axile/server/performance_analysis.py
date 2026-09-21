@@ -48,7 +48,7 @@ async def enqueue(session, account_id: int, force: bool = False) -> None:
 
 
 async def read_snapshot(session, account_id: int, range_key: str) -> dict:
-    """Read only compact persisted results; never deserialize execution history."""
+    """Read only compact persisted results and project range execution history."""
     joined = (
         (
             await session.execute(
@@ -99,6 +99,8 @@ def _snapshot_response(joined, range_key: str) -> dict:
         snapshot = None
     status = "pending" if incompatible else _snapshot_status(row, snapshot is not None)
     result = snapshot["ranges"][range_key] if snapshot else None
+    if result:
+        result = {**result, "performance": _range_performance(snapshot["ranges"], range_key)}
     return {
         "status": status,
         "source_version": row["source_version"] if row else 0,
@@ -115,6 +117,31 @@ def _snapshot_response(joined, range_key: str) -> dict:
         "daily_costs": result["daily_costs"] if result else {},
         "events": result["events"] if result else [],
         "event_count": result["event_count"] if result else 0,
+    }
+
+
+def _range_performance(ranges: dict, range_key: str) -> dict:
+    """投影范围内执行列表，同时兼容已持久化旧范围列表。"""
+    performance = ranges[range_key]["performance"]
+    if range_key == "all" or "executions" in performance:
+        return performance
+    executions = ranges.get("all", {}).get("performance", {}).get("executions")
+    if not isinstance(executions, list):
+        return performance
+    try:
+        start, end = timestamp(performance["baseline"]), timestamp(performance["end"])
+    except (KeyError, TypeError, ValueError):
+        return performance
+    return {
+        **performance,
+        "executions": [
+            execution
+            for execution in executions
+            if isinstance(execution, dict)
+            and isinstance(execution.get("record"), dict)
+            and isinstance(execution["record"].get("created_at"), str)
+            and start <= timestamp(execution["record"]["created_at"]) <= end
+        ],
     }
 
 
@@ -251,17 +278,22 @@ def compute_batch(
             for binding in sorted(bindings, key=lambda item: local_time(item.created_at))
             if start <= timestamp(binding.created_at) <= end
         ]
-        result.executions = [
+        range_executions = [
             item["payload"] | {"summary": summarize(by_record[item["record_id"]])}
             for item in sorted(projected, key=lambda item: (item["time"], item["record_id"]))
             if start <= item["time"] <= end
         ]
+        if range_key == "all":
+            result.executions = range_executions
         selected_trades = [
             fill for record in records if start <= timestamp(record.created_at) <= end for fill in by_record[record.id]
         ]
         selected_events = [event for event in events if start <= timestamp(event["time"]) <= end]
+        performance = result.model_dump(mode="json")
+        if range_key != "all":
+            performance.pop("executions", None)
         ranges[range_key] = {
-            "performance": result.model_dump(mode="json"),
+            "performance": performance,
             "daily_costs": daily_costs(selected_trades),
             "events": selected_events[:100],
             "event_count": len(selected_events),
