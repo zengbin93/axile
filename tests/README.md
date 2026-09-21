@@ -3,7 +3,8 @@
 测试按运行条件分为以下目录：
 
 - `tests/unit/`：不访问真实外部服务的单元测试。
-- `tests/integration/`：跨模块集成测试。
+- `tests/contract/`：扫描仓库或验证公共边界的契约测试。
+- `tests/integration/`：使用真实数据库、线程、IPC 或子进程的跨模块测试。
 - `tests/live/`：需要显式开关及真实环境的联机测试。
 
 安装开发依赖和 CTP 测试依赖：
@@ -27,6 +28,19 @@ uv run pytest tests/ -v \
 测试启动时会在系统临时目录生成独立的 ``config.toml``、SQLite 数据库和日志目录，
 并通过 ``AXILE_CONFIG_TOML`` 传递给测试启动的子进程。测试不得读取或写入工作目录中的
 ``axile.db``；需要数据库的用例应使用这套会话级隔离环境或自己的 ``tmp_path``。
+
+按反馈速度分层运行：
+
+```bash
+# 快速反馈：纯单元测试和仓库契约
+uv run pytest tests/ -m "unit or contract" --ignore=tests/live
+
+# 使用真实数据库、IPC 或子进程的离线集成测试
+uv run pytest tests/integration/ -m integration
+
+# 全部离线门禁（CI / 提交前）
+uv run pytest tests/ --ignore=tests/live
+```
 
 运行单个文件或测试：
 

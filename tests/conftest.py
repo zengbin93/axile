@@ -65,6 +65,8 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
         path = item.location[0]
         if "\\unit\\" in path or "/unit/" in path:
             item.add_marker(pytest.mark.unit)
+        elif "\\contract\\" in path or "/contract/" in path:
+            item.add_marker(pytest.mark.contract)
         elif "\\integration\\" in path or "/integration/" in path:
             item.add_marker(pytest.mark.integration)
         elif "\\live\\" in path or "/live/" in path:

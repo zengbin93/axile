@@ -6,6 +6,8 @@ import sys
 
 import pytest
 
+pytestmark = pytest.mark.slow
+
 
 @pytest.mark.parametrize(
     "code",
