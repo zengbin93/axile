@@ -17,7 +17,7 @@ export function performanceCoordinates(scene: ChartScene, points: PerformancePoi
     const time = pointTime(point), value = point.account_return
     return value == null || !Number.isFinite(value) || !Number.isFinite(time)
       ? null
-      : { x: xPosition(time, scene.width, scene.viewport), y: returnY(value, axis) }
+      : { x: xPosition(time, scene.width, scene.viewport, scene.scale), y: returnY(value, axis) }
   })
 }
 

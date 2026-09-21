@@ -1,10 +1,15 @@
 import type { AccountPerformance, PerformancePoint } from '@/types/api'
+import type { CostExecutionRow } from '@/lib/api/performance'
 import { axisPercent, niceReturnAxis } from '@/features/history/performance'
 import { amount, shanghaiTime, type CostSummary } from '@/features/history/costs'
 import { pointTime, timeLabel, type ChartSelection, type Viewport } from '@/features/history/chartModel'
+import type { TimeScale } from '@/features/history/timeScale'
+import { closedDaysBetween, closedRangeLabel } from '@/features/history/timeScale'
 
 export const CHART_HEIGHT = 600
 export const PLOT = { left: 12, right: 78, top: 16, bottom: 379, binding: 408, bindingHeight: 24, costTop: 464, costBottom: 504, navTop: 548, navBottom: 582 }
+const CALENDAR_MARK_Y = PLOT.costBottom + 12
+const TIME_AXIS_Y = PLOT.costBottom + 31
 export type SeriesKey = 'account_return' | 'portfolio_return' | 'account_daily_return' | 'portfolio_daily_return'
 export interface CanvasTheme { bg: string; surface: string; ink: string; muted: string; line: string; accent: string; warn: string; fill: string; font: string }
 export interface ChartScene {
@@ -18,6 +23,51 @@ export interface ChartScene {
   costs: Map<string, CostSummary> | null
   portfolioNames: Map<number, string>
   theme: CanvasTheme
+  scale?: TimeScale
+  /** 是否绘制执行事件针脚；缺省绘制。关闭后磁吸交互由组件侧一并失效。 */
+  showExecutions?: boolean
+  /** 相邻观测间完整休市天数缓存（len = times.length - 1）；缺省时退回逐帧现算。 */
+  closedGapDays?: number[]
+}
+
+export type ExecutionMarkerTone = 'normal' | 'warn'
+
+/**
+ * 执行针脚只保留两态：失败或成交覆盖不全走琥珀实心点，其余一律中性空心圈。
+ *
+ * 红绿只属于收益曲线本身；有利/不利的质量细节由成本面板三态承载，
+ * 针脚不复述，颜色预算留给「偏离」。
+ */
+export function executionMarkerTone(row: CostExecutionRow): ExecutionMarkerTone {
+  const { summary } = row
+  if (row.record.is_success !== 1 || (!row.noop && (summary.coverage == null || summary.covered < summary.count))) return 'warn'
+  return 'normal'
+}
+
+/** 有真实成交才画点，部分成交也算；无成交的执行不留针脚、不参与磁吸。 */
+export function hasExecutionMarker(row: CostExecutionRow): boolean {
+  return (row.transactions?.length ?? 0) > 0
+}
+
+export function executionMarkerPoint(scene: ChartScene, row: CostExecutionRow): { x: number; y: number } | null {
+  const time = shanghaiTime(row.record.created_at)
+  const { times, data, width, viewport } = scene
+  if (time < viewport.start || time > viewport.end) return null
+  const key = seriesKeys(scene.daily)[0]
+  const exact = data.points.findIndex(point => point.record_id === row.record.id)
+  let before = exact, after = exact
+  if (exact < 0) {
+    // 早于首观测/晚于末观测的执行吸附到最近观测点取值，x 仍按真实时间投影。
+    after = times.findIndex(value => value >= time)
+    if (after < 0) after = times.length - 1
+    before = Math.max(0, after - 1)
+  }
+  if (before < 0 || after < 0) return null
+  const a = data.points[before][key], b = data.points[after][key]
+  if (a == null || b == null || !Number.isFinite(a) || !Number.isFinite(b)) return null
+  const fraction = before === after ? 0 : (time - times[before]) / (times[after] - times[before] || 1)
+  const value = a + (b - a) * Math.max(0, Math.min(1, fraction))
+  return { x: xPosition(time, width, viewport, scene.scale), y: returnY(value, chartAxis(scene)) }
 }
 
 export function readCanvasTheme(element: HTMLElement): CanvasTheme {
@@ -39,8 +89,15 @@ export function prepareCanvas(canvas: HTMLCanvasElement, width: number): CanvasR
 
 export const seriesKeys = (daily: boolean): [SeriesKey, SeriesKey] => daily ? ['account_daily_return', 'portfolio_daily_return'] : ['account_return', 'portfolio_return']
 export const plotRight = (width: number) => width - PLOT.right
-export const xPosition = (time: number, width: number, view: Viewport) => PLOT.left + (time - view.start) / (view.end - view.start || 1) * (plotRight(width) - PLOT.left)
-export const xTime = (x: number, width: number, view: Viewport) => view.start + (x - PLOT.left) / (plotRight(width) - PLOT.left) * (view.end - view.start)
+export const xPosition = (time: number, width: number, view: Viewport, scale?: TimeScale) => {
+  const project = scale?.project ?? ((value: number) => value)
+  return PLOT.left + (project(time) - project(view.start)) / (project(view.end) - project(view.start) || 1) * (plotRight(width) - PLOT.left)
+}
+export const xTime = (x: number, width: number, view: Viewport, scale?: TimeScale) => {
+  const project = scale?.project ?? ((value: number) => value)
+  const invert = scale?.invert ?? ((value: number) => value)
+  return invert(project(view.start) + (x - PLOT.left) / (plotRight(width) - PLOT.left) * (project(view.end) - project(view.start)))
+}
 
 export function chartAxis(scene: ChartScene) {
   if (scene.returnRange) {
@@ -77,11 +134,11 @@ function drawBindings(ctx: CanvasRenderingContext2D, scene: ChartScene) {
   const { data, width, viewport, theme } = scene
   ctx.fillStyle = theme.muted; ctx.fillText('组合绑定', PLOT.left, PLOT.binding - 12)
   data.bindings.forEach((binding, i) => {
-    const start = Math.max(PLOT.left, xPosition(shanghaiTime(binding.time), width, viewport))
-    const end = Math.min(plotRight(width), xPosition(i + 1 < data.bindings.length ? shanghaiTime(data.bindings[i + 1].time) : viewport.end, width, viewport))
+    const start = Math.max(PLOT.left, xPosition(shanghaiTime(binding.time), width, viewport, scene.scale))
+    const end = Math.min(plotRight(width), xPosition(i + 1 < data.bindings.length ? shanghaiTime(data.bindings[i + 1].time) : viewport.end, width, viewport, scene.scale))
     if (end <= start) return
     line(ctx, start, PLOT.binding + PLOT.bindingHeight - 1, end, PLOT.binding + PLOT.bindingHeight - 1, theme.line)
-    const boundary = xPosition(shanghaiTime(binding.time), width, viewport)
+    const boundary = xPosition(shanghaiTime(binding.time), width, viewport, scene.scale)
     if (boundary >= PLOT.left) line(ctx, boundary, PLOT.binding + 4, boundary, PLOT.binding + PLOT.bindingHeight - 1, theme.muted)
   })
 }
@@ -105,7 +162,7 @@ function drawReturns(ctx: CanvasRenderingContext2D, scene: ChartScene) {
     data.points.forEach((point, i) => {
       const value = point[key]
       if (value == null || !Number.isFinite(value)) { connected = false; return }
-      const x = xPosition(times[i], width, viewport), y = returnY(value, axis)
+      const x = xPosition(times[i], width, viewport, scene.scale), y = returnY(value, axis)
       if (scene.daily) {
         const zero = returnY(0, axis)
         ctx.fillRect(x + (series - 1) * barWidth, Math.min(zero, y), barWidth, Math.max(1, Math.abs(y - zero)))
@@ -117,6 +174,24 @@ function drawReturns(ctx: CanvasRenderingContext2D, scene: ChartScene) {
     })
     if (!scene.daily) ctx.stroke()
   })
+  ctx.restore(); ctx.lineWidth = 1
+}
+
+function drawExecutionMarkers(ctx: CanvasRenderingContext2D, scene: ChartScene) {
+  const rows = scene.data.executions ?? []
+  if (!rows.length) return
+  const { theme } = scene
+  ctx.save(); ctx.beginPath(); ctx.rect(PLOT.left, PLOT.top, plotRight(scene.width) - PLOT.left, PLOT.bottom - PLOT.top); ctx.clip()
+  for (const row of rows) {
+    if (!hasExecutionMarker(row)) continue
+    const point = executionMarkerPoint(scene, row)
+    if (!point) continue
+    // 常态是挖空的中性圈，曲线从圈心穿过；琥珀实心点只留给异常执行。
+    const warn = executionMarkerTone(row) === 'warn'
+    ctx.beginPath(); ctx.arc(point.x, point.y, warn ? 1.9 : 2.1, 0, Math.PI * 2)
+    if (warn) { ctx.fillStyle = theme.warn; ctx.fill() }
+    else { ctx.fillStyle = theme.bg; ctx.fill(); ctx.strokeStyle = theme.muted; ctx.stroke() }
+  }
   ctx.restore(); ctx.lineWidth = 1
 }
 
@@ -139,7 +214,7 @@ function drawCosts(ctx: CanvasRenderingContext2D, scene: ChartScene) {
   ctx.save(); ctx.beginPath(); ctx.rect(PLOT.left, PLOT.costTop - 1, plotRight(width) - PLOT.left, PLOT.costBottom - PLOT.costTop + 3); ctx.clip()
   days.forEach(({ p, time }) => {
     const summary = costs?.get(p.date.slice(0, 10)), value = summary?.cost
-    const x = xPosition(time, width, viewport)
+    const x = xPosition(time, width, viewport, scene.scale)
     if (value == null) { ctx.fillStyle = theme.muted; ctx.fillText('·', x - 2, PLOT.costBottom); return }
     ctx.globalAlpha = summary!.covered < summary!.count ? 0.5 : 0.9
     ctx.fillStyle = value > 0 ? theme.warn : value < 0 ? theme.accent : theme.muted
@@ -152,15 +227,18 @@ function drawTimeAxis(ctx: CanvasRenderingContext2D, scene: ChartScene, exclude?
   const { width, viewport, theme } = scene
   const available = plotRight(width) - PLOT.left
   const count = Math.max(1, Math.floor(available / 145))
-  const intraday = viewport.end - viewport.start < 864e5
+  // 粒度判定必须在投影空间做：观测序列尺度下原始毫秒差不代表标签密度。
+  const project = scene.scale?.project ?? ((value: number) => value)
+  const intraday = project(viewport.end) - project(viewport.start) < 864e5
   ctx.fillStyle = theme.muted
   for (let i = 0; i <= count; i++) {
-    const time = viewport.start + (viewport.end - viewport.start) * i / count
+    const x = PLOT.left + available * i / count
+    const time = xTime(x, width, viewport, scene.scale)
     const label = timeLabel(time).slice(intraday ? 11 : 0, intraday ? 16 : 10)
     ctx.textAlign = i === 0 ? 'left' : i === count ? 'right' : 'center'
-    const x = PLOT.left + available * i / count, textWidth = ctx.measureText(label).width
+    const textWidth = ctx.measureText(label).width
     const left = x - (i === 0 ? 0 : i === count ? textWidth : textWidth / 2)
-    if (!exclude || left + textWidth < exclude.left || left > exclude.right) ctx.fillText(label, x, PLOT.costBottom + 25)
+    if (!exclude || left + textWidth < exclude.left || left > exclude.right) ctx.fillText(label, x, TIME_AXIS_Y)
   }
   ctx.textAlign = 'left'
 }
@@ -169,17 +247,27 @@ function drawNavigator(ctx: CanvasRenderingContext2D, scene: ChartScene) {
   const { width, viewport, times, data, theme } = scene
   const full = scene.domain ?? { start: times[0], end: times[times.length - 1] }
   ctx.fillStyle = theme.line; ctx.fillRect(PLOT.left, PLOT.navTop, plotRight(width) - PLOT.left, PLOT.navBottom - PLOT.navTop)
+  if (scene.scale?.mode === 'natural') {
+    ctx.fillStyle = theme.fill
+    for (const range of data.calendar.closed_ranges) {
+      const start = new Date(`${range.start}T00:00:00+08:00`).getTime()
+      const end = new Date(`${range.end}T00:00:00+08:00`).getTime() + 86_400_000
+      const left = Math.max(PLOT.left, xPosition(start, width, full, scene.scale))
+      const right = Math.min(plotRight(width), xPosition(end, width, full, scene.scale))
+      if (right > left) ctx.fillRect(left, PLOT.navTop, right - left, PLOT.navBottom - PLOT.navTop)
+    }
+  }
   const values = data.points.flatMap(p => p.account_return == null ? [] : [p.account_return])
   const low = Math.min(0, ...values), high = Math.max(0.01, ...values)
   ctx.strokeStyle = theme.muted; ctx.beginPath(); let connected = false
   data.points.forEach((p, i) => {
     if (p.account_return == null) { connected = false; return }
-    const x = xPosition(times[i], width, full), y = PLOT.navBottom - 4 - (p.account_return - low) / (high - low) * 25
+    const x = xPosition(times[i], width, full, scene.scale), y = PLOT.navBottom - 4 - (p.account_return - low) / (high - low) * 25
     if (connected) ctx.lineTo(x, y); else ctx.moveTo(x, y)
     connected = true
   })
   ctx.stroke()
-  const a = xPosition(viewport.start, width, full), b = xPosition(viewport.end, width, full)
+  const a = xPosition(viewport.start, width, full, scene.scale), b = xPosition(viewport.end, width, full, scene.scale)
   ctx.fillStyle = theme.bg; ctx.globalAlpha = 0.65
   ctx.fillRect(PLOT.left, PLOT.navTop, a - PLOT.left, PLOT.navBottom - PLOT.navTop)
   ctx.fillRect(b, PLOT.navTop, plotRight(width) - b, PLOT.navBottom - PLOT.navTop)
@@ -191,10 +279,57 @@ export function drawScene(canvas: HTMLCanvasElement, scene: ChartScene) {
   const ctx = prepareCanvas(canvas, scene.width)
   if (!ctx) return
   ctx.font = `11px ${scene.theme.font}`
-  drawReturns(ctx, scene); drawBindings(ctx, scene); drawCosts(ctx, scene); drawTimeAxis(ctx, scene); drawNavigator(ctx, scene)
+  drawCalendar(ctx, scene); drawReturns(ctx, scene); if (scene.showExecutions !== false) drawExecutionMarkers(ctx, scene); drawBindings(ctx, scene); drawCosts(ctx, scene); drawTimeAxis(ctx, scene); drawNavigator(ctx, scene); drawCalendarMarks(ctx, scene)
 }
 
-export function drawOverlay(canvas: HTMLCanvasElement, scene: ChartScene, hover: number | null, selection: ChartSelection, bindingTime: number | null = null, cursor: { time: number; x: number; y: number } | null = null) {
+function drawCalendar(ctx: CanvasRenderingContext2D, scene: ChartScene) {
+  if (scene.scale?.mode !== 'natural') return
+  ctx.save(); ctx.fillStyle = scene.theme.fill; ctx.globalAlpha = 0.65
+  for (const range of scene.data.calendar.closed_ranges) {
+    const start = new Date(`${range.start}T00:00:00+08:00`).getTime()
+    const end = new Date(`${range.end}T00:00:00+08:00`).getTime() + 86_400_000
+    const left = Math.max(PLOT.left, xPosition(start, scene.width, scene.viewport, scene.scale))
+    const right = Math.min(plotRight(scene.width), xPosition(end, scene.width, scene.viewport, scene.scale))
+    if (right <= left) continue
+    for (const [top, bottom] of [[PLOT.top, PLOT.bottom], [PLOT.binding, PLOT.binding + PLOT.bindingHeight], [PLOT.costTop, PLOT.costBottom], [PLOT.navTop, PLOT.navBottom]]) ctx.fillRect(left, top, right - left, bottom - top)
+    if (right - left >= 42) { ctx.globalAlpha = 1; ctx.fillStyle = scene.theme.muted; ctx.fillText('休市', left + 7, PLOT.top + 15); ctx.fillStyle = scene.theme.fill; ctx.globalAlpha = 0.65 }
+  }
+  ctx.restore()
+}
+
+/** measureText 结果按「字体 + 文本」缓存；休市标签逐帧重画但文本集合有限。 */
+const textWidths = new Map<string, number>()
+function measuredWidth(ctx: CanvasRenderingContext2D, text: string): number {
+  const key = `${ctx.font} ${text}`
+  let width = textWidths.get(key)
+  if (width == null) {
+    width = ctx.measureText(text).width
+    textWidths.set(key, width)
+  }
+  return width
+}
+
+function drawCalendarMarks(ctx: CanvasRenderingContext2D, scene: ChartScene) {
+  if (scene.scale?.mode !== 'observations') return
+  for (let index = 0; index < scene.times.length - 1; index++) {
+    const days = scene.closedGapDays?.[index] ?? closedDaysBetween(scene.times[index], scene.times[index + 1], scene.data.calendar.closed_ranges)
+    if (!days) continue
+    const left = xPosition(scene.times[index], scene.width, scene.viewport, scene.scale)
+    const right = xPosition(scene.times[index + 1], scene.width, scene.viewport, scene.scale)
+    const visibleLeft = Math.max(PLOT.left, left), visibleRight = Math.min(plotRight(scene.width), right)
+    const available = visibleRight - visibleLeft
+    if (available <= 4) continue
+    ctx.fillStyle = scene.theme.fill; ctx.globalAlpha = 0.55
+    ctx.fillRect(visibleLeft + 2, CALENDAR_MARK_Y - 10, Math.max(0, available - 4), 14)
+    ctx.globalAlpha = 1; ctx.fillStyle = scene.theme.muted; ctx.textAlign = 'center'
+    const full = `休市 ${days} 日`
+    const label = closedRangeLabel(available, days, measuredWidth(ctx, full), measuredWidth(ctx, '休市'))
+    if (label) ctx.fillText(label, (visibleLeft + visibleRight) / 2, CALENDAR_MARK_Y)
+  }
+  ctx.textAlign = 'left'
+}
+
+export function drawOverlay(canvas: HTMLCanvasElement, scene: ChartScene, hover: number | null, selection: ChartSelection, bindingTime: number | null = null, cursor: { time: number; x: number; y: number } | null = null, magnetRecordId: number | null = null) {
   const ctx = prepareCanvas(canvas, scene.width)
   if (!ctx) return
   const { width, viewport, theme, times, data } = scene
@@ -202,16 +337,28 @@ export function drawOverlay(canvas: HTMLCanvasElement, scene: ChartScene, hover:
   ctx.font = `11px ${theme.font}`
   const binding = bindingTime == null ? null : bindingAt(data, bindingTime)
   if (binding) {
-    const a = Math.max(PLOT.left, xPosition(shanghaiTime(binding.binding.time), width, viewport))
-    const b = Math.min(right, xPosition(shanghaiTime(binding.end), width, viewport))
+    const a = Math.max(PLOT.left, xPosition(shanghaiTime(binding.binding.time), width, viewport, scene.scale))
+    const b = Math.min(right, xPosition(shanghaiTime(binding.end), width, viewport, scene.scale))
     ctx.fillStyle = theme.accent; ctx.globalAlpha = 0.1
     ctx.fillRect(a, PLOT.binding, Math.max(0, b - a), PLOT.bindingHeight)
     ctx.globalAlpha = 1
     line(ctx, a, PLOT.binding + PLOT.bindingHeight - 1, b, PLOT.binding + PLOT.bindingHeight - 1, theme.accent)
   }
+  if (magnetRecordId != null && selection?.kind !== 'execution') {
+    const row = data.executions?.find(value => value.record.id === magnetRecordId)
+    if (row) {
+      const point = executionMarkerPoint(scene, row)
+      if (point) {
+        // 吸附/选中是交互反馈，统一走 accent，不继承执行点自身颜色。
+        ctx.strokeStyle = theme.accent; ctx.lineWidth = 1.25; ctx.globalAlpha = 0.55
+        ctx.beginPath(); ctx.arc(point.x, point.y, 5.5, 0, Math.PI * 2); ctx.stroke()
+        ctx.globalAlpha = 1; ctx.lineWidth = 1
+      }
+    }
+  }
   if (selection) {
-    const a = xPosition(selection.kind !== 'interval' ? selection.time : selection.start, width, viewport)
-    const b = selection.kind === 'interval' ? xPosition(selection.end, width, viewport) : a
+    const a = xPosition(selection.kind !== 'interval' ? selection.time : selection.start, width, viewport, scene.scale)
+    const b = selection.kind === 'interval' ? xPosition(selection.end, width, viewport, scene.scale) : a
     ctx.save(); ctx.beginPath(); ctx.rect(PLOT.left, PLOT.top, right - PLOT.left, PLOT.costBottom - PLOT.top); ctx.clip()
     if (selection.kind === 'interval') { ctx.fillStyle = theme.accent; ctx.globalAlpha = 0.08; ctx.fillRect(a, PLOT.top, b - a, PLOT.costBottom - PLOT.top); ctx.globalAlpha = 1 }
     for (const x of new Set([a, b])) {
@@ -219,9 +366,20 @@ export function drawOverlay(canvas: HTMLCanvasElement, scene: ChartScene, hover:
       ctx.fillStyle = theme.accent; ctx.fillRect(x - 3, PLOT.top, 6, 15)
     }
     ctx.restore()
+    if (selection.kind === 'execution') {
+      const row = data.executions?.find(value => value.record.id === selection.recordId)
+      if (row) {
+        const point = executionMarkerPoint(scene, row)
+        if (point) {
+          ctx.strokeStyle = theme.accent; ctx.lineWidth = 1.25; ctx.globalAlpha = 0.75
+          ctx.beginPath(); ctx.arc(point.x, point.y, 7, 0, Math.PI * 2); ctx.stroke()
+          ctx.globalAlpha = 1; ctx.lineWidth = 1
+        }
+      }
+    }
   }
   if (cursor && selection?.kind !== 'execution') {
-    const x = xPosition(cursor.time, width, viewport)
+    const x = xPosition(cursor.time, width, viewport, scene.scale)
     ctx.setLineDash([3, 3]); line(ctx, x, PLOT.top, x, PLOT.costBottom, theme.muted)
     line(ctx, PLOT.left, cursor.y, right, cursor.y, theme.muted); ctx.setLineDash([])
     const axis = chartAxis(scene)
@@ -230,12 +388,12 @@ export function drawOverlay(canvas: HTMLCanvasElement, scene: ChartScene, hover:
     ctx.fillStyle = theme.ink; ctx.fillText(axisPercent(value, axis.step), right + 8, cursor.y + 4)
     const label = timeLabel(cursor.time), labelWidth = ctx.measureText(label).width + 12
     const labelX = Math.max(PLOT.left, Math.min(right - labelWidth, x - labelWidth / 2))
-    ctx.fillStyle = theme.ink; ctx.fillRect(labelX, PLOT.costBottom + 10, labelWidth, 22)
-    ctx.fillStyle = theme.bg; ctx.fillText(label, labelX + 6, PLOT.costBottom + 25)
+    ctx.fillStyle = theme.ink; ctx.fillRect(labelX, PLOT.costBottom + 18, labelWidth, 22)
+    ctx.fillStyle = theme.bg; ctx.fillText(label, labelX + 6, TIME_AXIS_Y + 2)
     return
   }
   if (hover == null || !data.points[hover] || selection?.kind === 'execution') return
-  const x = xPosition(times[hover], width, viewport)
+  const x = xPosition(times[hover], width, viewport, scene.scale)
   if (x < PLOT.left || x > right) return
   ctx.setLineDash([3, 3]); line(ctx, x, PLOT.top, x, PLOT.costBottom, theme.muted); ctx.setLineDash([])
   const axis = chartAxis(scene)
@@ -251,10 +409,10 @@ export function drawOverlay(canvas: HTMLCanvasElement, scene: ChartScene, hover:
   const label = timeLabel(times[hover])
   const labelWidth = ctx.measureText(label).width + 12
   const labelX = Math.max(PLOT.left, Math.min(right - labelWidth, x - labelWidth / 2))
-  ctx.fillStyle = theme.bg; ctx.fillRect(PLOT.left, PLOT.costBottom + 9, right - PLOT.left, 25)
+  ctx.fillStyle = theme.bg; ctx.fillRect(PLOT.left, PLOT.costBottom + 18, right - PLOT.left, PLOT.navTop - PLOT.costBottom - 20)
   drawTimeAxis(ctx, scene, { left: labelX - 8, right: labelX + labelWidth + 8 })
-  ctx.fillStyle = theme.ink; ctx.fillRect(labelX, PLOT.costBottom + 10, labelWidth, 22)
-  ctx.fillStyle = theme.bg; ctx.fillText(label, labelX + 6, PLOT.costBottom + 25)
+  ctx.fillStyle = theme.ink; ctx.fillRect(labelX, PLOT.costBottom + 18, labelWidth, 22)
+  ctx.fillStyle = theme.bg; ctx.fillText(label, labelX + 6, TIME_AXIS_Y + 2)
 }
 
 export function bindingAt(data: AccountPerformance, time: number) {

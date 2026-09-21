@@ -85,8 +85,8 @@ export function getPerformanceCosts<T = CostExecutionRow | CostSymbolRow | CostT
   return apiGet<CostPage<T>>(`/account/performance/${id}/costs?${params}`, signal)
 }
 
-export function getPerformance(id: number, range: '30' | '90' | 'all', signal?: AbortSignal, includeBacktest = true) {
-  return apiGet<AccountPerformance>(`/account/performance/${id}?range=${range}&include_backtest=${includeBacktest}`, signal)
+export function getPerformance(id: number, range: '30' | '90' | 'all', signal?: AbortSignal) {
+  return apiGet<AccountPerformance>(`/account/performance/${id}?range=${range}&include_backtest=true`, signal)
 }
 
 export function savePerformanceSettings(id: number, settings: PerformanceSettings) {

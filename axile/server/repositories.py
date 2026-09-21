@@ -11,21 +11,6 @@ from axile.server.asset_observations import valid_asset_snapshot_condition
 from axile.server.db.models import AccountAssetSnapshot, ExecuteRecord, Portfolio, PortfolioAccount
 
 
-async def get_recent_account_asset_snapshots(
-    session: AsyncSession,
-    account_id: int,
-    limit: int = 20,
-) -> List[AccountAssetSnapshot]:
-    """获取账户最近的资产快照（最新在前）."""
-    result = await session.execute(
-        select(AccountAssetSnapshot)
-        .where(AccountAssetSnapshot.account_id == account_id, valid_asset_snapshot_condition())
-        .order_by(desc(AccountAssetSnapshot.id))
-        .limit(limit)
-    )
-    return list(result.scalars().all())
-
-
 async def get_recent_account_asset_snapshots_for_accounts(
     session: AsyncSession,
     account_ids: List[int],
@@ -52,71 +37,6 @@ async def get_recent_account_asset_snapshots_for_accounts(
     for snapshot in (await session.execute(stmt)).scalars().all():
         grouped.setdefault(snapshot.account_id, []).append(snapshot)
     return grouped
-
-
-async def _get_bounded_account_asset_snapshots_for_accounts(
-    session: AsyncSession,
-    account_ids: List[int],
-    *,
-    time_filter: ColumnElement[bool],
-    newest_first: bool,
-    limit: int,
-) -> Dict[int, List[AccountAssetSnapshot]]:
-    """批量获取多账户在时间边界一侧的资产快照."""
-    if not account_ids:
-        return {}
-    order_column = desc(col(AccountAssetSnapshot.id)) if newest_first else col(AccountAssetSnapshot.id)
-    row_number = (
-        func.row_number().over(
-            partition_by=col(AccountAssetSnapshot.account_id),
-            order_by=order_column,
-        )
-    ).label("rn")
-    ranked = (
-        select(AccountAssetSnapshot, row_number)
-        .where(col(AccountAssetSnapshot.account_id).in_(account_ids), time_filter, valid_asset_snapshot_condition())
-        .subquery()
-    )
-    inner_order = desc(ranked.c.id) if newest_first else ranked.c.id
-    stmt = select(AccountAssetSnapshot).from_statement(
-        select(ranked).where(ranked.c.rn <= limit).order_by(ranked.c.account_id, inner_order)
-    )
-    grouped: Dict[int, List[AccountAssetSnapshot]] = {}
-    for snapshot in (await session.execute(stmt)).scalars().all():
-        grouped.setdefault(snapshot.account_id, []).append(snapshot)
-    return grouped
-
-
-async def get_account_asset_snapshots_before_for_accounts(
-    session: AsyncSession,
-    account_ids: List[int],
-    before_created_at: str,
-    limit: int = 5,
-) -> Dict[int, List[AccountAssetSnapshot]]:
-    """批量获取时间界之前最近的账户资产快照."""
-    return await _get_bounded_account_asset_snapshots_for_accounts(
-        session,
-        account_ids,
-        time_filter=col(AccountAssetSnapshot.created_at) < before_created_at,
-        newest_first=True,
-        limit=limit,
-    )
-
-
-async def get_earliest_account_asset_snapshots_since_for_accounts(
-    session: AsyncSession,
-    account_ids: List[int],
-    since_created_at: str,
-    limit: int = 5,
-) -> Dict[int, List[AccountAssetSnapshot]]:
-    """批量获取时间界起最早的账户资产快照."""
-    return await _get_bounded_account_asset_snapshots_for_accounts(
-        session,
-        account_ids,
-        time_filter=col(AccountAssetSnapshot.created_at) >= since_created_at,
-        newest_first=False,
-        limit=limit,
-    )
 
 
 async def add_record_portfolio_account(

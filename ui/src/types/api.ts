@@ -222,10 +222,20 @@ export interface AccountPerformance {
   observation_count: number
   used_record_count: number
   invalid_asset_count: number
-  gap: { time: string; execution_id: string | null; reason: string; symbols: string[] } | null
+  skips: { count: number; missing_target: number; missing_ticks: number; first_time: string | null; last_time: string | null } | null
   points: PerformancePoint[]
   executions?: import('@/lib/api/performance').CostExecutionRow[]
   bindings: Array<{ time: string; portfolio_id: number | null }>
+  calendar: PerformanceCalendar
+}
+
+export interface CalendarRange { start: string; end: string }
+export interface PerformanceCalendar {
+  status: 'available' | 'partial' | 'unavailable' | 'not_required'
+  calendar_id: string | null
+  label: string | null
+  closed_ranges: CalendarRange[]
+  unavailable_ranges: CalendarRange[]
 }
 
 export type FeishuCardConfig =

@@ -1,10 +1,19 @@
-"""从执行快照构建 WBT 输入与同基准账户收益，不访问交易渠道."""
+"""从执行快照构建 WBT 输入与同基准账户收益；交易日历经渠道插件读取，渠道缺失或读取失败时降级为不可用.
+
+组合回测回放可执行权重：``symbol_results[*].sizing`` 证据完整（全品种 SIZED 且权重口径）时
+以 ``target_quantity * unit_notional / equity`` 逐行还原整手离散后的真实敞口；证据不完整
+（历史记录、lots 口径、UNAVAILABLE）回退到 ``curr_target`` 理论权重。2026-08-27 之前的
+记录无换算证据，一律按理论权重回放。盯市价与柜台对齐取最新价，无有效最新价回退中间价。
+账户与组合优先在同一批参与记录上配对采样：有参与记录的日子取当日最后一条参与记录，
+闭市心跳不再单独移动账户日点，从而把差异收敛为纯执行落差；无参与记录的日子保留账户
+观察，组合按持仓延续。
+"""
 
 from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from importlib.metadata import version
 from typing import cast
 from zoneinfo import ZoneInfo
@@ -16,13 +25,71 @@ from axile.server.asset_observations import is_asset_observation
 from axile.server.db.models import ExecuteRecord, ExecuteRecordPublic
 from axile.server.db.models.performance import (
     AccountPerformance,
-    PerformanceGap,
+    PerformanceCalendar,
+    PerformanceCalendarRange,
     PerformancePoint,
     PerformanceSettings,
+    PerformanceSkips,
     RangeKey,
 )
+from axile.server.trading_calendar import CalendarDecisionStatus, evaluate_channel_calendar_day
 
 _TIMEZONE = ZoneInfo("Asia/Shanghai")
+
+
+def _calendar_ranges(days: list[date]) -> list[PerformanceCalendarRange]:
+    """把已排序自然日合并为连续闭区间。"""
+    if not days:
+        return []
+    ranges: list[PerformanceCalendarRange] = []
+    start = previous = days[0]
+    for day in days[1:]:
+        if day != previous + timedelta(days=1):
+            ranges.append(PerformanceCalendarRange(start=start.isoformat(), end=previous.isoformat()))
+            start = day
+        previous = day
+    ranges.append(PerformanceCalendarRange(start=start.isoformat(), end=previous.isoformat()))
+    return ranges
+
+
+def performance_calendar(channel: str | None, baseline: str | None, end: str | None) -> PerformanceCalendar:
+    """构造严格裁剪到绩效结果区间的渠道日历事实。"""
+    if channel is None or baseline is None or end is None:
+        return PerformanceCalendar(status="unavailable")
+    first, last = local_time(baseline).date(), local_time(end).date()
+    closed: list[date] = []
+    unavailable: list[date] = []
+    calendar_id = label = None
+    current = first
+    try:
+        while current <= last:
+            # get_channel 对未注册渠道抛 KeyError；这里按缺日历降级而不是上抛。
+            decision = evaluate_channel_calendar_day(channel, current)
+            calendar_id = decision.calendar_id or calendar_id
+            label = decision.label or label
+            if decision.status is CalendarDecisionStatus.NOT_REQUIRED:
+                return PerformanceCalendar(status="not_required")
+            if decision.status is CalendarDecisionStatus.AVAILABLE_CLOSED:
+                closed.append(current)
+            elif decision.status is CalendarDecisionStatus.UNAVAILABLE:
+                unavailable.append(current)
+            current += timedelta(days=1)
+    except KeyError:
+        return PerformanceCalendar(status="unavailable")
+    status = (
+        "partial"
+        if unavailable and len(unavailable) <= (last - first).days
+        else "unavailable"
+        if unavailable
+        else "available"
+    )
+    return PerformanceCalendar(
+        status=status,
+        calendar_id=calendar_id,
+        label=label,
+        closed_ranges=_calendar_ranges(closed),
+        unavailable_ranges=_calendar_ranges(unavailable),
+    )
 
 
 @dataclass
@@ -55,10 +122,14 @@ def _mapping(value: object) -> dict[str, object]:
     return cast("dict[str, object]", value) if isinstance(value, dict) else {}
 
 
-def _mid_price(raw_tick: object) -> float | None:
+def _mark_price(raw_tick: object) -> float | None:
+    """盯市价与柜台对齐取最新价；盘口无效或无最新价回退买卖中间价."""
     tick = _mapping(raw_tick)
     if tick.get("book_valid") is False:
         return None
+    last = _number(tick.get("last_price"))
+    if last is not None and last > 0:
+        return last
     bid, ask = tick.get("bid_price"), tick.get("ask_price")
     bid = _number(bid[0] if isinstance(bid, list) and bid else bid)
     ask = _number(ask[0] if isinstance(ask, list) and ask else ask)
@@ -83,7 +154,7 @@ def _prices(result: dict[str, object]) -> dict[str, float]:
     return {
         symbol: price
         for symbol, tick in ticks.items()
-        if isinstance(symbol, str) and (price := _mid_price(tick)) is not None
+        if isinstance(symbol, str) and (price := _mark_price(tick)) is not None
     }
 
 
@@ -99,17 +170,49 @@ def _target(raw: object) -> dict[str, float] | None:
     return target
 
 
+def _executable_weight(sizing: dict[str, object]) -> float | None:
+    """从单条权重口径换算证据推导可执行权重；证据不完整时返回 None."""
+    if str(sizing.get("sizing_mode", "weight")) != "weight" or sizing.get("status") != "SIZED":
+        return None
+    quantity, notional = _number(sizing.get("target_quantity")), _number(sizing.get("unit_notional"))
+    equity = _number(sizing.get("equity"))
+    if equity is None or equity <= 0 or quantity is None:
+        return None
+    if quantity == 0:
+        # ZERO_TARGET、不足一手（BELOW_MIN_QUANTITY）或取整到 0：账户真实敞口为零。
+        return 0.0
+    if notional is None or notional <= 0:
+        return None
+    return quantity * notional / equity
+
+
+def _executable_target(result: dict[str, object]) -> dict[str, float] | None:
+    """全部品种均有可推导换算证据时返回可执行权重；任一品种证据不足返回 None."""
+    results = _mapping(result.get("symbol_results"))
+    if not results:
+        return None
+    target: dict[str, float] = {}
+    for symbol, value in results.items():
+        weight = _executable_weight(_mapping(_mapping(value).get("sizing")))
+        if weight is None or not isinstance(symbol, str) or not symbol:
+            return None
+        target[symbol] = weight
+    return target
+
+
 def observation(
     record: ExecuteRecord | ExecuteRecordPublic,
     fallback_weights: dict[str, float] | None = None,
 ) -> Observation:
-    """兼容历史行情结构；仅用相同执行 ID 的目标快照补缺."""
+    """兼容历史行情结构；有换算证据时回放可执行权重，快照仅补缺."""
     result = _mapping(record.raw_result)
     assets = _mapping(result.get("account_assets"))
     asset = _number(assets.get("total_asset"))
     if not is_asset_observation(assets, result):
         asset = None
-    target = _target(record.raw_input.get("curr_target", fallback_weights))
+    target = _executable_target(result)
+    if target is None:
+        target = _target(record.raw_input.get("curr_target", fallback_weights))
     if result.get("execution_kind") == "clear_positions":
         target = {}
     return Observation(
@@ -143,36 +246,86 @@ def select_range(items: list[Observation], range_key: RangeKey) -> list[Observat
     return [item for item in ordered if item.time >= cutoff]
 
 
-def build_wbt_input(items: list[Observation]) -> tuple[pd.DataFrame, PerformanceGap | None, int]:
-    """构建可信前缀；未知区间不能通过后续行情恢复累计收益."""
+def _required_symbols(item: Observation, previous: dict[str, float]) -> set[str] | None:
+    """返回参与回测所需的品种集合；目标缺失时返回 None."""
+    target = item.target
+    if target is None:
+        return None
+    required = {symbol for symbol, weight in previous.items() if weight != 0}
+    required.update(symbol for symbol, weight in target.items() if weight != 0)
+    return required
+
+
+def participating_items(items: list[Observation]) -> list[Observation]:
+    """返回可构建回测 bar 的观察序列；参与条件依赖延续中的上一目标."""
+    participants: list[Observation] = []
+    previous: dict[str, float] = {}
+    for item in items:
+        required = _required_symbols(item, previous)
+        if required is not None and not (required - item.prices.keys()):
+            participants.append(item)
+            previous = item.target or {}
+    return participants
+
+
+@dataclass
+class BacktestInput:
+    """WBT 输入与参与统计；未参与观测不产生行，权重自然延续."""
+
+    frame: pd.DataFrame
+    used: int
+    skips: PerformanceSkips
+    backtest_start: datetime | None
+    participants: list[Observation]
+
+
+def build_wbt_input(items: list[Observation]) -> BacktestInput:
+    """跳过缺目标或缺盘口的观测；失败执行意味着持仓延续，而非不可恢复的缺口."""
     rows: list[dict[str, object]] = []
     previous: dict[str, float] = {}
     used = 0
-    gap = None
+    backtest_start: datetime | None = None
+    participants: list[Observation] = []
+    missing_target = 0
+    missing_ticks = 0
+    first_time: str | None = None
+    last_time: str | None = None
     for item in items:
         target = item.target
-        required = {symbol for symbol, weight in previous.items() if weight != 0}
-        if target is not None:
-            required.update(symbol for symbol, weight in target.items() if weight != 0)
-        missing = sorted(required - item.prices.keys())
-        if target is None or missing:
-            gap = PerformanceGap(
-                time=item.time.isoformat(),
-                execution_id=item.execution_id,
-                reason="目标权重缺失或无效" if target is None else "必要标的缺少有效首笔盘口",
-                symbols=missing,
-            )
-            break
+        required = _required_symbols(item, previous)
+        missing = required is not None and bool(required - item.prices.keys())
+        if required is None or missing:
+            # 跳过：不产生行、不更新延续目标，WBT 按上一已知持仓延续。
+            missing_target += target is None
+            missing_ticks += target is not None
+            first_time = first_time or item.time.isoformat()
+            last_time = item.time.isoformat()
+            continue
         # 旧仓必须写入显式零权重退出行；其余有报价的零仓也保留供 WBT 建立历史。
         symbols = required | (target.keys() & item.prices.keys())
         rows.extend(
             {"dt": item.time, "symbol": symbol, "weight": target.get(symbol, 0.0), "price": item.prices[symbol]}
             for symbol in sorted(symbols)
         )
+        backtest_start = backtest_start or item.time
         previous = target
         used += 1
+        participants.append(item)
+    skipped = missing_target + missing_ticks
     frame = pd.DataFrame(rows, columns=["dt", "symbol", "weight", "price"])
-    return frame.astype({"weight": "float64", "price": "float64"}), gap, used
+    return BacktestInput(
+        frame=frame.astype({"weight": "float64", "price": "float64"}),
+        used=used,
+        skips=PerformanceSkips(
+            count=skipped,
+            missing_target=missing_target,
+            missing_ticks=missing_ticks,
+            first_time=first_time if skipped else None,
+            last_time=last_time if skipped else None,
+        ),
+        backtest_start=backtest_start,
+        participants=participants,
+    )
 
 
 def _portfolio_daily(frame: pd.DataFrame, settings: PerformanceSettings) -> dict[str, float]:
@@ -191,19 +344,26 @@ def _portfolio_daily(frame: pd.DataFrame, settings: PerformanceSettings) -> dict
 def _merge_daily(
     items: list[Observation],
     daily: dict[str, float] | None,
-    gap: PerformanceGap | None,
+    backtest_start: datetime | None,
+    participants: list[Observation] | None = None,
 ) -> list[PerformancePoint]:
     base = next((item for item in items if item.asset is not None and item.asset > 0), None)
     if base is None or base.asset is None:
         return []
+    # 账户与组合优先在同一批参与记录上配对采样；无参与记录的日子保留账户观察，
+    # 组合按持仓延续，闭市心跳不会单独移动账户日点。
     by_day: dict[str, Observation] = {}
     for item in items:
+        if item.time >= base.time:
+            by_day[item.time.date().isoformat()] = item
+    for item in participants or ():
         if item.time >= base.time:
             by_day[item.time.date().isoformat()] = item
     nav = 1.0
     previous_asset = base.asset
     points: list[PerformancePoint] = []
-    gap_day = gap.time[:10] if gap else None
+    # 回测首个参与观测之前组合收益未知；其后无 WBT 条目的日子按持仓延续计 0.
+    backtest_day = backtest_start.date().isoformat() if backtest_start is not None else None
     for day, last in by_day.items():
         # 日末资产缺失时不拿更早资产伪装同日末值；次日累计仍可由共同基准恢复。
         account = last.asset / base.asset - 1 if last.asset is not None else None
@@ -213,7 +373,9 @@ def _merge_daily(
             else None
         )
         previous_asset = last.asset
-        portfolio_daily = daily.get(day, 0.0) if daily is not None and (gap_day is None or day < gap_day) else None
+        portfolio_daily = (
+            daily.get(day, 0.0) if daily is not None and (backtest_day is None or day >= backtest_day) else None
+        )
         if portfolio_daily is not None:
             nav *= 1 + portfolio_daily
         portfolio = nav - 1 if portfolio_daily is not None else None
@@ -232,6 +394,7 @@ def _merge_daily(
             )
         )
     # 独立基准点保留执行时间，以便基准当天仍有后续执行时不覆盖日末收益。
+    from_backtest = daily is not None and backtest_start is not None and backtest_start <= base.time
     points.insert(
         0,
         PerformancePoint(
@@ -241,8 +404,8 @@ def _merge_daily(
             execution_id=base.execution_id,
             account_return=0.0,
             account_equity=base.asset,
-            portfolio_return=0.0 if daily is not None and _is_baseline(base) else None,
-            difference=0.0 if daily is not None and _is_baseline(base) else None,
+            portfolio_return=0.0 if from_backtest else None,
+            difference=0.0 if from_backtest else None,
         ),
     )
     return points
@@ -283,6 +446,7 @@ def calculate_performance(
     settings: PerformanceSettings,
     range_key: RangeKey,
     include_backtest: bool = True,
+    trade_channel: str | None = None,
 ) -> AccountPerformance:
     """使用 WBT 原生费后日收益与资产比值生成收益对比."""
     items = select_range(observations, range_key)
@@ -292,16 +456,28 @@ def calculate_performance(
         engine_version=version("wbt"),
         range=range_key,
         record_count=len(observations),
+        calendar=PerformanceCalendar(status="unavailable"),
     )
     if not items:
         return result
     result.observation_count = len(items)
     daily = None
+    backtest_start: datetime | None = None
+    participants: list[Observation] | None = None
     if include_backtest:
-        frame, result.gap, result.used_record_count = build_wbt_input(items)
-        daily = _portfolio_daily(frame, settings)
-    result.points = _merge_daily(items, daily, result.gap)
+        built = build_wbt_input(items)
+        result.used_record_count = built.used
+        result.skips = built.skips
+        backtest_start = built.backtest_start
+        # 空帧必须归 None：单观测帧的 WBT 日收益同样为空，但语义是尚未起息而非无回测。
+        daily = None if built.frame.empty else _portfolio_daily(built.frame, settings)
+        participants = built.participants or None
+    else:
+        # 快速路径用同一参与谓词配对采样，不构建也不运行回测。
+        participants = participating_items(items) or None
+    result.points = _merge_daily(items, daily, backtest_start, participants)
     result.baseline = result.points[0].date if result.points else None
     result.end = items[-1].time.isoformat()
     result.invalid_asset_count = sum(item.asset is None for item in items)
+    result.calendar = performance_calendar(trade_channel, result.baseline, result.end)
     return result

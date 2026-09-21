@@ -34,9 +34,6 @@ class _RecordingSink:
     def dispatch_price_data(self, price_data: Any) -> None:
         """记录行情事件。"""
 
-    def dispatch_runtime_log(self, event: Any) -> None:
-        """记录 runtime 日志事件。"""
-
 
 def _make_request(deadline: float | None = None) -> GMBridgeRequest:
     return GMBridgeRequest(

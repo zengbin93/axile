@@ -266,7 +266,7 @@ def test_account_only_performance_ignores_unavailable_backtest(tmp_path, monkeyp
                 assert result.settings.backtest_fee_rate == 0.001
                 assert result.points[-1].account_return == pytest.approx(103 / 101 - 1)
                 assert not result.backtest_included
-                assert result.gap is None
+                assert result.skips is None
                 assert result.used_record_count == 0
                 assert all(point.portfolio_return is None for point in result.points)
                 assert result.bindings[0].time == "2026-01-02T09:00:00"

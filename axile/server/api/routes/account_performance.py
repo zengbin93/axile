@@ -31,6 +31,7 @@ async def _account_performance(session, account_id: int, range_key: RangeKey) ->
     await session.rollback()
     await session.execute(text("BEGIN"))
     account = await _get_account_or_404(session, account_id)
+    trade_channel = str(account.trade_channel)
     settings = PerformanceSettings.model_validate(account, from_attributes=True)
     records = (
         (await session.execute(select(ExecuteRecord).where(col(ExecuteRecord.account_id) == account_id)))
@@ -51,7 +52,7 @@ async def _account_performance(session, account_id: int, range_key: RangeKey) ->
     items = [observation(record, fallback.get(record.execution_id or "")) for record in records]
     binding_values = [(local_time(binding.created_at), binding.portfolio_id) for binding in bindings]
     await session.rollback()
-    result = await run_in_threadpool(calculate_performance, items, settings, range_key, False)
+    result = await run_in_threadpool(calculate_performance, items, settings, range_key, False, trade_channel)
     if result.baseline and result.end:
         start, end = local_time(result.baseline), local_time(result.end)
         result.bindings = [
@@ -103,7 +104,7 @@ async def get_performance(
     result = AccountPerformance.model_validate(snapshot["result"])
     if not include_backtest:
         result.backtest_included = False
-        result.gap = None
+        result.skips = None
         result.used_record_count = 0
         for point in result.points:
             point.portfolio_return = point.portfolio_daily_return = point.difference = None

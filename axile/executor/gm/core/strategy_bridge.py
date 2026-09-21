@@ -33,7 +33,6 @@ from axile.executor.gm.core.bridge_context import (
     clear_gm_strategy_runtime_context,
     install_gm_strategy_runtime_context,
 )
-from axile.executor.gm.core.callback_dispatcher import GMRuntimeLogEvent
 from axile.executor.models.unified_order import TradeRecord, UnifiedOrder
 from axile.executor.models.unified_price import UnifiedPriceData
 
@@ -76,9 +75,6 @@ class GMBridgeEventSink(Protocol):
 
     def dispatch_price_data(self, price_data: UnifiedPriceData) -> None:
         """分发行情数据事件."""
-
-    def dispatch_runtime_log(self, event: GMRuntimeLogEvent) -> None:
-        """分发 GM runtime 日志事件."""
 
 
 @dataclass(slots=True)

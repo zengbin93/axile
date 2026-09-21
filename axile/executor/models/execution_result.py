@@ -79,20 +79,6 @@ def outcome_from_status(status: ExecutionStatus, *, terminated: bool = False) ->
     return _OUTCOME_FROM_STATUS[status]
 
 
-def aggregate_outcomes(outcomes: list[ExecutionOutcome]) -> ExecutionOutcome:
-    """错误优先；缺少证据不推定完成，混合受阻与完成属于未到位。"""
-    if not outcomes:
-        return ExecutionOutcome.UNKNOWN
-    for outcome in (ExecutionOutcome.ERROR, ExecutionOutcome.TERMINATED, ExecutionOutcome.UNKNOWN):
-        if outcome in outcomes:
-            return outcome
-    if all(outcome == ExecutionOutcome.BLOCKED for outcome in outcomes):
-        return ExecutionOutcome.BLOCKED
-    if any(outcome != ExecutionOutcome.COMPLETED for outcome in outcomes):
-        return ExecutionOutcome.NOT_REACHED
-    return ExecutionOutcome.COMPLETED
-
-
 class TargetSizingStatus(StrEnum):
     """目标数量换算状态."""
 
@@ -208,20 +194,3 @@ class AlgorithmResult(BaseModel):
             当 ``status`` 属于成功集合时返回 ``True``。
         """
         return is_success_status(self.status)
-
-    def with_runtime_account_assets(self, account_assets: UnifiedAccountAssets | None) -> "AlgorithmResult":
-        """
-        为结果附加运行时账户资产快照.
-
-        Parameters
-        ----------
-        account_assets : UnifiedAccountAssets | None
-            执行结束时采集到的账户资产快照。
-
-        Returns
-        -------
-        AlgorithmResult
-            写入运行时账户资产后的当前结果对象。
-        """
-        self.account_assets = account_assets
-        return self

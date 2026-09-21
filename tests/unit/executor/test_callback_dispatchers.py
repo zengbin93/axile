@@ -138,7 +138,6 @@ def test_dispatchers_register_broadcast_isolate_errors_and_clear_callbacks(
             "order_updates_received": 2,
             "trade_records_received": 2,
             "price_updates_received": 2,
-            "runtime_logs_received": 0,
         }
 
     dispatcher.register_order_callback(order_callback)
