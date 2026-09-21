@@ -208,6 +208,9 @@ export interface PerformancePoint {
   portfolio_return: number | null
   account_daily_return: number | null
   portfolio_daily_return: number | null
+  target_portfolio_return?: number | null
+  target_portfolio_daily_return?: number | null
+  sizing_fallback?: boolean
   difference: number | null
 }
 
@@ -221,8 +224,12 @@ export interface AccountPerformance {
   record_count: number
   observation_count: number
   used_record_count: number
+  target_used_record_count?: number
   invalid_asset_count: number
   skips: { count: number; missing_target: number; missing_ticks: number; first_time: string | null; last_time: string | null } | null
+  target_skips?: AccountPerformance['skips']
+  sizing_fallback_count?: number | null
+  sizing_fallback_ranges?: Array<{ start: string; end: string; count: number }>
   points: PerformancePoint[]
   executions?: import('@/lib/api/performance').CostExecutionRow[]
   bindings: Array<{ time: string; portfolio_id: number | null }>

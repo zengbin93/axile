@@ -407,6 +407,51 @@ def test_below_min_quantity_replays_zero_executable_weight():
     assert observation(record).target == {"X": 0.0}
 
 
+def test_dual_weight_curves_keep_account_axis_and_zero_lot_is_not_fallback():
+    first = sized_record({"X": {**sized(qty=0.0), "first_tick": {"last_price": 100}}}, {"X": 1.05})
+    second = sized_record({"X": {**sized(qty=0.0), "first_tick": {"last_price": 110}}}, {"X": 1.05})
+    second.id = 2
+    second.created_at = "2026-01-02T01:00:00Z"
+    second.raw_result["account_assets"]["total_asset"] = 110
+    result = run([observation(first), observation(second)])
+    assert result.points[-1].account_return == pytest.approx(110 / 102335.888 - 1)
+    assert result.points[-1].portfolio_return == 0
+    assert result.points[-1].target_portfolio_return == pytest.approx(0.105)
+    assert result.sizing_fallback_count == 0
+    assert result.used_record_count == result.target_used_record_count == 2
+
+
+def test_dual_weight_skips_and_fallback_only_count_participants():
+    rows = [
+        obs(1, {"A": 100}, {"A": 0}, target_weight={"A": 1.0}),
+        obs(2, {"A": 110}, {"A": 1.0}, target_weight={"A": 1.0}, sizing_fallback=True),
+        obs(3, {}, {"A": 1.0}, target_weight={"A": 1.0}, sizing_fallback=True),
+        obs(4, {"A": 120}, {"A": 1.0}, target_weight={"A": 1.0}, sizing_fallback=True),
+    ]
+    rows[2].prices = {}
+    result = run(rows)
+    assert result.sizing_fallback_count == 2
+    assert [(r.count, r.start, r.end) for r in result.sizing_fallback_ranges] == [
+        (2, rows[1].time.isoformat(), rows[3].time.isoformat())
+    ]
+    assert result.points[2].sizing_fallback is True
+    assert result.skips.missing_ticks == result.target_skips.missing_ticks == 1
+
+
+def test_target_price_requirement_is_independent_of_sized_zero():
+    rows = [
+        obs(1, {"A": 100}, {"A": 0}, target_weight={"A": 1.0}),
+        obs(2, {"A": 110}, {"A": 0}, target_weight={"A": 1.0}),
+    ]
+    rows[0].prices = rows[1].prices = {}
+    result = run(rows)
+    assert result.used_record_count == 2
+    assert result.target_used_record_count == 0
+    assert result.points[-1].portfolio_return == 0
+    assert result.target_skips.missing_ticks == 2
+    assert all(point.target_portfolio_return is None for point in result.points)
+
+
 def test_quantized_quantity_replays_lot_weight_per_row_equity():
     record = sized_record({"X": sized(qty=2.0), "S": sized(qty=-3.0, notional=34780.0, equity=101000.0)})
     target = observation(record).target

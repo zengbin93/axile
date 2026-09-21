@@ -1,9 +1,9 @@
-"""从执行快照构建 WBT 输入与同基准账户收益；交易日历经渠道插件读取，渠道缺失或读取失败时降级为不可用.
+"""从执行快照构建两种 WBT 输入与同基准账户收益；渠道日历缺失时降级为不可用。
 
-组合回测回放可执行权重：``symbol_results[*].sizing`` 证据完整（全品种 SIZED 且权重口径）时
-以 ``target_quantity * unit_notional / equity`` 逐行还原整手离散后的真实敞口；证据不完整
-（历史记录、lots 口径、UNAVAILABLE）回退到 ``curr_target`` 理论权重。2026-08-27 之前的
-记录无换算证据，一律按理论权重回放。盯市价与柜台对齐取最新价，无有效最新价回退中间价。
+数量换算后回测使用完整的 ``symbol_results[*].sizing`` 证据（全品种 SIZED 且权重口径），
+以 ``target_quantity * unit_notional / equity`` 还原目标敞口，并非实际成交持仓；证据不完整
+时整条记录回退到 ``curr_target``。目标权重回测始终使用执行器收到的账户目标。
+盯市价与柜台对齐取最新价，无有效最新价回退中间价。
 账户与组合优先在同一批参与记录上配对采样：有参与记录的日子取当日最后一条参与记录，
 闭市心跳不再单独移动账户日点，从而把差异收敛为纯执行落差；无参与记录的日子保留账户
 观察，组合按持仓延续。
@@ -27,6 +27,7 @@ from axile.server.db.models.performance import (
     AccountPerformance,
     PerformanceCalendar,
     PerformanceCalendarRange,
+    PerformanceFallbackRange,
     PerformancePoint,
     PerformanceSettings,
     PerformanceSkips,
@@ -102,6 +103,8 @@ class Observation:
     asset: float | None
     target: dict[str, float] | None
     prices: dict[str, float]
+    target_weight: dict[str, float] | None = None
+    sizing_fallback: bool = False
 
 
 def local_time(value: str) -> datetime:
@@ -210,13 +213,22 @@ def observation(
     asset = _number(assets.get("total_asset"))
     if not is_asset_observation(assets, result):
         asset = None
-    target = _executable_target(result)
-    if target is None:
-        target = _target(record.raw_input.get("curr_target", fallback_weights))
+    target_weight = _target(record.raw_input.get("curr_target"))
+    if target_weight is None:
+        target_weight = _target(fallback_weights)
+    executable = _executable_target(result)
+    target = executable if executable is not None else target_weight
     if result.get("execution_kind") == "clear_positions":
-        target = {}
+        target = target_weight = {}
     return Observation(
-        record.id or 0, record.execution_id, local_time(record.created_at), asset, target, _prices(result)
+        record.id or 0,
+        record.execution_id,
+        local_time(record.created_at),
+        asset,
+        target,
+        _prices(result),
+        target_weight,
+        executable is None and target_weight is not None and bool(target_weight),
     )
 
 
@@ -246,9 +258,9 @@ def select_range(items: list[Observation], range_key: RangeKey) -> list[Observat
     return [item for item in ordered if item.time >= cutoff]
 
 
-def _required_symbols(item: Observation, previous: dict[str, float]) -> set[str] | None:
+def _required_symbols(item: Observation, previous: dict[str, float], target_weight: bool = False) -> set[str] | None:
     """返回参与回测所需的品种集合；目标缺失时返回 None."""
-    target = item.target
+    target = item.target_weight if target_weight else item.target
     if target is None:
         return None
     required = {symbol for symbol, weight in previous.items() if weight != 0}
@@ -279,7 +291,7 @@ class BacktestInput:
     participants: list[Observation]
 
 
-def build_wbt_input(items: list[Observation]) -> BacktestInput:
+def build_wbt_input(items: list[Observation], target_weight: bool = False) -> BacktestInput:
     """跳过缺目标或缺盘口的观测；失败执行意味着持仓延续，而非不可恢复的缺口."""
     rows: list[dict[str, object]] = []
     previous: dict[str, float] = {}
@@ -291,8 +303,8 @@ def build_wbt_input(items: list[Observation]) -> BacktestInput:
     first_time: str | None = None
     last_time: str | None = None
     for item in items:
-        target = item.target
-        required = _required_symbols(item, previous)
+        target = item.target_weight if target_weight else item.target
+        required = _required_symbols(item, previous, target_weight)
         missing = required is not None and bool(required - item.prices.keys())
         if required is None or missing:
             # 跳过：不产生行、不更新延续目标，WBT 按上一已知持仓延续。
@@ -346,6 +358,9 @@ def _merge_daily(
     daily: dict[str, float] | None,
     backtest_start: datetime | None,
     participants: list[Observation] | None = None,
+    target_daily: dict[str, float] | None = None,
+    target_start: datetime | None = None,
+    fallback_days: set[str] | None = None,
 ) -> list[PerformancePoint]:
     base = next((item for item in items if item.asset is not None and item.asset > 0), None)
     if base is None or base.asset is None:
@@ -360,10 +375,12 @@ def _merge_daily(
         if item.time >= base.time:
             by_day[item.time.date().isoformat()] = item
     nav = 1.0
+    target_nav = 1.0
     previous_asset = base.asset
     points: list[PerformancePoint] = []
     # 回测首个参与观测之前组合收益未知；其后无 WBT 条目的日子按持仓延续计 0.
     backtest_day = backtest_start.date().isoformat() if backtest_start is not None else None
+    target_day = target_start.date().isoformat() if target_start is not None else None
     for day, last in by_day.items():
         # 日末资产缺失时不拿更早资产伪装同日末值；次日累计仍可由共同基准恢复。
         account = last.asset / base.asset - 1 if last.asset is not None else None
@@ -374,11 +391,18 @@ def _merge_daily(
         )
         previous_asset = last.asset
         portfolio_daily = (
-            daily.get(day, 0.0) if daily is not None and (backtest_day is None or day >= backtest_day) else None
+            daily.get(day, 0.0) if daily is not None and backtest_day is not None and day >= backtest_day else None
         )
         if portfolio_daily is not None:
             nav *= 1 + portfolio_daily
         portfolio = nav - 1 if portfolio_daily is not None else None
+        target_portfolio_daily = (
+            target_daily.get(day, 0.0)
+            if target_daily is not None and target_day is not None and day >= target_day
+            else None
+        )
+        if target_portfolio_daily is not None:
+            target_nav *= 1 + target_portfolio_daily
         points.append(
             PerformancePoint(
                 date=day,
@@ -390,6 +414,9 @@ def _merge_daily(
                 portfolio_return=portfolio,
                 account_daily_return=account_daily,
                 portfolio_daily_return=portfolio_daily,
+                target_portfolio_return=target_nav - 1 if target_portfolio_daily is not None else None,
+                target_portfolio_daily_return=target_portfolio_daily,
+                sizing_fallback=day in (fallback_days or set()),
                 difference=account - portfolio if account is not None and portfolio is not None else None,
             )
         )
@@ -405,6 +432,9 @@ def _merge_daily(
             account_return=0.0,
             account_equity=base.asset,
             portfolio_return=0.0 if from_backtest else None,
+            target_portfolio_return=0.0
+            if target_daily is not None and target_start is not None and target_start <= base.time
+            else None,
             difference=0.0 if from_backtest else None,
         ),
     )
@@ -464,18 +494,43 @@ def calculate_performance(
     daily = None
     backtest_start: datetime | None = None
     participants: list[Observation] | None = None
+    target_daily: dict[str, float] | None = None
+    target_start: datetime | None = None
+    fallback_days: set[str] = set()
     if include_backtest:
         built = build_wbt_input(items)
+        target_built = build_wbt_input(items, target_weight=True)
         result.used_record_count = built.used
+        result.target_used_record_count = target_built.used
         result.skips = built.skips
+        result.target_skips = target_built.skips
         backtest_start = built.backtest_start
-        # 空帧必须归 None：单观测帧的 WBT 日收益同样为空，但语义是尚未起息而非无回测。
-        daily = None if built.frame.empty else _portfolio_daily(built.frame, settings)
+        target_start = target_built.backtest_start
+        # 全零目标可参与且无需报价；此时空帧表示现金持仓，收益为零。
+        daily = ({} if built.used else None) if built.frame.empty else _portfolio_daily(built.frame, settings)
+        target_daily = (
+            ({} if target_built.used else None)
+            if target_built.frame.empty
+            else _portfolio_daily(target_built.frame, settings)
+        )
         participants = built.participants or None
+        fallback_days = {item.time.date().isoformat() for item in built.participants if item.sizing_fallback}
+        result.sizing_fallback_count = sum(item.sizing_fallback for item in built.participants)
+        current: PerformanceFallbackRange | None = None
+        for item in built.participants:
+            if item.sizing_fallback:
+                when = item.time.isoformat()
+                if current is None:
+                    current = PerformanceFallbackRange(start=when, end=when, count=0)
+                    result.sizing_fallback_ranges.append(current)
+                current.end = when
+                current.count += 1
+            else:
+                current = None
     else:
         # 快速路径用同一参与谓词配对采样，不构建也不运行回测。
         participants = participating_items(items) or None
-    result.points = _merge_daily(items, daily, backtest_start, participants)
+    result.points = _merge_daily(items, daily, backtest_start, participants, target_daily, target_start, fallback_days)
     result.baseline = result.points[0].date if result.points else None
     result.end = items[-1].time.isoformat()
     result.invalid_asset_count = sum(item.asset is None for item in items)

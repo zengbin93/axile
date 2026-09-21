@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { chartAxis, executionMarkerPoint, executionMarkerTone, hasExecutionMarker, returnY, type CanvasTheme, type ChartScene } from '@/components/viz/performanceCanvas'
+import { chartAxis, executionMarkerPoint, executionMarkerTone, hasExecutionMarker, returnY, seriesKeys, type CanvasTheme, type ChartScene } from '@/components/viz/performanceCanvas'
 import { pointTime } from '@/features/history/chartModel'
 import { shanghaiTime } from '@/features/history/costs'
 import type { AccountPerformance } from '@/types/api'
@@ -29,6 +29,12 @@ test('无成交不画点（失败的也一样），有真实成交保留', () =>
 })
 
 const theme: CanvasTheme = { bg: '#fff', surface: '#fff', ink: '#000', muted: '#888', line: '#ddd', accent: '#06c', warn: '#fa0', fill: '#eee', font: 'sans-serif' }
+
+test('回测口径统一选择累计和每日字段', () => {
+  expect(seriesKeys(false, 'target')).toEqual(['account_return', 'target_portfolio_return'])
+  expect(seriesKeys(true, 'target')).toEqual(['account_daily_return', 'target_portfolio_daily_return'])
+  expect(seriesKeys(false, 'sized')).toEqual(['account_return', 'portfolio_return'])
+})
 
 function markerScene(returns: number[]): ChartScene {
   const data: AccountPerformance = {

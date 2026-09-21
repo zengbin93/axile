@@ -64,13 +64,13 @@ export function reconcileSelection(selection: ChartSelection, points: Performanc
   return precisePoints(points) && times.includes(selection.start) && times.includes(selection.end) ? selection : null
 }
 
-export function intervalReturn(points: PerformancePoint[], selection: ChartSelection, key: 'account_return' | 'portfolio_return'): number | null {
+export function intervalReturn(points: PerformancePoint[], selection: ChartSelection, key: 'account_return' | 'portfolio_return' | 'target_portfolio_return'): number | null {
   if (selection?.kind !== 'interval') return null
   const start = points.findIndex(p => pointTime(p) === selection.start), end = points.findIndex(p => pointTime(p) === selection.end)
   if (start < 0 || end <= start) return null
   const a = points[start][key], b = points[end][key]
   if (a == null || b == null || !Number.isFinite(a) || !Number.isFinite(b) || 1 + a <= 0) return null
-  if (key === 'portfolio_return' && points.slice(start, end + 1).some(p => p[key] == null)) return null
+  if (key !== 'account_return' && points.slice(start, end + 1).some(p => p[key] == null)) return null
   return (1 + b) / (1 + a) - 1
 }
 

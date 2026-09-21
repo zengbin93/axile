@@ -34,6 +34,7 @@ test('回测不跨缺口计算，账户仍能使用有效端点', () => {
   const points = [point('2026-01-01', 0.1), point('2026-01-02', null), point('2026-01-03', 0.21)]
   const selection = intervalSelection(pointTime(points[0]), pointTime(points[2]))
   expect(intervalReturn(points, selection, 'portfolio_return')).toBeNull()
+  expect(intervalReturn(points.map((point, index) => ({ ...point, target_portfolio_return: index === 2 ? null : point.portfolio_return })), selection, 'target_portfolio_return')).toBeNull()
   expect(intervalReturn(points, selection, 'account_return')).toBeCloseTo(0.1)
   expect(intervalReturn(points, intervalSelection(pointTime(points[1]), pointTime(points[2])), 'account_return')).toBeNull()
 })

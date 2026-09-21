@@ -4,13 +4,14 @@ import { axisPercent, niceReturnAxis } from '@/features/history/performance'
 import { amount, shanghaiTime, type CostSummary } from '@/features/history/costs'
 import { pointTime, timeLabel, type ChartSelection, type Viewport } from '@/features/history/chartModel'
 import type { TimeScale } from '@/features/history/timeScale'
+import type { BacktestMode } from '@/features/history/viewState'
 import { closedDaysBetween, closedRangeLabel } from '@/features/history/timeScale'
 
 export const CHART_HEIGHT = 600
 export const PLOT = { left: 12, right: 78, top: 16, bottom: 379, binding: 408, bindingHeight: 24, costTop: 464, costBottom: 504, navTop: 548, navBottom: 582 }
 const CALENDAR_MARK_Y = PLOT.costBottom + 12
 const TIME_AXIS_Y = PLOT.costBottom + 31
-export type SeriesKey = 'account_return' | 'portfolio_return' | 'account_daily_return' | 'portfolio_daily_return'
+export type SeriesKey = 'account_return' | 'portfolio_return' | 'target_portfolio_return' | 'account_daily_return' | 'portfolio_daily_return' | 'target_portfolio_daily_return'
 export interface CanvasTheme { bg: string; surface: string; ink: string; muted: string; line: string; accent: string; warn: string; fill: string; font: string }
 export interface ChartScene {
   domain?: Viewport
@@ -19,6 +20,7 @@ export interface ChartScene {
   width: number
   viewport: Viewport
   daily: boolean
+  backtestMode?: BacktestMode
   returnRange?: { min: number; max: number } | null
   costs: Map<string, CostSummary> | null
   portfolioNames: Map<number, string>
@@ -53,7 +55,7 @@ export function executionMarkerPoint(scene: ChartScene, row: CostExecutionRow): 
   const time = shanghaiTime(row.record.created_at)
   const { times, data, width, viewport } = scene
   if (time < viewport.start || time > viewport.end) return null
-  const key = seriesKeys(scene.daily)[0]
+  const key = seriesKeys(scene.daily, scene.backtestMode)[0]
   const exact = data.points.findIndex(point => point.record_id === row.record.id)
   let before = exact, after = exact
   if (exact < 0) {
@@ -87,7 +89,9 @@ export function prepareCanvas(canvas: HTMLCanvasElement, width: number): CanvasR
   return ctx
 }
 
-export const seriesKeys = (daily: boolean): [SeriesKey, SeriesKey] => daily ? ['account_daily_return', 'portfolio_daily_return'] : ['account_return', 'portfolio_return']
+export const seriesKeys = (daily: boolean, mode: BacktestMode = 'sized'): [SeriesKey, SeriesKey] => daily
+  ? ['account_daily_return', mode === 'target' ? 'target_portfolio_daily_return' : 'portfolio_daily_return']
+  : ['account_return', mode === 'target' ? 'target_portfolio_return' : 'portfolio_return']
 export const plotRight = (width: number) => width - PLOT.right
 export const xPosition = (time: number, width: number, view: Viewport, scale?: TimeScale) => {
   const project = scale?.project ?? ((value: number) => value)
@@ -109,7 +113,7 @@ export function chartAxis(scene: ChartScene) {
     const ticks = Array.from({ length: Math.max(0, Math.floor((max - first) / step) + 1) }, (_, i) => first + i * step)
     return { min, max, step, ticks }
   }
-  const keys = seriesKeys(scene.daily)
+  const keys = seriesKeys(scene.daily, scene.backtestMode)
   const values = scene.data.points.flatMap((p, i) => scene.times[i] >= scene.viewport.start && scene.times[i] <= scene.viewport.end || !scene.daily && (scene.times[i] < scene.viewport.start && (scene.times[i + 1] ?? Infinity) >= scene.viewport.start || scene.times[i] > scene.viewport.end && (scene.times[i - 1] ?? -Infinity) <= scene.viewport.end)
     ? keys.flatMap(key => typeof p[key] === 'number' && Number.isFinite(p[key]) ? [p[key]!] : []) : [])
   return niceReturnAxis(values)
@@ -154,7 +158,7 @@ function drawReturns(ctx: CanvasRenderingContext2D, scene: ChartScene) {
   ctx.save(); ctx.beginPath(); ctx.rect(PLOT.left, PLOT.top, plotRight(width) - PLOT.left, PLOT.bottom - PLOT.top); ctx.clip()
   const count = times.filter(t => t >= viewport.start && t <= viewport.end).length
   const barWidth = Math.max(1, Math.min(9, (plotRight(width) - PLOT.left) / Math.max(2, count) / 3))
-  seriesKeys(scene.daily).forEach((key, series) => {
+  seriesKeys(scene.daily, scene.backtestMode).forEach((key, series) => {
     ctx.strokeStyle = ctx.fillStyle = series === 0 ? theme.accent : theme.ink
     ctx.lineWidth = series === 0 ? 1.8 : 1.5
     ctx.setLineDash(series === 1 ? [5, 3] : [])
@@ -397,7 +401,7 @@ export function drawOverlay(canvas: HTMLCanvasElement, scene: ChartScene, hover:
   if (x < PLOT.left || x > right) return
   ctx.setLineDash([3, 3]); line(ctx, x, PLOT.top, x, PLOT.costBottom, theme.muted); ctx.setLineDash([])
   const axis = chartAxis(scene)
-  const marks = seriesKeys(scene.daily).flatMap((key, series) => {
+  const marks = seriesKeys(scene.daily, scene.backtestMode).flatMap((key, series) => {
     const value = data.points[hover][key]
     return value == null ? [] : [{ value, series, y: returnY(value, axis) }]
   }).sort((a, b) => a.y - b.y)

@@ -13,7 +13,7 @@ import { getAccount } from '@/lib/api/accounts'
 import { getPortfolios } from '@/lib/api/portfolios'
 import { shanghaiDay, shanghaiLabel } from '@/features/history/costs'
 import { reconcileSelection, type ChartSelection } from '@/features/history/chartModel'
-import { loadPerformanceView, performanceViews, savePerformanceView } from '@/features/history/viewState'
+import { loadPerformanceView, performanceViews, savePerformanceView, type BacktestMode } from '@/features/history/viewState'
 import { getPerformanceCosts, selectionQuery, savePerformanceSettings } from '@/lib/api/performance'
 import { usePerformanceSnapshot } from '@/features/history/usePerformanceSnapshot'
 import { snapshotPending } from '@/features/history/performanceCache'
@@ -30,6 +30,9 @@ const RANGES: Array<{ value: RangeKey; label: string }> = [
 ]
 const VIEWS: Array<{ value: 'cumulative' | 'daily'; label: string }> = [
   { value: 'cumulative', label: '累计' }, { value: 'daily', label: '每日' },
+]
+const BACKTEST_MODES: Array<{ value: BacktestMode; label: string }> = [
+  { value: 'sized', label: '数量换算后' }, { value: 'target', label: '目标权重' },
 ]
 const SCALES: Array<{ value: TimeScaleMode; label: string }> = [
   { value: 'observations', label: '观测序列' }, { value: 'natural', label: '自然时间' },
@@ -51,10 +54,11 @@ function AccountHistory({ accountId }: { accountId: number }) {
   const [scale, setScale] = useState<TimeScaleMode>(() => performanceViews.get(accountId)?.scale ?? loadPerformanceView(accountId).scale ?? 'observations')
   const [selection, setSelection] = useState<ChartSelection>(() => performanceViews.get(accountId)?.selection ?? null)
   const [markers, setMarkers] = useState(() => performanceViews.get(accountId)?.markers ?? loadPerformanceView(accountId).markers ?? true)
+  const [backtestMode, setBacktestMode] = useState<BacktestMode>(() => performanceViews.get(accountId)?.backtestMode ?? loadPerformanceView(accountId).backtestMode ?? 'sized')
   useEffect(() => {
-    performanceViews.set(accountId, { ...performanceViews.get(accountId), range, view, scale, selection, markers })
-    savePerformanceView(accountId, { scale, markers })
-  }, [accountId, range, view, scale, selection, markers])
+    performanceViews.set(accountId, { ...performanceViews.get(accountId), range, view, scale, selection, markers, backtestMode })
+    savePerformanceView(accountId, { scale, markers, backtestMode })
+  }, [accountId, range, view, scale, selection, markers, backtestMode])
   const [showEvents, setShowEvents] = useState(false)
   const [draft, setDraft] = useState<{ mode: 'ts' | 'cs'; fee: string } | null>(null)
   const [saved, setSaved] = useState<PerformanceSettings | null>(null)
@@ -135,7 +139,7 @@ function AccountHistory({ accountId }: { accountId: number }) {
   const active = data?.points[data.points.length - 1]
   const daily = view === 'daily'
   const accountReturn = active?.account_return
-  const portfolioReturn = active?.portfolio_return
+  const portfolioReturn = backtestMode === 'target' ? active?.target_portfolio_return : active?.portfolio_return
   const difference = accountReturn != null && portfolioReturn != null ? portfolioReturn - accountReturn : null
   const costs = useMemo(() => snapshot?.result ? new Map(Object.entries(snapshot.daily_costs)) : null, [snapshot?.result, snapshot?.daily_costs])
   const events = snapshot?.events ?? []
@@ -152,6 +156,7 @@ function AccountHistory({ accountId }: { accountId: number }) {
           <span role="status" className="sr-only">{dirty && !saving ? '参数已修改，待计算' : ''}</span>
         </div>
         <Segmented size="sm" value={view} options={VIEWS} onChange={value => withViewTransition(() => setView(value))} />
+        <fieldset><legend className="sr-only">回测口径</legend><Segmented size="sm" value={backtestMode} options={BACKTEST_MODES} onChange={setBacktestMode} /></fieldset>
         <fieldset><legend className="sr-only">横轴尺度</legend><Segmented size="sm" value={scale} options={SCALES} onChange={setScale} /></fieldset>
         <fieldset><legend className="sr-only">成交点</legend><Segmented size="sm" value={markers ? 'on' : 'off'} options={MARKERS} onChange={value => setMarkers(value === 'on')} /></fieldset>
         </div>
@@ -168,7 +173,7 @@ function AccountHistory({ accountId }: { accountId: number }) {
         />
         {data ? <dl className="flex min-w-0 flex-wrap items-baseline text-xs text-ink-3">
           <div className="whitespace-nowrap"><dt className="sr-only">基准</dt><dd className="inline">{data.baseline ? <time dateTime={data.baseline} title={shanghaiLabel(data.baseline)}>{shanghaiDay(data.baseline)}</time> : '—'}</dd><span aria-hidden="true">&nbsp;→&nbsp;</span><dt className="sr-only">截止</dt><dd className="inline">{data.end ? <time dateTime={data.end} title={shanghaiLabel(data.end)}>{shanghaiDay(data.end)}</time> : '—'}</dd><span aria-hidden="true">&nbsp;·</span></div>
-          <div className="whitespace-nowrap"><dt className="sr-only">有效回测记录</dt><dd className="inline">回测 {data.backtest_included ? (data.skips?.count ? `${data.used_record_count}/${data.observation_count}` : data.used_record_count) : 0}</dd><span aria-hidden="true">&nbsp;·</span></div>
+          <div className="whitespace-nowrap"><dt className="sr-only">有效回测记录</dt><dd className="inline">回测 {data.backtest_included ? `${backtestMode === 'target' ? data.target_used_record_count ?? 0 : data.used_record_count}/${data.observation_count}` : 0}</dd><span aria-hidden="true">&nbsp;·</span></div>
           <div className="whitespace-nowrap"><dt className="sr-only">历史记录</dt><dd className="inline">历史 {data.record_count}</dd></div>
         </dl> : <span className="shrink-0 text-xs text-ink-3">{snapshot?.data_until ? `数据截止 ${shanghaiLabel(snapshot.data_until)}` : '暂无绩效快照'}</span>}
       </div>
@@ -191,8 +196,9 @@ function AccountHistory({ accountId }: { accountId: number }) {
     <ErrorNotice title="区间成本读取失败" error={intervalCosts.error} variant="compact" onRetry={intervalCosts.refresh} />
     {!data && <PerformanceChartPlaceholder accountId={accountId} controls={controls} loading={backtestBusy || !snapshot && !calculationError} failed={!!calculationError} />}
     {data && <div className="pb-4">
-      <PerformanceChart key={range} accountId={accountId} snapshotId={snapshot?.snapshot_id} viewKey={`${accountId}:${range}`} data={data} daily={daily} scaleMode={scale} costs={costs} intervalCost={intervalCosts.error || intervalCosts.loading ? null : intervalCosts.data?.summary ?? null} onSelect={value => { setSelectionNotice(false); setSelection(value) }} selection={selection} portfolioNames={portfolioNames} controls={controls} showExecutions={markers} />
-      {data.skips?.count ? <p role="status" className="mt-2 text-xs text-warn">{data.skips.count} 条执行快照未参与回测（{[data.skips.missing_target ? `目标权重缺失 ${data.skips.missing_target} 条` : null, data.skips.missing_ticks ? `缺少首笔盘口 ${data.skips.missing_ticks} 条` : null].filter(Boolean).join('、')}），组合收益按最后持仓延续估算</p> : null}
+      <PerformanceChart key={range} accountId={accountId} snapshotId={snapshot?.snapshot_id} viewKey={`${accountId}:${range}`} data={data} daily={daily} backtestMode={backtestMode} scaleMode={scale} costs={costs} intervalCost={intervalCosts.error || intervalCosts.loading ? null : intervalCosts.data?.summary ?? null} onSelect={value => { setSelectionNotice(false); setSelection(value) }} selection={selection} portfolioNames={portfolioNames} controls={controls} showExecutions={markers} />
+      {backtestMode === 'sized' && !!data.sizing_fallback_count && <p role="status" className="mt-2 text-xs text-ink-3">{data.sizing_fallback_count} 条参与回测的执行记录因缺少数量换算证据，按目标权重计算：{data.sizing_fallback_ranges?.map(range => `${shanghaiLabel(range.start)} → ${shanghaiLabel(range.end)}（${range.count} 条）`).join('、')}</p>}
+      {(backtestMode === 'target' ? data.target_skips : data.skips)?.count ? <p role="status" className="mt-2 text-xs text-warn">{(backtestMode === 'target' ? data.target_skips : data.skips)?.count} 条执行快照未参与回测（{[(backtestMode === 'target' ? data.target_skips : data.skips)?.missing_target ? `目标权重缺失 ${(backtestMode === 'target' ? data.target_skips : data.skips)?.missing_target} 条` : null, (backtestMode === 'target' ? data.target_skips : data.skips)?.missing_ticks ? `缺少首笔盘口 ${(backtestMode === 'target' ? data.target_skips : data.skips)?.missing_ticks} 条` : null].filter(Boolean).join('、')}），组合收益按最后持仓延续估算</p> : null}
       {data.invalid_asset_count > 0 && <p className="mt-2 text-xs text-warn">{data.invalid_asset_count} 条账户资产快照不可用</p>}
     </div>}
     <div className="border-t border-line py-4">

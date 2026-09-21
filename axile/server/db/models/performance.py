@@ -36,6 +36,9 @@ class PerformancePoint(BaseModel):
     portfolio_return: float | None = None
     account_daily_return: float | None = None
     portfolio_daily_return: float | None = None
+    target_portfolio_return: float | None = None
+    target_portfolio_daily_return: float | None = None
+    sizing_fallback: bool = False
     difference: float | None = None
 
 
@@ -47,6 +50,14 @@ class PerformanceSkips(BaseModel):
     missing_ticks: int = 0
     first_time: str | None = None
     last_time: str | None = None
+
+
+class PerformanceFallbackRange(BaseModel):
+    """参与回测的连续换算回退观测区段。"""
+
+    start: str
+    end: str
+    count: int
 
 
 class PerformanceBinding(BaseModel):
@@ -85,8 +96,12 @@ class AccountPerformance(BaseModel):
     record_count: int = 0
     observation_count: int = 0
     used_record_count: int = 0
+    target_used_record_count: int = 0
     invalid_asset_count: int = 0
     skips: PerformanceSkips | None = None
+    target_skips: PerformanceSkips | None = None
+    sizing_fallback_count: int | None = None
+    sizing_fallback_ranges: list[PerformanceFallbackRange] = Field(default_factory=list)
     points: list[PerformancePoint] = Field(default_factory=list)
     bindings: list[PerformanceBinding] = Field(default_factory=list)
     executions: list[dict] = Field(default_factory=list)
