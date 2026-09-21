@@ -365,10 +365,10 @@ def test_reconciled_fill_reduces_next_slice_quantity(filled) -> None:
 
 @pytest.mark.parametrize("chase_enabled", [False, True])
 def test_subsecond_wait_stops_at_deadline_without_chasing(monkeypatch, chase_enabled) -> None:
-    from tests.unit.executor.algorithms.test_algorithm_issue_fixes import _ClockStub
+    from tests.fixtures.algorithm_fakes import ClockStub
 
     executor = _make_executor(OrderParamModel.DIRECTIONAL)
-    clock = _ClockStub()
+    clock = ClockStub()
     tracker = OrderTracker(executor=executor, clock=clock, chase_config=ChaseConfig() if chase_enabled else None)
     order = _submit(executor, tracker, OrderDirection.BUY, 2, target=2, current=0)[0]
     executor.get_pending_orders.return_value = [order]
@@ -424,9 +424,9 @@ def test_final_fill_before_gate_always_refreshes_slice(model, sign, arrival) -> 
 @pytest.mark.parametrize("model", [OrderParamModel.OFFSET, OrderParamModel.POSITION_SIDE, OrderParamModel.DIRECTIONAL])
 def test_slow_snapshot_cannot_submit_after_deadline(monkeypatch, model) -> None:
     from axile.executor.algorithms.utils import order_helper
-    from tests.unit.executor.algorithms.test_algorithm_issue_fixes import _ClockStub
+    from tests.fixtures.algorithm_fakes import ClockStub
 
-    clock = _ClockStub()
+    clock = ClockStub()
     monkeypatch.setattr(order_helper, "get_default_clock", lambda: clock)
     executor = _make_executor(model)
 
@@ -442,9 +442,9 @@ def test_slow_snapshot_cannot_submit_after_deadline(monkeypatch, model) -> None:
 
 def test_chunk_submission_stops_when_budget_expires(monkeypatch) -> None:
     from axile.executor.algorithms.utils import order_helper
-    from tests.unit.executor.algorithms.test_algorithm_issue_fixes import _ClockStub
+    from tests.fixtures.algorithm_fakes import ClockStub
 
-    clock = _ClockStub()
+    clock = ClockStub()
     monkeypatch.setattr(order_helper, "get_default_clock", lambda: clock)
     executor = _make_executor(OrderParamModel.OFFSET)
     executor.get_positions.return_value = []

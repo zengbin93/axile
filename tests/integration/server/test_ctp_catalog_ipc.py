@@ -20,6 +20,8 @@ from axile.server.execution.worker_backend.protocol import (
     WorkerBackendResponse,
 )
 
+pytestmark = pytest.mark.slow
+
 KEY = ("9999", "tcp://unused:1", "20260914")
 ROWS = {"ag2612": {"InstrumentID": "ag2612", "PriceTick": 1.0}}
 

@@ -321,10 +321,10 @@ def test_real_algorithm_crosses_zero_within_slice_budget(monkeypatch, module, mo
     from axile.common.order_param_model import OrderParamModel
     from axile.executor.algorithms.utils import clock as clock_module
     from axile.executor.models.unified_account_assets import PositionDirection
-    from tests.unit.executor.algorithms.test_algorithm_issue_fixes import _ClockStub
+    from tests.fixtures.algorithm_fakes import ClockStub
     from tests.unit.executor.algorithms.test_split_orders import _make_executor
 
-    clock = _ClockStub()
+    clock = ClockStub()
     monkeypatch.setattr(clock_module, "_default_clock", clock)
     executor = _make_executor(OrderParamModel(model_name))
     current = [-sign * 2.0]

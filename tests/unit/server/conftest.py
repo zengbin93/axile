@@ -20,11 +20,10 @@ def _ensure_database_schema() -> Iterator[None]:
     Notes
     -----
     服务端部分用例会经由未被 monkeypatch 的真实 ``SessionLocal`` 触达
-    ``axile.server.core.db.engine``。历史上这些用例依赖开发机遗留的
-    ``./axile.db`` 文件恰好已含表结构，在全新检出的 CI 环境（无该文件）会
-    因 ``no such table`` 失败。此夹具用 ``SQLModel.metadata.create_all``
-    幂等建表，消除对遗留文件的隐式依赖；建表后 ``dispose`` 连接池，避免
-    连接被绑定到本夹具的事件循环而影响后续按用例创建的事件循环。
+    ``axile.server.core.db.engine``。根级 ``conftest`` 已在任何服务端模块导入前，
+    通过 ``AXILE_CONFIG_TOML`` 将该引擎指向本次测试会话的临时数据库；这里仅
+    为该隔离数据库创建完整 schema。建表后 ``dispose`` 连接池，避免连接被绑定
+    到本夹具的事件循环而影响后续按用例创建的事件循环。
     """
 
     async def _create() -> None:

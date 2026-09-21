@@ -98,10 +98,10 @@ def test_unassociated_fill_replays_before_cancel_callback_submits_fallback(broke
 
     from axile.executor.algorithms.utils.order_tracker import ChaseConfig, OrderTracker
     from axile.executor.ctp.converters import order_to_unified
-    from tests.unit.executor.algorithms.test_algorithm_issue_fixes import _FallbackExecutor
+    from tests.fixtures.algorithm_fakes import FallbackExecutor
 
     executor = broker.executor
-    adapter = _FallbackExecutor()
+    adapter = FallbackExecutor()
     adapter.symbol = "ag2612"
     tracker = OrderTracker(adapter, chase_config=ChaseConfig(enabled=True))
     native = SimpleNamespace(

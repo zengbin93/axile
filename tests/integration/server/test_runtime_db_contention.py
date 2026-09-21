@@ -13,6 +13,8 @@ from axile.server.core.db import SQLITE_BUSY_TIMEOUT_MS, register_sqlite_concurr
 from axile.server.execution import account_runtime_sync as runtime
 from tests.unit.server._runtime_db_support import runtime_database
 
+pytestmark = pytest.mark.slow
+
 _WRITE_CONTROL_RECORD = """
 import sqlite3, sys
 with sqlite3.connect(sys.argv[1], timeout=0.5) as connection:
