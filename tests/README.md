@@ -24,6 +24,10 @@ uv run pytest tests/ -v \
   --cov=axile --cov-report=xml --cov-report=term-missing --cov-fail-under=69
 ```
 
+测试启动时会在系统临时目录生成独立的 ``config.toml``、SQLite 数据库和日志目录，
+并通过 ``AXILE_CONFIG_TOML`` 传递给测试启动的子进程。测试不得读取或写入工作目录中的
+``axile.db``；需要数据库的用例应使用这套会话级隔离环境或自己的 ``tmp_path``。
+
 运行单个文件或测试：
 
 ```bash
