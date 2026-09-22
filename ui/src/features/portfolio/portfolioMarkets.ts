@@ -26,5 +26,5 @@ export function portfolioMarketOptions(channels: ChannelCapability[]): Portfolio
 export function portfolioTemplate(option: PortfolioMarketOption): string {
   const weight = 1 / option.exampleSymbols.length
   const entries = option.exampleSymbols.map((symbol) => `${JSON.stringify(symbol)}: ${Number(weight.toFixed(6))}`)
-  return `def calculate_portfolio(context):\n    # 返回 {品种: 目标权重}\n    return {${entries.join(', ')}}`
+  return `from axile.server.context import Context\n\ndef calculate_portfolio(context: Context) -> dict[str, float]:\n    # 返回 {品种: 目标权重}\n    return {${entries.join(', ')}}`
 }

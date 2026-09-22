@@ -10,7 +10,7 @@ import { Select } from '@/components/ui/Select'
 import { Segmented } from '@/components/ui/Segmented'
 import { Tooltip } from '@/components/ui/Tooltip'
 import { ConfirmModal, type ConfirmSpec } from '@/components/ui/ConfirmModal'
-import { PythonFunctionEditor, type PythonEditorHandle } from '@/components/ui/PythonFunctionEditor'
+import { PythonFunctionEditor, PythonRunResultBody, type PythonEditorHandle, type PythonProblem } from '@/components/ui/PythonFunctionEditor'
 import { PythonRunPanel } from '@/components/ui/PythonRunPanel'
 import { channelLabel } from '@/features/dashboard/display'
 import { WeightResult } from '@/features/portfolio/WeightResult'
@@ -99,6 +99,7 @@ export function PortfolioEditPage() {
   const [resultOpen, setResultOpen] = useState(true)
   const [targetTab, setTargetTab] = useState<'effective' | 'trial'>('effective')
   const [problemsOpen, setProblemsOpen] = useState(false)
+  const [codeProblems, setCodeProblems] = useState<PythonProblem[]>([])
   const [followersOpen, setFollowersOpen] = useState(true)
   const [inspectorWidth, setInspectorWidth] = useState(initialInspectorWidth)
   const [resizingInspector, setResizingInspector] = useState(false)
@@ -357,7 +358,7 @@ export function PortfolioEditPage() {
     try {
       const text = await navigator.clipboard.readText()
       if (text) {
-        setCode(text)
+        editorRef.current?.replaceCode(text)
         setSaveError(null)
       }
     } finally {
@@ -704,6 +705,7 @@ export function PortfolioEditPage() {
           </div>
           <PythonFunctionEditor
             ref={editorRef}
+            onProblems={setCodeProblems}
             layout="workbench"
             fill
             code={code}
@@ -773,12 +775,28 @@ export function PortfolioEditPage() {
 
           <PythonRunPanel
             kind="problems"
+            title="代码问题 / 试跑"
+            statusOverride={<span className="ml-auto self-center px-3 text-[12px] text-ink-3">{codeProblems.filter((problem) => problem.source === 'ty').length} 个静态问题</span>}
+            contentOverride={(
+              <div className="space-y-3">
+                <p className="text-[12px] text-ink-3">代码问题 · ty</p>
+                {codeProblems.filter((problem) => problem.source === 'ty').map((problem, index) => (
+                  <button key={`${index}-${problem.line}`} type="button" className="block w-full border-l-2 border-warn px-3 py-2 text-left text-[13px] text-warn" onClick={() => editorRef.current?.revealLine(problem.line)}>
+                    第 {problem.line} 行 · {problem.message}
+                  </button>
+                ))}
+                {!codeProblems.some((problem) => problem.source === 'ty') && <p className="text-[13px] text-ink-3">暂无静态诊断；语言服务状态见编辑器底栏。</p>}
+                <p className="border-t border-line pt-3 text-[12px] text-ink-3">试跑结果{calc.stale ? ' · 代码已修改，以下为旧结果' : ''}</p>
+                {!calc.stale && calc.editorResult?.errorLine != null && <button type="button" className="text-[12px] text-accent" onClick={() => editorRef.current?.revealLine(calc.editorResult!.errorLine!)}>定位到第 {calc.editorResult.errorLine} 行</button>}
+                {calc.editorResult ? <PythonRunResultBody result={calc.editorResult} stale={calc.stale} /> : <p className="text-[13px] text-ink-3">尚未试跑</p>}
+              </div>
+            )}
             open={problemsOpen}
             onToggle={() => setProblemsOpen((open) => !open)}
             className="border-t border-line"
             running={calc.validating}
             result={calc.editorResult}
-            stale={calc.stale}
+            stale={false}
             onRevealError={(line) => editorRef.current?.revealLine(line)}
           />
         </div>

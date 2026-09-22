@@ -86,7 +86,7 @@ describe('portfolio market presets', () => {
 
   it('builds an equal-weight runnable template from example symbols', () => {
     expect(portfolioTemplate(futures)).toBe(
-      'def calculate_portfolio(context):\n    # 返回 {品种: 目标权重}\n    return {"rb2610": 0.5, "ag2612": 0.5}',
+      'from axile.server.context import Context\n\ndef calculate_portfolio(context: Context) -> dict[str, float]:\n    # 返回 {品种: 目标权重}\n    return {"rb2610": 0.5, "ag2612": 0.5}',
     )
   })
 })

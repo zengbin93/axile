@@ -1,34 +1,24 @@
-import { useEffect, useImperativeHandle, useRef, type ReactNode, type Ref } from 'react'
+import { useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type ReactNode, type Ref } from 'react'
 import { python } from '@codemirror/lang-python'
-import { HighlightStyle, syntaxHighlighting } from '@codemirror/language'
-import { lintGutter, setDiagnostics, type Diagnostic } from '@codemirror/lint'
+import { lintGutter, linter, forceLinting, forEachDiagnostic, type Diagnostic } from '@codemirror/lint'
+import { Compartment, StateEffect } from '@codemirror/state'
+import { undo, redo, isolateHistory } from '@codemirror/commands'
+import { openSearchPanel, gotoLine } from '@codemirror/search'
 import { EditorView } from '@codemirror/view'
-import { tags } from '@lezer/highlight'
 import CodeMirror, { type ReactCodeMirrorRef } from '@uiw/react-codemirror'
 import { Check, Clipboard, Play, TriangleAlert } from 'lucide-react'
 import { InkRewrite } from '@/components/ui/InkRewrite'
+import { connectPython, type LanguageStatus } from '@/components/ui/pythonLanguageService'
+import { editingExtensions, isMac } from '@/components/ui/pythonEditorExtensions'
+import { apiSend } from '@/lib/api/client'
+import { PythonSourcePreview, type SourcePreview } from '@/components/ui/PythonSourcePreview'
+import { quickFix, renamePythonSymbol } from '@/components/ui/pythonLanguageFeatures'
+import { jumpToDefinition, findReferences } from '@codemirror/lsp-client'
+import { pythonEditorTheme } from '@/components/ui/pythonEditorTheme'
 
-const editorTheme = EditorView.theme({
-  '&': { backgroundColor: 'var(--color-code-bg)', color: 'var(--color-code-fg)', fontSize: '14px' },
-  '&.cm-focused': { outline: 'none' },
-  '.cm-gutters': { backgroundColor: 'var(--color-code-bg)', color: 'var(--color-ink-3)', border: 'none' },
-  '.cm-content': { fontFamily: 'var(--font-mono)' },
-  '.cm-cursor': { borderLeftColor: 'var(--color-code-fg)' },
-  '&.cm-focused .cm-selectionBackground, .cm-selectionBackground, ::selection': {
-    backgroundColor: 'var(--color-code-selection) !important',
-  },
-})
-
-const vscodeDarkHighlight = HighlightStyle.define([
-  { tag: [tags.keyword, tags.modifier, tags.controlKeyword, tags.operatorKeyword], color: 'var(--color-code-keyword)' },
-  { tag: [tags.variableName, tags.propertyName], color: 'var(--color-code-name)' },
-  { tag: [tags.function(tags.variableName), tags.definition(tags.variableName)], color: 'var(--color-code-function)' },
-  { tag: [tags.string, tags.special(tags.string)], color: 'var(--color-code-string)' },
-  { tag: [tags.number, tags.bool, tags.null], color: 'var(--color-code-number)' },
-  { tag: [tags.className, tags.typeName, tags.namespace], color: 'var(--color-code-type)' },
-  { tag: [tags.comment, tags.lineComment, tags.blockComment], color: 'var(--color-code-comment)', fontStyle: 'italic' },
-  { tag: [tags.operator, tags.punctuation], color: 'var(--color-code-fg)' },
-])
+export interface PythonProblem { line: number; message: string; source: string; severity: string }
+const runtimeChanged = StateEffect.define<null>()
+const basicSetup = { foldGutter: true, highlightActiveLine: true, highlightActiveLineGutter: true, autocompletion: true }
 
 export interface PythonValidationState {
   valid: boolean
@@ -42,6 +32,7 @@ export interface PythonValidationState {
 export interface PythonEditorHandle {
   focus: () => void
   revealLine: (line: number) => void
+  replaceCode: (code: string) => void
 }
 
 export type PythonRunStatus = 'running' | 'idle' | 'stale' | 'pass' | 'fail'
@@ -127,6 +118,7 @@ export function PythonFunctionEditor({
   fill = false,
   layout = 'console',
   ref,
+  onProblems,
 }: {
   code: string
   onChange: (code: string) => void
@@ -148,11 +140,64 @@ export function PythonFunctionEditor({
   /** 布局形态：console = 表单内嵌（工具条 + 结果带）；workbench = 纯代码区。 */
   layout?: 'console' | 'workbench'
   ref?: Ref<PythonEditorHandle>
+  onProblems?: (problems: PythonProblem[]) => void
 }) {
   const cmRef = useRef<ReactCodeMirrorRef>(null)
   const hasCode = code.trim().length > 0
   const onRunRef = useRef(onRun)
   onRunRef.current = onRun
+  const onChangeRef = useRef(onChange)
+  onChangeRef.current = onChange
+  const changeCode = useCallback((value: string) => onChangeRef.current(value), [])
+  const [view, setView] = useState<EditorView | null>(null)
+  const [languageStatus, setLanguageStatus] = useState<LanguageStatus>('connecting')
+  const [position, setPosition] = useState({ line: 1, column: 1 })
+  const [formatting, setFormatting] = useState(false)
+  const [editorMessage, setEditorMessage] = useState('')
+  const [helpOpen, setHelpOpen] = useState(false)
+  const [sourcePreview, setSourcePreview] = useState<SourcePreview | null>(null)
+  const languageSlot = useMemo(() => new Compartment(), [])
+  const runtimeRef = useRef({ result, stale })
+  runtimeRef.current = { result, stale }
+  const problemsRef = useRef(onProblems)
+  problemsRef.current = onProblems
+  const problemsKey = useRef('')
+  const formatRef = useRef<() => void>(() => {})
+  const formattingRef = useRef(false)
+
+  useEffect(() => {
+    if (!view) return
+    return connectPython(view, languageSlot, setLanguageStatus, (uri, code) => new Promise((resolve) => {
+      setSourcePreview({ uri, code, resolve })
+    }))
+  }, [view, languageSlot])
+
+  const replaceCode = useCallback((text: string) => {
+    const editor = cmRef.current?.view
+    if (!editor || disabled) return
+    editor.dispatch({ changes: { from: 0, to: editor.state.doc.length, insert: text }, annotations: isolateHistory.of('full') })
+    editor.focus()
+  }, [disabled])
+
+  formatRef.current = () => {
+    const editor = cmRef.current?.view
+    if (!editor || disabled || formattingRef.current) return
+    const before = editor.state.doc
+    formattingRef.current = true
+    setFormatting(true)
+    setEditorMessage('')
+    void apiSend<{ code: string }>('POST', '/editor/format', { code: before.toString() })
+      .then(({ code: formatted }) => {
+        if (cmRef.current?.view !== editor || editor.state.readOnly) return
+        if (editor.state.doc !== before) {
+          setEditorMessage('代码已变化，请重新格式化')
+          return
+        }
+        if (formatted !== before.toString()) replaceCode(formatted)
+      })
+      .catch((error: unknown) => setEditorMessage(error instanceof Error ? error.message : '格式化失败'))
+      .finally(() => { formattingRef.current = false; setFormatting(false) })
+  }
 
   useImperativeHandle(
     ref,
@@ -165,33 +210,29 @@ export function PythonFunctionEditor({
         view.dispatch({ selection: { anchor: line.from }, effects: EditorView.scrollIntoView(line.from, { y: 'center' }) })
         view.focus()
       },
+      replaceCode,
     }),
-    [],
+    [replaceCode],
   )
 
   useEffect(() => {
     const view = cmRef.current?.view
     if (!view) return
-    const diagnostics: Diagnostic[] = []
-    let errorFrom: number | null = null
-    if (result && !result.valid && result.errorLine != null) {
+    view.dispatch({ effects: runtimeChanged.of(null) })
+    forceLinting(view)
+    if (result && !stale && !result.valid && result.errorLine != null) {
       const lineNo = Math.min(Math.max(result.errorLine, 1), view.state.doc.lines)
       const line = view.state.doc.line(lineNo)
-      const message = [result.errorType, result.errorMessage].filter(Boolean).join(': ')
-      diagnostics.push({ from: line.from, to: line.to, severity: 'error', message: message || '试跑未通过' })
-      errorFrom = line.from
+      view.dispatch({ effects: EditorView.scrollIntoView(line.from, { y: 'center' }) })
     }
-    // 失败时把错误行滚进可视区，省掉在长代码里找 lint 红标。
-    view.dispatch(
-      setDiagnostics(view.state, diagnostics),
-      errorFrom != null ? { effects: EditorView.scrollIntoView(errorFrom, { y: 'center' }) } : {},
-    )
-  }, [result])
+  }, [result, stale])
 
   const paste = async () => {
     try {
       const text = await navigator.clipboard.readText()
-      if (text) onChange(text)
+      if (text) replaceCode(text)
+    } catch {
+      setEditorMessage('无法读取剪贴板，请在编辑器内使用粘贴快捷键')
     } finally {
       cmRef.current?.view?.focus()
     }
@@ -200,26 +241,73 @@ export function PythonFunctionEditor({
   const status = pythonRunStatus(running, result, stale)
   const style = PYTHON_RUN_STYLE[status]
 
-  // Ctrl/Cmd+Enter 试跑（VSCode Run 的肌肉记忆）；onRun 内部自行判断 canRun。
-  const runKeymap = EditorView.domEventHandlers({
-    keydown: (event) => {
-      if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
-        event.preventDefault()
-        onRunRef.current()
-        return true
-      }
-      return false
-    },
-  })
-  const extensions = [
-    editorTheme,
-    syntaxHighlighting(vscodeDarkHighlight),
+  const extensions = useMemo(() => [
+    pythonEditorTheme,
     python(),
     lintGutter(),
-    EditorView.lineWrapping,
-    EditorView.editable.of(!disabled),
-    runKeymap,
-  ]
+    languageSlot.of([]),
+    editingExtensions(() => formatRef.current(), () => onRunRef.current()),
+    linter((editor): Diagnostic[] => {
+      const { result: current, stale: outdated } = runtimeRef.current
+      if (!current || current.valid || outdated || current.errorLine == null) return []
+      const line = editor.state.doc.line(Math.min(Math.max(current.errorLine, 1), editor.state.doc.lines))
+      return [{ from: line.from, to: line.to, severity: 'error', source: '试跑',
+        message: [current.errorType, current.errorMessage].filter(Boolean).join(': ') || '试跑未通过' }]
+    }, { needsRefresh: (update) => update.transactions.some((transaction) => transaction.effects.some((effect) => effect.is(runtimeChanged))) }),
+    EditorView.updateListener.of((update) => {
+      if (update.selectionSet || update.docChanged) {
+        const line = update.state.doc.lineAt(update.state.selection.main.head)
+        setPosition({ line: line.number, column: update.state.selection.main.head - line.from + 1 })
+      }
+      const problems: PythonProblem[] = []
+      forEachDiagnostic(update.state, (diagnostic, from) => problems.push({
+        line: update.state.doc.lineAt(from).number, message: diagnostic.message,
+        source: diagnostic.source ?? 'ty', severity: diagnostic.severity,
+      }))
+      const key = JSON.stringify(problems)
+      if (key !== problemsKey.current) {
+        problemsKey.current = key
+        queueMicrotask(() => problemsRef.current?.(problems))
+      }
+    }),
+  ], [languageSlot])
+
+  const mod = isMac() ? '⌘' : 'Ctrl'
+  const tools = (
+    <div className="flex flex-none flex-wrap items-center gap-3 border-b border-line bg-surface px-3 py-1.5 text-[12px] text-ink-2" aria-label="编辑操作">
+      <button type="button" onClick={() => view && openSearchPanel(view)}>查找 / 替换</button>
+      <button type="button" disabled={disabled || formatting} onClick={() => formatRef.current()}>{formatting ? '格式化中…' : '格式化'}</button>
+      <button type="button" disabled={disabled} onClick={() => { if (view) { undo(view); view.focus() } }}>撤销</button>
+      <button type="button" disabled={disabled} onClick={() => { if (view) { redo(view); view.focus() } }}>重做</button>
+      <button type="button" aria-expanded={helpOpen} onClick={() => setHelpOpen(!helpOpen)}>快捷键</button>
+      <button type="button" disabled={languageStatus !== 'ready'} onClick={() => view && jumpToDefinition(view)}>定义</button>
+      <button type="button" disabled={languageStatus !== 'ready'} onClick={() => view && findReferences(view)}>引用</button>
+      <button type="button" disabled={disabled || languageStatus !== 'ready'} onClick={() => view && renamePythonSymbol(view)}>重命名</button>
+      <button type="button" disabled={disabled || languageStatus !== 'ready'} onClick={() => view && quickFix(view)}>快速修复</button>
+    </div>
+  )
+  const assistance = (
+    <>
+      <div inert={!helpOpen} className={`grid flex-none transition-[grid-template-rows] duration-200 motion-reduce:transition-none ${helpOpen ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'}`}>
+        <div className="min-h-0 overflow-hidden"><p className="bg-surface px-3 py-2 text-[12px] leading-6 text-ink-2">
+          {mod}+F 查找 · {isMac() ? '⌘+⌥+F' : 'Ctrl+H'} 替换 · {mod}+Z 撤销 · {mod}+Shift+Z 重做 · Tab / Shift+Tab 缩进 · Esc 然后 Tab 移出编辑器<br />
+          {mod}+/ 注释 · Alt+↑/↓ 移动行 · {mod}+D 选中下一个相同词 · {mod}+G 跳转行 · Shift+Alt+F 格式化 · {mod}+S 保存 · {mod}+Enter 试跑
+          <br />F12 定义 · Shift+F12 引用 · F2 重命名 · {mod}+. 快速修复 · {mod}+Shift+Space 参数提示
+        </p></div>
+      </div>
+      {editorMessage && <p role="status" className="flex-none bg-surface px-3 py-2 text-[12px] text-warn">{editorMessage}</p>}
+      {sourcePreview && <PythonSourcePreview source={sourcePreview} onClose={() => { setSourcePreview(null); requestAnimationFrame(() => view?.focus()) }} />}
+    </>
+  )
+  const statusBar = (
+    <div className="flex flex-none items-center gap-3 border-t border-line bg-surface px-3 py-1 text-[11px] text-ink-3">
+      <button type="button" onClick={() => view && gotoLine(view)}>行 {position.line}，列 {position.column}</button>
+      <span>4 空格</span><span>Python</span>
+      <span role="status" aria-label="语言服务" data-state={languageStatus} className={`ml-auto ${languageStatus === 'reconnecting' ? 'text-warn' : ''}`}>
+        <InkRewrite text={languageStatus === 'ready' ? 'ty 已连接' : languageStatus === 'connecting' ? 'ty 连接中…' : 'ty 重连中 · 可继续编辑'} tone="label" />
+      </span>
+    </div>
+  )
 
   const codeBlock = (
     <div className={`relative bg-code-bg ${fill ? 'min-h-0 flex-1' : ''}`}>
@@ -231,13 +319,16 @@ export function PythonFunctionEditor({
             : '[&_.cm-editor]:!bg-code-bg [&_.cm-gutters]:!bg-code-bg'
         }
         value={code}
-        onChange={onChange}
+        onChange={changeCode}
+        onCreateEditor={setView}
+        editable={!disabled}
+        readOnly={disabled}
         height={fill ? '100%' : height}
         minHeight={fill ? undefined : minHeight}
         maxHeight={fill ? undefined : maxHeight}
         theme="none"
         extensions={extensions}
-        basicSetup={{ foldGutter: false, highlightActiveLine: false, highlightActiveLineGutter: false, autocompletion: false }}
+        basicSetup={basicSetup}
       />
       {!hasCode && (
         <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-2">
@@ -254,7 +345,9 @@ export function PythonFunctionEditor({
     // 工作台：纯代码区，吃满父容器；结果呈现由外部 PythonRunPanel 承担。
     return (
       <div className="flex h-full min-h-0 w-full flex-col">
+        {tools}{assistance}
         <div className="flex min-h-0 flex-1 flex-col overflow-hidden">{codeBlock}</div>
+        {statusBar}
       </div>
     )
   }
@@ -306,7 +399,7 @@ export function PythonFunctionEditor({
           </div>
         </div>
 
-        {codeBlock}
+        {tools}{assistance}{codeBlock}{statusBar}
       </div>
     </div>
   )
