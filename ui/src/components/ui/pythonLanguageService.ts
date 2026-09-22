@@ -1,8 +1,9 @@
 import { Compartment, Text } from '@codemirror/state'
 import { EditorView, ViewPlugin, keymap, showDialog, type ViewUpdate } from '@codemirror/view'
 import { linter, forceLinting, type Diagnostic } from '@codemirror/lint'
-import { LSPClient, LSPPlugin, serverCompletion, hoverTooltips, signatureHelp, jumpToDefinitionKeymap, findReferencesKeymap, type WorkspaceFile } from '@codemirror/lsp-client'
+import { LSPClient, LSPPlugin, serverCompletion, signatureHelp, jumpToDefinitionKeymap, findReferencesKeymap, type WorkspaceFile } from '@codemirror/lsp-client'
 import DOMPurify from 'dompurify'
+import { pythonHover } from '@/components/ui/pythonHover'
 import { apiGet } from '@/lib/api/client'
 import { pythonVisualFeatures, quickFix, renamePythonSymbol } from '@/components/ui/pythonLanguageFeatures'
 import type { DocumentSymbol, SymbolInformation } from 'vscode-languageserver-protocol'
@@ -50,7 +51,7 @@ export function connectPython(
         rootUri: message.rootUri,
         timeout: 10000,
         sanitizeHTML: (html) => DOMPurify.sanitize(html),
-        extensions: [serverCompletion(), hoverTooltips(), signatureHelp(), {
+        extensions: [serverCompletion(), signatureHelp(), {
           clientCapabilities: { textDocument: {
             codeAction: { codeActionLiteralSupport: { codeActionKind: { valueSet: ['quickfix'] } }, resolveSupport: { properties: ['edit'] } },
             semanticTokens: { requests: { full: true }, tokenTypes: ['namespace', 'class', 'type', 'function', 'method', 'variable', 'parameter', 'property', 'keyword', 'string', 'number', 'comment', 'decorator'], tokenModifiers: [], formats: ['relative'] },
@@ -95,6 +96,7 @@ export function connectPython(
         view.dispatch({ effects: slot.reconfigure([
           active.plugin(message.uri, 'python'),
           pythonVisualFeatures(),
+          pythonHover(),
           ...(onSymbols ? [documentSymbols(onSymbols)] : []),
           keymap.of([...jumpToDefinitionKeymap, ...findReferencesKeymap,
             { key: 'F2', run: renamePythonSymbol }, { key: 'Mod-.', run: quickFix }]),
