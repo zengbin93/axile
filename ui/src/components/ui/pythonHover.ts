@@ -154,7 +154,11 @@ function pinDocumentationContext(dom: HTMLElement, content: HTMLElement) {
 }
 
 const hoverTheme = EditorView.theme({
-  '.cm-tooltip-hover:has(.cm-python-hover)': { display: 'flex', flexDirection: 'column', overflow: 'hidden' },
+  '.cm-tooltip-hover:has(.cm-python-hover)': {
+    display: 'flex', flexDirection: 'column', overflow: 'hidden',
+    border: '1px solid var(--color-line)', borderRadius: '6px',
+    backgroundColor: 'var(--color-surface)', boxShadow: 'var(--shadow-card)',
+  },
   '.cm-python-hover': {
     position: 'relative', display: 'flex', flexDirection: 'column', boxSizing: 'border-box', minHeight: '0', flex: '0 1 auto',
     width: 'max-content', maxWidth: 'min(680px, calc(100vw - 24px))', maxHeight: 'min(420px, 55vh)',
@@ -163,19 +167,19 @@ const hoverTheme = EditorView.theme({
   '.cm-python-hover[style*="width"]': { maxWidth: 'calc(100vw - 24px)', maxHeight: 'calc(100vh - 24px)' },
   '.cm-python-hover-doc': {
     minWidth: '0', minHeight: '0', flex: '1 1 auto', overflow: 'auto', overscrollBehavior: 'contain',
-    padding: '10px 12px 16px', fontFamily: 'var(--font-sans)', fontSize: '13px',
+    padding: '8px 10px', fontFamily: 'var(--font-sans)', fontSize: '13px',
     color: 'var(--color-ink-2)', lineHeight: '1.65', whiteSpace: 'normal', overflowWrap: 'anywhere',
   },
   '.cm-python-hover-signature': {
     flex: '0 0 auto', boxSizing: 'border-box',
-    maxHeight: 'min(110px, 25vh, max(0px, calc(var(--python-hover-height, 420px) - 24px)))', padding: '0 12px',
+    maxHeight: 'min(110px, 25vh, max(0px, calc(var(--python-hover-height, 420px) - 24px)))', padding: '0 10px',
     borderBottom: '1px solid var(--color-line)', backgroundColor: 'var(--color-surface)',
   },
   '.cm-python-hover-signature + .cm-python-hover-doc': { minHeight: '24px' },
-  '.cm-python-hover-section': { display: 'flow-root', paddingBottom: '8px' },
+  '.cm-python-hover-section': { display: 'flow-root', paddingBottom: '4px' },
   '.cm-python-hover-doc .cm-python-hover-section > :first-child': {
-    position: 'sticky', top: '-10px', zIndex: '1', margin: '0 -12px 6px', padding: '8px 12px',
-    backgroundColor: 'var(--color-surface)', borderBottom: '1px solid var(--color-line)',
+    position: 'sticky', top: '-8px', zIndex: '1', margin: '0 -10px 4px', padding: '6px 10px',
+    backgroundColor: 'var(--color-surface)',
   },
   '.cm-python-hover-doc:focus-visible': { outline: '1px solid var(--color-accent)', outlineOffset: '-2px' },
   '.cm-python-hover-doc p': { margin: '8px 0' },
@@ -189,11 +193,11 @@ const hoverTheme = EditorView.theme({
     boxDecorationBreak: 'clone',
   },
   '.cm-python-hover-doc pre': {
-    whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', margin: '10px 0', padding: '8px 10px',
-    border: '1px solid var(--color-line)', borderRadius: '5px',
+    whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', margin: '8px 0', padding: '6px 8px',
+    border: 'none', borderRadius: '4px',
     backgroundColor: 'var(--color-code-bg)', color: 'var(--color-code-fg)', fontFamily: 'var(--font-mono)', lineHeight: '1.6',
   },
-  '.cm-python-hover-signature pre': { margin: '0', padding: '8px 0', border: 'none', backgroundColor: 'transparent' },
+  '.cm-python-hover-signature pre': { margin: '0', padding: '7px 0', border: 'none', backgroundColor: 'transparent' },
   '.cm-python-hover-doc ul, .cm-python-hover-doc ol': { margin: '8px 0', paddingLeft: '22px' },
   '.cm-python-hover-doc ul': { listStyleType: 'disc' },
   '.cm-python-hover-doc ol': { listStyleType: 'decimal' },
