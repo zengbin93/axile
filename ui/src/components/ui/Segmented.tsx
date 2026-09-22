@@ -36,12 +36,14 @@ export function Segmented<T extends string>({
   value,
   options,
   onChange,
+  trailing,
   size = 'md',
   className = '',
 }: {
   value: T
   options: SegmentedOption<T>[]
   onChange: (value: T) => void
+  trailing?: ReactNode
   size?: SegmentedSize
   className?: string
 }): ReactElement {
@@ -105,6 +107,7 @@ export function Segmented<T extends string>({
           {o.icon}{o.label}
         </button>
       ))}
+      {trailing && <div className="relative z-10 ml-0.5 flex items-center border-l border-line/70 pl-0.5">{trailing}</div>}
     </div>
   )
 }

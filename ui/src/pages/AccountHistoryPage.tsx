@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useParams } from 'react-router'
-import { RefreshCw, Save } from 'lucide-react'
+import { CircleHelp, RefreshCw, Save } from 'lucide-react'
 import { useNavigate } from '@/components/ui/nav'
 import { SectionLabel } from '@/components/ui/Card'
 import { Segmented } from '@/components/ui/Segmented'
+import { Tooltip } from '@/components/ui/Tooltip'
 import { ErrorNotice } from '@/components/ui/ErrorNotice'
 import { PerformanceChart } from '@/components/viz/PerformanceChart'
 import { PerformanceChartPlaceholder } from '@/features/history/PerformanceChartPlaceholder'
@@ -156,7 +157,11 @@ function AccountHistory({ accountId }: { accountId: number }) {
           <span role="status" className="sr-only">{dirty && !saving ? '参数已修改，待计算' : ''}</span>
         </div>
         <Segmented size="sm" value={view} options={VIEWS} onChange={value => withViewTransition(() => setView(value))} />
-        <fieldset><legend className="sr-only">回测口径</legend><Segmented size="sm" value={backtestMode} options={BACKTEST_MODES} onChange={setBacktestMode} /></fieldset>
+        <fieldset><legend className="sr-only">回测口径</legend><Segmented size="sm" value={backtestMode} options={BACKTEST_MODES} onChange={setBacktestMode} trailing={
+          <Tooltip content={<div className="space-y-1"><p><b>数量换算后：</b>按数量换算目标敞口，并非实际成交持仓。</p><p><b>目标权重：</b>直接按目标权重计算回测收益。</p></div>} arrow>
+            <button type="button" aria-label="回测口径说明" className="flex h-9 w-8 items-center justify-center rounded text-ink-3 hover:text-ink-1 focus-visible:outline-accent"><CircleHelp size={15} aria-hidden="true" /></button>
+          </Tooltip>
+        } /></fieldset>
         <fieldset><legend className="sr-only">横轴尺度</legend><Segmented size="sm" value={scale} options={SCALES} onChange={setScale} /></fieldset>
         <fieldset><legend className="sr-only">成交点</legend><Segmented size="sm" value={markers ? 'on' : 'off'} options={MARKERS} onChange={value => setMarkers(value === 'on')} /></fieldset>
         </div>
