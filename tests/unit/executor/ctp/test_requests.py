@@ -34,6 +34,24 @@ from axile.executor.models.unified_order import OrderDirection, OrderType
 from tests.unit.executor.ctp._quote_test_support import fresh_quote
 
 
+def test_position_valuation_subscribes_combination_legs_and_skips_zero(config):
+    executor = CTPExecutor.__new__(CTPExecutor)
+    executor._lock = threading.RLock()
+    executor._timeout = 0.01
+    executor._instruments = {"rb2610": object(), "rb2701": object()}
+    executor.initialize_websocket = Mock()
+    executor._snapshot_quote_error = Mock(return_value=None)
+    executor._quotes = {symbol: fresh_quote(symbol, "") for symbol in executor._instruments}
+    rows = [
+        SimpleNamespace(InstrumentID="SP rb2610&rb2701", PosiDirection="2", Position=1),
+        SimpleNamespace(InstrumentID="rb2610", Position=0),
+    ]
+    quotes, errors = executor._position_valuation_quotes(rows)
+    executor.initialize_websocket.assert_called_once_with(["rb2610", "rb2701"])
+    assert set(quotes) == {"rb2610", "rb2701"}
+    assert errors == {}
+
+
 @pytest.fixture
 def config() -> CTPAccountConfig:
     """返回不连接柜台的最小 CTP 配置。"""

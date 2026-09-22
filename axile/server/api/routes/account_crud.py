@@ -398,10 +398,14 @@ async def account_dashboard(session: SessionDep, sched: SchedDep) -> AccountDash
         raw_positions = assets.get("positions")
         positions: list[Any] = raw_positions if isinstance(raw_positions, list) else []
         holdings_count = len(positions)
-        position_weights = sorted(
-            (abs(float(pos.get("market_value") or 0.0)) for pos in positions if isinstance(pos, dict)),
-            reverse=True,
-        )[:12]
+        valuation_complete = all(
+            isinstance(pos, dict) and isinstance(pos.get("market_value"), (int, float)) for pos in positions
+        )
+        position_weights = (
+            sorted((abs(float(pos["market_value"])) for pos in positions), reverse=True)[:12]
+            if valuation_complete
+            else []
+        )
         plugin = get_channel(str(account.trade_channel))
         currency = plugin.descriptor.currency
 
@@ -455,7 +459,7 @@ async def account_dashboard(session: SessionDep, sched: SchedDep) -> AccountDash
         target_snapshot = targets_by_account.get(account_id)
         target_weights = None if target_snapshot is None else target_snapshot.normalized_weights
         off_symbol_count = None
-        if latest_snapshot is not None and isinstance(target_weights, dict):
+        if latest_snapshot is not None and valuation_complete and isinstance(target_weights, dict):
             off_symbol_count = plan_executable_target(
                 positions,
                 target_weights,

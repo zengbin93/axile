@@ -144,6 +144,7 @@ export function formatMoney(v: number): string {
 /** 持仓一句话描述。 */
 export function holdingText(count: number, weights: number[]): string {
   if (count === 0) return '空仓'
+  if (weights.length === 0) return `持有 ${count} 只 · 市值不可用`
   const max = weights.length ? Math.max(...weights.map(Math.abs)) : 0
   const total = weights.reduce((s, w) => s + Math.abs(w), 0) || 1
   return `持有 ${count} 只 · 最大 ${((max / total) * 100).toFixed(0)}%`

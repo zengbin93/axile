@@ -577,13 +577,15 @@ class AbstractExecutorCapabilityMixin:
         if not positions:
             return empty_result
 
-        total_asset = sum(pos.market_value for pos in positions)
+        if any(pos.market_value is None for pos in positions):
+            return empty_result
+        total_asset = sum(pos.market_value for pos in positions if pos.market_value is not None)
         if total_asset <= 0:
             return empty_result
 
         last_target: dict[str, float] = {}
         for pos in positions:
-            if pos.volume > 0 and pos.market_value > 0:
+            if pos.volume > 0 and pos.market_value is not None and pos.market_value > 0:
                 weight = pos.market_value / total_asset
                 if hasattr(pos, "direction") and pos.direction == PositionDirection.SHORT:
                     weight = -weight

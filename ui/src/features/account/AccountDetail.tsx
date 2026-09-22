@@ -216,7 +216,11 @@ export function AccountDetail({
   const plan = rebalancePlanOfServer(comparison.data)
   const driftLevel: StatusLevel = plan.off > 0 ? 'warn' : 'ok'
   const driftHeadline =
-    plan.rows.length === 0
+    latestAssets && positions.some((position) => position.market_value == null)
+      ? '暂无有效行情 · 偏离未计算'
+      : !comparisonReady
+        ? '偏离尚未计算'
+        : plan.rows.length === 0
       ? '空仓 · 与目标一致'
       : plan.off === 0
         ? '已调仓到位'

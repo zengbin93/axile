@@ -21,6 +21,36 @@ from axile.executor.models.unified_output import UnifiedStandardOutput
 from axile.executor.models.unified_price import UnifiedPriceData
 
 
+def test_ctp_card_keeps_unpriced_position_visible() -> None:
+    """缺行情时展示持仓手数，不把成本伪装为市值。"""
+    output = UnifiedStandardOutput(
+        account_assets=UnifiedAccountAssets(
+            available_cash=900.0,
+            total_asset=1000.0,
+            market_value=None,
+            positions=[
+                Position(
+                    symbol="rb2610",
+                    volume=1,
+                    available_volume=1,
+                    market_value=None,
+                    direction=PositionDirection.LONG,
+                    extra={"position_cost": 100},
+                )
+            ],
+        ),
+        symbol_results={},
+        status=ExecutionStatus.NOOP,
+        channel_type=TradeChannel.CTP,
+    )
+    card = build_execute_results_feishu_card(_NotificationSource(), output)
+    variables = card["data"]["template_variable"]
+    assert variables["market_value"] == "暂无有效行情"
+    assert variables["positions"][0]["market_value"] == "暂无有效行情"
+    assert variables["positions"][0]["volume"] == "1.0000"
+    assert variables["positions"][0]["rate"] == "—"
+
+
 class _Logger:
     def __init__(self) -> None:
         self.messages: list[tuple[str, object]] = []

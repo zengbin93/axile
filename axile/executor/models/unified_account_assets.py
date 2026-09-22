@@ -58,8 +58,8 @@ class Position(BaseModel):
         当前持仓数量。
     available_volume : float
         可用于交易的持仓数量。
-    market_value : float
-        当前持仓市值。
+    market_value : float | None
+        当前持仓市值；缺少有效行情时为 ``None``。
     direction : PositionDirection
         持仓方向。
     """
@@ -67,7 +67,7 @@ class Position(BaseModel):
     symbol: str = Field(..., description="品种代码（统一格式）")
     volume: float = Field(..., description="持仓数量（统一为float类型）")
     available_volume: float = Field(..., description="可用数量")
-    market_value: float = Field(..., description="持仓市值")
+    market_value: float | None = Field(..., description="持仓市值；缺少有效行情时为 None")
     direction: PositionDirection = Field(..., description="持仓方向")
     avg_price: float | None = Field(None, description="成本价")
 
@@ -100,8 +100,8 @@ class UnifiedAccountAssets(BaseModel):
         可用资金。
     total_asset : float
         总资产。
-    market_value : float
-        持仓市值。
+    market_value : float | None
+        持仓市值；任一在仓品种缺少有效行情时为 ``None``。
     positions : list[Position]
         当前持仓列表。
     currency : str
@@ -116,7 +116,7 @@ class UnifiedAccountAssets(BaseModel):
     # === 核心字段 ===
     available_cash: float = Field(..., description="可用资金")
     total_asset: float = Field(..., description="总资产")
-    market_value: float = Field(..., description="持仓市值")
+    market_value: float | None = Field(..., description="持仓市值；缺少有效行情时为 None")
     positions: list[Position] = Field(default=[], description="持仓列表")
 
     # === 账户级补充字段 ===
@@ -175,16 +175,18 @@ class UnifiedAccountAssets(BaseModel):
                 return pos
         return None
 
-    def get_total_position_value(self) -> float:
+    def get_total_position_value(self) -> float | None:
         """
         计算全部持仓的总市值.
 
         Returns
         -------
-        float
-            所有持仓 ``market_value`` 的总和。
+        float | None
+            所有持仓 ``market_value`` 的总和；任一持仓无法估值时为 ``None``。
         """
-        return sum(pos.market_value for pos in self.positions)
+        if any(pos.market_value is None for pos in self.positions):
+            return None
+        return sum(pos.market_value for pos in self.positions if pos.market_value is not None)
 
     def validate_balance(self) -> bool:
         """
@@ -195,6 +197,8 @@ class UnifiedAccountAssets(BaseModel):
         bool
             当 ``total_asset`` 约等于可用资金与持仓市值之和时返回 ``True``。
         """
+        if self.market_value is None:
+            return False
         calculated_total = self.available_cash + self.market_value
         tolerance = 0.01  # 允许0.01的误差
         return abs(self.total_asset - calculated_total) <= tolerance
@@ -315,7 +319,9 @@ class UnifiedAccountAssets(BaseModel):
                         symbol=str(pos_copy["symbol"]),
                         volume=float(pos_copy["volume"]),
                         available_volume=float(pos_copy["available_volume"]),
-                        market_value=float(pos_copy["market_value"]),
+                        market_value=(
+                            float(pos_copy["market_value"]) if pos_copy.get("market_value") is not None else None
+                        ),
                         direction=PositionDirection(pos_copy["direction"]),
                         avg_price=float(pos_copy["avg_price"]) if pos_copy.get("avg_price") is not None else None,
                         extra=pos_copy.get("extra", {}),
@@ -325,7 +331,11 @@ class UnifiedAccountAssets(BaseModel):
         return cls(
             available_cash=available_cash,
             total_asset=total_asset,
-            market_value=sum(pos.market_value for pos in positions),
+            market_value=(
+                sum(pos.market_value for pos in positions if pos.market_value is not None)
+                if all(pos.market_value is not None for pos in positions)
+                else None
+            ),
             positions=positions,
             currency=currency,
             extra={"channel_type": channel_type},

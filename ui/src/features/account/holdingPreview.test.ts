@@ -80,6 +80,16 @@ describe('currentHoldingPreview', () => {
     ])
   })
 
+  it('缺少行情时保留持仓数量而不把市值当成零', () => {
+    const rows = currentHoldingPreview([
+      { symbol: 'rb2610', volume: 2, market_value: 10_000 },
+      { symbol: 'rb2610', volume: 1, market_value: null },
+    ], 100_000)
+    expect(rows[0].volume).toBe(3)
+    expect(rows[0].value).toBeNull()
+    expect(rows[0].weight).toBeNull()
+  })
+
   it('权益未知时保留持仓市值但不编造权重', () => {
     expect(currentHoldingPreview([{ symbol: 'rb2610', volume: 2, available_volume: 1, market_value: 12_000 }], 0)[0]).toEqual({
       key: 'rb2610:long',

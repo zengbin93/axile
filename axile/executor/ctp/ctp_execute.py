@@ -25,6 +25,7 @@ from axile.executor.account_control.exceptions import AccountControlBlockedError
 from axile.executor.algorithms.utils import clock_now
 from axile.executor.china_futures_session import is_within_possible_china_futures_session
 from axile.executor.constants.order_status import OrderStatus
+from axile.executor.ctp.combination import split_combination_position
 from axile.executor.ctp.converters import (
     account_to_unified,
     order_to_unified,
@@ -706,12 +707,15 @@ class CTPExecutor(AbstractExecutor, UnifiedCallbackClient):
             if day and day != self._trading_day:
                 raise CtpRequestError(f"会话对账交易日不一致: expected={self._trading_day}, actual={day}")
             self._catalog_progress("对账记录", throttled=True)
+        quotes, quote_errors = self._position_valuation_quotes(positions)
         self._recovery_snapshot = {
             "trading_day": self._trading_day,
             "assets": account_to_unified(
                 accounts[-1],
                 positions,
                 self._instruments,
+                quotes=quotes,
+                quote_errors=quote_errors,
                 progress=lambda: self._catalog_progress("持仓转换", throttled=True),
             ),
             "orders": orders,
@@ -859,7 +863,35 @@ class CTPExecutor(AbstractExecutor, UnifiedCallbackClient):
         if not accounts:
             raise CtpRequestError("资金查询返回空结果")
         p = build_query_positions(c)
-        return account_to_unified(accounts[-1], self._query("ReqQryInvestorPosition", p), self._instruments)
+        positions = self._query("ReqQryInvestorPosition", p)
+        quotes, quote_errors = self._position_valuation_quotes(positions)
+        return account_to_unified(accounts[-1], positions, self._instruments, quotes=quotes, quote_errors=quote_errors)
+
+    def _position_valuation_quotes(self, positions):
+        """有限等待持仓行情；缺失时保留原始仓位并提供估值诊断。"""
+        symbols = []
+        for row in positions:
+            for leg in split_combination_position(row) or [row]:
+                volume = leg.get("Position", 0) if isinstance(leg, dict) else getattr(leg, "Position", 0)
+                symbol = str(leg.get("InstrumentID", "") if isinstance(leg, dict) else getattr(leg, "InstrumentID", ""))
+                if isinstance(volume, (int, float)) and volume > 0 and symbol in self._instruments:
+                    symbols.append(symbol)
+        symbols = list(dict.fromkeys(symbols))
+        if symbols:
+            try:
+                self.initialize_websocket(symbols)
+            except (CtpRequestError, TimeoutError, ValueError) as exc:
+                self.logger.warning("CTP 持仓行情订阅不可用: %s", exc)
+        deadline = time.monotonic() + min(self._timeout, 2.0)
+        while symbols and time.monotonic() < deadline:
+            with self._lock:
+                if all(self._snapshot_quote_error(symbol, self._quotes.get(symbol)) is None for symbol in symbols):
+                    break
+            threading.Event().wait(0.05)
+        with self._lock:
+            errors = {symbol: self._snapshot_quote_error(symbol, self._quotes.get(symbol)) for symbol in symbols}
+            quotes = {symbol: self._quotes[symbol] for symbol, error in errors.items() if error is None}
+            return quotes, {symbol: error for symbol, error in errors.items() if error is not None}
 
     @override
     def get_market_data(self, symbols):

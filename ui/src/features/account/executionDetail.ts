@@ -125,6 +125,9 @@ export interface AccountBookends {
   equityAfter: number | null
   mvBefore: number | null
   mvAfter: number | null
+  /** 使用执行初始报价回填的持仓参考市值。 */
+  mvBeforeReference: boolean
+  mvAfterReference: boolean
   /** 冻结输入里的执行超时（秒）。 */
   timeoutSec: number | null
 }
@@ -725,6 +728,10 @@ export function buildExecutionDetail(
   }
 
   const stdInput = asDict(artifactContent(artifacts, AT.standardInput)?.input)
+  const isReferenceValue = (assets: Dict | null): boolean =>
+    Array.isArray(assets?.positions) && assets.positions.some((position) =>
+      asStr(asDict(asDict(asDict(position)?.extra)?.market_value_provenance)?.source)
+        === 'ctp_first_tick_last_price_0014')
   const bookends: AccountBookends = {
     cashBefore: isDegradedSnapshotSource(srcBefore) ? null : asNum(beforeAssets?.available_cash),
     cashAfter: isDegradedSnapshotSource(srcAfter) ? null : asNum(afterAssets?.available_cash),
@@ -732,6 +739,8 @@ export function buildExecutionDetail(
     equityAfter: header.equityAfter,
     mvBefore: isDegradedSnapshotSource(srcBefore) ? null : asNum(beforeAssets?.market_value),
     mvAfter: isDegradedSnapshotSource(srcAfter) ? null : asNum(afterAssets?.market_value),
+    mvBeforeReference: isReferenceValue(beforeAssets),
+    mvAfterReference: isReferenceValue(afterAssets),
     timeoutSec: asNum(stdInput?.execution_timeout),
   }
 

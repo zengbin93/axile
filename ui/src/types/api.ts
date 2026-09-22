@@ -554,7 +554,7 @@ export interface AccountAssetSnapshotList {
 export interface Position {
   symbol?: string
   /** 持仓市值（幅度，恒非负；方向由 `direction` 表达）。 */
-  market_value?: number
+  market_value?: number | null
   /** 持仓方向：``多头`` / ``空头``（部分渠道可能给英文）。缺失按多头处理。 */
   direction?: string
   /** 持仓数量。 */

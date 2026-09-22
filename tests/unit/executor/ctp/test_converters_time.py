@@ -7,7 +7,38 @@ from datetime import datetime, timezone
 import pytest
 
 from axile.executor.algorithms.utils.order_tracker import OrderTracker
-from axile.executor.ctp.converters import order_to_unified, quote_to_unified, trade_to_unified
+from axile.executor.ctp.converters import account_to_unified, order_to_unified, quote_to_unified, trade_to_unified
+
+
+def test_position_valuation_uses_latest_price_and_true_multiplier():
+    rows = [dict(InstrumentID="rb2610", PosiDirection="2", Position=2, TodayPosition=1, PositionCost=7000)]
+    quote = quote_to_unified(dict(InstrumentID="rb2610", LastPrice=400))
+    assets = account_to_unified(
+        dict(Balance=10000, Available=3000), rows, {"rb2610": {"VolumeMultiple": 10}}, quotes={"rb2610": quote}
+    )
+    assert assets.total_asset == 10000
+    assert assets.market_value == 8000
+    assert assets.positions[0].market_value == 8000
+    assert assets.positions[0].extra["position_cost"] == 7000
+    assert assets.positions[0].extra["volume_multiple"] == 10
+    assert assets.positions[0].extra["last_price"] == 400
+    assert assets.positions[0].extra["quote_timestamp"] == quote.timestamp
+    assert assets.positions[0].extra["quote_update_time"] == quote.update_time
+
+
+@pytest.mark.parametrize("multiplier,reason", [(None, "missing_multiplier"), (10, "stale_exchange_time")])
+def test_position_missing_valuation_preserves_holdings(multiplier, reason):
+    row = dict(InstrumentID="rb2610", PosiDirection="2", Position=2, TodayPosition=1, PositionCost=7000)
+    instrument = {"VolumeMultiple": multiplier} if multiplier is not None else {}
+    assets = account_to_unified(
+        dict(Balance=10000), [row], {"rb2610": instrument}, quote_errors={"rb2610": "stale_exchange_time"}
+    )
+    assert assets.total_asset == 10000
+    assert assets.market_value is None
+    assert assets.positions[0].volume == 2
+    assert assets.positions[0].market_value is None
+    assert assets.positions[0].extra["valuation_reason"] == reason
+    assert assets.positions[0].extra["position_cost"] == 7000
 
 
 @pytest.mark.skipif(not hasattr(time, "tzset"), reason="requires POSIX tzset")

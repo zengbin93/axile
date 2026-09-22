@@ -90,6 +90,11 @@ async def account_rebalance_plan(session: SessionDep, account_id: int) -> Accoun
     assets = assets_snapshot.assets
     raw_positions = assets.get("positions")
     positions = raw_positions if isinstance(raw_positions, list) else []
+    if any(not isinstance(pos, dict) or pos.get("market_value") is None for pos in positions):
+        return AccountRebalancePlanPublic(
+            observed_at=assets_snapshot.created_at,
+            target_calculated_at=snapshot.calculated_at,
+        )
     plugin = get_channel(account.trade_channel)
     plan = plan_executable_target(
         positions,

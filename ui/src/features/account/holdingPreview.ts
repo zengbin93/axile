@@ -19,6 +19,7 @@ interface HoldingAggregate {
   availableVolume: number
   availableVolumeComplete: boolean
   value: number | null
+  valueComplete: boolean
 }
 
 function isShort(direction: unknown): boolean {
@@ -49,8 +50,8 @@ export function currentHoldingPreview(
     if (!symbol) continue
     const direction = isShort(position.direction) ? 'short' : 'long'
     const key = `${symbol}:${direction}`
-    const rawValue = Number(position.market_value)
-    const value = Number.isFinite(rawValue) ? Math.abs(rawValue) : null
+    const rawValue = position.market_value
+    const value = typeof rawValue === 'number' && Number.isFinite(rawValue) ? Math.abs(rawValue) : null
     const volume = quantity(position.volume)
     const availableVolume = quantity(position.available_volume)
     const previous = holdings.get(key)
@@ -62,12 +63,15 @@ export function currentHoldingPreview(
       availableVolume: (previous?.availableVolume ?? 0) + (availableVolume ?? 0),
       availableVolumeComplete: (previous?.availableVolumeComplete ?? true) && availableVolume != null,
       value: value == null ? previous?.value ?? null : (previous?.value ?? 0) + value,
+      valueComplete: (previous?.valueComplete ?? true) && value != null,
     })
   }
 
   return [...holdings.entries()]
     .map(([key, holding]) => {
-      const signedValue = holding.value == null ? null : holding.direction === 'short' ? -holding.value : holding.value
+      const signedValue = !holding.valueComplete || holding.value == null
+        ? null
+        : holding.direction === 'short' ? -holding.value : holding.value
       return {
         key,
         symbol: holding.symbol,
