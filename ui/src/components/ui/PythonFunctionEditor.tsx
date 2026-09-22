@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type ReactNode, type Ref } from 'react'
+import { createPortal } from 'react-dom'
 import { python } from '@codemirror/lang-python'
 import { lintGutter, linter, forceLinting, forEachDiagnostic, type Diagnostic } from '@codemirror/lint'
 import { Compartment, StateEffect } from '@codemirror/state'
@@ -8,7 +9,10 @@ import { EditorView } from '@codemirror/view'
 import CodeMirror, { type ReactCodeMirrorRef } from '@uiw/react-codemirror'
 import { Check, Clipboard, Play, TriangleAlert } from 'lucide-react'
 import { InkRewrite } from '@/components/ui/InkRewrite'
-import { connectPython, type LanguageStatus } from '@/components/ui/pythonLanguageService'
+import { connectPython, type DocumentSymbols, type LanguageStatus } from '@/components/ui/pythonLanguageService'
+import { OverflowText } from '@/components/ui/OverflowText'
+import { LSPPlugin } from '@codemirror/lsp-client'
+import type { DocumentSymbol, SymbolInformation, Range } from 'vscode-languageserver-protocol'
 import { editingExtensions, isMac } from '@/components/ui/pythonEditorExtensions'
 import { apiSend } from '@/lib/api/client'
 import { PythonSourcePreview, type SourcePreview } from '@/components/ui/PythonSourcePreview'
@@ -19,6 +23,7 @@ import { pythonEditorTheme } from '@/components/ui/pythonEditorTheme'
 export interface PythonProblem { line: number; message: string; source: string; severity: string }
 const runtimeChanged = StateEffect.define<null>()
 const basicSetup = { foldGutter: true, highlightActiveLine: true, highlightActiveLineGutter: true, autocompletion: true }
+const toolbarActionClass = 'flex-none rounded px-2 py-1 cursor-pointer transition-colors duration-150 hover:bg-fill hover:text-ink-1 active:bg-ink-1/10 active:text-ink-1 aria-expanded:bg-fill aria-expanded:text-ink-1 focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-1 disabled:pointer-events-none disabled:opacity-40 motion-reduce:transition-none'
 
 export interface PythonValidationState {
   valid: boolean
@@ -119,6 +124,8 @@ export function PythonFunctionEditor({
   layout = 'console',
   ref,
   onProblems,
+  headerTarget,
+  statusTarget,
 }: {
   code: string
   onChange: (code: string) => void
@@ -141,6 +148,8 @@ export function PythonFunctionEditor({
   layout?: 'console' | 'workbench'
   ref?: Ref<PythonEditorHandle>
   onProblems?: (problems: PythonProblem[]) => void
+  headerTarget?: HTMLElement | null
+  statusTarget?: HTMLElement | null
 }) {
   const cmRef = useRef<ReactCodeMirrorRef>(null)
   const hasCode = code.trim().length > 0
@@ -152,9 +161,11 @@ export function PythonFunctionEditor({
   const [view, setView] = useState<EditorView | null>(null)
   const [languageStatus, setLanguageStatus] = useState<LanguageStatus>('connecting')
   const [position, setPosition] = useState({ line: 1, column: 1 })
+  const [symbols, setSymbols] = useState<DocumentSymbols | null>(null)
+  const [menu, setMenu] = useState<{ kind: 'actions' | 'symbols'; x: number; y: number; items?: DocumentSymbol[] | SymbolInformation[]; active?: string } | null>(null)
+  const menuRef = useRef<HTMLDivElement>(null)
   const [formatting, setFormatting] = useState(false)
   const [editorMessage, setEditorMessage] = useState('')
-  const [helpOpen, setHelpOpen] = useState(false)
   const [sourcePreview, setSourcePreview] = useState<SourcePreview | null>(null)
   const languageSlot = useMemo(() => new Compartment(), [])
   const runtimeRef = useRef({ result, stale })
@@ -167,9 +178,9 @@ export function PythonFunctionEditor({
 
   useEffect(() => {
     if (!view) return
-    return connectPython(view, languageSlot, setLanguageStatus, (uri, code) => new Promise((resolve) => {
+    return connectPython(view, languageSlot, (status) => { setLanguageStatus(status); if (status !== 'ready') setSymbols(null) }, (uri, code) => new Promise((resolve) => {
       setSourcePreview({ uri, code, resolve })
-    }))
+    }), (next) => setSymbols(next))
   }, [view, languageSlot])
 
   const replaceCode = useCallback((text: string) => {
@@ -273,28 +284,99 @@ export function PythonFunctionEditor({
   ], [languageSlot])
 
   const mod = isMac() ? '⌘' : 'Ctrl'
+  const shortcuts: Record<string, string> = {
+    '查找 / 替换': `${mod}+F`, '格式化': 'Shift+Alt+F',
+    '撤销': `${mod}+Z`, '重做': isMac() ? '⌘+Shift+Z' : 'Ctrl+Y',
+    '定义': 'F12', '引用': 'Shift+F12', '重命名': 'F2', '快速修复': `${mod}+.`,
+  }
+  const shortcutHint = (name: string) => shortcuts[name]
+    ? <span aria-hidden="true" className="shrink-0 whitespace-nowrap text-[0.9em] font-normal text-ink-3">{shortcuts[name]}</span>
+    : null
+  const editor = view
+  const plugin = editor && LSPPlugin.get(editor)
+  const cursor = plugin && editor ? plugin.toPosition(editor.state.selection.main.head) : null
+  const contains = (range: Range) => cursor && (range.start.line < cursor.line || range.start.line === cursor.line && range.start.character <= cursor.character)
+    && (range.end.line > cursor.line || range.end.line === cursor.line && range.end.character >= cursor.character)
+  const flat = symbols?.length && 'location' in symbols[0]
+  const roots = flat ? (symbols as SymbolInformation[]).filter((item) => item.location.uri === plugin?.uri) : (symbols as DocumentSymbol[] | null)
+  const chain: DocumentSymbol[] = []
+  if (roots && !flat) {
+    let siblings = roots as DocumentSymbol[]
+    while (siblings.length) {
+      const found: DocumentSymbol | undefined = siblings.find((item) => contains(item.range))
+      if (!found) break
+      chain.push(found)
+      siblings = found.children ?? []
+    }
+  }
+  const jumpSymbol = (item: DocumentSymbol | SymbolInformation) => {
+    if (!editor || !plugin) return
+    const location = 'location' in item ? item.location.range.start : item.selectionRange.start
+    const offset = plugin.fromPosition(location, editor.state.doc)
+    editor.dispatch({ selection: { anchor: offset }, effects: EditorView.scrollIntoView(offset, { y: 'center' }) })
+    setMenu(null)
+    editor.focus()
+  }
+  const openMenu = (kind: 'actions' | 'symbols', target: HTMLElement, items?: DocumentSymbol[] | SymbolInformation[], active?: string) => {
+    const rect = target.getBoundingClientRect()
+    setMenu({ kind, x: Math.min(rect.left, window.innerWidth - 240), y: Math.min(rect.bottom + 3, window.innerHeight - 350), items, active })
+  }
+  const command = (name: string) => {
+    setMenu(null)
+    if (!editor) return
+    editor.focus()
+    if (name === '查找 / 替换') openSearchPanel(editor)
+    if (name === '格式化') formatRef.current()
+    if (name === '粘贴') void paste()
+    if (name === '撤销') undo(editor)
+    if (name === '重做') redo(editor)
+    if (name === '定义') jumpToDefinition(editor)
+    if (name === '引用') findReferences(editor)
+    if (name === '重命名') renamePythonSymbol(editor)
+    if (name === '快速修复') quickFix(editor)
+  }
+  useEffect(() => {
+    if (!menu) return
+    const close = (event: PointerEvent) => { if (!menuRef.current?.contains(event.target as Node)) { setMenu(null); if (!(event.target instanceof HTMLElement && event.target.closest('button, a, input, .cm-editor'))) editor?.focus() } }
+    menuRef.current?.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus()
+    document.addEventListener('pointerdown', close)
+    return () => document.removeEventListener('pointerdown', close)
+  }, [menu, editor])
+  const actions = ['查找 / 替换', '撤销', '重做', '定义', '引用', '重命名', '快速修复']
+  const actionDisabled = (name: string) => name === '格式化' && formatting ? true : name === '开发文档 ↗' ? false : ['定义', '引用', '重命名', '快速修复'].includes(name) ? languageStatus !== 'ready' || (disabled && ['重命名', '快速修复'].includes(name)) : disabled && name !== '查找 / 替换'
+  const workbenchHeader = (
+    <div className="@container flex h-8 min-w-0 items-center gap-1 border-b border-line bg-surface px-3 text-[12px] text-ink-2">
+      <div className="flex min-w-0 flex-1 items-center overflow-hidden whitespace-nowrap">
+        <button type="button" className="flex-none text-ink-1" onClick={(event) => openMenu('symbols', event.currentTarget)}>目标函数</button>
+        {(chain.length > 3 ? [chain[0], null, chain.at(-1)!] : chain).map((item, index) => <span key={item?.name ?? 'ellipsis'} className="flex min-w-0 items-center gap-1 pl-1">
+          <span aria-hidden>›</span><button type="button" className="min-w-0 max-w-32" onClick={(event) => openMenu('symbols', event.currentTarget, item ? index === 0 ? roots ?? [] : chain[chain.indexOf(item) - 1]?.children ?? roots ?? [] : chain[0]?.children ?? [], item?.name)}>{item ? <OverflowText text={item.name} /> : '…'}</button>
+        </span>)}
+      </div>
+      <button type="button" className={`${toolbarActionClass} hidden items-center gap-1 @min-[480px]:inline-flex`} disabled={disabled} onClick={() => void paste()}><Clipboard size={12} /> 粘贴</button>
+      <button type="button" className={`${toolbarActionClass} hidden items-center gap-2 @min-[480px]:inline-flex`} disabled={disabled || formatting} onClick={() => formatRef.current()}>{formatting ? '格式化中…' : '格式化'}{shortcutHint('格式化')}</button>
+      <button type="button" className={toolbarActionClass} aria-haspopup="menu" aria-expanded={menu?.kind === 'actions'} onClick={(event) => openMenu('actions', event.currentTarget)}>菜单</button>
+      <a className={`${toolbarActionClass} hidden @min-[480px]:block`} href="/docs/custom-calc" target="_blank" rel="noopener">开发文档 ↗</a>
+    </div>
+  )
+  const popup = menu && createPortal(<div ref={menuRef} role="menu" tabIndex={-1} onKeyDown={(event) => {
+    if (event.key === 'Escape') { setMenu(null); editor?.focus() }
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      event.preventDefault()
+      const buttons = [...event.currentTarget.querySelectorAll<HTMLButtonElement>('button:not(:disabled)')]
+      buttons[(buttons.indexOf(document.activeElement as HTMLButtonElement) + buttons.length + (event.key === 'ArrowDown' ? 1 : -1)) % buttons.length]?.focus()
+    }
+  }} style={{ left: Math.max(8, menu.x), top: Math.max(8, menu.y) }} className="fixed z-[100] max-h-[65vh] w-[min(15rem,calc(100vw-16px))] overflow-auto rounded-md border border-line bg-surface p-1 text-[12px] text-ink-1 shadow-lg">
+    {menu.kind === 'symbols' ? ((menu.items ?? roots)?.length ? (menu.items ?? roots)!.map((item, index) => <button key={index} role="menuitem" className={`block w-full truncate px-2 py-1.5 text-left hover:bg-fill ${menu.active === item.name ? 'text-accent' : ''}`} onClick={() => jumpSymbol(item)}>{item.name} · {('location' in item ? item.location.range.start.line : item.selectionRange.start.line) + 1}</button>) : <span className="block p-2 text-ink-3">暂无符号</span>) : <>{[...actions, '粘贴', '格式化', '开发文档 ↗'].map((name) => <button key={name} role="menuitem" disabled={actionDisabled(name)} className={`${toolbarActionClass} flex w-full items-center justify-between gap-4 py-1.5 text-left`} onClick={() => name === '开发文档 ↗' ? window.open('/docs/custom-calc', '_blank', 'noopener') : command(name)}><span>{name}</span>{shortcutHint(name)}</button>)}<div className="border-t border-line px-2 py-1 text-ink-3">Python · 4 空格</div></>}
+  </div>, document.body)
   const tools = (
-    <div className="flex flex-none flex-wrap items-center gap-3 border-b border-line bg-surface px-3 py-1.5 text-[12px] text-ink-2" aria-label="编辑操作">
-      <button type="button" onClick={() => view && openSearchPanel(view)}>查找 / 替换</button>
-      <button type="button" disabled={disabled || formatting} onClick={() => formatRef.current()}>{formatting ? '格式化中…' : '格式化'}</button>
-      <button type="button" disabled={disabled} onClick={() => { if (view) { undo(view); view.focus() } }}>撤销</button>
-      <button type="button" disabled={disabled} onClick={() => { if (view) { redo(view); view.focus() } }}>重做</button>
-      <button type="button" aria-expanded={helpOpen} onClick={() => setHelpOpen(!helpOpen)}>快捷键</button>
-      <button type="button" disabled={languageStatus !== 'ready'} onClick={() => view && jumpToDefinition(view)}>定义</button>
-      <button type="button" disabled={languageStatus !== 'ready'} onClick={() => view && findReferences(view)}>引用</button>
-      <button type="button" disabled={disabled || languageStatus !== 'ready'} onClick={() => view && renamePythonSymbol(view)}>重命名</button>
-      <button type="button" disabled={disabled || languageStatus !== 'ready'} onClick={() => view && quickFix(view)}>快速修复</button>
+    <div className="flex flex-none flex-wrap items-center gap-1 border-b border-line bg-surface px-3 py-1.5 text-[12px] text-ink-2" aria-label="编辑操作">
+      {[actions[0], '格式化', ...actions.slice(1)].map((name) => <button key={name} type="button" className={`${toolbarActionClass} inline-flex items-center gap-2`} disabled={actionDisabled(name)} onClick={() => command(name)}>
+        <span>{name === '格式化' && formatting ? '格式化中…' : name}</span>{shortcutHint(name)}
+      </button>)}
     </div>
   )
   const assistance = (
     <>
-      <div inert={!helpOpen} className={`grid flex-none transition-[grid-template-rows] duration-200 motion-reduce:transition-none ${helpOpen ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'}`}>
-        <div className="min-h-0 overflow-hidden"><p className="bg-surface px-3 py-2 text-[12px] leading-6 text-ink-2">
-          {mod}+F 查找 · {isMac() ? '⌘+⌥+F' : 'Ctrl+H'} 替换 · {mod}+Z 撤销 · {mod}+Shift+Z 重做 · Tab / Shift+Tab 缩进 · Esc 然后 Tab 移出编辑器<br />
-          {mod}+/ 注释 · Alt+↑/↓ 移动行 · {mod}+D 选中下一个相同词 · {mod}+G 跳转行 · Shift+Alt+F 格式化 · {mod}+S 保存 · {mod}+Enter 试跑
-          <br />F12 定义 · Shift+F12 引用 · F2 重命名 · {mod}+. 快速修复 · {mod}+Shift+Space 参数提示
-        </p></div>
-      </div>
       {editorMessage && <p role="status" className="flex-none bg-surface px-3 py-2 text-[12px] text-warn">{editorMessage}</p>}
       {sourcePreview && <PythonSourcePreview source={sourcePreview} onClose={() => { setSourcePreview(null); requestAnimationFrame(() => view?.focus()) }} />}
     </>
@@ -310,7 +392,14 @@ export function PythonFunctionEditor({
   )
 
   const codeBlock = (
-    <div className={`relative bg-code-bg ${fill ? 'min-h-0 flex-1' : ''}`}>
+    <div onContextMenu={layout === 'workbench' ? (event) => {
+      event.preventDefault()
+      if (view && !(view.state.selection.main.from !== view.state.selection.main.to && view.posAtCoords({ x: event.clientX, y: event.clientY }) != null && view.posAtCoords({ x: event.clientX, y: event.clientY })! >= view.state.selection.main.from && view.posAtCoords({ x: event.clientX, y: event.clientY })! <= view.state.selection.main.to)) {
+        const offset = view.posAtCoords({ x: event.clientX, y: event.clientY })
+        if (offset != null) view.dispatch({ selection: { anchor: offset } })
+      }
+      setMenu({ kind: 'actions', x: Math.min(event.clientX, window.innerWidth - 240), y: Math.min(event.clientY, window.innerHeight - 350) })
+    } : undefined} className={`relative bg-code-bg ${fill ? 'min-h-0 flex-1' : ''}`}>
       <CodeMirror
         ref={cmRef}
         className={
@@ -345,9 +434,12 @@ export function PythonFunctionEditor({
     // 工作台：纯代码区，吃满父容器；结果呈现由外部 PythonRunPanel 承担。
     return (
       <div className="flex h-full min-h-0 w-full flex-col">
-        {tools}{assistance}
+        {headerTarget ? createPortal(workbenchHeader, headerTarget) : null}
+        {popup}
+        {editorMessage && <p role="status" className="px-3 text-[12px] text-warn">{editorMessage}</p>}
+        {sourcePreview && <PythonSourcePreview source={sourcePreview} onClose={() => { setSourcePreview(null); requestAnimationFrame(() => view?.focus()) }} />}
         <div className="flex min-h-0 flex-1 flex-col overflow-hidden">{codeBlock}</div>
-        {statusBar}
+        {statusTarget && createPortal(<div className="flex items-center gap-2 whitespace-nowrap text-[11px] text-ink-3"><button type="button" title="跳转到行" onClick={() => view && gotoLine(view)}><span className="max-[480px]:hidden">行 {position.line}，列 {position.column}</span><span className="hidden max-[480px]:inline">{position.line}:{position.column}</span></button><span role="status" aria-label="语言服务" aria-description={languageStatus === 'ready' ? 'ty 语言服务已连接' : languageStatus === 'connecting' ? 'ty 语言服务连接中' : 'ty 语言服务重连中，可继续编辑'} data-state={languageStatus} className={languageStatus === 'reconnecting' ? 'text-warn' : ''}><InkRewrite text={languageStatus === 'ready' ? 'ty' : languageStatus === 'connecting' ? 'ty 连接中' : 'ty 重连中'} tone="label" /></span></div>, statusTarget)}
       </div>
     )
   }

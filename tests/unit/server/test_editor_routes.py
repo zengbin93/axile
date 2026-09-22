@@ -96,6 +96,9 @@ def test_lsp_features_and_session_cleanup(client):
         uri = session["uri"]
         params = {"textDocument": {"uri": uri}}
         open_document(socket, uri, code)
+        assert capabilities["capabilities"].get("documentSymbolProvider")
+        symbols = request(socket, 20, "textDocument/documentSymbol", params)
+        assert any(item["name"] == "calculate_portfolio" for item in symbols)
         diagnostic = request(socket, 2, "textDocument/diagnostic", params)
         assert any("int" in item["message"] for item in diagnostic["items"]), diagnostic
         assert not any("unresolved-import" == item.get("code") for item in diagnostic["items"]), diagnostic

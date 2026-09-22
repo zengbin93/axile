@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { useParams, useViewTransitionState } from 'react-router'
-import { Clipboard, ChevronDown, Pencil, Play, RefreshCw, Zap } from 'lucide-react'
+import { ChevronDown, Pencil, Play, RefreshCw, Zap } from 'lucide-react'
 import { Link } from '@/components/ui/nav'
 import { Chip } from '@/components/ui/Card'
 import { Skeleton } from '@/components/ui/Skeleton'
@@ -108,6 +108,8 @@ export function PortfolioEditPage() {
   const [resizingPanels, setResizingPanels] = useState(false)
   const nameEditorRef = useRef<HTMLDivElement>(null)
   const editorRef = useRef<PythonEditorHandle>(null)
+  const [editorHeader, setEditorHeader] = useState<HTMLDivElement | null>(null)
+  const [editorStatus, setEditorStatus] = useState<HTMLDivElement | null>(null)
   const workbenchRef = useRef<HTMLDivElement>(null)
   const editorPaneRef = useRef<HTMLDivElement>(null)
   const inspectorRef = useRef<HTMLDivElement>(null)
@@ -353,18 +355,6 @@ export function PortfolioEditPage() {
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [])
-
-  const paste = async () => {
-    try {
-      const text = await navigator.clipboard.readText()
-      if (text) {
-        editorRef.current?.replaceCode(text)
-        setSaveError(null)
-      }
-    } finally {
-      editorRef.current?.focus()
-    }
-  }
 
   const restore = () => {
     setName(original.name)
@@ -685,26 +675,11 @@ export function PortfolioEditPage() {
           style={{ gridTemplateRows: editorRows }}
         >
           <div className="flex min-h-[420px] min-w-0 flex-col bg-code-bg md:min-h-0">
-          {/* 编辑辅助动作（粘贴 / 文档）与代码同列：console 布局里它们住代码上方工具条，
-              workbench 无工具条，就落在代码页头栏；粘贴与空态大按钮互斥，只在有代码时出现。 */}
-          <div className="flex h-8 flex-none items-center gap-3 border-b border-line bg-surface px-3 text-[12px] text-ink-2">
-            <span className="font-[550] text-ink-1">目标函数</span>
-            {code.trim() && (
-              <button
-                type="button"
-                className="inline-flex cursor-pointer items-center gap-1 text-accent"
-                onClick={() => void paste()}
-              >
-                <Clipboard size={12} /> 粘贴
-              </button>
-            )}
-            <a className="text-accent" href="/docs/custom-calc" target="_blank" rel="noopener">
-              开发文档 ↗
-            </a>
-            <span className="ml-auto font-mono text-[11px] text-ink-3">⌘/Ctrl+Enter 试跑</span>
-          </div>
+          <div ref={setEditorHeader} className="h-8 flex-none" />
           <PythonFunctionEditor
             ref={editorRef}
+            headerTarget={editorHeader}
+            statusTarget={editorStatus}
             onProblems={setCodeProblems}
             layout="workbench"
             fill
@@ -785,7 +760,7 @@ export function PortfolioEditPage() {
                     第 {problem.line} 行 · {problem.message}
                   </button>
                 ))}
-                {!codeProblems.some((problem) => problem.source === 'ty') && <p className="text-[13px] text-ink-3">暂无静态诊断；语言服务状态见编辑器底栏。</p>}
+                {!codeProblems.some((problem) => problem.source === 'ty') && <p className="text-[13px] text-ink-3">暂无静态诊断。</p>}
                 <p className="border-t border-line pt-3 text-[12px] text-ink-3">试跑结果{calc.stale ? ' · 代码已修改，以下为旧结果' : ''}</p>
                 {!calc.stale && calc.editorResult?.errorLine != null && <button type="button" className="text-[12px] text-accent" onClick={() => editorRef.current?.revealLine(calc.editorResult!.errorLine!)}>定位到第 {calc.editorResult.errorLine} 行</button>}
                 {calc.editorResult ? <PythonRunResultBody result={calc.editorResult} stale={calc.stale} /> : <p className="text-[13px] text-ink-3">尚未试跑</p>}
@@ -898,7 +873,8 @@ export function PortfolioEditPage() {
             }
           />
         </div>
-        <div className="ml-auto flex h-full flex-none items-center">
+        <div ref={setEditorStatus} className="mr-2 flex-none" />
+        <div className="flex h-full flex-none items-center">
           <button
             type="button"
             className={`h-full px-2 text-ink-2 transition-opacity duration-200 hover:bg-fill hover:text-ink-1 ${

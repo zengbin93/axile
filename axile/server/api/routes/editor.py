@@ -130,6 +130,7 @@ def validate_message(message: dict, uri: str) -> None:
         "textDocument/inlayHint",
         "inlayHint/resolve",
         "textDocument/foldingRange",
+        "textDocument/documentSymbol",
     }
     if not isinstance(method, str) or (method and method not in allowed):
         raise ValueError("不支持的编辑器操作")

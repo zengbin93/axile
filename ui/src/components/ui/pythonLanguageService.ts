@@ -1,12 +1,14 @@
 import { Compartment, Text } from '@codemirror/state'
-import { EditorView, keymap, showDialog } from '@codemirror/view'
+import { EditorView, ViewPlugin, keymap, showDialog, type ViewUpdate } from '@codemirror/view'
 import { linter, forceLinting, type Diagnostic } from '@codemirror/lint'
 import { LSPClient, LSPPlugin, serverCompletion, hoverTooltips, signatureHelp, jumpToDefinitionKeymap, findReferencesKeymap, type WorkspaceFile } from '@codemirror/lsp-client'
 import DOMPurify from 'dompurify'
 import { apiGet } from '@/lib/api/client'
 import { pythonVisualFeatures, quickFix, renamePythonSymbol } from '@/components/ui/pythonLanguageFeatures'
+import type { DocumentSymbol, SymbolInformation } from 'vscode-languageserver-protocol'
 
 export type LanguageStatus = 'connecting' | 'ready' | 'reconnecting'
+export type DocumentSymbols = DocumentSymbol[] | SymbolInformation[]
 type LspDiagnostic = {
   range: { start: { line: number; character: number }; end: { line: number; character: number } }
   severity?: number
@@ -19,6 +21,7 @@ export function connectPython(
   slot: Compartment,
   onStatus: (status: LanguageStatus) => void,
   displaySource: (uri: string, code: string) => Promise<EditorView | null>,
+  onSymbols?: (symbols: DocumentSymbols | null, doc: Text) => void,
 ) {
   let disposed = false
   let socket: WebSocket | null = null
@@ -51,7 +54,7 @@ export function connectPython(
           clientCapabilities: { textDocument: {
             codeAction: { codeActionLiteralSupport: { codeActionKind: { valueSet: ['quickfix'] } }, resolveSupport: { properties: ['edit'] } },
             semanticTokens: { requests: { full: true }, tokenTypes: ['namespace', 'class', 'type', 'function', 'method', 'variable', 'parameter', 'property', 'keyword', 'string', 'number', 'comment', 'decorator'], tokenModifiers: [], formats: ['relative'] },
-            inlayHint: {}, foldingRange: { lineFoldingOnly: false },
+            inlayHint: {}, foldingRange: { lineFoldingOnly: false }, documentSymbol: { hierarchicalDocumentSymbolSupport: true },
           } },
         }],
       })
@@ -92,6 +95,7 @@ export function connectPython(
         view.dispatch({ effects: slot.reconfigure([
           active.plugin(message.uri, 'python'),
           pythonVisualFeatures(),
+          ...(onSymbols ? [documentSymbols(onSymbols)] : []),
           keymap.of([...jumpToDefinitionKeymap, ...findReferencesKeymap,
             { key: 'F2', run: renamePythonSymbol }, { key: 'Mod-.', run: quickFix }]),
           linter(async (editor): Promise<Diagnostic[]> => {
@@ -140,4 +144,42 @@ export function connectPython(
     client?.disconnect()
     socket?.close()
   }
+}
+
+/** 文档版本与插件身份共同约束响应，编辑后立即清除旧的可点击位置。 */
+function documentSymbols(onSymbols: (symbols: DocumentSymbols | null, doc: Text) => void) {
+  return ViewPlugin.fromClass(class {
+    timer: ReturnType<typeof setTimeout> | undefined
+    sequence = 0
+    alive = true
+    constructor(readonly view: EditorView) { this.schedule(0) }
+    update(update: ViewUpdate) {
+      if (update.docChanged) {
+        this.sequence++
+        onSymbols(null, update.state.doc)
+        this.schedule(450)
+      }
+    }
+    schedule(delay: number) {
+      clearTimeout(this.timer)
+      this.timer = setTimeout(() => void this.refresh(), delay)
+    }
+    async refresh() {
+      const plugin = LSPPlugin.get(this.view)
+      const doc = this.view.state.doc
+      const sequence = ++this.sequence
+      if (!plugin?.client.connected || !plugin.client.serverCapabilities?.documentSymbolProvider) {
+        onSymbols(null, doc)
+        return
+      }
+      try {
+        plugin.client.sync()
+        const symbols = await plugin.client.request<object, DocumentSymbols | null>('textDocument/documentSymbol', { textDocument: { uri: plugin.uri } })
+        if (this.alive && this.sequence === sequence && this.view.state.doc === doc && LSPPlugin.get(this.view) === plugin && plugin.client.connected) onSymbols(symbols ?? [], doc)
+      } catch {
+        if (this.alive && this.sequence === sequence && this.view.state.doc === doc) onSymbols(null, doc)
+      }
+    }
+    destroy() { this.alive = false; this.sequence++; clearTimeout(this.timer); onSymbols(null, this.view.state.doc) }
+  })
 }

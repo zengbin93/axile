@@ -8,8 +8,12 @@ export function Fixture() {
   const [problems, setProblems] = useState<PythonProblem[]>([])
   const [result, setResult] = useState<PythonValidationState | null>(null)
   const [ranCode, setRanCode] = useState('')
+  const [header, setHeader] = useState<HTMLDivElement | null>(null)
+  const [status, setStatus] = useState<HTMLDivElement | null>(null)
   return <main style={{ height: '90vh', display: 'flex', flexDirection: 'column' }}>
-    <PythonFunctionEditor code={code} onChange={setCode} running={false} result={result} stale={ranCode !== code} onRun={() => { setRanCode(code); setResult({ valid: false, errorLine: 1, errorMessage: '模拟试跑错误' }) }} layout="workbench" fill onProblems={setProblems} />
+    <div ref={setHeader} style={{ height: 32 }} />
+    <PythonFunctionEditor headerTarget={header} statusTarget={status} code={code} onChange={setCode} running={false} result={result} stale={ranCode !== code} onRun={() => { setRanCode(code); setResult({ valid: false, errorLine: 1, errorMessage: '模拟试跑错误' }) }} layout="workbench" fill onProblems={setProblems} />
+    <div ref={setStatus} />
     <output data-testid="code" hidden>{code}</output>
     <output data-testid="problems">{JSON.stringify(problems)}</output>
   </main>
