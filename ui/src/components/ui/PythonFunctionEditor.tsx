@@ -381,12 +381,14 @@ export function PythonFunctionEditor({
       {sourcePreview && <PythonSourcePreview source={sourcePreview} onClose={() => { setSourcePreview(null); requestAnimationFrame(() => view?.focus()) }} />}
     </>
   )
+  const analyzerLabel = languageStatus === 'ready' ? '代码分析器' : languageStatus === 'connecting' ? '代码分析器连接中…' : '代码分析器重连中…'
+  const analyzerDescription = languageStatus === 'ready' ? '代码分析器已连接' : languageStatus === 'connecting' ? '代码分析器连接中' : '暂时无法分析代码，可继续编辑'
   const statusBar = (
     <div className="flex flex-none items-center gap-3 border-t border-line bg-surface px-3 py-1 text-[11px] text-ink-3">
       <button type="button" onClick={() => view && gotoLine(view)}>行 {position.line}，列 {position.column}</button>
       <span>4 空格</span><span>Python</span>
-      <span role="status" aria-label="语言服务" data-state={languageStatus} className={`ml-auto ${languageStatus === 'reconnecting' ? 'text-warn' : ''}`}>
-        <InkRewrite text={languageStatus === 'ready' ? 'ty 已连接' : languageStatus === 'connecting' ? 'ty 连接中…' : 'ty 重连中 · 可继续编辑'} tone="label" />
+      <span role="status" aria-label="代码分析器" aria-description={analyzerDescription} title={analyzerDescription} data-state={languageStatus} className={`ml-auto ${languageStatus === 'reconnecting' ? 'text-warn' : ''}`}>
+        <InkRewrite text={analyzerLabel} tone="label" />
       </span>
     </div>
   )
@@ -439,7 +441,7 @@ export function PythonFunctionEditor({
         {editorMessage && <p role="status" className="px-3 text-[12px] text-warn">{editorMessage}</p>}
         {sourcePreview && <PythonSourcePreview source={sourcePreview} onClose={() => { setSourcePreview(null); requestAnimationFrame(() => view?.focus()) }} />}
         <div className="flex min-h-0 flex-1 flex-col overflow-hidden">{codeBlock}</div>
-        {statusTarget && createPortal(<div className="flex items-center gap-2 whitespace-nowrap text-[11px] text-ink-3"><button type="button" title="跳转到行" onClick={() => view && gotoLine(view)}><span className="max-[480px]:hidden">行 {position.line}，列 {position.column}</span><span className="hidden max-[480px]:inline">{position.line}:{position.column}</span></button><span role="status" aria-label="语言服务" aria-description={languageStatus === 'ready' ? 'ty 语言服务已连接' : languageStatus === 'connecting' ? 'ty 语言服务连接中' : 'ty 语言服务重连中，可继续编辑'} data-state={languageStatus} className={languageStatus === 'reconnecting' ? 'text-warn' : ''}><InkRewrite text={languageStatus === 'ready' ? 'ty' : languageStatus === 'connecting' ? 'ty 连接中' : 'ty 重连中'} tone="label" /></span></div>, statusTarget)}
+        {statusTarget && createPortal(<div className="flex items-center gap-2 whitespace-nowrap text-[11px] text-ink-3"><button type="button" title="跳转到行" onClick={() => view && gotoLine(view)}><span className="max-[480px]:hidden">行 {position.line}，列 {position.column}</span><span className="hidden max-[480px]:inline">{position.line}:{position.column}</span></button><span role="status" aria-label="代码分析器" aria-description={analyzerDescription} title={analyzerDescription} data-state={languageStatus} className={languageStatus === 'reconnecting' ? 'text-warn' : ''}><InkRewrite text={analyzerLabel} tone="label" /></span></div>, statusTarget)}
       </div>
     )
   }

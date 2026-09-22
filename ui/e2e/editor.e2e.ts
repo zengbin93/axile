@@ -14,7 +14,7 @@ async function editorCommand(page: Page, name: string) {
 test.beforeEach(async ({ page }) => {
   page.on('pageerror', (error) => { throw error })
   await page.goto('/e2e/editor.html')
-  await expect(page.getByRole('status', { name: '语言服务' })).toHaveAttribute('data-state', 'ready')
+  await expect(page.getByRole('status', { name: '代码分析器' })).toHaveAttribute('data-state', 'ready')
 })
 
 test('document symbols navigate to the current function and class method', async ({ page }) => {
@@ -168,8 +168,8 @@ test('indentation, bracket pairing, comment and multi-selection shortcuts', asyn
 test('reconnect resynchronizes unsaved text without losing undo', async ({ page, request }) => {
   await replace(page, 'draft: int = "keep me"\n')
   await request.post('http://127.0.0.1:1439/test/disconnect')
-  await expect(page.getByRole('status', { name: '语言服务' })).toHaveAttribute('data-state', 'reconnecting')
-  await expect(page.getByRole('status', { name: '语言服务' })).toHaveAttribute('data-state', 'ready', { timeout: 20000 })
+  await expect(page.getByRole('status', { name: '代码分析器' })).toHaveAttribute('data-state', 'reconnecting')
+  await expect(page.getByRole('status', { name: '代码分析器' })).toHaveAttribute('data-state', 'ready', { timeout: 20000 })
   await expect(page.getByTestId('code')).toHaveText('draft: int = "keep me"\n')
   await expect(page.getByTestId('problems')).toContainText('not assignable')
   await editorCommand(page, '撤销')
