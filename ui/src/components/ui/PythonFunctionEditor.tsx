@@ -19,6 +19,7 @@ import { PythonSourcePreview, type SourcePreview } from '@/components/ui/PythonS
 import { quickFix, renamePythonSymbol } from '@/components/ui/pythonLanguageFeatures'
 import { jumpToDefinition, findReferences } from '@codemirror/lsp-client'
 import { pythonEditorTheme } from '@/components/ui/pythonEditorTheme'
+import { pythonStickyScroll } from '@/components/ui/pythonStickyScroll'
 
 export interface PythonProblem { line: number; message: string; source: string; severity: string }
 const runtimeChanged = StateEffect.define<null>()
@@ -254,6 +255,7 @@ export function PythonFunctionEditor({
 
   const extensions = useMemo(() => [
     pythonEditorTheme,
+    pythonStickyScroll,
     python(),
     lintGutter(),
     languageSlot.of([]),

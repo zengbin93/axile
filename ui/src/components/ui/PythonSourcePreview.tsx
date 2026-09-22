@@ -4,8 +4,9 @@ import CodeMirror from '@uiw/react-codemirror'
 import { python } from '@codemirror/lang-python'
 import { EditorView } from '@codemirror/view'
 import { pythonEditorTheme } from '@/components/ui/pythonEditorTheme'
+import { pythonStickyScroll } from '@/components/ui/pythonStickyScroll'
 
-const sourceExtensions = [python(), pythonEditorTheme]
+const sourceExtensions = [python(), pythonEditorTheme, pythonStickyScroll]
 
 export interface SourcePreview {
   uri: string

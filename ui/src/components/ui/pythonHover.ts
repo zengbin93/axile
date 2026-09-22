@@ -66,6 +66,18 @@ function createHover(view: EditorView, html: string, shouldFocus: () => boolean)
   content.setAttribute('aria-label', 'Python 文档')
   content.innerHTML = html
   pinDocumentationContext(dom, content)
+  const signature = dom.querySelector<HTMLElement>('.cm-python-hover-signature')
+  // Keep a readable body even when CodeMirror clamps the hover near a viewport edge.
+  const sizeObserver = new ResizeObserver(([entry]) => {
+    if (entry) dom.style.setProperty('--python-hover-height', `${entry.contentRect.height}px`)
+  })
+  signature?.addEventListener('wheel', event => {
+    if (signature.scrollHeight > signature.clientHeight + 1) return
+    const delta = event.deltaMode === 1 ? event.deltaY * 20
+      : event.deltaMode === 2 ? event.deltaY * content.clientHeight : event.deltaY
+    content.scrollTop += delta
+    event.preventDefault()
+  }, { passive: false })
   const grip = dom.appendChild(document.createElement('div'))
   grip.className = 'cm-python-hover-resize'
   grip.title = '拖动调整文档大小'
@@ -104,12 +116,14 @@ function createHover(view: EditorView, html: string, shouldFocus: () => boolean)
   return {
     dom,
     mount() {
+      sizeObserver.observe(dom)
       if (readingSize) {
         dom.style.width = `${readingSize.width}px`
         dom.style.height = `${readingSize.height}px`
       }
       if (shouldFocus()) content.focus({ preventScroll: true })
     },
+    destroy() { sizeObserver.disconnect() },
   }
 }
 
@@ -153,10 +167,11 @@ const hoverTheme = EditorView.theme({
     color: 'var(--color-ink-2)', lineHeight: '1.65', whiteSpace: 'normal', overflowWrap: 'anywhere',
   },
   '.cm-python-hover-signature': {
-    flex: '0 1 auto', maxHeight: 'min(110px, 25vh)', padding: '8px 12px',
+    flex: '0 0 auto', boxSizing: 'border-box',
+    maxHeight: 'min(110px, 25vh, max(0px, calc(var(--python-hover-height, 420px) - 24px)))', padding: '0 12px',
     borderBottom: '1px solid var(--color-line)', backgroundColor: 'var(--color-surface)',
   },
-  '.cm-python-hover-signature + .cm-python-hover-doc': { minHeight: 'min(48px, 15vh)' },
+  '.cm-python-hover-signature + .cm-python-hover-doc': { minHeight: '24px' },
   '.cm-python-hover-section': { display: 'flow-root', paddingBottom: '8px' },
   '.cm-python-hover-doc .cm-python-hover-section > :first-child': {
     position: 'sticky', top: '-10px', zIndex: '1', margin: '0 -12px 6px', padding: '8px 12px',
@@ -178,7 +193,7 @@ const hoverTheme = EditorView.theme({
     border: '1px solid var(--color-line)', borderRadius: '5px',
     backgroundColor: 'var(--color-code-bg)', color: 'var(--color-code-fg)', fontFamily: 'var(--font-mono)', lineHeight: '1.6',
   },
-  '.cm-python-hover-signature pre': { margin: '0', padding: '0', border: 'none', backgroundColor: 'transparent' },
+  '.cm-python-hover-signature pre': { margin: '0', padding: '8px 0', border: 'none', backgroundColor: 'transparent' },
   '.cm-python-hover-doc ul, .cm-python-hover-doc ol': { margin: '8px 0', paddingLeft: '22px' },
   '.cm-python-hover-doc ul': { listStyleType: 'disc' },
   '.cm-python-hover-doc ol': { listStyleType: 'decimal' },

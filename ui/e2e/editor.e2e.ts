@@ -295,12 +295,19 @@ test('hover pins its signature and pushes section headings away as the next sect
   const signature = page.getByRole('region', { name: '函数签名' })
   await expect(signature).toContainText('documented')
   const signatureBefore = (await signature.boundingBox())!
-  await doc.evaluate(el => { el.scrollTop = 180 })
+  expect(await signature.evaluate(el => el.scrollHeight <= el.clientHeight + 1)).toBe(true)
+  await signature.hover()
+  await page.mouse.wheel(0, 180)
+  await expect.poll(() => doc.evaluate(el => el.scrollTop)).toBeGreaterThan(100)
   const parameters = doc.getByRole('heading', { name: 'Parameters' })
   const returns = doc.getByRole('heading', { name: 'Returns' })
   await expect.poll(async () => Math.abs((await parameters.boundingBox())!.y - (await doc.boundingBox())!.y)).toBeLessThan(2)
   expect((await signature.boundingBox())!.y).toBe(signatureBefore.y)
-  expect((await signature.boundingBox())!.height).toBeGreaterThan(20)
+  expect(await signature.evaluate(el => {
+    const frame = el.getBoundingClientRect()
+    const text = el.querySelector('code')!.getBoundingClientRect()
+    return text.top >= frame.top && text.bottom <= frame.bottom
+  })).toBe(true)
   // Stop with the next heading halfway through the sticky heading's slot.
   await doc.evaluate(el => {
     const heading = el.querySelectorAll('h2')[1]
@@ -313,7 +320,50 @@ test('hover pins its signature and pushes section headings away as the next sect
   await page.setViewportSize({ width: 420, height: 320 })
   await expect(doc).toBeVisible()
   expect((await doc.boundingBox())!.height).toBeGreaterThan(40)
+  expect(await signature.evaluate(el => el.scrollHeight <= el.clientHeight + 1)).toBe(true)
   await doc.focus()
   await page.keyboard.press('Escape')
   await expect(doc).toHaveCount(0)
+})
+
+test('editor sticky scroll shows nested scopes, follows horizontal scroll and jumps to declarations', async ({ page }) => {
+  const body = Array.from({ length: 45 }, (_, i) => `            print(${i})`).join('\n')
+  const next = Array.from({ length: 45 }, (_, i) => `    print(${i})`).join('\n')
+  const parameters = Array.from({ length: 20 }, (_, i) => `_parameter_number_${i}=0`).join(', ')
+  await replace(page, `class Strategy:\n    def calculate(self, ${parameters}):\n        if True:\n${body}\n\ndef another():\n${next}\n`)
+  const scroller = page.locator('.cm-scroller').first()
+  const sticky = page.getByRole('navigation', { name: '代码作用域' }).first()
+  await scroller.evaluate(el => { el.scrollTop = 0 })
+  await expect(sticky).toBeHidden()
+  await scroller.hover()
+  await page.mouse.wheel(0, 350)
+  await expect(sticky.getByRole('button')).toHaveCount(3)
+  await expect(sticky).toContainText('class Strategy:')
+  await expect(sticky).toContainText('def calculate(self,')
+  await expect(sticky).toContainText('if True:')
+  const rect = (await sticky.boundingBox())!
+  const scrollRect = (await scroller.boundingBox())!
+  expect(Math.abs(rect.y - scrollRect.y)).toBeLessThan(2)
+  const initialScroll = await scroller.evaluate(el => el.scrollTop)
+  await sticky.hover()
+  await page.mouse.wheel(0, 100)
+  await expect.poll(() => scroller.evaluate(el => el.scrollTop)).toBeGreaterThan(initialScroll + 50)
+  const code = sticky.locator('.cm-python-sticky-code').nth(1)
+  const codeLeft = (await code.boundingBox())!.x
+  const gutterLeft = (await sticky.locator('.cm-python-sticky-number').nth(1).boundingBox())!.x
+  await scroller.evaluate(el => { el.scrollLeft = 120 })
+  await expect.poll(async () => (await code.boundingBox())!.x).toBeLessThan(codeLeft - 100)
+  expect((await sticky.locator('.cm-python-sticky-number').nth(1).boundingBox())!.x).toBe(gutterLeft)
+  await scroller.evaluate(el => { el.scrollLeft = 0 })
+  await page.screenshot({ path: '/tmp/axon-editor-sticky-nested.png' })
+  await sticky.getByRole('button', { name: /第 2 行/ }).click()
+  await expect(page.locator('.cm-content').first()).toBeFocused()
+  await expect.poll(() => scroller.evaluate(el => el.scrollTop)).toBeLessThan(80)
+  await scroller.evaluate(el => { el.scrollTop = 1300 })
+  await expect(sticky.getByRole('button')).toHaveCount(1)
+  await expect(sticky).toContainText('def another():')
+  await expect(sticky).not.toContainText('Strategy')
+  await page.screenshot({ path: '/tmp/axon-editor-sticky.png' })
+  await replace(page, 'value = 1\n')
+  await expect(sticky).toBeHidden()
 })
