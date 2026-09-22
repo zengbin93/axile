@@ -40,7 +40,7 @@ export function pythonHover() {
 
   return [hover, hoverTheme, keymap.of([{
     key: 'Mod-Alt-i', run(view) {
-      const existing = view.dom.querySelector<HTMLElement>('.cm-python-hover-doc')
+      const existing = view.dom.querySelector<HTMLElement>('.cm-python-hover-doc:not(.cm-python-hover-signature)')
       if (existing) existing.focus()
       else {
         focusNext = true
@@ -65,6 +65,7 @@ function createHover(view: EditorView, html: string, shouldFocus: () => boolean)
   content.setAttribute('role', 'region')
   content.setAttribute('aria-label', 'Python 文档')
   content.innerHTML = html
+  pinDocumentationContext(dom, content)
   const grip = dom.appendChild(document.createElement('div'))
   grip.className = 'cm-python-hover-resize'
   grip.title = '拖动调整文档大小'
@@ -112,6 +113,32 @@ function createHover(view: EditorView, html: string, shouldFocus: () => boolean)
   }
 }
 
+/** Move the leading LSP signature once; section boundaries let CSS push old headings away. */
+function pinDocumentationContext(dom: HTMLElement, content: HTMLElement) {
+  const first = content.firstElementChild
+  if (first?.matches('pre:has(> code.language-python)') && first.nextElementSibling) {
+    const signature = document.createElement('div')
+    signature.className = 'cm-python-hover-doc cm-python-hover-signature quiet-scrollbar'
+    signature.tabIndex = 0
+    signature.setAttribute('role', 'region')
+    signature.setAttribute('aria-label', '函数签名')
+    signature.appendChild(first)
+    dom.insertBefore(signature, content)
+    // The pinned header already separates the signature from the documentation.
+    if (content.firstElementChild?.tagName === 'HR') content.firstElementChild.remove()
+  }
+
+  let section: HTMLElement | undefined
+  for (const node of Array.from(content.childNodes)) {
+    if (node instanceof HTMLElement && /^H[1-6]$/.test(node.tagName)) {
+      section = document.createElement('section')
+      section.className = 'cm-python-hover-section'
+      content.insertBefore(section, node)
+    }
+    section?.appendChild(node)
+  }
+}
+
 const hoverTheme = EditorView.theme({
   '.cm-tooltip-hover:has(.cm-python-hover)': { display: 'flex', flexDirection: 'column', overflow: 'hidden' },
   '.cm-python-hover': {
@@ -124,6 +151,16 @@ const hoverTheme = EditorView.theme({
     minWidth: '0', minHeight: '0', flex: '1 1 auto', overflow: 'auto', overscrollBehavior: 'contain',
     padding: '10px 12px 16px', fontFamily: 'var(--font-sans)', fontSize: '13px',
     color: 'var(--color-ink-2)', lineHeight: '1.65', whiteSpace: 'normal', overflowWrap: 'anywhere',
+  },
+  '.cm-python-hover-signature': {
+    flex: '0 1 auto', maxHeight: 'min(110px, 25vh)', padding: '8px 12px',
+    borderBottom: '1px solid var(--color-line)', backgroundColor: 'var(--color-surface)',
+  },
+  '.cm-python-hover-signature + .cm-python-hover-doc': { minHeight: 'min(48px, 15vh)' },
+  '.cm-python-hover-section': { display: 'flow-root', paddingBottom: '8px' },
+  '.cm-python-hover-doc .cm-python-hover-section > :first-child': {
+    position: 'sticky', top: '-10px', zIndex: '1', margin: '0 -12px 6px', padding: '8px 12px',
+    backgroundColor: 'var(--color-surface)', borderBottom: '1px solid var(--color-line)',
   },
   '.cm-python-hover-doc:focus-visible': { outline: '1px solid var(--color-accent)', outlineOffset: '-2px' },
   '.cm-python-hover-doc p': { margin: '8px 0' },
@@ -141,6 +178,7 @@ const hoverTheme = EditorView.theme({
     border: '1px solid var(--color-line)', borderRadius: '5px',
     backgroundColor: 'var(--color-code-bg)', color: 'var(--color-code-fg)', fontFamily: 'var(--font-mono)', lineHeight: '1.6',
   },
+  '.cm-python-hover-signature pre': { margin: '0', padding: '0', border: 'none', backgroundColor: 'transparent' },
   '.cm-python-hover-doc ul, .cm-python-hover-doc ol': { margin: '8px 0', paddingLeft: '22px' },
   '.cm-python-hover-doc ul': { listStyleType: 'disc' },
   '.cm-python-hover-doc ol': { listStyleType: 'decimal' },

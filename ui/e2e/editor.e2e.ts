@@ -284,3 +284,36 @@ test('mouse hover remains readable above the anchor and resizes upwards', async 
   await page.keyboard.press('Escape')
   await expect(doc).toHaveCount(0)
 })
+
+test('hover pins its signature and pushes section headings away as the next section enters', async ({ page }) => {
+  const paragraphs = Array.from({ length: 12 }, (_, i) => `    Detail ${i}: ${'Documentation text. '.repeat(6)}`).join('\n\n')
+  await replace(page, `def documented(value: str) -> str:\n    """Summary.\n\n    ## Parameters\n\n${paragraphs}\n\n    ## Returns\n\n${paragraphs}\n    """\n    return value\n`)
+  await page.keyboard.press('ControlOrMeta+Home')
+  for (let i = 0; i < 5; i++) await page.keyboard.press('ArrowRight')
+  await page.keyboard.press('ControlOrMeta+Alt+i')
+  const doc = page.getByRole('region', { name: 'Python 文档' })
+  const signature = page.getByRole('region', { name: '函数签名' })
+  await expect(signature).toContainText('documented')
+  const signatureBefore = (await signature.boundingBox())!
+  await doc.evaluate(el => { el.scrollTop = 180 })
+  const parameters = doc.getByRole('heading', { name: 'Parameters' })
+  const returns = doc.getByRole('heading', { name: 'Returns' })
+  await expect.poll(async () => Math.abs((await parameters.boundingBox())!.y - (await doc.boundingBox())!.y)).toBeLessThan(2)
+  expect((await signature.boundingBox())!.y).toBe(signatureBefore.y)
+  expect((await signature.boundingBox())!.height).toBeGreaterThan(20)
+  // Stop with the next heading halfway through the sticky heading's slot.
+  await doc.evaluate(el => {
+    const heading = el.querySelectorAll('h2')[1]
+    el.scrollTop += heading.getBoundingClientRect().top - el.getBoundingClientRect().top - 12
+  })
+  await expect.poll(async () => (await parameters.boundingBox())!.y).toBeLessThan((await doc.boundingBox())!.y)
+  await doc.evaluate(el => { el.scrollTop += 100 })
+  await expect.poll(async () => Math.abs((await returns.boundingBox())!.y - (await doc.boundingBox())!.y)).toBeLessThan(2)
+  expect((await signature.boundingBox())!.y).toBe(signatureBefore.y)
+  await page.setViewportSize({ width: 420, height: 320 })
+  await expect(doc).toBeVisible()
+  expect((await doc.boundingBox())!.height).toBeGreaterThan(40)
+  await doc.focus()
+  await page.keyboard.press('Escape')
+  await expect(doc).toHaveCount(0)
+})
