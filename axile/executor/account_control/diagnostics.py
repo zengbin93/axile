@@ -12,6 +12,7 @@ OPERATION_LABELS = {
     "ctp_query_trades": "查询成交",
     "query_account": "查询账户",
     "query_positions": "查询持仓",
+    "query_depth_market_data": "查询行情快照",
     "query_instruments": "查询合约",
     "authenticate": "认证",
     "trader_login": "交易登录",

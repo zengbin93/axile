@@ -253,7 +253,8 @@ def account_to_unified(
             "quote_timestamp": quote.timestamp if quote is not None else None,
             "quote_update_time": quote.update_time if quote is not None else None,
             "valuation_status": "unavailable" if reason else "priced",
-            "valuation_source": None if reason else "ctp_last_price",
+            "valuation_source": None if reason else quote.extra.get("valuation_source", "ctp_last_price"),
+            "valuation_reference": quote.extra.get("valuation_reference", False) if quote is not None else False,
         }
         if reason:
             extra["valuation_reason"] = reason

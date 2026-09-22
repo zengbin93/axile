@@ -25,6 +25,7 @@ from axile.executor.ctp.ctp_execute import (
 from axile.executor.ctp.requests import (
     build_order_cancel,
     build_order_insert,
+    build_query_depth_market_data,
     build_query_settlement_confirm,
     resolve_offset,
 )
@@ -40,8 +41,10 @@ def test_position_valuation_subscribes_combination_legs_and_skips_zero(config):
     executor._timeout = 0.01
     executor._instruments = {"rb2610": object(), "rb2701": object()}
     executor.initialize_websocket = Mock()
-    executor._snapshot_quote_error = Mock(return_value=None)
-    executor._quotes = {symbol: fresh_quote(symbol, "") for symbol in executor._instruments}
+    executor._get_ctp_session_block_reason = Mock(return_value=None)
+    executor._fresh_valuation_quote_error = Mock(return_value=None)
+    executor._valuation_quotes = {symbol: fresh_quote(symbol, "") for symbol in executor._instruments}
+    executor._query_valuation_snapshot = Mock()
     rows = [
         SimpleNamespace(InstrumentID="SP rb2610&rb2701", PosiDirection="2", Position=1),
         SimpleNamespace(InstrumentID="rb2610", Position=0),
@@ -50,6 +53,7 @@ def test_position_valuation_subscribes_combination_legs_and_skips_zero(config):
     executor.initialize_websocket.assert_called_once_with(["rb2610", "rb2701"])
     assert set(quotes) == {"rb2610", "rb2701"}
     assert errors == {}
+    executor._query_valuation_snapshot.assert_not_called()
 
 
 @pytest.fixture
@@ -103,6 +107,12 @@ def test_build_order_insert_populates_native_fields(config: CTPAccountConfig) ->
     assert request.OrderPriceType == td.THOST_FTDC_OPT_LimitPrice
     assert request.VolumeTotalOriginal == 3
     assert request.LimitPrice == 3210.0
+
+
+def test_build_query_depth_market_data_uses_contract_identity() -> None:
+    request = build_query_depth_market_data("rb2610", "SHFE")
+    assert request.InstrumentID == "rb2610"
+    assert request.ExchangeID == "SHFE"
 
 
 def test_target_weight_uses_contract_multiplier_and_integer_lots(config) -> None:

@@ -79,6 +79,13 @@ def build_query_positions(config: CTPAccountConfig) -> object:
     return req
 
 
+def build_query_depth_market_data(symbol: str, exchange_id: str) -> object:
+    """按合约构造交易柜台的行情快照查询。"""
+    req = td.CThostFtdcQryDepthMarketDataField()
+    req.InstrumentID, req.ExchangeID = symbol, exchange_id
+    return req
+
+
 def build_query_orders(config: CTPAccountConfig, symbol: str | None = None) -> object:
     """构造订单查询请求。"""
     req = td.CThostFtdcQryOrderField()
