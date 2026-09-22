@@ -512,7 +512,12 @@ function Evidence({
         <div className="num text-[13.5px] text-ink-2">
           <BookendRow label="现金" before={b.cashBefore} after={b.cashAfter} currency={currency} />
           <BookendRow label={assetLabel} before={b.equityBefore} after={b.equityAfter} currency={currency} pnl />
-          <BookendRow label={positionValueLabel} before={b.mvBefore} after={b.mvAfter} currency={currency} />
+          <BookendRow
+            label={b.mvBeforeReference || b.mvAfterReference ? `${positionValueLabel} · 执行初始报价参考` : positionValueLabel}
+            before={b.mvBefore}
+            after={b.mvAfter}
+            currency={currency}
+          />
         </div>
       )}
       {b.timeoutSec != null && <div className="mt-1 text-[13px] text-ink-3">冻结输入 · 执行超时 {b.timeoutSec}s</div>}

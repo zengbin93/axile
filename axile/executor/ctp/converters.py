@@ -190,6 +190,8 @@ def account_to_unified(
     position_rows: list[object],
     instruments: Mapping[str, object],
     *,
+    quotes: Mapping[str, UnifiedPriceData] | None = None,
+    quote_errors: Mapping[str, str] | None = None,
     progress: Callable[[], None] | None = None,
 ) -> UnifiedAccountAssets:
     """聚合资金与原生持仓帧为统一账户快照。"""
@@ -205,10 +207,12 @@ def account_to_unified(
         native_direction = str(_value(row, "PosiDirection", "") or "")
         direction = PositionDirection.LONG if native_direction == td.THOST_FTDC_PD_Long else PositionDirection.SHORT
         key = (symbol, direction.value)
+        volume = _position_quantity(row, "Position")
+        if volume == 0:
+            continue
         group = groups.setdefault(
             key, {"volume": 0.0, "today": 0.0, "yesterday": 0.0, "frozen": 0.0, "cost": 0.0, "origin": None}
         )
-        volume = _position_quantity(row, "Position")
         today = _position_quantity(row, "TodayPosition")
         if today > volume:
             raise ValueError(f"{symbol}: 今仓与总持仓不一致")
@@ -227,14 +231,32 @@ def account_to_unified(
     positions: list[Position] = []
     for (symbol, direction), group in groups.items():
         instrument = instruments.get(symbol)
-        multiplier = _float(instrument, "VolumeMultiple") or 1.0
+        multiplier = _float(instrument, "VolumeMultiple")
         volume = group["volume"]
-        avg_price = group["cost"] / (volume * multiplier) if volume else None
+        quote = quotes.get(symbol) if quotes else None
+        reason = (quote_errors or {}).get(symbol)
+        if multiplier <= 0:
+            reason = "missing_multiplier"
+        elif quote is None and reason is None:
+            reason = "missing_quote"
+        elif quote is not None and _price({"LastPrice": quote.last_price}, "LastPrice") <= 0:
+            reason = "invalid_last_price"
+        market_value = volume * quote.last_price * multiplier if reason is None and quote is not None else None
+        avg_price = group["cost"] / (volume * multiplier) if volume and multiplier > 0 else None
         extra = {
             "long_td" if direction == PositionDirection.LONG.value else "short_td": group["today"],
             "long_yd" if direction == PositionDirection.LONG.value else "short_yd": group["yesterday"],
             "frozen": group["frozen"],
+            "position_cost": group["cost"],
+            "volume_multiple": multiplier if multiplier > 0 else None,
+            "last_price": quote.last_price if quote is not None else None,
+            "quote_timestamp": quote.timestamp if quote is not None else None,
+            "quote_update_time": quote.update_time if quote is not None else None,
+            "valuation_status": "unavailable" if reason else "priced",
+            "valuation_source": None if reason else "ctp_last_price",
         }
+        if reason:
+            extra["valuation_reason"] = reason
         if group["origin"]:
             extra["combination_origin"] = group["origin"]
         positions.append(
@@ -242,7 +264,7 @@ def account_to_unified(
                 symbol=symbol,
                 volume=volume,
                 available_volume=max(0.0, volume - group["frozen"]),
-                market_value=group["cost"],
+                market_value=market_value,
                 direction=direction,
                 avg_price=avg_price,
                 extra=extra,
@@ -253,7 +275,9 @@ def account_to_unified(
     return UnifiedAccountAssets(
         available_cash=_float(account, "Available"),
         total_asset=_float(account, "Balance"),
-        market_value=sum(position.market_value for position in positions),
+        market_value=sum(position.market_value for position in positions)
+        if all(position.market_value is not None for position in positions)
+        else None,
         positions=positions,
         extra={
             "account_id": str(_value(account, "AccountID", "") or ""),

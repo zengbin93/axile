@@ -23,7 +23,7 @@ class FormattedFeishuPosition(TypedDict):
 
     symbol: str
     direction: str
-    market_value: float
+    market_value: float | None
     volume: float
     avg_price: float
 
@@ -53,7 +53,7 @@ def format_position_for_feishu(position: Position) -> FormattedFeishuPosition:
     return {
         "symbol": position.symbol,
         "direction": position.direction.value if hasattr(position.direction, "value") else str(position.direction),
-        "market_value": float(position.market_value),
+        "market_value": float(position.market_value) if position.market_value is not None else None,
         "volume": float(position.volume),
         "avg_price": float(position.avg_price) if position.avg_price is not None else 0,
     }
@@ -111,16 +111,17 @@ def _legacy_template_variables(
     positions: list[dict[str, str]] = []
     for position in account_assets.positions:
         formatted_pos = format_position_for_feishu(position)
-        if formatted_pos["market_value"] <= 0:
+        value = formatted_pos["market_value"]
+        if value is not None and value <= 0:
             continue
         positions.append(
             {
                 "symbol": formatted_pos["symbol"],
                 "direction": formatted_pos["direction"],
-                "market_value": f"{formatted_pos['market_value']:.2f}",
+                "market_value": f"{value:.2f}" if value is not None else "暂无有效行情",
                 "volume": f"{formatted_pos['volume']:.4f}",
                 "target_volume": f"{target_volume.get(formatted_pos['symbol'], 0):.4f}",
-                "rate": f"{formatted_pos['market_value'] / total_assets:.2%}" if total_assets > 0 else "0.00%",
+                "rate": f"{value / total_assets:.2%}" if value is not None and total_assets > 0 else "—",
             }
         )
     order_lookup = _build_order_lookup(output.orders)
@@ -130,7 +131,9 @@ def _legacy_template_variables(
         "algorithm": str(output.inputs.algorithm.get("method", "Unknown")) if output.inputs else "Unknown",
         "total_assets": f"{total_assets:.2f}",
         "available_cash": f"{float(account_assets.available_cash):.2f}",
-        "market_value": f"{float(account_assets.market_value):.2f}",
+        "market_value": (
+            f"{account_assets.market_value:.2f}" if account_assets.market_value is not None else "暂无有效行情"
+        ),
         "positions": positions,
         "trades": [format_trade_for_feishu(source, trade, order_lookup) for trade in output.trades],
     }
@@ -154,7 +157,11 @@ def _structured_template_variables(
             **position.model_dump(mode="json", exclude={"extra"}),
             "target_volume": output.target_volume.get(position.symbol, 0),
             "target_weight": inputs.curr_target.get(position.symbol) if inputs else None,
-            "rate": float(position.market_value) / total_asset if total_asset > 0 else 0.0,
+            "rate": (
+                float(position.market_value) / total_asset
+                if position.market_value is not None and total_asset > 0
+                else None
+            ),
         }
         for position in assets.positions
     ]
@@ -204,12 +211,16 @@ def _structured_template_variables(
         "assets": {
             "total_assets": total_asset,
             "available_cash": float(assets.available_cash),
-            "market_value": float(assets.market_value),
+            "market_value": float(assets.market_value) if assets.market_value is not None else None,
             "currency": assets.currency,
             "update_time": assets.update_time,
             "source": assets.source,
             "cash_rate": float(assets.available_cash) / total_asset if total_asset > 0 else 0.0,
-            "position_rate": float(assets.market_value) / total_asset if total_asset > 0 else 0.0,
+            "position_rate": (
+                float(assets.market_value) / total_asset
+                if assets.market_value is not None and total_asset > 0
+                else None
+            ),
         },
         "targets": {
             "current": dict(inputs.curr_target) if inputs else {},

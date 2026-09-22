@@ -474,6 +474,12 @@ describe('buildExecutionDetail · 账户书签（证据）', () => {
     expect(b.cashAfter).toBe(4755.75)
     expect(b.equityBefore).toBe(5147.62)
     expect(b.mvAfter).toBe(9265.26)
+    expect(b.mvAfterReference).toBe(false)
+    const afterAssets = after.content.account_assets as { positions: { extra: Record<string, unknown> }[] }
+    afterAssets.positions[0].extra.market_value_provenance = {
+      source: 'ctp_first_tick_last_price_0014', quote_timestamp: 1780000000000,
+    }
+    expect(buildExecutionDetail(events, artifacts).bookends.mvAfterReference).toBe(true)
     expect(b.timeoutSec).toBe(60)
   })
 })

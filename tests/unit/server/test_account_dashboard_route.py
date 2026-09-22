@@ -270,6 +270,33 @@ def test_dashboard_handles_account_without_records(monkeypatch: pytest.MonkeyPat
     assert item["is_scheduled"] is False
 
 
+def test_dashboard_unknown_valuation_does_not_claim_zero_exposure(monkeypatch: pytest.MonkeyPatch) -> None:
+    """报价缺失时不将未知持仓市值计作零，也不报告偏离。"""
+    account = build_account(id=1, name="acc", is_started=True)
+
+    async def _bindings(_session: object) -> dict[int, int]:
+        return {1: 7}
+
+    async def _snapshots(_session: object, _account_ids: object, limit: int = 20) -> dict[int, list[object]]:
+        return {1: [_snapshot(1000, [{"symbol": "rb2610", "volume": 1, "market_value": None}], "2026-09-22T10:00:00")]}
+
+    async def _empty(*_args: object, **_kwargs: object) -> dict[int, list[object]]:
+        return {}
+
+    async def _targets(_session: object, _pairs: object) -> dict[int, object]:
+        return {1: SimpleNamespace(normalized_weights={"rb2610": 0.3})}
+
+    monkeypatch.setattr(account_crud, "get_portfolios_every_account", _bindings)
+    monkeypatch.setattr(account_crud, "get_recent_execute_records_for_accounts", _empty)
+    monkeypatch.setattr(account_crud, "get_recent_account_asset_snapshots_for_accounts", _snapshots)
+    monkeypatch.setattr(account_crud, "read_performance_summaries", _empty)
+    monkeypatch.setattr(account_crud, "get_latest_account_target_snapshots_for_accounts", _targets)
+    item = TestClient(_build_app(_Session([account]), _Scheduler())).get("/account/dashboard").json()["data"][0]
+    assert item["holdings_count"] == 1
+    assert item["position_weights"] == []
+    assert item["off_symbol_count"] is None
+
+
 def test_dashboard_counts_off_symbols_from_target_and_snapshot(monkeypatch: pytest.MonkeyPatch) -> None:
     """有持仓快照和目标时，off_symbol_count 按可执行数量口径计算。"""
     account = build_account(id=1, name="acc", is_started=True)

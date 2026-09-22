@@ -129,8 +129,10 @@ def _sample_legs(assets: UnifiedAccountAssets) -> list[_SampleLeg]:
         if volume <= 0:
             continue
         price = float(position.avg_price or 0.0)
-        if price <= 0:
-            price = float(position.market_value) / volume
+        if price <= 0 and position.market_value is not None:
+            multiplier = position.extra.get("volume_multiple", 1)
+            if isinstance(multiplier, (int, float)) and multiplier > 0:
+                price = position.market_value / (volume * multiplier)
         if price <= 0:
             continue
         if not legs:
@@ -184,9 +186,9 @@ def _holding_weights(assets: UnifiedAccountAssets) -> dict[str, float]:
     if total <= 0:
         return {}
     return {
-        position.symbol: float(position.market_value) / total
+        position.symbol: position.market_value / total
         for position in assets.positions
-        if float(position.market_value) > 0
+        if position.market_value is not None and position.market_value > 0
     }
 
 
