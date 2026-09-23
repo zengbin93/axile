@@ -16,6 +16,7 @@ interface AccountActionsProps {
   onTerminate: () => void
   onToggleStarted: () => void
   onEdit: () => void
+  onCopy: () => void
   onDelete: () => void
 }
 
@@ -181,6 +182,9 @@ export function AccountActions(props: AccountActionsProps) {
           >
             <button className={menuItem} onClick={() => { closeMenu(); props.onEdit() }}>
               ✎ 编辑账户
+            </button>
+            <button className={menuItem} onClick={() => { closeMenu(); props.onCopy() }}>
+              复制账户
             </button>
             <div className="mx-1.5 my-1.5 h-px bg-line" />
             <button

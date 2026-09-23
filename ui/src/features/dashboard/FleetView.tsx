@@ -1,5 +1,7 @@
+import { useState } from 'react'
 import { useViewTransitionState } from 'react-router'
-import { Plus } from 'lucide-react'
+import { Copy, Plus } from 'lucide-react'
+import { CopyAccountDialog } from '@/features/account/CopyAccountDialog'
 import { cardPerformance, currentEquity } from '@/features/dashboard/performance'
 import { Link, useNavigate } from '@/components/ui/nav'
 import { Card } from '@/components/ui/Card'
@@ -22,6 +24,7 @@ function FleetCard({
   portfolioName: string | null
 }) {
   const navigate = useNavigate()
+  const [copyOpen, setCopyOpen] = useState(false)
   const to = `/accounts/${item.account_id}`
   // 仅「正在跳转到本卡」时给账户名挂共享名，与详情页头配对做共享元素 FLIP（平移 + 微缩）。
   const transitioning = useViewTransitionState(to)
@@ -46,12 +49,12 @@ function FleetCard({
       ? 'border-warn/45 bg-warn-tint'
       : 'border-transparent'
 
-  return (
+  return <>
     <Card
       className={`mb-4 border px-6 py-4 transition-transform hover:-translate-y-px ${borderCls}`}
       onClick={() => navigate(to)}
     >
-      <div className="flex items-center gap-3">
+      <div className="flex flex-wrap items-center gap-3">
         <span
           className="text-[16px] font-[620]"
           style={transitioning ? { viewTransitionName: `account-name-${item.account_id}` } : undefined}
@@ -80,6 +83,14 @@ function FleetCard({
             {INTEGRITY_ICON[state.integrity]} {state.text}
           </span>
         )}
+        <button
+          type="button"
+          className="inline-flex flex-none items-center gap-1 rounded-chip border border-line px-2.5 py-1 text-[13px] text-ink-2 hover:border-border-strong hover:text-ink-1"
+          aria-label={`复制账户 ${item.name}`}
+          onClick={(event) => { event.stopPropagation(); setCopyOpen(true) }}
+        >
+          <Copy size={13} aria-hidden />复制
+        </button>
       </div>
 
       <div className="mt-3 flex items-end justify-between gap-3">
@@ -107,7 +118,8 @@ function FleetCard({
       </div>
       <ExposureBar weights={item.position_weights} />
     </Card>
-  )
+    <CopyAccountDialog accountId={item.account_id} name={item.name} isStarted={item.is_started} isBusy={Boolean(live)} open={copyOpen} onClose={() => setCopyOpen(false)} />
+  </>
 }
 
 /** 舰队总览（所有账户的着陆列表）：汇总条 + 按状态排序的账户卡。 */

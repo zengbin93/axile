@@ -551,7 +551,15 @@ def test_account_creation_defaults_and_ordinary_updates_preserve_settings(monkey
         "axile.executor.algorithms.core.base.get_algorithm_metadata", lambda method: SimpleNamespace(params_class=None)
     )
     payload = build_account().model_dump(
-        exclude={"id", "created_at", "updated_at", "backtest_weight_type", "backtest_fee_rate"}
+        exclude={
+            "id",
+            "created_at",
+            "updated_at",
+            "backtest_weight_type",
+            "backtest_fee_rate",
+            "copied_from_account_id",
+            "copied_from_account_name",
+        }
     )
     created = AccountCreate.model_validate(payload)
     assert created.backtest_weight_type == "ts"

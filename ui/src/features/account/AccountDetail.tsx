@@ -15,6 +15,7 @@ import { Tooltip } from '@/components/ui/Tooltip'
 import { ErrorNotice } from '@/components/ui/ErrorNotice'
 import { Skeleton, SkeletonGroup, SkeletonText } from '@/components/ui/Skeleton'
 import { AccountActions } from '@/features/account/AccountActions'
+import { CopyAccountDialog } from '@/features/account/CopyAccountDialog'
 import { useExecutionRunner } from '@/features/account/useExecutionRunner'
 import { useTerminateAction } from '@/features/account/useTerminateAction'
 import { buildRecentActivity, recentRowText } from '@/features/account/recent'
@@ -91,6 +92,7 @@ export function AccountDetail({
   const sidebarCompact = useNavigationStore((s) => s.sidebarCompact)
   const [timerOpen, setTimerOpen] = useState(false)
   const [refreshingAssets, setRefreshingAssets] = useState(false)
+  const [copyOpen, setCopyOpen] = useState(false)
   // 启停乐观态：确认后立刻翻转，驱动按钮/状态句日记式换字；与 item 对齐后清除。
   const [startedOverride, setStartedOverride] = useState<boolean | null>(null)
   // 共享元素 FLIP 门控：
@@ -396,9 +398,17 @@ export function AccountDetail({
             onTerminate={terminate}
             onToggleStarted={onToggleStarted}
             onEdit={() => navigate(`/accounts/${accountId}/edit`)}
+            onCopy={() => setCopyOpen(true)}
             onDelete={onDelete}
           />
         </div>
+        {account.data?.copied_from_account_name && (
+          <div className="mt-2 text-sm text-ink-3">
+            复制自{account.data.copied_from_account_id && useDomainStore.getState().accounts?.some((a) => a.account_id === account.data?.copied_from_account_id) ? (
+              <Link className="ml-1 text-accent hover:underline" to={`/accounts/${account.data.copied_from_account_id}`}>{account.data.copied_from_account_name}</Link>
+            ) : <span className="ml-1">{account.data.copied_from_account_name}</span>}
+          </div>
+        )}
 
         {/*
          * 状态区固定为「标题行 + 副行」两行结构，高度不随运行态增减（框不动，戏在框里演）。
@@ -601,6 +611,7 @@ export function AccountDetail({
           />
         </div>
       </Card>
+      <CopyAccountDialog accountId={accountId} name={item.name} isStarted={isStarted} isBusy={isBusy} open={copyOpen} onClose={() => setCopyOpen(false)} />
 
       <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-3">
         <Card className="px-6 py-4 md:col-span-2">

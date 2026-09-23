@@ -368,6 +368,8 @@ class Account(AccountBase, AsyncAttrs, table=True):
     """账户."""
 
     id: Optional[int] = Field(default=None, primary_key=True)
+    copied_from_account_id: Optional[int] = Field(default=None, sa_column=Column(Integer, nullable=True))
+    copied_from_account_name: Optional[str] = Field(default=None, sa_column=Column(Text, nullable=True))
     updated_at: str = Field(default_factory=now_str, sa_column=Column(Text, nullable=False))
     created_at: str = Field(default_factory=now_str, sa_column=Column(Text, nullable=False))
 
@@ -404,6 +406,8 @@ class AccountPublic(SQLModel):
     backtest_weight_type: WeightType = "ts"
     backtest_fee_rate: FeeRate = 0.0
     id: Optional[int]
+    copied_from_account_id: Optional[int] = None
+    copied_from_account_name: Optional[str] = None
     name: str
     market: str
     trade_channel: TradeChannel

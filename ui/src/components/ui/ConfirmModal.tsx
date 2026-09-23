@@ -5,7 +5,7 @@ export interface ConfirmSpec {
   body: string
   /** 确认按钮文案。 */
   okText: string
-  /** 危险操作用琥珀色确认按钮。 */
+  /** 危险操作用琥珀色文字和边框提示。 */
   danger?: boolean
   onConfirm: () => void
 }
@@ -90,7 +90,7 @@ export function ConfirmModal({
             <div className="flex justify-end gap-2.5 border-t border-line px-5 py-3.5">
               <button
                 ref={cancelRef}
-                className="inline-flex cursor-pointer items-center gap-1.5 rounded-[9px] border border-line bg-surface px-4 py-2 text-sm text-ink-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/55 focus-visible:ring-offset-2 focus-visible:ring-offset-surface"
+                className="inline-flex cursor-pointer items-center gap-1.5 rounded-[9px] border border-line bg-surface px-4 py-2 text-sm text-ink-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink-2/55 focus-visible:ring-offset-2 focus-visible:ring-offset-surface"
                 onClick={onClose}
               >
                 取消
@@ -98,10 +98,10 @@ export function ConfirmModal({
               </button>
               <button
                 ref={okRef}
-                className={`inline-flex cursor-pointer items-center gap-1.5 rounded-[9px] border-0 px-[18px] py-2 text-sm font-[550] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-surface ${
+                className={`inline-flex cursor-pointer items-center gap-1.5 rounded-[9px] border px-[18px] py-2 text-sm font-[550] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-surface ${
                   spec.danger
-                    ? 'bg-warn text-white focus-visible:ring-warn/60'
-                    : 'bg-ink-1 text-surface focus-visible:ring-accent/55'
+                    ? 'border-warn/55 bg-surface text-warn hover:bg-warn-soft focus-visible:ring-warn/60'
+                    : 'border-transparent bg-ink-1 text-surface focus-visible:ring-accent/55'
                 }`}
                 onClick={() => {
                   onClose()

@@ -274,6 +274,10 @@ export function createAccount(body: Record<string, unknown>): Promise<Account> {
   return apiSend<Account>('POST', '/account/', body)
 }
 
+export function copyAccount(id: number, name: string): Promise<Account> {
+  return apiSend<Account>('POST', `/account/${id}/copy`, { name })
+}
+
 /** 更新账户（局部）。 */
 export function updateAccount(id: number, patch: AccountUpdatePayload): Promise<Account> {
   return apiSend<Account>('PATCH', `/account/${id}`, patch)

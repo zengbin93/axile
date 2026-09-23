@@ -160,6 +160,8 @@ export interface AccountRuntimeSync {
 }
 
 export interface Account {
+  copied_from_account_id?: number | null
+  copied_from_account_name?: string | null
   runtime_sync?: AccountRuntimeSync | null
   backtest_weight_type?: 'ts' | 'cs'
   backtest_fee_rate?: number

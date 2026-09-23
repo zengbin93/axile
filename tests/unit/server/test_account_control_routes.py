@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import asyncio
 import re
 from collections.abc import AsyncGenerator
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException, Response
 from fastapi.testclient import TestClient
 
 from axile.common.trade_channel import TradeChannel
@@ -61,6 +63,67 @@ class _RouteSession:
 class _Scheduler:
     def get_job(self, _job_id: str) -> None:
         return None
+
+
+def test_copy_account_keeps_secrets_server_side_and_source_untouched(monkeypatch: pytest.MonkeyPatch) -> None:
+    """复制仅转移配置，来源及执行历史不会随新账户对象复制。"""
+    source = _build_account()
+    source.is_started = False
+    session = _RouteSession(source)
+    bindings: list[tuple[int, int | None]] = []
+
+    async def record_binding(_session: object, account_id: int, portfolio_id: int | None) -> None:
+        bindings.append((account_id, portfolio_id))
+
+    async def no_sync(*_args: object, **_kwargs: object) -> None:
+        return None
+
+    async def reconciled(*_args: object, **_kwargs: object) -> SimpleNamespace:
+        return SimpleNamespace(status="synchronized")
+
+    monkeypatch.setattr(account_crud_routes, "add_record_portfolio_account", record_binding)
+    monkeypatch.setattr(account_crud_routes, "enqueue_account_runtime_sync", no_sync)
+    monkeypatch.setattr(account_crud_routes, "_reconcile_committed_runtime", reconciled)
+    monkeypatch.setattr(account_crud_routes, "_account_public_with_runtime_sync", lambda account, _sync: account)
+    monkeypatch.setattr(account_crud_routes, "get_running_execution_id", lambda _id: None)
+    monkeypatch.setattr(account_crud_routes, "get_queued_execution_id", lambda _id: None)
+
+    copied = asyncio.run(
+        account_crud_routes.copy_account(
+            session, _Scheduler(), 1, account_crud_routes.AccountCopyRequest(name="新账户"), Response()
+        )
+    )
+    assert copied is not source
+    assert copied.name == "新账户"
+    assert copied.is_started is False
+    assert all(copied.account_config[key] == value for key, value in source.account_config.items())
+    assert copied.copied_from_account_id == 1
+    assert copied.copied_from_account_name == source.name
+    assert source.name == "ctp-testnet-sim"
+    assert source.copied_from_account_id is None
+    assert bindings == [(1, source.portfolio_id)]
+
+
+@pytest.mark.parametrize("condition", ["started", "scheduled", "running", "queued"])
+def test_copy_account_rejects_active_source(monkeypatch: pytest.MonkeyPatch, condition: str) -> None:
+    source = _build_account()
+    source.is_started = condition == "started"
+    scheduler = _Scheduler()
+    if condition == "scheduled":
+        monkeypatch.setattr(scheduler, "get_job", lambda _id: object())
+    monkeypatch.setattr(
+        account_crud_routes, "get_running_execution_id", lambda _id: "run" if condition == "running" else None
+    )
+    monkeypatch.setattr(
+        account_crud_routes, "get_queued_execution_id", lambda _id: "queue" if condition == "queued" else None
+    )
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(
+            account_crud_routes.copy_account(
+                _RouteSession(source), scheduler, 1, account_crud_routes.AccountCopyRequest(name="新账户"), Response()
+            )
+        )
+    assert exc.value.status_code == 409
 
 
 def _build_account(

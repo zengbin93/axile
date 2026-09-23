@@ -7,7 +7,7 @@ from typing import Annotated, Any, cast
 
 from fastapi import APIRouter, Header, HTTPException, Response, status
 from loguru import logger
-from pydantic import ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from sqlmodel import and_, delete, desc, func, select
 
 from axile.channels import get_channel
@@ -63,6 +63,14 @@ from axile.server.target_weight_snapshots import get_latest_account_target_snaps
 from axile.server.trading_calendar import CalendarDecisionStatus, evaluate_channel_calendar_moment
 
 router = APIRouter()
+
+
+class AccountCopyRequest(BaseModel):
+    """复制账户时仅接收新名称。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(min_length=1)
 
 
 def _account_public(account: Account) -> AccountPublic:
@@ -336,6 +344,58 @@ async def create_account(
     if sync.status != "synchronized":
         response.status_code = status.HTTP_202_ACCEPTED
     return _account_public_with_runtime_sync(db_account, sync)
+
+
+@router.post("/{account_id}/copy", status_code=status.HTTP_201_CREATED, response_model=AccountPublic)
+async def copy_account(
+    session: SessionDep,
+    sched: SchedDep,
+    account_id: int,
+    request: AccountCopyRequest,
+    response: Response,
+) -> AccountPublic:
+    """在来源账户完全暂停后复制配置与初始组合绑定。"""
+    async with account_runtime_lock(account_id):
+        if not request.name.strip():
+            raise HTTPException(status_code=422, detail="新账户名称不能为空")
+        source = await _get_account_or_404(session, account_id)
+        if source.is_started:
+            raise HTTPException(status_code=409, detail="请先暂停来源账户的自动调度")
+        if sched.get_job(str(account_id)) is not None:  # type: ignore[no-untyped-call]
+            raise HTTPException(status_code=409, detail="来源账户的调度任务尚未移除，请稍后重试")
+        if get_running_execution_id(account_id) or get_queued_execution_id(account_id):
+            raise HTTPException(status_code=409, detail="来源账户仍有执行中或排队中的任务，请等待结束")
+
+        try:
+            payload = AccountCreate.model_validate(
+                source.model_dump(
+                    exclude={"id", "created_at", "updated_at", "copied_from_account_id", "copied_from_account_name"}
+                )
+                | {"name": request.name.strip(), "is_started": False}
+            )
+            routes = _account_route_module()
+            routes._validate_account_control_binding(payload.trade_channel, payload.account_control_preset)
+            config = _validate_channel_account_config(payload.trade_channel, payload.account_config)
+            _check_algorithm_channel_compat(payload.algorithm, str(payload.trade_channel), "下单算法")
+            _check_algorithm_channel_compat(payload.empty_positions_algorithm, str(payload.trade_channel), "清仓算法")
+            parse_cron_expr(payload.cron_expr)
+            copied = await _create_account_record(session, payload, config)
+            copied.copied_from_account_id = account_id
+            copied.copied_from_account_name = source.name
+            await enqueue_account_runtime_sync(session, cast("int", copied.id), reset_worker=False)
+            await session.commit()
+            await session.refresh(copied)
+        except (ValueError, ValidationError) as exc:
+            await session.rollback()
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        except Exception:
+            await session.rollback()
+            raise
+
+    sync = await _reconcile_committed_runtime(session, sched, cast("int", copied.id))
+    if sync.status != "synchronized":
+        response.status_code = status.HTTP_202_ACCEPTED
+    return _account_public_with_runtime_sync(copied, sync)
 
 
 @router.get("/", response_model=AccountListPublic)
