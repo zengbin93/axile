@@ -42,6 +42,7 @@ def test_migration_history_is_linear() -> None:
         "0012_performance_snapshots.py",
         "0013_legacy_execution_errors.py",
         "0014_ctp_market_value.py",
+        "0015_tq_market_value.py",
     ]
     initial = _load_migration(migration_paths[0])
     calendar = _load_migration(migration_paths[1])
@@ -66,6 +67,9 @@ def test_migration_history_is_linear() -> None:
     valuation = _load_migration(migration_paths[13])
     assert valuation.revision == "0014"
     assert valuation.down_revision == "0013"
+    tq_valuation = _load_migration(migration_paths[14])
+    assert tq_valuation.revision == "0015"
+    assert tq_valuation.down_revision == "0014"
     assert ctp_account_control_preset.revision == "0009"
     assert ctp_account_control_preset.down_revision == "0008"
     assert account_runtime_sync.revision == "0010"

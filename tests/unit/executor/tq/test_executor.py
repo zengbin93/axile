@@ -175,6 +175,11 @@ def test_executor_converts_queries_and_order_primitives(
     assert market["rb2610"].last_price == 3200
     assert assets.positions[0].symbol == "rb2610"
     assert assets.positions[0].extra["long_yd"] == 2
+    assert assets.positions[0].market_value == 3 * 3200 * 10
+    assert assets.market_value == 3 * 3200 * 10
+    assert assets.positions[0].extra["position_cost"] == 30_000
+    assert assets.total_asset == 1_000_000
+    assert assets.available_cash == 900_000
     assert order.symbol == "rb2610"
     assert {key: value for key, value in api.insert_args.items() if key != "order_id"} == {
         "symbol": "SHFE.rb2610",

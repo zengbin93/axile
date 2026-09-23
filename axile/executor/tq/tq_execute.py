@@ -360,7 +360,8 @@ class TQExecutor(AbstractExecutor):
             return account, positions
 
         account, positions = runtime.call(query)
-        return account_to_unified(account, positions, runtime.resolver)
+        quotes = runtime.quote_snapshots(list(positions)) if positions else {}
+        return account_to_unified(account, positions, runtime.resolver, quotes)
 
     def _quote_snapshot(self, symbol: str) -> dict[str, object]:
         runtime = self._require_runtime()

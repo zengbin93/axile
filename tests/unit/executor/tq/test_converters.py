@@ -107,6 +107,7 @@ def test_positions_expose_complete_today_yesterday_breakdown() -> None:
             }
         },
         _resolver(),
+        {"SHFE.rb2610": {"last_price": 3200, "volume_multiple": 10, "datetime": "2026-09-22T14:59:00"}},
     )
 
     assert [(position.direction, position.volume) for position in assets.positions] == [
@@ -115,3 +116,35 @@ def test_positions_expose_complete_today_yesterday_breakdown() -> None:
     ]
     assert assets.positions[0].extra["net_position"] == 4
     assert assets.positions[1].extra["long_yd"] == 3
+    assert [position.market_value for position in assets.positions] == [160_000, 32_000]
+    assert assets.market_value == 192_000
+    assert assets.total_asset == 1_000_000
+    assert assets.available_cash == 900_000
+    assert assets.positions[0].extra["position_cost"] == 50_000
+    assert assets.positions[0].extra["market_value_provenance"]["price_status"] == "reference"
+
+
+def test_position_value_requires_every_contract_to_be_valued() -> None:
+    assets = account_to_unified(
+        {"available": 10, "balance": 20},
+        {"SHFE.rb2610": {"pos_long_today": 1}, "SHFE.ag2610": {"pos_short_today": 2}},
+        _resolver(),
+        {"SHFE.rb2610": {"last_price": 100, "volume_multiple": 10}},
+    )
+    assert assets.positions[0].market_value == 1000
+    assert assets.positions[1].market_value is None
+    assert assets.market_value is None
+    assert assets.positions[1].extra["market_value_provenance"]["reason"] == "missing_quote"
+
+
+def test_invalid_price_multiplier_and_empty_positions() -> None:
+    row = {"SHFE.rb2610": {"pos_long_today": 1}}
+    for quote, reason in [
+        ({"last_price": float("nan"), "volume_multiple": 10}, "invalid_price"),
+        ({"last_price": 100, "volume_multiple": 0}, "invalid_multiplier"),
+        ({"last_price": 1e308, "volume_multiple": 1e308}, "calculation_overflow"),
+    ]:
+        assets = account_to_unified({}, row, _resolver(), {"SHFE.rb2610": quote})
+        assert assets.market_value is None
+        assert assets.positions[0].extra["market_value_provenance"]["reason"] == reason
+    assert account_to_unified({}, {}, _resolver()).market_value == 0
