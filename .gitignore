@@ -208,3 +208,6 @@ start_local_server.ps1
 *.db.bk
 *.db
 .claude/settings.local.json
+# Browser editor checks
+ui/test-results/
+ui/playwright-report/

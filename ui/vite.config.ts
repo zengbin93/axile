@@ -18,8 +18,10 @@ export default defineConfig({
     proxy: {
       // 后端 axile 服务（本机 loopback）。dev 下把 /api 透传过去。
       '/api': {
-        target: 'http://127.0.0.1:1419',
+        target: process.env.AXILE_API_TARGET ?? 'http://127.0.0.1:1419',
         changeOrigin: true,
+        ws: true,
+        rewriteWsOrigin: true,
       },
     },
   },
