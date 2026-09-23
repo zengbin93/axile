@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { chartAxis, executionMarkerPoint, executionMarkerTone, hasExecutionMarker, returnY, seriesKeys, type CanvasTheme, type ChartScene } from '@/components/viz/performanceCanvas'
+import { bindingAtObservation, bindingObservationSpan, chartAxis, executionMarkerPoint, executionMarkerTone, hasExecutionMarker, returnY, seriesKeys, type CanvasTheme, type ChartScene } from '@/components/viz/performanceCanvas'
 import { pointTime } from '@/features/history/chartModel'
 import { shanghaiTime } from '@/features/history/costs'
 import type { AccountPerformance } from '@/types/api'
@@ -29,6 +29,19 @@ test('无成交不画点（失败的也一样），有真实成交保留', () =>
 })
 
 const theme: CanvasTheme = { bg: '#fff', surface: '#fff', ink: '#000', muted: '#888', line: '#ddd', accent: '#06c', warn: '#fa0', fill: '#eee', font: 'sans-serif' }
+
+test('绑定可见边界落在收益观测点，绑定详情仍保留实际生效时间', () => {
+  const times = [100, 200, 300, 400]
+  const data = { bindings: [
+    { time: '1970-01-01T08:00:00.150+08:00', portfolio_id: 1 },
+    { time: '1970-01-01T08:00:00.250+08:00', portfolio_id: 2 },
+  ] } as AccountPerformance
+  expect(bindingObservationSpan(data, times, 0)).toEqual({ start: 200, end: 300 })
+  expect(bindingObservationSpan(data, times, 1)).toEqual({ start: 300, end: 400 })
+  expect(bindingAtObservation(data, times, 275)?.binding.portfolio_id).toBe(1)
+  expect(bindingAtObservation(data, times, 300)?.binding.portfolio_id).toBe(2)
+  expect(bindingAtObservation(data, times, 300)?.binding.time).toBe(data.bindings[1].time)
+})
 
 test('回测口径统一选择累计和每日字段', () => {
   expect(seriesKeys(false, 'target')).toEqual(['account_return', 'target_portfolio_return'])
