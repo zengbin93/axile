@@ -8,6 +8,7 @@ from threading import Lock
 import loguru
 
 from axile.domain.execution import ExecutionKind, ExecutionTaskStatus
+from axile.executor.algorithms.utils.clock import clock_async_sleep
 from axile.server.core.db import SessionLocal
 from axile.server.db.models import Account, now_str
 from axile.server.execution.intents import (
@@ -64,7 +65,7 @@ async def _dispatch_account(account_id: int) -> None:
                 await _run_claimed_intent(queued)
             except IntentNotRunnable as exc:
                 if exc.retry:
-                    await asyncio.sleep(0.4)
+                    await clock_async_sleep(0.4)
                     continue
                 loguru.logger.info(f"dispatcher 跳过不可跑 intent execution_id={queued.execution_id}: {exc}")
                 continue

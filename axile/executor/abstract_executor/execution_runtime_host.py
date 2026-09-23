@@ -70,7 +70,7 @@ class AbstractExecutorExecutionRuntimeHostMixin:
         calendar_id = cast("str | None", getattr(executor, "_channel_calendar_id", None))
         if calendar_id is None:
             return True
-        current = day or date.today()
+        current = day or clock_now().date()
         calendar = cast("TradingCalendar | None", getattr(executor, "_trading_calendar", None))
         if calendar is not None:
             try:

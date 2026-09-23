@@ -12,6 +12,7 @@ from sqlmodel import col, desc, func, select
 
 from axile.channels import get_channel
 from axile.common.trade_channel import TradeChannel
+from axile.executor.algorithms.utils.clock import clock_now
 from axile.executor.trading_calendar import SHINNY_COVERAGE_END, SHINNY_COVERAGE_START
 from axile.server.api.deps import SessionDep
 from axile.server.api.routes.account_support import _get_account_or_404
@@ -204,7 +205,7 @@ async def schedule_preview(payload: SchedulePreviewRequest) -> SchedulePreviewRe
     except KeyError as exc:
         raise _field_error("trade_channel", str(exc)) from exc
 
-    evaluated_at = datetime.now(SCHEDULER_TIMEZONE)
+    evaluated_at = clock_now(tz=SCHEDULER_TIMEZONE)
     calendar = _calendar_summary(payload.trade_channel, evaluated_at)
     if is_blank_cron_expr(payload.cron_expr):
         return SchedulePreviewResponse(evaluated_at=evaluated_at, calendar=calendar, items=[])

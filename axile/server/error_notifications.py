@@ -7,12 +7,12 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime
 
 import aiohttp
 import loguru
 
 from axile.common.feishu import push_feishu_card
+from axile.executor.algorithms.utils.clock import clock_now
 from axile.server.db.models import Account
 
 
@@ -38,7 +38,7 @@ def build_error_card(
     dict[str, object]
         可直接发送到飞书的卡片 JSON。
     """
-    current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    current_time = clock_now().strftime("%Y-%m-%d %H:%M:%S")
     info_sections = [f"**⏰ 发生时间:** {current_time}"]
     if account_name:
         info_sections.append(f"**👤 账户名称:** {account_name}")
@@ -88,7 +88,7 @@ def build_test_card() -> dict[str, object]:
     -----
     仅用于系统配置向导的连通性自检，不含任何错误详情。
     """
-    current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    current_time = clock_now().strftime("%Y-%m-%d %H:%M:%S")
     return {
         "header": {
             "title": {"tag": "plain_text", "content": "🔔 axile 告警联通测试"},

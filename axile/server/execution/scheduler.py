@@ -1,12 +1,12 @@
 """账户执行任务的调度辅助函数."""
 
-from datetime import datetime
 from typing import Union, cast
 
 import loguru
 from apscheduler.job import Job  # type: ignore[import-not-found]
 from apscheduler.triggers.cron import CronTrigger  # type: ignore[import-not-found]
 
+from axile.executor.algorithms.utils.clock import clock_now
 from axile.server.core.db import SessionLocal
 from axile.server.core.log_config import execution_log_context
 from axile.server.core.scheduler import Scheduler
@@ -21,7 +21,7 @@ from axile.server.trading_calendar import (
 
 async def execute_scheduled_rebalance(account_id: int) -> None:
     """在进入执行链路前按北京时间和渠道日历判断 Cron 触发。"""
-    triggered_at = datetime.now(SCHEDULER_TIMEZONE)
+    triggered_at = clock_now(tz=SCHEDULER_TIMEZONE)
     async with SessionLocal() as session:
         account = await session.get(Account, account_id)
         if account is None or not account.is_started or is_blank_cron_expr(account.cron_expr):
@@ -155,7 +155,7 @@ async def create_job(
 
     try:
         trigger = combine_cron_triggers(triggers)
-        next_run_time = trigger.get_next_fire_time(None, datetime.now(SCHEDULER_TIMEZONE))  # type: ignore[no-untyped-call]
+        next_run_time = trigger.get_next_fire_time(None, clock_now(tz=SCHEDULER_TIMEZONE))  # type: ignore[no-untyped-call]
         sched.add_job(  # type: ignore[no-untyped-call]
             func=execute_scheduled_rebalance,
             args=[account.id],

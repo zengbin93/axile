@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import atexit
-import time
 from dataclasses import dataclass, field
 from multiprocessing import get_context
 from multiprocessing.connection import Connection
@@ -14,6 +13,7 @@ from typing import cast
 from uuid import uuid4
 
 from axile.common.trade_channel import TradeChannel
+from axile.executor.algorithms.utils.clock import clock_monotonic
 from axile.executor.ctp_catalog import CatalogStore
 from axile.executor.models.execution_result import ExecutionOutcome, ExecutionStatus
 from axile.executor.models.unified_account_assets import UnifiedAccountAssets
@@ -307,10 +307,10 @@ class WorkerBackendManager:
             if not handle.connection.poll(timeout):
                 raise WorkerBackendTimeoutError(f"worker backend 响应超时（{timeout}s）")
             return handle.connection.recv(), False
-        deadline = time.monotonic() + timeout
+        deadline = clock_monotonic() + timeout
         termination_deadline = None
         while True:
-            now = time.monotonic()
+            now = clock_monotonic()
             remaining = self._remaining_response_time(handle, request, deadline, now)
             if remaining <= 0:
                 raise WorkerBackendTimeoutError(f"worker backend 响应超时（{timeout}s）")

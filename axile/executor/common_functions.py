@@ -11,6 +11,8 @@
         execute_trading()
 """
 
+from axile.executor.algorithms.utils.clock import clock_now
+
 
 def is_trading_time() -> bool:
     """
@@ -32,9 +34,7 @@ def is_trading_time() -> bool:
         >>> # 在交易时间内
         >>> result = is_trading_time()  # 返回True或False取决于当前时间
     """
-    import pandas as pd
-
-    now_time = pd.Timestamp.now()
+    now_time = clock_now()
     now_time_hm = now_time.strftime("%H:%M")
 
     # 检查是否为周末

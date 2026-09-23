@@ -272,12 +272,7 @@ def test_reconcile_recreates_when_compact_str_collides_but_hours_differ(
 def test_schedule_preview_returns_raw_cron_points_with_cursor(monkeypatch: pytest.MonkeyPatch) -> None:
     evaluated = datetime(2026, 8, 26, 9, 0, tzinfo=SCHEDULER_TIMEZONE)
 
-    class _Datetime(datetime):
-        @classmethod
-        def now(cls, tz: object = None) -> datetime:
-            return evaluated
-
-    monkeypatch.setattr(account_schedule, "datetime", _Datetime)
+    monkeypatch.setattr(account_schedule, "clock_now", lambda *, tz: evaluated)
     payload = account_schedule.SchedulePreviewRequest(
         trade_channel=TradeChannel.CTP,
         cron_expr="30 9 * * *",
@@ -302,12 +297,7 @@ def test_schedule_preview_keeps_session_gap_points_and_marks_them_skipped(
 ) -> None:
     evaluated = datetime(2026, 8, 27, 1, 33, tzinfo=SCHEDULER_TIMEZONE)
 
-    class _Datetime(datetime):
-        @classmethod
-        def now(cls, tz: object = None) -> datetime:
-            return evaluated
-
-    monkeypatch.setattr(account_schedule, "datetime", _Datetime)
+    monkeypatch.setattr(account_schedule, "clock_now", lambda *, tz: evaluated)
     response = asyncio.run(
         account_schedule.schedule_preview(
             account_schedule.SchedulePreviewRequest(
@@ -331,12 +321,7 @@ def test_schedule_preview_keeps_session_gap_points_and_marks_them_skipped(
 def test_schedule_preview_keeps_weekend_points_and_marks_them_skipped(monkeypatch: pytest.MonkeyPatch) -> None:
     evaluated = datetime(2026, 8, 28, 15, 1, tzinfo=SCHEDULER_TIMEZONE)
 
-    class _Datetime(datetime):
-        @classmethod
-        def now(cls, tz: object = None) -> datetime:
-            return evaluated
-
-    monkeypatch.setattr(account_schedule, "datetime", _Datetime)
+    monkeypatch.setattr(account_schedule, "clock_now", lambda *, tz: evaluated)
     response = asyncio.run(
         account_schedule.schedule_preview(
             account_schedule.SchedulePreviewRequest(
@@ -359,12 +344,7 @@ def test_schedule_preview_keeps_weekend_points_and_marks_them_skipped(monkeypatc
 def test_schedule_preview_marks_unsupported_year_fail_open(monkeypatch: pytest.MonkeyPatch) -> None:
     evaluated = datetime(2027, 1, 1, 8, 0, tzinfo=SCHEDULER_TIMEZONE)
 
-    class _Datetime(datetime):
-        @classmethod
-        def now(cls, tz: object = None) -> datetime:
-            return evaluated
-
-    monkeypatch.setattr(account_schedule, "datetime", _Datetime)
+    monkeypatch.setattr(account_schedule, "clock_now", lambda *, tz: evaluated)
     response = asyncio.run(
         account_schedule.schedule_preview(
             account_schedule.SchedulePreviewRequest(

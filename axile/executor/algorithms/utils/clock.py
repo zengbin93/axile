@@ -5,10 +5,12 @@
 算法代码通过 Clock 接口获取时间和等待，在仿真环境下可以自动加速。
 """
 
+import asyncio
 import threading
 import time
+from collections.abc import Callable
 from datetime import datetime, tzinfo
-from typing import Protocol
+from typing import Protocol, cast
 
 
 class Clock(Protocol):
@@ -77,6 +79,10 @@ class RealClock:
             当前 Unix 时间戳，单位为秒。
         """
         return time.time()
+
+    def monotonic(self) -> float:
+        """返回不受系统时钟校准影响的超时计时值。"""
+        return time.monotonic()
 
     def sleep(self, seconds: float) -> None:
         """
@@ -152,6 +158,25 @@ def set_default_clock(clock: Clock) -> None:
     """
     global _default_clock
     _default_clock = clock
+
+
+def clock_monotonic(clock: Clock | None = None) -> float:
+    """读取超时计时值；旧版自定义时钟沿用其仿真时间戳。"""
+    resolved = _resolve_clock(clock)
+    monotonic = getattr(resolved, "monotonic", None)
+    if callable(monotonic):
+        return cast(Callable[[], float], monotonic)()
+    return resolved.time()
+
+
+async def clock_async_sleep(seconds: float, clock: Clock | None = None) -> None:
+    """异步等待；仿真时推进时钟并让出事件循环。"""
+    resolved = _resolve_clock(clock)
+    if isinstance(resolved, RealClock):
+        await asyncio.sleep(seconds)
+        return
+    resolved.sleep(seconds)
+    await asyncio.sleep(0)
 
 
 def clock_now(clock: Clock | None = None, tz: tzinfo | None = None) -> datetime:

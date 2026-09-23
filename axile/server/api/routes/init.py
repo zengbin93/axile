@@ -26,6 +26,7 @@ from axile.common.config import (
     update_config_toml_value,
     write_config_toml,
 )
+from axile.executor.algorithms.utils.clock import get_default_clock
 from axile.server.error_notifications import build_test_card
 
 router = APIRouter(prefix="/init", tags=["init"])
@@ -241,10 +242,8 @@ def update_execution_alert(payload: ExecutionAlertUpdateRequest) -> TestResult:
 
 def _restart_process() -> None:
     """向自身发送 ``SIGTERM`` 触发退出，交由外部 supervisor 拉起以重读配置."""
-    import time
-
     # 稍作延迟，确保保存响应已回发给前端后再退出。
-    time.sleep(_RESTART_DELAY_SECONDS)
+    get_default_clock().sleep(_RESTART_DELAY_SECONDS)
     logger.warning("初始化完成，进程即将退出以便重启进入正常模式。")
     os.kill(os.getpid(), signal.SIGTERM)
 
