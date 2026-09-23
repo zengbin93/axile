@@ -8,8 +8,8 @@
 from __future__ import annotations
 
 import re
+from datetime import datetime
 
-from axile.executor.algorithms.utils.clock import clock_now
 from axile.executor.ctp_product_sessions import CTP_PRODUCT_SESSIONS
 
 # 期货 TA2701；期权 TA2701C5000（郑商所无 -C- 分隔符）。
@@ -51,7 +51,7 @@ def canonicalize_cn_futures_symbol(symbol: str, *, reference_year: int | None = 
     if product not in _CZCE_PRODUCTS:
         return symbol
     requested_year = 2000 + int(match.group("year"))
-    year = reference_year if reference_year is not None else clock_now().year
+    year = reference_year if reference_year is not None else datetime.now().year
     native_digit = requested_year % 10
     nearest_year = min(
         (candidate for candidate in range(2000, 2100) if candidate % 10 == native_digit),

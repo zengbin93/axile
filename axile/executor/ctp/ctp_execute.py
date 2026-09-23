@@ -5,6 +5,7 @@ from __future__ import annotations
 import shutil
 import tempfile
 import threading
+import time
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
@@ -21,7 +22,7 @@ from axile.common.trade_channel import TradeChannel
 from axile.executor.abstract_executor.base import AbstractExecutor
 from axile.executor.account_control.decorators import run_controlled_call
 from axile.executor.account_control.exceptions import AccountControlBlockedError
-from axile.executor.algorithms.utils import clock_monotonic, clock_now, clock_now_iso, get_default_clock
+from axile.executor.algorithms.utils import clock_now
 from axile.executor.china_futures_session import is_within_possible_china_futures_session
 from axile.executor.constants.order_status import OrderStatus
 from axile.executor.ctp.combination import split_combination_position
@@ -320,7 +321,7 @@ class CTPExecutor(AbstractExecutor, UnifiedCallbackClient):
         )
 
     def _wait(self, stage, name):
-        if not get_default_clock().event_wait(stage.done, self._timeout):
+        if not stage.done.wait(self._timeout):
             self._invalidate_connection(f"{name}超时")
             raise TimeoutError(f"{name}超时")
         if stage.error:
@@ -334,7 +335,7 @@ class CTPExecutor(AbstractExecutor, UnifiedCallbackClient):
     def _catalog_progress(self, phase: str, *, throttled: bool = False) -> None:
         if self._ready:
             return
-        now = clock_monotonic()
+        now = time.monotonic()
         if not throttled or now - self._catalog_progress_at >= 1:
             self._catalog_provider.progress(phase)
             self._catalog_progress_at = now
@@ -640,10 +641,10 @@ class CTPExecutor(AbstractExecutor, UnifiedCallbackClient):
     def _wait_query(self, pending, name, *, timeout=None):
         wait_seconds = self._timeout if timeout is None else timeout
         if pending.idle is None:
-            if not get_default_clock().event_wait(pending.done, wait_seconds):
+            if not pending.done.wait(wait_seconds):
                 raise TimeoutError(f"{name}超时")
             return
-        while not get_default_clock().event_wait(pending.done, 0.05):
+        while not pending.done.wait(0.05):
             self._catalog_checkpoint()
             if pending.idle.timed_out(wait_seconds, pending.done):
                 raise TimeoutError(f"{name}超时：连续 {wait_seconds:g} 秒无回调")
@@ -783,7 +784,7 @@ class CTPExecutor(AbstractExecutor, UnifiedCallbackClient):
     @override
     def _check_trading_time(self) -> bool:
         """市场缝用钟判断；盘中品种时段仍由 CTP 编排器负责。"""
-        return is_within_possible_china_futures_session(clock_now(tz=_SHANGHAI))
+        return is_within_possible_china_futures_session(datetime.now(_SHANGHAI))
 
     @override
     def _execution_engine(self) -> ExecutionEngine:
@@ -851,7 +852,7 @@ class CTPExecutor(AbstractExecutor, UnifiedCallbackClient):
             return symbol
         trading_day = str(getattr(self, "_trading_day", ""))
         reference_year = (
-            int(trading_day[:4]) if len(trading_day) >= 4 and trading_day[:4].isdigit() else clock_now().year
+            int(trading_day[:4]) if len(trading_day) >= 4 and trading_day[:4].isdigit() else datetime.now().year
         )
         native_symbol = canonicalize_cn_futures_symbol(symbol, reference_year=reference_year)
         if native_symbol == symbol:
@@ -894,15 +895,15 @@ class CTPExecutor(AbstractExecutor, UnifiedCallbackClient):
                 self.initialize_websocket(open_symbols)
             except (CtpRequestError, TimeoutError, ValueError) as exc:
                 self.logger.warning("CTP 持仓行情订阅不可用: %s", exc)
-        deadline = clock_monotonic() + min(self._timeout, 3.0)
-        while open_symbols and clock_monotonic() < deadline:
+        deadline = time.monotonic() + min(self._timeout, 3.0)
+        while open_symbols and time.monotonic() < deadline:
             with self._lock:
                 if all(
                     self._fresh_valuation_quote_error(self._valuation_quotes.get(symbol)) is None
                     for symbol in open_symbols
                 ):
                     break
-            get_default_clock().sleep(0.05)
+            threading.Event().wait(0.05)
         with self._lock:
             cached = {symbol: self._valuation_quotes.get(symbol) for symbol in symbols}
         quotes = {}
@@ -946,7 +947,7 @@ class CTPExecutor(AbstractExecutor, UnifiedCallbackClient):
                 if quote.symbol != symbol or valuation_quote_error(quote) is not None:
                     continue
                 self._normalize_quote_time(quote)
-                quote.extra["received_at"] = get_default_clock().time()
+                quote.extra["received_at"] = time.time()
                 quote.extra["valuation_source"] = "ctp_snapshot_last_price"
                 with self._lock:
                     previous = self._valuation_quotes.get(symbol)
@@ -962,8 +963,8 @@ class CTPExecutor(AbstractExecutor, UnifiedCallbackClient):
     @override
     def get_market_data(self, symbols):
         self.initialize_websocket(symbols)
-        deadline = clock_monotonic() + self._timeout
-        while clock_monotonic() < deadline:
+        deadline = time.monotonic() + self._timeout
+        while time.monotonic() < deadline:
             with self._lock:
                 self._require_session_ready()
                 errors = {x: self._subscription_errors[x] for x in symbols if x in self._subscription_errors}
@@ -971,7 +972,7 @@ class CTPExecutor(AbstractExecutor, UnifiedCallbackClient):
                     raise CtpRequestError(f"行情订阅失败: {errors}")
                 if all(x in self._subscription_acks and self._quote_error(x) is None for x in symbols):
                     return {x: self._quotes[x] for x in symbols}
-            get_default_clock().sleep(0.05)
+            threading.Event().wait(0.05)
         with self._lock:
             diagnostics = {symbol: self._quote_diagnostic(symbol) for symbol in symbols}
         raise TimeoutError(f"行情等待超时: {symbols}; {diagnostics}")
@@ -980,7 +981,7 @@ class CTPExecutor(AbstractExecutor, UnifiedCallbackClient):
         quote = self._quotes.get(symbol)
         return {
             "reason": self._quote_error(symbol),
-            "time": self._quote_time_evidence(quote, get_default_clock().time()) if quote else None,
+            "time": self._quote_time_evidence(quote, time.time()) if quote else None,
             "last_rejection": self._quote_rejections.get(symbol),
         }
 
@@ -1001,7 +1002,7 @@ class CTPExecutor(AbstractExecutor, UnifiedCallbackClient):
     def _fresh_valuation_quote_error(self, quote):
         return fresh_valuation_quote_error(
             quote,
-            now=get_default_clock().time(),
+            now=time.time(),
             trading_day=self._trading_day,
             max_age=self._config().quote_max_age_seconds,
         )
@@ -1009,7 +1010,7 @@ class CTPExecutor(AbstractExecutor, UnifiedCallbackClient):
     def _snapshot_quote_error(self, symbol, quote, *, now=None):
         return quote_error(
             quote,
-            now=get_default_clock().time() if now is None else now,
+            now=time.time() if now is None else now,
             trading_day=self._trading_day,
             max_age=self._config().quote_max_age_seconds,
             tick=self.get_tick_size(symbol),
@@ -1419,7 +1420,7 @@ class CTPExecutor(AbstractExecutor, UnifiedCallbackClient):
         with self._lock:
             if self._closed or self._invalid_reason:
                 return
-            received_at = get_default_clock().time()
+            received_at = time.time()
             q = quote_to_unified(row)
             if q.symbol not in self._subscriptions:
                 return
@@ -1580,7 +1581,7 @@ class CTPExecutor(AbstractExecutor, UnifiedCallbackClient):
         c = self._config()
         ref = self._new_ref()
         kind = OptionActionType(action)
-        record = OptionActionRecord(ref, symbol, kind, volume, submit_time=clock_now_iso())
+        record = OptionActionRecord(ref, symbol, kind, volume, submit_time=datetime.now().isoformat())
         req, name = build_option_insert(
             broker_id=c.broker_id,
             investor_id=c.investor_id,

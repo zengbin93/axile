@@ -334,7 +334,7 @@ def test_initialization_progress_extends_only_current_request():
 
 def test_catalog_polling_alone_never_refreshes_watchdog(monkeypatch):
     now = [10.0]
-    monkeypatch.setattr("axile.server.execution.worker_backend.catalog.clock_monotonic", lambda: now[0])
+    monkeypatch.setattr("axile.server.execution.worker_backend.catalog.time.monotonic", lambda: now[0])
     parent, child = multiprocessing.Pipe()
     store = CatalogStore()
     store.acquire(KEY, "loader")

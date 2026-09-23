@@ -134,7 +134,7 @@ def test_cancelled_local_waiter_does_not_abort_other_accounts():
 
 def test_record_progress_is_throttled_and_ready_executor_stops_reporting(monkeypatch):
     now = [10.0]
-    monkeypatch.setattr("axile.executor.ctp.ctp_execute.clock_monotonic", lambda: now[0])
+    monkeypatch.setattr("axile.executor.ctp.ctp_execute.time.monotonic", lambda: now[0])
     executor = CTPExecutor(TradeChannel.CTP)
     phases = []
     executor.set_catalog_provider(SimpleNamespace(progress=phases.append))

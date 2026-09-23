@@ -14,6 +14,7 @@ import os
 import queue
 import sys
 import threading
+import time
 import traceback
 from collections.abc import Callable
 from concurrent.futures import Future
@@ -25,7 +26,6 @@ from typing import Protocol, TypeAlias
 
 from loguru import logger
 
-from axile.executor.algorithms.utils.clock import clock_monotonic, get_default_clock
 from axile.executor.gm.core.api_bridge import GMBridgeRequestPayload, GMSdkRequest, GMSubscribeSymbolsRequest
 from axile.executor.gm.core.bridge_context import (
     GMStartupHistoryEntry,
@@ -89,7 +89,7 @@ class GMBridgeRequest:
     future : Future[GMBridgeResult]
         回填执行结果的 Future；调用方超时后会将其取消。
     deadline : float | None
-        请求的绝对过期时刻（``clock_monotonic()`` 时基）；``None`` 表示不过期。
+        请求的绝对过期时刻（``time.monotonic()`` 时基）；``None`` 表示不过期。
         消费端在真正调用 SDK 前会二次校验该字段，兜住「调用方刚超时、
         消费端已把请求取出队列」这段无法用取消标志覆盖的竞态窗口。
     """
@@ -105,7 +105,7 @@ class GMBridgeRequest:
         Parameters
         ----------
         now : float | None, optional
-            用于比较的当前时刻（``clock_monotonic()`` 时基）；缺省时取当前时刻。
+            用于比较的当前时刻（``time.monotonic()`` 时基）；缺省时取当前时刻。
 
         Returns
         -------
@@ -114,7 +114,7 @@ class GMBridgeRequest:
         """
         if self.deadline is None:
             return False
-        return (clock_monotonic() if now is None else now) >= self.deadline
+        return (time.monotonic() if now is None else now) >= self.deadline
 
 
 class GMStrategyBridge:
@@ -166,7 +166,7 @@ class GMStrategyBridge:
         self._token = token
         self._account_id = account_id
         self._callback_dispatcher = callback_dispatcher
-        self._strategy_id = strategy_id or f"axile_callback_{int(get_default_clock().time())}"
+        self._strategy_id = strategy_id or f"axile_callback_{int(time.time())}"
         self._serv_addr = serv_addr
         self._subscribe_symbols = subscribe_symbols or []
 
@@ -189,7 +189,7 @@ class GMStrategyBridge:
         }
         self._startup_state: dict[str, GMStartupStateValue] = {
             "phase": "initialized",
-            "history": [{"phase": "initialized", "ts": get_default_clock().time()}],
+            "history": [{"phase": "initialized", "ts": time.time()}],
         }
 
         logger.info(f"StrategyBridge 初始化: strategy_id={self._strategy_id}")
@@ -227,13 +227,12 @@ class GMStrategyBridge:
         self._thread.start()
 
         # 小步等待可同时观察 ready 与后台线程异常，避免线程早已退出却仍等满 30 秒。
-        clock = get_default_clock()
-        deadline = clock_monotonic(clock) + max(timeout, 0.0)
+        deadline = time.monotonic() + max(timeout, 0.0)
         while not self._ready_event.is_set() and self._startup_error is None:
-            remaining = deadline - clock_monotonic(clock)
+            remaining = deadline - time.monotonic()
             if remaining <= 0:
                 break
-            clock.event_wait(self._ready_event, min(0.05, remaining))
+            self._ready_event.wait(timeout=min(0.05, remaining))
 
         if self._ready_event.is_set():
             self._running = True
@@ -251,7 +250,7 @@ class GMStrategyBridge:
             logger.warning(
                 f"StrategyBridge 启动在 {timeout} 秒内未就绪，但线程仍存活；继续等待 {grace_timeout} 秒宽限窗口"
             )
-            if clock.event_wait(self._ready_event, grace_timeout):
+            if self._ready_event.wait(timeout=grace_timeout):
                 self._running = True
                 logger.success("StrategyBridge 在宽限窗口内启动成功")
                 return True
@@ -329,7 +328,7 @@ class GMStrategyBridge:
 
     def _update_startup_state(self, phase: str, **details: GMStartupStateValue) -> None:
         """记录 bridge 启动阶段."""
-        entry: GMStartupHistoryEntry = {"phase": phase, "ts": get_default_clock().time()}
+        entry: GMStartupHistoryEntry = {"phase": phase, "ts": time.time()}
         if details:
             entry.update(details)
         history = self._startup_state.setdefault("history", [])
@@ -419,7 +418,7 @@ class GMStrategyBridge:
         bridge_request = GMBridgeRequest(
             request=request,
             future=Future(),
-            deadline=None if timeout is None else clock_monotonic() + timeout,
+            deadline=None if timeout is None else time.monotonic() + timeout,
         )
         self._request_queue.put(bridge_request)
 

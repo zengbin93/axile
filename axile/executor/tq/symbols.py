@@ -4,10 +4,10 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
+from datetime import datetime
 from typing import TypeVar
 
 from axile.channels.cn_futures import canonicalize_cn_futures_symbol, czce_is_option_instrument
-from axile.executor.algorithms.utils.clock import clock_now
 from axile.executor.models.unified_input import UnifiedStandardInput
 
 _TRADE_CLASSES = frozenset({"FUTURE", "OPTION", "COMBINE"})
@@ -41,7 +41,7 @@ class TQSymbolResolver:
         for item in instruments:
             by_local.setdefault(item.instrument_id, []).append(item)
         self._by_local: dict[str, list[TQInstrument]] = by_local
-        self._reference_year: int = reference_year if reference_year is not None else clock_now().year
+        self._reference_year: int = reference_year or datetime.now().year
 
     def _czce_alias_candidates(self, symbol: str) -> list[TQInstrument]:
         exchange_id: str | None = None

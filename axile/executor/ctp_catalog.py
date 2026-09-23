@@ -4,13 +4,12 @@ from __future__ import annotations
 
 import pickle
 import threading
+import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Any, Protocol
 from uuid import uuid4
-
-from axile.executor.algorithms.utils.clock import get_default_clock
 
 CatalogKey = tuple[str, str, str]
 CatalogRows = dict[str, dict[str, object]]
@@ -143,7 +142,7 @@ class LocalCatalogProvider:
                 raise RuntimeError(error)
             if data is not None:
                 return decode_catalog(data)
-            get_default_clock().sleep(0.05)
+            time.sleep(0.05)
 
     def progress(self, phase: str) -> None:
         """独立执行器没有外层 IPC watchdog。"""

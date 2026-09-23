@@ -128,7 +128,7 @@ def emit(broker, clock="21:01:02", day="20260915", trading_day="20260915"):
 def test_zero_login_normalized_quote_passes_gates_and_preserves_newest(broker, monkeypatch):
     executor = broker.start()
     now = datetime.fromisoformat("2026-09-14T21:01:02.124+08:00").timestamp()
-    monkeypatch.setattr("axile.executor.ctp.ctp_execute.get_default_clock", lambda: SimpleNamespace(time=lambda: now))
+    monkeypatch.setattr("axile.executor.ctp.ctp_execute.time.time", lambda: now)
     executor.initialize_websocket(["ag2612"])
     emit(broker)
     q = executor.get_market_data(["ag2612"])["ag2612"]
@@ -152,7 +152,7 @@ def test_zero_login_normalized_quote_passes_gates_and_preserves_newest(broker, m
 def test_timeout_includes_time_evidence(broker, monkeypatch, clock, direction):
     executor = broker.start()
     now = datetime.fromisoformat("2026-09-14T21:01:02.124+08:00").timestamp()
-    monkeypatch.setattr("axile.executor.ctp.ctp_execute.get_default_clock", lambda: SimpleNamespace(time=lambda: now))
+    monkeypatch.setattr("axile.executor.ctp.ctp_execute.time.time", lambda: now)
     executor.initialize_websocket(["ag2612"])
     emit(broker, clock)
     executor._timeout = 0

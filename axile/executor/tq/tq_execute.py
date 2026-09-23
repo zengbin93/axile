@@ -13,7 +13,6 @@ from zoneinfo import ZoneInfo
 from axile.common.trade_channel import TradeChannel
 from axile.executor.abstract_executor.base import AbstractExecutor
 from axile.executor.account_control.exceptions import AccountControlBlockedError
-from axile.executor.algorithms.utils.clock import clock_now
 from axile.executor.china_futures_session import is_within_possible_china_futures_session
 from axile.executor.execution_engine import ExecutionEngine
 from axile.executor.futures_order_intent import is_close_intent, plan_futures_close_orders, single_close_offset
@@ -205,7 +204,7 @@ class TQExecutor(AbstractExecutor):
     @override
     def _check_trading_time(self) -> bool:
         # 日夜盘缝用钟整市场判断；盘中混合持仓仍按品种拦。
-        return is_within_possible_china_futures_session(clock_now(tz=_SHANGHAI))
+        return is_within_possible_china_futures_session(datetime.now(_SHANGHAI))
 
     @staticmethod
     def _matched_trading_session(
@@ -325,7 +324,7 @@ class TQExecutor(AbstractExecutor):
         return results
 
     def _check_symbol_trading_time(self, symbol: str, now: datetime | None = None) -> TQTradingTimeCheck:
-        local_now = now or clock_now(tz=_SHANGHAI)
+        local_now = now or datetime.now(_SHANGHAI)
         if local_now.tzinfo is None:
             local_now = local_now.replace(tzinfo=_SHANGHAI)
         return self._check_symbol_trading_times([symbol], local_now.astimezone(_SHANGHAI))[symbol]
@@ -417,7 +416,7 @@ class TQExecutor(AbstractExecutor):
         order_id = uuid4().hex
 
         def submit(api: object) -> TQTradingTimeCheck | dict[str, object]:
-            check = self._check_tq_symbol_trading_time(api, sessions, clock_now(tz=_SHANGHAI))
+            check = self._check_tq_symbol_trading_time(api, sessions, datetime.now(_SHANGHAI))
             if check.error is not None:
                 return check
             insert_order = getattr(api, "insert_order")

@@ -4,8 +4,6 @@ from __future__ import annotations
 
 from datetime import date, datetime
 
-from axile.executor.algorithms.utils.clock import clock_now
-
 
 def is_china_futures_trading_day(value: date | datetime | None = None) -> bool:
     """判断日期是否为中国期货的常规工作日。
@@ -14,7 +12,7 @@ def is_china_futures_trading_day(value: date | datetime | None = None) -> bool:
     -----
     节假日停市由柜台最终校验；公共层这里只做不依赖渠道 SDK 的周末过滤。
     """
-    current = value.date() if isinstance(value, datetime) else value or clock_now().date()
+    current = value.date() if isinstance(value, datetime) else value or date.today()
     return current.weekday() < 5
 
 

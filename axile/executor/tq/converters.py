@@ -7,7 +7,6 @@ from datetime import datetime
 from typing import Any
 
 from axile.common.trade_channel import TradeChannel
-from axile.executor.algorithms.utils.clock import clock_now_iso
 from axile.executor.constants.order_status import OrderStatus
 from axile.executor.models.unified_account_assets import Position, PositionDirection, UnifiedAccountAssets
 from axile.executor.models.unified_order import OrderDirection, OrderType, TradeRecord, UnifiedOrder
@@ -33,7 +32,7 @@ def _iso_from_nano(value: object) -> str:
     try:
         return datetime.fromtimestamp(int(value) / 1_000_000_000).isoformat()
     except (TypeError, ValueError, OSError):
-        return clock_now_iso()
+        return datetime.now().isoformat()
 
 
 def _quote_time(value: object) -> tuple[str, int]:

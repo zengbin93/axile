@@ -3,15 +3,14 @@
 from __future__ import annotations
 
 import threading
+import time
 from collections.abc import Callable
-
-from axile.executor.algorithms.utils.clock import clock_monotonic
 
 
 class QueryIdleClock:
     """回调入口与超时判定共享一把锁，避免末条回调竞争。"""
 
-    def __init__(self, clock: Callable[[], float] = clock_monotonic) -> None:
+    def __init__(self, clock: Callable[[], float] = time.monotonic) -> None:
         self.clock = clock
         self.lock = threading.Lock()
         self.last = clock()

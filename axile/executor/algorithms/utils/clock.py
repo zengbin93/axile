@@ -169,19 +169,6 @@ def clock_monotonic(clock: Clock | None = None) -> float:
     return resolved.time()
 
 
-def clock_condition_wait(condition: threading.Condition, timeout: float, clock: Clock | None = None) -> None:
-    """等待条件更新；仿真时释放锁并推进时钟后重新检查条件。"""
-    resolved = _resolve_clock(clock)
-    if isinstance(resolved, RealClock):
-        condition.wait(timeout=timeout)
-        return
-    condition.release()
-    try:
-        resolved.sleep(timeout)
-    finally:
-        condition.acquire()
-
-
 async def clock_async_sleep(seconds: float, clock: Clock | None = None) -> None:
     """异步等待；仿真时推进时钟并让出事件循环。"""
     resolved = _resolve_clock(clock)
