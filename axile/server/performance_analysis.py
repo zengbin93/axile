@@ -1,8 +1,6 @@
 """Single-worker, durable performance queue and atomic snapshot publication."""
 
 import asyncio
-import time
-from datetime import datetime
 from importlib.metadata import version
 from uuid import uuid4
 
@@ -11,6 +9,7 @@ from loguru import logger
 from sqlalchemy.dialects.sqlite import insert
 from starlette.concurrency import run_in_threadpool
 
+from axile.executor.algorithms.utils.clock import clock_now_iso, get_default_clock
 from axile.server.db.models import Account, ExecuteRecord, PortfolioAccount, ScheduleSkip, TargetWeightSnapshot
 from axile.server.db.models.analysis import analysis_snapshot as snapshots
 from axile.server.db.models.analysis import analysis_state as states
@@ -361,7 +360,7 @@ class AnalysisManager:
                         .where(
                             states.c.running_version.is_(None),
                             states.c.failures <= len(RETRY_DELAYS),
-                            states.c.retry_at <= time.time(),
+                            states.c.retry_at <= get_default_clock().time(),
                             sa.or_(
                                 states.c.requested,
                                 sa.and_(
@@ -431,7 +430,7 @@ class AnalysisManager:
                     running_version=None,
                     requested=True if failures <= len(RETRY_DELAYS) else False,
                     failures=failures,
-                    retry_at=time.time() + RETRY_DELAYS[min(failures - 1, len(RETRY_DELAYS) - 1)],
+                    retry_at=get_default_clock().time() + RETRY_DELAYS[min(failures - 1, len(RETRY_DELAYS) - 1)],
                     error="绩效计算失败，请重试或查看服务日志",
                 )
             )
@@ -480,7 +479,7 @@ class AnalysisManager:
                     source_version=row["source_version"],
                     logic_version=LOGIC_VERSION,
                     engine_version=ENGINE_VERSION,
-                    computed_at=datetime.now(SHANGHAI).isoformat(),
+                    computed_at=clock_now_iso(tz=SHANGHAI),
                     data_until=ranges["all"]["performance"]["end"],
                     settings=settings.model_dump(),
                     ranges=ranges,

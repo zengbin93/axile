@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
-from datetime import datetime
 from enum import Enum
 from typing import Any
 
 from openctp_ctp import thosttraderapi as td
+
+from axile.executor.algorithms.utils.clock import clock_now_iso
 
 
 class OptionActionType(str, Enum):
@@ -116,7 +117,7 @@ def fail_option_action(record: OptionActionRecord, info: object, source: str) ->
         error_id=int(getattr(info, "ErrorID", 0) or 0),
         error_msg=str(getattr(info, "ErrorMsg", "") or ""),
         error_source=source,
-        finish_time=datetime.now().isoformat(),
+        finish_time=clock_now_iso(),
     )
 
 
@@ -131,7 +132,7 @@ def finish_option_action(record: OptionActionRecord, row: object) -> OptionActio
         }
     )
     status = OptionActionStatus.ABANDONED if record.action is OptionActionType.ABANDON else OptionActionStatus.EXECUTED
-    return replace(record, status=status, finish_time=datetime.now().isoformat(), extra=extra)
+    return replace(record, status=status, finish_time=clock_now_iso(), extra=extra)
 
 
 __all__ = ["OptionActionRecord", "OptionActionStatus", "OptionActionType"]

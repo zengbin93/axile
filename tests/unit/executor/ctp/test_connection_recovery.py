@@ -275,7 +275,7 @@ def test_wrong_and_duplicate_stage_responses_cannot_replace_session(broker):
 def test_stage_timeout_is_sticky_and_late_login_does_not_restore_readiness(broker, monkeypatch):
     broker.trader.ReqUserLogin.side_effect = None
     broker.trader.ReqUserLogin.return_value = 0
-    monkeypatch.setattr(broker.executor._login.done, "wait", lambda _timeout: False)
+    monkeypatch.setattr(broker.executor._login.done, "wait", lambda **_kwargs: False)
     with pytest.raises(TimeoutError, match="登录超时"):
         broker.start()
 
@@ -495,7 +495,7 @@ def test_reconciliation_progress_keeps_watchdog_alive_over_sixty_seconds(broker,
     now = [100.0]
     updated = [100.0]
     phases = []
-    monkeypatch.setattr("axile.executor.ctp.ctp_execute.time.monotonic", lambda: now[0])
+    monkeypatch.setattr("axile.executor.ctp.ctp_execute.clock_monotonic", lambda: now[0])
     provider = LocalCatalogProvider(CatalogStore())
 
     def progress(phase):

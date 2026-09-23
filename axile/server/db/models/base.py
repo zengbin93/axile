@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
-import datetime
-import time
 import uuid
 from typing import Any
 
 from pydantic import BaseModel
 from sqlalchemy import JSON as SA_JSON
 from sqlalchemy.types import TypeDecorator
+
+from axile.executor.algorithms.utils.clock import clock_now, clock_now_ms
 
 
 class PydanticJSONType(TypeDecorator[Any]):
@@ -65,12 +65,12 @@ class PydanticJSONType(TypeDecorator[Any]):
 
 def now_str() -> str:
     """返回不带微秒的本地时间 ISO 字符串."""
-    return datetime.datetime.now().replace(microsecond=0).isoformat()
+    return clock_now().replace(microsecond=0).isoformat()
 
 
 def now_ms() -> int:
     """返回当前时间的 Unix 毫秒时间戳."""
-    return time.time_ns() // 1_000_000
+    return clock_now_ms()
 
 
 def new_execution_id() -> str:

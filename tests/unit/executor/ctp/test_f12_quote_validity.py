@@ -97,7 +97,7 @@ def test_real_executor_blocks_stale_or_invalid_quote_at_get_and_submit(monkeypat
         executor.initialize_websocket(["ag2612"])
         broker.quote()
         quote = executor._quotes["ag2612"]
-        monkeypatch.setattr("axile.executor.ctp.ctp_execute.time.time", lambda: 1000.0)
+        monkeypatch.setattr("axile.executor.algorithms.utils.clock.RealClock.time", lambda _self: 1000.0)
         quote.timestamp = 1_000_000
         quote.extra["received_at"] = 1000.0
         if fault == "exchange_stale":

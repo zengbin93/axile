@@ -22,7 +22,6 @@ import json
 import math
 import subprocess
 import sys
-import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, cast, override
@@ -34,6 +33,7 @@ from axile.channels.schedule_clock import CN_STOCK_WINDOWS, is_within_schedule_w
 from axile.common.gm_symbols import GM_SYMBOL_RESOLVER, normalize_gm_standard_input
 from axile.common.trade_channel import TradeChannel
 from axile.executor.abstract_executor.base import AbstractExecutor
+from axile.executor.algorithms.utils.clock import clock_now, get_default_clock
 from axile.executor.constants.order_status import OrderStatus
 from axile.executor.gm.common import (
     convert_gm_order_to_unified,
@@ -166,7 +166,7 @@ class GMExecutor(AbstractExecutor, UnifiedCallbackClient):
 
     def _check_trading_time(self) -> bool:
         """检查当前是否处于 A 股可报单窗且自然日开市。"""
-        return is_within_schedule_windows(datetime.now(), CN_STOCK_WINDOWS) and self._is_channel_calendar_open()
+        return is_within_schedule_windows(clock_now(), CN_STOCK_WINDOWS) and self._is_channel_calendar_open()
 
     # ==================== 回调模式方法 ====================
 
@@ -810,21 +810,22 @@ class GMExecutor(AbstractExecutor, UnifiedCallbackClient):
     def _wait_for_port_listen(self, port: int, timeout: int | float, log_interval: int = 5) -> bool:
         """在 Windows 上等待某端口进入监听状态."""
         logger.info(f"正在等待端口 {port} 进入监听状态（最长等待 {timeout} 秒）...")
-        deadline = time.time() + timeout
+        clock = get_default_clock()
+        deadline = clock.time() + timeout
         last_log_time = 0
 
-        while time.time() < deadline:
+        while clock.time() < deadline:
             for conn in psutil.net_connections(kind="inet"):
                 if conn.status == psutil.CONN_LISTEN and conn.laddr and conn.laddr.port == port:  # type: ignore
                     logger.success(f"端口 {port} 已进入监听状态。")
                     return True
 
-            now = time.time()
+            now = clock.time()
             if now - last_log_time >= log_interval:
                 logger.info(f"仍在等待端口 {port} 进入监听状态...")
                 last_log_time = now
 
-            time.sleep(0.2)
+            clock.sleep(0.2)
 
         logger.error(f"超时未检测到端口 {port} 监听。")
         return False
@@ -869,7 +870,7 @@ class GMExecutor(AbstractExecutor, UnifiedCallbackClient):
         try:
             logger.info(f"开始检查账户 [{account_id}] 是否存在超时委托，超时时间设定为 {timeout} 秒")
             unfinished_orders = self._query_unfinished_order_records(account_id)
-            now = datetime.now(timezone.utc).astimezone()
+            now = clock_now(tz=timezone.utc).astimezone()
 
             to_cancel: list[GMCancelOrderTarget] = []
 
@@ -911,7 +912,7 @@ class GMExecutor(AbstractExecutor, UnifiedCallbackClient):
 
     def _filter_recent_orders(self, within_seconds: int, account_id: str) -> list[UnifiedOrder]:
         """过滤指定 account_id 的订单，并返回在 within_seconds 秒内创建的订单."""
-        now = datetime.now(timezone(timedelta(hours=8), "Asia/Shanghai"))
+        now = clock_now(tz=timezone(timedelta(hours=8), "Asia/Shanghai"))
         return [
             order
             for order in self._query_order_records(account_id)

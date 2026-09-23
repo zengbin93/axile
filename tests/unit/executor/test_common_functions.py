@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import runpy
 from datetime import datetime
+from types import SimpleNamespace
 
-import pandas as pd
 import pytest
 
 from axile.executor import common_functions
+from axile.executor.algorithms.utils import clock as clock_module
 
 
 @pytest.mark.parametrize(
@@ -25,7 +26,7 @@ def test_is_trading_time_matches_a_share_sessions(
     timestamp: datetime,
     expected: bool,  # noqa: FBT001
 ) -> None:
-    monkeypatch.setattr(pd.Timestamp, "now", classmethod(lambda cls: cls(timestamp)))
+    monkeypatch.setattr(clock_module, "_default_clock", SimpleNamespace(time=lambda: timestamp.timestamp()))
 
     assert common_functions.is_trading_time() is expected
 
@@ -34,7 +35,9 @@ def test_common_functions_module_main_prints_status(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    monkeypatch.setattr(pd.Timestamp, "now", classmethod(lambda cls: cls(datetime(2024, 3, 18, 10, 0))))
+    monkeypatch.setattr(
+        clock_module, "_default_clock", SimpleNamespace(time=lambda: datetime(2024, 3, 18, 10, 0).timestamp())
+    )
 
     assert common_functions.__file__ is not None
     runpy.run_path(common_functions.__file__, run_name="__main__")

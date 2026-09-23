@@ -7,6 +7,9 @@
 from axile.executor.algorithms.utils.clock import (
     Clock,
     RealClock,
+    clock_async_sleep,
+    clock_condition_wait,
+    clock_monotonic,
     clock_now,
     clock_now_iso,
     clock_now_ms,
@@ -35,6 +38,9 @@ __all__ = [
     # 时钟抽象
     "Clock",
     "RealClock",
+    "clock_async_sleep",
+    "clock_condition_wait",
+    "clock_monotonic",
     "clock_now",
     "clock_now_iso",
     "clock_now_ms",

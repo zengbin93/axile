@@ -9,7 +9,6 @@ Axile GM Callback Bridge Strategy.
 # pyright: reportAttributeAccessIssue=false, reportUndefinedVariable=false, reportCallIssue=false, reportArgumentType=false
 
 import queue
-import time
 from datetime import datetime
 from typing import TypeAlias
 
@@ -19,6 +18,7 @@ from gm.model import DictLikeAccountStatus, DictLikeExecRpt, DictLikeOrder  # ty
 from gm.model.storage import Context  # type: ignore
 
 from axile.common.trade_channel import TradeChannel
+from axile.executor.algorithms.utils.clock import get_default_clock
 from axile.executor.gm.common import (
     _build_gm_trade_id,
     convert_gm_order_type_to_type,
@@ -55,7 +55,7 @@ def _update_startup_phase(phase: str, **details: _StartupDetailValue) -> None:
         return
     state = context.startup_state
 
-    entry: dict[str, _StartupDetailValue] = {"phase": phase, "ts": time.time()}
+    entry: dict[str, _StartupDetailValue] = {"phase": phase, "ts": get_default_clock().time()}
     if details:
         entry.update(details)
 

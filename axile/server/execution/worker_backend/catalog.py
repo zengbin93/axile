@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import threading
-import time
 from collections.abc import Callable, Mapping
 from hashlib import sha256
 from multiprocessing.connection import Connection
@@ -12,6 +11,7 @@ from uuid import uuid4
 
 from loguru import logger
 
+from axile.executor.algorithms.utils.clock import clock_monotonic, get_default_clock
 from axile.executor.ctp_catalog import (
     CatalogKey,
     CatalogLoad,
@@ -48,7 +48,7 @@ class CatalogSession:
             return self.active, self.updated, self.started, self.finished
 
     def _progress(self, message: dict[str, Any]) -> None:
-        now = time.monotonic()
+        now = clock_monotonic()
         with self.lock:
             if message["op"] == "begin":
                 self.request_id = message["request_id"]
@@ -204,4 +204,4 @@ class RemoteCatalogProvider:
             if status["progress"] != observed:
                 observed = status["progress"]
                 self.progress("等待共享目录：加载者有进展")
-            time.sleep(0.1)
+            get_default_clock().sleep(0.1)

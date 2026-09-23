@@ -1,7 +1,5 @@
 """账户绩效设置和 WBT 收益对比接口，不操作执行与调度."""
 
-import asyncio
-import time
 from typing import Annotated
 
 from fastapi import APIRouter, HTTPException, Query, Request
@@ -9,6 +7,7 @@ from sqlalchemy import text
 from sqlmodel import col, select
 from starlette.concurrency import run_in_threadpool
 
+from axile.executor.algorithms.utils.clock import clock_async_sleep, clock_monotonic
 from axile.server.api.deps import SessionDep
 from axile.server.api.routes.account_support import _get_account_or_404
 from axile.server.db.models import ExecuteRecord, PortfolioAccount, TargetWeightSnapshot
@@ -93,14 +92,14 @@ async def get_performance(
     if snapshot["status"] != "ready":
         await enqueue(session, account_id)
         request.app.state.analysis_manager.wake.set()
-        deadline = time.monotonic() + 120
+        deadline = clock_monotonic() + 120
         while snapshot["status"] != "ready":
             await session.rollback()
             snapshot = await read_snapshot(session, account_id, range)
-            if snapshot["status"] == "failed" or time.monotonic() > deadline:
+            if snapshot["status"] == "failed" or clock_monotonic() > deadline:
                 raise HTTPException(503, detail="绩效尚未就绪，请读取快照状态或稍后重试")
             if snapshot["status"] != "ready":
-                await asyncio.sleep(0.1)
+                await clock_async_sleep(0.1)
     result = AccountPerformance.model_validate(snapshot["result"])
     if not include_backtest:
         result.backtest_included = False

@@ -6,12 +6,12 @@ import asyncio
 import logging
 import queue
 import threading
-import time
 from collections.abc import Callable, Mapping
 from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import Literal, TypeVar, cast
 
+from axile.executor.algorithms.utils.clock import clock_condition_wait, clock_monotonic, get_default_clock
 from axile.executor.tq.symbols import TQInstrument, TQSymbolResolver
 
 T = TypeVar("T")
@@ -93,7 +93,7 @@ def _quote_value_snapshot(value: object) -> object:
 
 @dataclass(slots=True)
 class _QuoteSubscription:
-    started: float = field(default_factory=time.monotonic)
+    started: float = field(default_factory=clock_monotonic)
     task: asyncio.Task[None] | None = None
     entity: object | None = None
     snapshot: dict[str, object] | None = None
@@ -124,7 +124,7 @@ class TQRuntime:
         self._trades: dict[str, dict[str, object]] = {}
         self._thread = threading.Thread(target=self._run, name="axile-tqsdk-runtime", daemon=True)
         self._thread.start()
-        if not self._ready.wait(command_timeout):
+        if not get_default_clock().event_wait(self._ready, command_timeout):
             raise TimeoutError("TqSdk 运行时初始化超时")
         if self._startup_error is not None:
             raise RuntimeError(f"TqSdk 运行时初始化失败: {self._startup_error}") from self._startup_error
@@ -155,10 +155,11 @@ class TQRuntime:
         if self._stopped.is_set():
             command.fail_pending(self._stopped_error())
         wait_timeout = self._command_timeout if timeout is None else timeout
-        if not command.done.wait(wait_timeout):
+        if not get_default_clock().event_wait(command.done, wait_timeout):
             if command.cancel():
                 raise TimeoutError("TqSdk 命令排队超时")
-            command.done.wait()
+            while not command.done.is_set():
+                get_default_clock().event_wait(command.done, 0.05)
         if command.error is not None:
             raise RuntimeError(f"TqSdk 命令失败: {command.error}") from command.error
         return cast(T, command.result)
@@ -204,13 +205,13 @@ class TQRuntime:
             self._subscription_failed(symbol, state, exc)
             return
         if state.warned:
-            self._logger.info("TQ 行情订阅恢复 %s，耗时 %.3fs", symbol, time.monotonic() - state.started)
+            self._logger.info("TQ 行情订阅恢复 %s，耗时 %.3fs", symbol, clock_monotonic() - state.started)
 
     def _subscription_failed(self, symbol: str, state: _QuoteSubscription, error: Exception) -> None:
         with self._quote_condition:
             state.error = error
             self._quote_condition.notify_all()
-        self._logger.warning("TQ 行情订阅失败 %s，耗时 %.3fs: %s", symbol, time.monotonic() - state.started, error)
+        self._logger.warning("TQ 行情订阅失败 %s，耗时 %.3fs: %s", symbol, clock_monotonic() - state.started, error)
 
     def _publish_quote(self, state: _QuoteSubscription) -> None:
         snapshot = cast(dict[str, object], _quote_value_snapshot(snapshot_entity(state.entity)))
@@ -225,7 +226,7 @@ class TQRuntime:
         超时不取消共享订阅；失败合约记录诊断并省略，交由规划层处理缺失行情。
         已缓存快照保留 SDK 原始时间戳，不等待下一笔更新。
         """
-        deadline = time.monotonic() + timeout
+        deadline = clock_monotonic() + timeout
         self.subscribe(symbols)
         with self._quote_condition:
             states = {symbol: self._subscriptions[symbol] for symbol in dict.fromkeys(symbols)}
@@ -233,16 +234,18 @@ class TQRuntime:
                 if self._stopped.is_set():
                     raise self._stopped_error()
                 pending = {s: state for s, state in states.items() if state.snapshot is None and state.error is None}
-                remaining = deadline - time.monotonic()
+                remaining = deadline - clock_monotonic()
                 if not pending or remaining <= 0:
                     break
                 if threading.current_thread() is self._thread:
                     raise RuntimeError("TQ owner 线程不能等待首笔行情")
-                self._quote_condition.wait(remaining)
+                clock_condition_wait(self._quote_condition, remaining)
             for symbol, state in pending.items():
                 if not state.warned:
                     state.warned = True
-                    self._logger.warning("TQ 首次行情订阅超时 %s，耗时 %.3fs", symbol, time.monotonic() - state.started)
+                    self._logger.warning(
+                        "TQ 首次行情订阅超时 %s，耗时 %.3fs", symbol, clock_monotonic() - state.started
+                    )
             return {symbol: deepcopy(state.snapshot) for symbol, state in states.items() if state.snapshot is not None}
 
     def quote_snapshot(self, symbol: str, *, timeout: float = 5.0) -> dict[str, object]:
@@ -371,7 +374,7 @@ class TQRuntime:
                             command.finish(result=result)
                 try:
                     wait_update = getattr(api, "wait_update")
-                    wait_update(deadline=time.time() + 0.05)
+                    wait_update(deadline=get_default_clock().time() + 0.05)
                     self._pump_changes(api)
                 except BaseException:  # noqa: BLE001 - 终止失效事件泵并让后续调用看到异常
                     raise

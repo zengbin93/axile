@@ -14,6 +14,7 @@ from typing import cast
 
 from loguru import logger
 
+from axile.executor.algorithms.utils.clock import get_default_clock
 from axile.executor.models.unified_account_assets import UnifiedAccountAssets
 from axile.executor.models.unified_input import UnifiedStandardInput
 from axile.executor.models.unified_output import UnifiedStandardOutput
@@ -222,7 +223,7 @@ def _handle_calculate_portfolio(
 
 def _terminate_stuck_portfolio_calculation(finished: threading.Event, timeout: float) -> None:
     """组合函数超过墙钟上限时立即终止其所在 worker."""
-    if not finished.wait(timeout):
+    if not get_default_clock().event_wait(finished, timeout):
         os._exit(124)
 
 
