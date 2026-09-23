@@ -25,6 +25,16 @@ def test_trader_spi_forwards_settlement_confirmation_query() -> None:
     owner._query_response.assert_called_once_with(row, info, 13, True)
 
 
+def test_trader_spi_forwards_market_snapshot_query() -> None:
+    owner = Mock()
+    spi = TraderSpi(owner)
+    row, info = object(), object()
+
+    spi.OnRspQryDepthMarketData(row, info, 14, True)
+
+    owner._query_response.assert_called_once_with(row, info, 14, True)
+
+
 def test_trader_spi_routes_option_exchange_error() -> None:
     owner = Mock()
     spi = TraderSpi(owner)

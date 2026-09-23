@@ -45,13 +45,19 @@ from axile.executor.ctp.options import (
     option_ref,
 )
 from axile.executor.ctp.quote_time import resolve_quote_time
-from axile.executor.ctp.quote_validation import price_in_bounds, quote_error
+from axile.executor.ctp.quote_validation import (
+    fresh_valuation_quote_error,
+    price_in_bounds,
+    quote_error,
+    valuation_quote_error,
+)
 from axile.executor.ctp.requests import (
     build_authenticate,
     build_market_login,
     build_order_cancel,
     build_order_insert,
     build_query_account,
+    build_query_depth_market_data,
     build_query_orders,
     build_query_positions,
     build_query_settlement_confirm,
@@ -186,6 +192,7 @@ class CTPExecutor(AbstractExecutor, UnifiedCallbackClient):
         self._catalog_provider = LOCAL_CATALOG
         self._catalog_progress_at = 0.0
         self._quotes = {}
+        self._valuation_quotes = {}
         self._quote_time_logged = set()
         self._quote_rejections = {}
         self._quote_calendar = ShinnyTradingCalendar()
@@ -509,6 +516,7 @@ class CTPExecutor(AbstractExecutor, UnifiedCallbackClient):
             self._ready = False
             self._monitoring = False
             self._quotes.clear()
+            self._valuation_quotes.clear()
             self._fail_waiters(self._connection_failure)
 
     def _require_active_connection(self):
@@ -588,12 +596,13 @@ class CTPExecutor(AbstractExecutor, UnifiedCallbackClient):
                 p.error = error
                 p.done.set()
 
-    def _query(self, name, req):
+    def _query(self, name, req, *, symbol=None, timeout=None):
         with self._query_lock:
             operation = {
                 "ReqQryInstrument": "query_instruments",
                 "ReqQryTradingAccount": "query_account",
                 "ReqQryInvestorPosition": "query_positions",
+                "ReqQryDepthMarketData": "query_depth_market_data",
                 "ReqQryOrder": "query_orders",
                 "ReqQryTrade": "ctp_query_trades",
                 "ReqQrySettlementInfoConfirm": "query_settlement_status",
@@ -611,7 +620,7 @@ class CTPExecutor(AbstractExecutor, UnifiedCallbackClient):
                 self._pending_queries[rid] = pending
 
             try:
-                self._send_trader_request(operation, name, req, before_send=register_pending)
+                self._send_trader_request(operation, name, req, symbol=symbol, before_send=register_pending)
                 if pending.idle is not None:
                     pending.idle.sent()
             except Exception:
@@ -620,7 +629,7 @@ class CTPExecutor(AbstractExecutor, UnifiedCallbackClient):
                 raise
             assert pending_rid is not None
             try:
-                self._wait_query(pending, name)
+                self._wait_query(pending, name, timeout=timeout)
                 if pending.error:
                     raise pending.error
                 self._catalog_progress(f"{name}完成")
@@ -629,15 +638,16 @@ class CTPExecutor(AbstractExecutor, UnifiedCallbackClient):
                 pending.done.set()
                 self._pending_queries.pop(pending_rid, None)
 
-    def _wait_query(self, pending, name):
+    def _wait_query(self, pending, name, *, timeout=None):
+        wait_seconds = self._timeout if timeout is None else timeout
         if pending.idle is None:
-            if not pending.done.wait(self._timeout):
+            if not pending.done.wait(wait_seconds):
                 raise TimeoutError(f"{name}超时")
             return
         while not pending.done.wait(0.05):
             self._catalog_checkpoint()
-            if pending.idle.timed_out(self._timeout, pending.done):
-                raise TimeoutError(f"{name}超时：连续 {self._timeout:g} 秒无回调")
+            if pending.idle.timed_out(wait_seconds, pending.done):
+                raise TimeoutError(f"{name}超时：连续 {wait_seconds:g} 秒无回调")
         self.logger.info(
             "CTP 合约查询完成 | records={} max_idle={:.3f}s local_processing={:.3f}s",
             len(pending.rows),
@@ -868,7 +878,7 @@ class CTPExecutor(AbstractExecutor, UnifiedCallbackClient):
         return account_to_unified(accounts[-1], positions, self._instruments, quotes=quotes, quote_errors=quote_errors)
 
     def _position_valuation_quotes(self, positions):
-        """有限等待持仓行情；缺失时保留原始仓位并提供估值诊断。"""
+        """盘中有限等待 tick，休市直接用最近价格，缺价时查询快照。"""
         symbols = []
         for row in positions:
             for leg in split_combination_position(row) or [row]:
@@ -877,21 +887,78 @@ class CTPExecutor(AbstractExecutor, UnifiedCallbackClient):
                 if isinstance(volume, (int, float)) and volume > 0 and symbol in self._instruments:
                     symbols.append(symbol)
         symbols = list(dict.fromkeys(symbols))
-        if symbols:
+        open_symbols = [
+            symbol for symbol in symbols if self._get_ctp_session_block_reason(symbol) != "CTP.SESSION.CLOSED"
+        ]
+        if open_symbols:
             try:
-                self.initialize_websocket(symbols)
+                self.initialize_websocket(open_symbols)
             except (CtpRequestError, TimeoutError, ValueError) as exc:
                 self.logger.warning("CTP 持仓行情订阅不可用: %s", exc)
-        deadline = time.monotonic() + min(self._timeout, 2.0)
-        while symbols and time.monotonic() < deadline:
+        deadline = time.monotonic() + min(self._timeout, 3.0)
+        while open_symbols and time.monotonic() < deadline:
             with self._lock:
-                if all(self._snapshot_quote_error(symbol, self._quotes.get(symbol)) is None for symbol in symbols):
+                if all(
+                    self._fresh_valuation_quote_error(self._valuation_quotes.get(symbol)) is None
+                    for symbol in open_symbols
+                ):
                     break
             threading.Event().wait(0.05)
         with self._lock:
-            errors = {symbol: self._snapshot_quote_error(symbol, self._quotes.get(symbol)) for symbol in symbols}
-            quotes = {symbol: self._quotes[symbol] for symbol, error in errors.items() if error is None}
-            return quotes, {symbol: error for symbol, error in errors.items() if error is not None}
+            cached = {symbol: self._valuation_quotes.get(symbol) for symbol in symbols}
+        quotes = {}
+        errors = {}
+        for symbol in symbols:
+            quote = cached[symbol]
+            needs_snapshot = valuation_quote_error(quote) is not None or (
+                symbol in open_symbols and self._fresh_valuation_quote_error(quote) is not None
+            )
+            if needs_snapshot:
+                snapshot = self._query_valuation_snapshot(symbol)
+                if snapshot is not None and (
+                    valuation_quote_error(quote) is not None or snapshot.timestamp >= quote.timestamp
+                ):
+                    quote = snapshot
+            error = valuation_quote_error(quote)
+            if error is not None:
+                errors[symbol] = error
+                continue
+            assert quote is not None
+            selected = quote.model_copy(deep=True)
+            selected.extra["valuation_reference"] = (
+                symbol not in open_symbols or self._fresh_valuation_quote_error(selected) is not None
+            )
+            quotes[symbol] = selected
+        return quotes, errors
+
+    def _query_valuation_snapshot(self, symbol):
+        """从交易柜台查询单合约快照；失败时保留已有估值行情。"""
+        instrument = self._instruments[symbol]
+        exchange_id = str(getattr(instrument, "ExchangeID", "") or "")
+        try:
+            rows = self._query(
+                "ReqQryDepthMarketData",
+                build_query_depth_market_data(symbol, exchange_id),
+                symbol=symbol,
+                timeout=min(self._timeout, 3.0),
+            )
+            for row in reversed(rows):
+                quote = quote_to_unified(row)
+                if quote.symbol != symbol or valuation_quote_error(quote) is not None:
+                    continue
+                self._normalize_quote_time(quote)
+                quote.extra["received_at"] = time.time()
+                quote.extra["valuation_source"] = "ctp_snapshot_last_price"
+                with self._lock:
+                    previous = self._valuation_quotes.get(symbol)
+                    if previous is None or quote.timestamp >= previous.timestamp:
+                        self._valuation_quotes[symbol] = quote
+                return quote
+        except CtpSessionRecoveryRequired:
+            raise
+        except Exception as exc:  # noqa: BLE001 - 快照是估值兜底，查询失败不影响既有持仓事实
+            self.logger.warning("CTP 持仓行情快照查询失败: symbol={} error={}", symbol, exc)
+        return None
 
     @override
     def get_market_data(self, symbols):
@@ -931,6 +998,14 @@ class CTPExecutor(AbstractExecutor, UnifiedCallbackClient):
 
     def _quote_error(self, symbol):
         return self._snapshot_quote_error(symbol, self._quotes.get(symbol))
+
+    def _fresh_valuation_quote_error(self, quote):
+        return fresh_valuation_quote_error(
+            quote,
+            now=time.time(),
+            trading_day=self._trading_day,
+            max_age=self._config().quote_max_age_seconds,
+        )
 
     def _snapshot_quote_error(self, symbol, quote, *, now=None):
         return quote_error(
@@ -1357,6 +1432,13 @@ class CTPExecutor(AbstractExecutor, UnifiedCallbackClient):
             error = self._snapshot_quote_error(q.symbol, q, now=received_at)
             previous = self._quotes.get(q.symbol)
             out_of_order = previous is not None and q.timestamp <= previous.timestamp <= received_at * 1000
+            valuation_previous = self._valuation_quotes.get(q.symbol)
+            if (
+                not out_of_order
+                and valuation_quote_error(q) is None
+                and (valuation_previous is None or q.timestamp > valuation_previous.timestamp)
+            ):
+                self._valuation_quotes[q.symbol] = q
             if error or out_of_order:
                 self._quote_rejections[q.symbol] = {
                     "reason": error or "out_of_order",

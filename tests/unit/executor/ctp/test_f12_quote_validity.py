@@ -5,6 +5,7 @@ import sys
 import pytest
 
 from axile.executor.ctp.converters import quote_to_unified
+from axile.executor.ctp.quote_validation import fresh_valuation_quote_error, quote_error, valuation_quote_error
 
 
 @pytest.mark.parametrize("invalid", [sys.float_info.max, float("nan"), float("inf"), -1, 0])
@@ -38,6 +39,22 @@ def test_invalid_native_prices_are_cleaned_at_every_level(invalid):
 def test_book_validity_requires_non_crossed_prices_and_both_volumes(bid, ask, bid_volume, ask_volume, valid):
     quote = quote_to_unified(dict(BidPrice1=bid, AskPrice1=ask, BidVolume1=bid_volume, AskVolume1=ask_volume))
     assert quote.book_valid is valid
+
+
+def test_valuation_accepts_old_last_price_without_book_but_order_validation_does_not():
+    quote = quote_to_unified(dict(TradingDay="20260910", LastPrice=100))
+    quote.timestamp = 900_000
+    quote.extra["received_at"] = 900.0
+
+    assert valuation_quote_error(quote) is None
+    assert fresh_valuation_quote_error(quote, now=1000, trading_day="20260910", max_age=5) == "stale_exchange_time"
+    assert quote_error(quote, now=900, trading_day="20260910", max_age=5, tick=1) == "missing_two_sided_book"
+
+
+@pytest.mark.parametrize("last_price", [0, -1, float("nan"), float("inf")])
+def test_valuation_rejects_invalid_last_price(last_price):
+    quote = quote_to_unified(dict(LastPrice=last_price))
+    assert valuation_quote_error(quote) == "invalid_last_price"
 
 
 @pytest.mark.parametrize("age,valid", [(0, True), (5, True), (5.001, False), (-1, False)])

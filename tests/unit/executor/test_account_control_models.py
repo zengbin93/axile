@@ -237,6 +237,8 @@ def test_ctp_account_control_preset_uses_ctp_specific_limits() -> None:
     assert "insert_order" not in policy.operations
     assert policy.operation_groups["place_order"] == {"ctp_td_global"}
     assert policy.operation_groups["query_account"] == {"ctp_td_global"}
+    assert policy.operation_groups["query_depth_market_data"] == {"ctp_td_global"}
+    assert policy.operations["query_depth_market_data"].account.per_minute.limit == 60
     assert policy.operations["cancel_order_ctp"].priority == 0
     assert preset.policy.groups["ctp_td_global"].min_interval_ms.limit == 1500
 
