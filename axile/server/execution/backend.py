@@ -43,6 +43,7 @@ class RebalanceBackendRequest:
     curr_target: dict[str, float]
     last_target: dict[str, object]
     logger: "loguru.Logger"
+    notification_snapshot: dict[str, object] | None = None
 
 
 @dataclass(frozen=True)
@@ -56,6 +57,7 @@ class ClearPositionsBackendRequest:
     execution_id: str
     trigger_source: str
     logger: "loguru.Logger"
+    notification_snapshot: dict[str, object] | None = None
 
 
 async def run_rebalance_via_backend(*, request: RebalanceBackendRequest) -> ExecuteRecord:
@@ -120,6 +122,7 @@ async def _run_rebalance_via_worker_process(request: RebalanceBackendRequest) ->
             execution_id=request.execution_id,
             trigger_source=request.trigger_source,
             cleanup=request.cleanup,
+            **({"notification_snapshot": request.notification_snapshot} if request.notification_snapshot else {}),
         )
         raw_input = dict(request.standard_input_dict)
         if normalized_symbol_fields is not None:
@@ -215,7 +218,16 @@ async def _run_rebalance_inline(request: RebalanceBackendRequest) -> ExecuteReco
         output = cast(
             "UnifiedStandardOutput",
             await asyncio.to_thread(
-                lambda: executor.execute(request.standard_input, cleanup=request.cleanup, retain_runtime=True)
+                lambda: executor.execute(
+                    request.standard_input,
+                    cleanup=request.cleanup,
+                    retain_runtime=True,
+                    **(
+                        {"notification_snapshot": request.notification_snapshot}
+                        if request.notification_snapshot
+                        else {}
+                    ),
+                )
             ),
         )
         record = await _persist_rebalance_completion(request, executor, output, before_account_assets)
@@ -413,6 +425,7 @@ async def _run_clear_positions_via_worker_process(request: ClearPositionsBackend
             empty_kwargs=request.empty_kwargs,
             audit_input=request.audit_input,
             execution_id=request.execution_id,
+            **({"notification_snapshot": request.notification_snapshot} if request.notification_snapshot else {}),
         )
         record, _ = await _append_output_record(
             account=request.account,
@@ -458,7 +471,16 @@ async def _run_clear_positions_inline(request: ClearPositionsBackendRequest) -> 
         output = cast(
             "UnifiedStandardOutput",
             await asyncio.to_thread(
-                lambda: executor.empty_positions(cleanup=True, retain_runtime=True, **request.empty_kwargs)
+                lambda: executor.empty_positions(
+                    cleanup=True,
+                    retain_runtime=True,
+                    **(
+                        {"notification_snapshot": request.notification_snapshot}
+                        if request.notification_snapshot
+                        else {}
+                    ),
+                    **request.empty_kwargs,
+                )
             ),
         )
         record = await _persist_clear_positions_completion(request, executor, output, before_account_assets)

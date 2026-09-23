@@ -4,14 +4,14 @@ from __future__ import annotations
 
 import queue
 import threading
-from typing import Protocol, TypedDict
+from typing import Any, Protocol, TypedDict
 
 import loguru
 
 from axile.common.feishu import push_feishu_card
 from axile.executor.algorithms.utils import clock_now
 from axile.executor.models.feishu import FeishuCardConfig
-from axile.executor.models.unified_account_assets import Position
+from axile.executor.models.unified_account_assets import Position, UnifiedAccountAssets, is_degraded_snapshot_source
 from axile.executor.models.unified_order import TradeRecord, UnifiedOrder
 from axile.executor.models.unified_output import UnifiedStandardOutput
 
@@ -99,17 +99,42 @@ def _redact_sensitive(value: object) -> object:
     return value
 
 
+def _select_notification_assets(
+    source: FeishuNotificationSource,
+    output: UnifiedStandardOutput,
+    notification_snapshot: dict[str, object] | None,
+) -> UnifiedAccountAssets | None:
+    """优先使用本次可信资产，否则使用与账户页面同源的备用快照。"""
+    current = output.account_assets
+    if not is_degraded_snapshot_source(current.source):
+        return current
+    if notification_snapshot is None:
+        return None
+    try:
+        assets = UnifiedAccountAssets.model_validate(notification_snapshot["assets"])
+    except Exception as exc:
+        source.logger.error(f"飞书通知备用资产快照无效: {exc}")
+        return None
+    if is_degraded_snapshot_source(assets.source):
+        return None
+    source.logger.info(
+        f"飞书通知使用备用资产快照: id={notification_snapshot.get('id')}, "
+        f"created_at={notification_snapshot.get('created_at')}"
+    )
+    return assets
+
+
 def _legacy_template_variables(
     source: FeishuNotificationSource,
     output: UnifiedStandardOutput,
+    account_assets: UnifiedAccountAssets | None,
 ) -> dict[str, object]:
     """构造与既有飞书模板完全兼容的变量集合."""
     account_mark = source._get_account_mark()
-    account_assets = output.account_assets
-    total_assets = float(account_assets.total_asset)
+    total_assets = float(account_assets.total_asset) if account_assets is not None else None
     target_volume = output.target_volume
     positions: list[dict[str, str]] = []
-    for position in account_assets.positions:
+    for position in account_assets.positions if account_assets is not None else []:
         formatted_pos = format_position_for_feishu(position)
         value = formatted_pos["market_value"]
         if value is not None and value <= 0:
@@ -121,7 +146,9 @@ def _legacy_template_variables(
                 "market_value": f"{value:.2f}" if value is not None else "暂无有效行情",
                 "volume": f"{formatted_pos['volume']:.4f}",
                 "target_volume": f"{target_volume.get(formatted_pos['symbol'], 0):.4f}",
-                "rate": f"{value / total_assets:.2%}" if value is not None and total_assets > 0 else "—",
+                "rate": f"{value / total_assets:.2%}"
+                if value is not None and total_assets is not None and total_assets > 0
+                else "—",
             }
         )
     order_lookup = _build_order_lookup(output.orders)
@@ -129,12 +156,25 @@ def _legacy_template_variables(
         "account_mark": account_mark,
         "dt": clock_now().strftime("%Y-%m-%d %H:%M:%S"),
         "algorithm": str(output.inputs.algorithm.get("method", "Unknown")) if output.inputs else "Unknown",
-        "total_assets": f"{total_assets:.2f}",
-        "available_cash": f"{float(account_assets.available_cash):.2f}",
+        "total_assets": f"{total_assets:.2f}" if total_assets is not None else "未获取",
+        "available_cash": f"{float(account_assets.available_cash):.2f}" if account_assets is not None else "未获取",
         "market_value": (
-            f"{account_assets.market_value:.2f}" if account_assets.market_value is not None else "暂无有效行情"
+            f"{account_assets.market_value:.2f}"
+            if account_assets is not None and account_assets.market_value is not None
+            else ("暂无有效行情" if account_assets is not None else "未获取")
         ),
-        "positions": positions,
+        "positions": positions
+        if account_assets is not None
+        else [
+            {
+                "symbol": "未获取",
+                "direction": "—",
+                "market_value": "未获取",
+                "volume": "—",
+                "target_volume": "—",
+                "rate": "—",
+            }
+        ],
         "trades": [format_trade_for_feishu(source, trade, order_lookup) for trade in output.trades],
     }
 
@@ -143,13 +183,13 @@ def _structured_template_variables(
     source: FeishuNotificationSource,
     output: UnifiedStandardOutput,
     legacy: dict[str, object],
+    assets: UnifiedAccountAssets | None,
 ) -> dict[str, object]:
     """构造版本化、跨渠道且不含连接信息的模板变量."""
     inputs = output.inputs
-    assets = output.account_assets
     audit_value = inputs.extra.get("audit") if inputs else None
     audit: dict[str, object] = audit_value if isinstance(audit_value, dict) else {}
-    total_asset = float(assets.total_asset)
+    total_asset = float(assets.total_asset) if assets is not None else None
     orders = [order.model_dump(mode="json", exclude={"extra", "update_timestamp"}) for order in output.orders]
     trades = [trade.model_dump(mode="json", exclude={"extra"}) for trade in output.trades]
     positions = [
@@ -159,11 +199,11 @@ def _structured_template_variables(
             "target_weight": inputs.curr_target.get(position.symbol) if inputs else None,
             "rate": (
                 float(position.market_value) / total_asset
-                if position.market_value is not None and total_asset > 0
+                if position.market_value is not None and total_asset is not None and total_asset > 0
                 else None
             ),
         }
-        for position in assets.positions
+        for position in (assets.positions if assets is not None else [])
     ]
     symbols: list[dict[str, object]] = []
     for symbol, result in output.symbol_results.items():
@@ -210,15 +250,22 @@ def _structured_template_variables(
         },
         "assets": {
             "total_assets": total_asset,
-            "available_cash": float(assets.available_cash),
-            "market_value": float(assets.market_value) if assets.market_value is not None else None,
-            "currency": assets.currency,
-            "update_time": assets.update_time,
-            "source": assets.source,
-            "cash_rate": float(assets.available_cash) / total_asset if total_asset > 0 else 0.0,
+            "available_cash": float(assets.available_cash) if assets is not None else None,
+            "market_value": float(assets.market_value)
+            if assets is not None and assets.market_value is not None
+            else None,
+            "currency": assets.currency if assets is not None else None,
+            "update_time": assets.update_time if assets is not None else None,
+            "source": assets.source if assets is not None else "unavailable",
+            "cash_rate": float(assets.available_cash) / total_asset
+            if assets is not None and total_asset is not None and total_asset > 0
+            else None,
             "position_rate": (
                 float(assets.market_value) / total_asset
-                if assets.market_value is not None and total_asset > 0
+                if assets is not None
+                and assets.market_value is not None
+                and total_asset is not None
+                and total_asset > 0
                 else None
             ),
         },
@@ -227,13 +274,13 @@ def _structured_template_variables(
             "previous": dict(inputs.last_target) if inputs else {},
             "target_volume": output.target_volume,
         },
-        "positions": positions,
+        "positions": positions if assets is not None else None,
         "orders": orders,
         "trades": trades,
         "symbols": symbols,
         "summary": {
             "symbol_count": len(output.symbol_results),
-            "position_count": len(positions),
+            "position_count": len(positions) if assets is not None else None,
             "order_count": len(orders),
             "filled_order_count": len(output.get_filled_orders()),
             "active_order_count": len(output.get_active_orders()),
@@ -252,13 +299,16 @@ def send_execute_results_to_feishu(
     feishu_key: str | None = None,
     card_config: FeishuCardConfig | None = None,
     template_id: str = "AAqRUQhyOM90g",
+    notification_snapshot: dict[str, object] | None = None,
 ) -> None:
     """发送执行结果到飞书群机器人."""
     if not feishu_key:
         source.logger.info("未提供飞书key，跳过通知发送")
         return
 
-    card = build_execute_results_feishu_card(source, output, card_config, template_id=template_id)
+    card = build_execute_results_feishu_card(
+        source, output, card_config, template_id=template_id, notification_snapshot=notification_snapshot
+    )
 
     try:
         push_feishu_card(card, feishu_key)
@@ -273,14 +323,16 @@ def build_execute_results_feishu_card(
     card_config: FeishuCardConfig | None = None,
     *,
     template_id: str = "AAqRUQhyOM90g",
+    notification_snapshot: dict[str, object] | None = None,
 ) -> ObjectDict:
     """按账户配置构造可直接发送的执行结果卡片."""
-    legacy = _legacy_template_variables(source, output)
     if card_config and card_config.mode == "custom":
         card: ObjectDict = dict(card_config.card or {})
     else:
+        assets = _select_notification_assets(source, output, notification_snapshot)
+        legacy = _legacy_template_variables(source, output, assets)
         custom_template = card_config.template_id if card_config and card_config.mode == "template" else None
-        variables = _structured_template_variables(source, output, legacy) if custom_template else legacy
+        variables = _structured_template_variables(source, output, legacy, assets) if custom_template else legacy
         card = {
             "type": "template",
             "data": {
@@ -302,7 +354,9 @@ _FEISHU_NOTIFY_WORKER_COUNT = 2
 _FEISHU_NOTIFY_QUEUE_MAXSIZE = 64
 """待发通知队列容量；超出后丢弃最新通知，避免无界堆积。"""
 
-_FeishuNotifyTask = tuple["FeishuNotificationSource", UnifiedStandardOutput, str, FeishuCardConfig | None]
+_FeishuNotifyTask = tuple[
+    "FeishuNotificationSource", UnifiedStandardOutput, str, FeishuCardConfig | None, dict[str, object] | None
+]
 
 _notify_queue: queue.Queue[_FeishuNotifyTask] = queue.Queue(maxsize=_FEISHU_NOTIFY_QUEUE_MAXSIZE)
 _notify_workers_started = False
@@ -312,12 +366,15 @@ _notify_workers_lock = threading.Lock()
 def _feishu_notify_worker_loop() -> None:
     """后台 worker 主循环：串行消费队列并发送飞书通知，异常不退出。"""
     while True:
-        source, output, feishu_key, card_config = _notify_queue.get()
+        source, output, feishu_key, card_config, notification_snapshot = _notify_queue.get()
         try:
+            notification_kwargs: dict[str, Any] = (
+                {"notification_snapshot": notification_snapshot} if notification_snapshot else {}
+            )
             if card_config is None:
-                send_execute_results_to_feishu(source, output, feishu_key)
+                send_execute_results_to_feishu(source, output, feishu_key, **notification_kwargs)
             else:
-                send_execute_results_to_feishu(source, output, feishu_key, card_config)
+                send_execute_results_to_feishu(source, output, feishu_key, card_config, **notification_kwargs)
         except Exception as exc:  # noqa: BLE001 - 通知任务异常不得拖垮 worker
             loguru.logger.error(f"飞书通知任务执行异常: {exc}")
         finally:
@@ -346,6 +403,7 @@ def enqueue_execute_results_to_feishu(
     output: UnifiedStandardOutput,
     feishu_key: str | None = None,
     card_config: FeishuCardConfig | None = None,
+    notification_snapshot: dict[str, object] | None = None,
 ) -> None:
     """
     将执行结果飞书通知投递到有界后台队列.
@@ -374,6 +432,6 @@ def enqueue_execute_results_to_feishu(
         return
     _ensure_feishu_notify_workers_started()
     try:
-        _notify_queue.put_nowait((source, output, feishu_key, card_config))
+        _notify_queue.put_nowait((source, output, feishu_key, card_config, notification_snapshot))
     except queue.Full:
         loguru.logger.warning(f"飞书通知队列已满（maxsize={_FEISHU_NOTIFY_QUEUE_MAXSIZE}），丢弃本次通知以避免无界堆积")

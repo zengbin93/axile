@@ -19,6 +19,7 @@ from axile.server.execution.execution_algorithms import (
     resolve_execution_algorithm_name,
 )
 from axile.server.execution.execution_records_output import sanitize_standard_input_for_audit
+from axile.server.execution.notification_assets import load_notification_snapshot
 from axile.server.execution.registry import clear_running_execution, register_inline_execution
 from axile.server.utils import trade_channel_check
 
@@ -144,11 +145,13 @@ async def __empty_positions(
         logger = loguru.logger
 
     local_execution_id = execution_id or new_execution_id()
+    notification_snapshot = await load_notification_snapshot(account)
     request = _build_clear_positions_backend_request(
         account=account,
         algorithm=algorithm,
         execution_id=local_execution_id,
         logger=logger,
+        notification_snapshot=notification_snapshot,
     )
     return await execution_backend.run_clear_positions_via_backend(request=request)
 
@@ -159,6 +162,7 @@ def _build_clear_positions_backend_request(
     algorithm: dict[str, object] | None,
     execution_id: str,
     logger: "loguru.Logger",
+    notification_snapshot: dict[str, object] | None = None,
 ) -> execution_backend.ClearPositionsBackendRequest:
     """组装后端执行清仓所需的请求对象。"""
     resolved_algorithm = resolve_empty_positions_algorithm(account, algorithm)
@@ -199,4 +203,5 @@ def _build_clear_positions_backend_request(
         execution_id=execution_id,
         trigger_source="empty_positions",
         logger=logger,
+        notification_snapshot=notification_snapshot,
     )

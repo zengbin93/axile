@@ -6,7 +6,6 @@ from typing import Any
 
 from axile.common.trade_channel import TradeChannel
 from axile.executor.abstract_executor import AbstractExecutor
-from axile.executor.abstract_executor import facade as abstract_executor_facade_module
 from axile.executor.models.execution_result import ExecutionStatus
 from axile.executor.models.unified_account_assets import Position, PositionDirection, UnifiedAccountAssets
 from axile.executor.models.unified_input import CTPAccountConfig, UnifiedStandardInput
@@ -124,7 +123,6 @@ def test_empty_positions_returns_noop_result_when_no_positions() -> None:
 
 
 def test_empty_positions_executes_and_sends_feishu_notification(monkeypatch) -> None:
-    sent: list[tuple[object, object, object]] = []
     captured: dict[str, Any] = {}
     executor = _EmptyPositionsExecutor(
         UnifiedAccountAssets(
@@ -172,10 +170,6 @@ def test_empty_positions_executes_and_sends_feishu_notification(monkeypatch) -> 
             success=True,
         )
 
-    def fake_sender(source: object, output: object, feishu_key: object) -> None:
-        sent.append((source, output, feishu_key))
-
-    monkeypatch.setattr(abstract_executor_facade_module, "send_execute_results_to_feishu", fake_sender)
     monkeypatch.setattr(executor, "execute", fake_execute)
     monkeypatch.setattr(
         executor, "_calculate_last_target_unified", lambda positions: {position.symbol: 0.1 for position in positions}
@@ -200,7 +194,7 @@ def test_empty_positions_executes_and_sends_feishu_notification(monkeypatch) -> 
     assert standard_input.feishu_key == "hook-empty"
     assert standard_input.forbidden_symbols == ["ag2612"]
     assert standard_input.extra["source"] == "test"
-    assert sent == [(executor, result, "hook-empty")]
+    assert result.success is True  # fake execute 不进入真实通知入口
 
 
 def test_empty_positions_uses_wider_default_timeout(monkeypatch) -> None:

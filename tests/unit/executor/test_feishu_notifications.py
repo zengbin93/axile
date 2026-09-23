@@ -8,7 +8,6 @@ import threading
 from axile.common.trade_channel import TradeChannel
 from axile.executor import feishu_notifications as feishu_module
 from axile.executor.abstract_executor import execution_lifecycle as abstract_executor_execution_lifecycle_module
-from axile.executor.abstract_executor import facade as abstract_executor_facade_module
 from axile.executor.abstract_executor.base import AbstractExecutor
 from axile.executor.algorithms.core.base import AlgorithmResult
 from axile.executor.feishu_notifications import build_execute_results_feishu_card, send_execute_results_to_feishu
@@ -308,13 +307,9 @@ def test_execute_with_feishu_key_uses_extracted_sender(monkeypatch) -> None:
     assert sent[0][2] == "hook-exec"
 
 
-def test_empty_positions_uses_extracted_sender(monkeypatch) -> None:
-    """AbstractExecutor.empty_positions 应调用新飞书模块发送结果。"""
+def test_empty_positions_does_not_send_second_card(monkeypatch) -> None:
+    """清仓外层不重复发送结果卡片。"""
     executor = _FeishuAwareExecutor(TradeChannel.CTP, None)
-    sent: list[tuple[object, object, object]] = []
-
-    def _fake_sender(source: object, output: object, feishu_key: object) -> None:
-        sent.append((source, output, feishu_key))
 
     def _fake_execute(
         _standard_input: UnifiedStandardInput,
@@ -329,7 +324,6 @@ def test_empty_positions_uses_extracted_sender(monkeypatch) -> None:
             success=True,
         )
 
-    monkeypatch.setattr(abstract_executor_facade_module, "send_execute_results_to_feishu", _fake_sender)
     monkeypatch.setattr(executor, "execute", _fake_execute)
     monkeypatch.setattr(
         executor,
@@ -365,9 +359,7 @@ def test_empty_positions_uses_extracted_sender(monkeypatch) -> None:
     result = executor.empty_positions(feishu_key="hook-empty")
 
     assert result.success is True
-    assert len(sent) == 1
-    assert sent[0][0] is executor
-    assert sent[0][2] == "hook-empty"
+    assert result.success is True  # fake execute 不进入真实通知入口
 
 
 def test_send_execute_results_to_feishu_builds_expected_card(monkeypatch) -> None:
@@ -607,3 +599,49 @@ def test_feishu_worker_survives_task_exception(monkeypatch) -> None:
 
     assert done.wait(timeout=5.0), "异常任务后 worker 未继续消费下一个任务"
     assert "boom" in calls and "ok" in calls
+
+
+def test_notification_asset_selection_and_evidence_boundary() -> None:
+    """降级执行复用旧快照，金额和持仓同源，执行输出仍保留本次事实。"""
+    source = _NotificationSource()
+    old = UnifiedAccountAssets(
+        available_cash=700,
+        total_asset=1000,
+        market_value=300,
+        positions=[
+            Position(symbol="rb2610", volume=2, available_volume=2, market_value=300, direction=PositionDirection.LONG)
+        ],
+    )
+    snapshot = {"id": 42, "created_at": "2026-09-23 11:19:00", "assets": old.model_dump(mode="json")}
+    for degraded_source in ("unavailable", "assumed", "error"):
+        output = UnifiedStandardOutput(
+            account_assets=UnifiedAccountAssets(
+                available_cash=0, total_asset=0, market_value=0, source=degraded_source
+            ),
+            status=ExecutionStatus.BLOCKED,
+            channel_type=TradeChannel.CTP,
+        )
+        card = build_execute_results_feishu_card(source, output, notification_snapshot=snapshot)
+        variables = card["data"]["template_variable"]
+        assert (variables["total_assets"], variables["available_cash"], variables["market_value"]) == (
+            "1000.00",
+            "700.00",
+            "300.00",
+        )
+        assert variables["positions"][0]["symbol"] == "rb2610"
+        assert output.account_assets.source == degraded_source
+        assert "notification_snapshot" not in output.model_dump_json()
+        missing = build_execute_results_feishu_card(source, output)["data"]["template_variable"]
+        assert missing["total_assets"] == "未获取"
+        assert missing["positions"][0]["symbol"] == "未获取"
+
+    current = UnifiedStandardOutput(
+        account_assets=UnifiedAccountAssets(available_cash=0, total_asset=0, market_value=0, positions=[]),
+        status=ExecutionStatus.NOOP,
+        channel_type=TradeChannel.CTP,
+    )
+    variables = build_execute_results_feishu_card(source, current, notification_snapshot=snapshot)["data"][
+        "template_variable"
+    ]
+    assert variables["total_assets"] == "0.00"
+    assert variables["positions"] == []

@@ -31,6 +31,7 @@ class _ExecuteTradeRequestContext:
     audit_context: dict[str, object]
     audit_input: dict[str, object]
     cleanup: bool
+    notification_snapshot: dict[str, object] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -48,6 +49,7 @@ class _EmptyPositionsRequestContext:
     algorithm_name: str
     audit_context: dict[str, object]
     audit_input: dict[str, object]
+    notification_snapshot: dict[str, object] | None = None
 
 
 def _parse_execute_trade_request(request: WorkerBackendRequest) -> _ExecuteTradeRequestContext:
@@ -81,6 +83,7 @@ def _parse_execute_trade_request(request: WorkerBackendRequest) -> _ExecuteTrade
         audit_context=audit_context,
         audit_input=cast(dict[str, object], request.payload["audit_input"]),
         cleanup=bool(request.payload["cleanup"]),
+        notification_snapshot=cast("dict[str, object] | None", request.payload.get("notification_snapshot")),
     )
 
 
@@ -113,4 +116,5 @@ def _parse_empty_positions_request(request: WorkerBackendRequest) -> _EmptyPosit
         algorithm_name=str(resolved_algorithm.get("method", "SINGLE-MAKER")),
         audit_context=audit_context,
         audit_input=cast(dict[str, object], request.payload["audit_input"]),
+        notification_snapshot=cast("dict[str, object] | None", request.payload.get("notification_snapshot")),
     )

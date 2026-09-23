@@ -11,7 +11,6 @@ from typing import TYPE_CHECKING, cast
 
 from axile.executor.abstract_executor.support import _coerce_object_dict, _coerce_trade_rules
 from axile.executor.account_control.decorators import controlled_operation
-from axile.executor.feishu_notifications import FeishuNotificationSource, send_execute_results_to_feishu
 from axile.executor.models.execution_result import ExecutionOutcome, ExecutionStatus
 from axile.executor.models.feishu import FeishuCardConfig
 from axile.executor.models.unified_account_assets import Position, UnifiedAccountAssets
@@ -445,6 +444,9 @@ class AbstractExecutorFacadeMixin:
             当账户配置缺失时抛出。
         """
         executor = _executor(self)
+        notification_snapshot = kwargs.pop("notification_snapshot", None)
+        if not isinstance(notification_snapshot, dict):
+            notification_snapshot = None
         account_assets = executor.get_account_assets()
         curr_target = self._build_empty_positions_curr_target(account_assets.positions)
         if not curr_target:
@@ -468,8 +470,8 @@ class AbstractExecutorFacadeMixin:
             standard_input,
             cleanup=cleanup,
             retain_runtime=retain_runtime,
+            **({"notification_snapshot": notification_snapshot} if notification_snapshot else {}),
         )
-        self._notify_empty_positions_result_if_needed(result, plan.feishu_key, plan.feishu_card_config)
         return result
 
     def _plan_empty_positions(
@@ -559,29 +561,6 @@ class AbstractExecutorFacadeMixin:
             extra=plan.extra,
             execution_timeout=plan.execution_timeout,
         )
-
-    def _notify_empty_positions_result_if_needed(
-        self,
-        result: UnifiedStandardOutput,
-        feishu_key: str | None,
-        card_config: FeishuCardConfig | None,
-    ) -> None:
-        """
-        在配置了飞书 key 时发送清仓结果通知.
-
-        Parameters
-        ----------
-        result : UnifiedStandardOutput
-            清仓流程执行结果。
-        feishu_key : str | None
-            飞书 webhook key；为空时跳过通知。
-        """
-        if feishu_key and result:
-            source = cast("FeishuNotificationSource", _executor(self))
-            if card_config is None:
-                send_execute_results_to_feishu(source, result, feishu_key)
-            else:
-                send_execute_results_to_feishu(source, result, feishu_key, card_config)
 
     def _build_empty_positions_curr_target(self, positions: list[Position]) -> dict[str, float]:
         """

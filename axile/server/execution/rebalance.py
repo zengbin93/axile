@@ -26,6 +26,7 @@ from axile.server.execution.execution_algorithms import (
     resolve_execution_algorithm_name,
 )
 from axile.server.execution.execution_records_output import sanitize_standard_input_for_audit
+from axile.server.execution.notification_assets import load_notification_snapshot
 from axile.server.execution.records import append_error_execute_record
 from axile.server.execution.registry import (
     AccountExecutionAlreadyRunningError,
@@ -338,6 +339,7 @@ async def _build_rebalance_backend_request(
     if normalized_target is None:
         normalized_target = _normalize_rebalance_target(account, curr_target)
     last_target = await _load_last_target_snapshot(account)
+    notification_snapshot = await load_notification_snapshot(account)
     # 审计输入、执行器输入与回传给调用方的 curr_target 必须共享同一份
     # 规范化结果，避免回放执行时出现“显示目标”和“实际下单目标”不一致。
     standard_input = _build_rebalance_standard_input(
@@ -366,6 +368,7 @@ async def _build_rebalance_backend_request(
         curr_target=normalized_target,
         last_target=last_target,
         logger=logger,
+        notification_snapshot=notification_snapshot,
     )
 
 

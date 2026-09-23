@@ -652,6 +652,7 @@ class WorkerBackendManager:
         execution_id: str | None,
         trigger_source: str,
         cleanup: bool,
+        notification_snapshot: dict[str, object] | None = None,
     ) -> tuple[UnifiedStandardOutput, dict[str, object] | None]:
         """
         通过多进程 worker 执行调仓请求.
@@ -694,6 +695,7 @@ class WorkerBackendManager:
                 "audit_input": audit_input,
                 "trigger_source": trigger_source,
                 "cleanup": cleanup,
+                "notification_snapshot": notification_snapshot,
             },
         )
         response = await asyncio.to_thread(
@@ -715,6 +717,7 @@ class WorkerBackendManager:
         empty_kwargs: dict[str, object],
         audit_input: dict[str, object],
         execution_id: str,
+        notification_snapshot: dict[str, object] | None = None,
     ) -> UnifiedStandardOutput:
         """
         通过多进程 worker 执行清仓请求.
@@ -749,6 +752,7 @@ class WorkerBackendManager:
             payload={
                 "empty_kwargs": empty_kwargs,
                 "audit_input": audit_input,
+                "notification_snapshot": notification_snapshot,
             },
         )
         response = await asyncio.to_thread(

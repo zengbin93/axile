@@ -7,7 +7,7 @@ execution 内部共享查询入口。
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from axile.executor.abstract_executor.execution_runtime_facade import (
     AbstractExecutorExecutionRuntimeFacadeMixin,
@@ -46,6 +46,7 @@ class AbstractExecutorExecutionLifecycleMixin(AbstractExecutorExecutionRuntimeFa
         standard_input: UnifiedStandardInput,
         cleanup: bool = True,
         retain_runtime: bool = False,
+        notification_snapshot: dict[str, object] | None = None,
     ) -> UnifiedStandardOutput:
         """
         执行统一交易流程入口.
@@ -101,11 +102,15 @@ class AbstractExecutorExecutionLifecycleMixin(AbstractExecutorExecutionRuntimeFa
             # 统一经有界后台队列发送，隔离飞书网络延迟且避免线程随执行次数增长。
             if standard_input.feishu_key:
                 executor.logger.info("异步发送飞书通知")
+                notification_kwargs: dict[str, Any] = (
+                    {"notification_snapshot": notification_snapshot} if notification_snapshot else {}
+                )
                 if standard_input.feishu_card_config is None:
                     enqueue_execute_results_to_feishu(
                         cast("FeishuNotificationSource", executor),
                         output,
                         standard_input.feishu_key,
+                        **notification_kwargs,
                     )
                 else:
                     enqueue_execute_results_to_feishu(
@@ -113,6 +118,7 @@ class AbstractExecutorExecutionLifecycleMixin(AbstractExecutorExecutionRuntimeFa
                         output,
                         standard_input.feishu_key,
                         standard_input.feishu_card_config,
+                        **notification_kwargs,
                     )
 
             executor.logger.debug(f"交易执行完成 - 成功: {output.success}")

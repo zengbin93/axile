@@ -282,6 +282,7 @@ def _handle_execute_trade(
                 standard_input,
                 cleanup=False,
                 retain_runtime=True,
+                **({"notification_snapshot": context.notification_snapshot} if context.notification_snapshot else {}),
             ),
         )
         result = _dump_output_payload(output)
@@ -364,7 +365,12 @@ def _handle_empty_positions(
         empty_positions = getattr(executor, "empty_positions")
         output = cast(
             UnifiedStandardOutput,
-            empty_positions(cleanup=False, retain_runtime=True, **context.empty_kwargs),
+            empty_positions(
+                cleanup=False,
+                retain_runtime=True,
+                **({"notification_snapshot": context.notification_snapshot} if context.notification_snapshot else {}),
+                **context.empty_kwargs,
+            ),
         )
         result = _dump_output_payload(output)
         _append_success_audit(
