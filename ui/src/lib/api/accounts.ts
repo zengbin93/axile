@@ -27,7 +27,7 @@ export interface AccountFeishuTestResult {
   message: string
 }
 
-/** 使用当前页面草稿推送样例执行结果通知卡片（成交为样例，非真实执行）。 */
+/** 使用输入或已保存的 Webhook 推送样例执行结果通知卡片。 */
 export function testAccountFeishu(
   id: number,
   feishuKey: string,

@@ -681,8 +681,6 @@ async def update_account(
         validate_notification_config(
             next_notification_mode, next_notification_code if isinstance(next_notification_code, str) else None
         )
-        if next_notification_mode == "default":
-            data["execution_notification_code"] = None
         if account.account_config is not None or account.trade_channel is not None:
             data["account_config"] = normalized_account_config
         runtime_changed = bool({"account_config", "trade_channel", "is_started"} & data.keys())

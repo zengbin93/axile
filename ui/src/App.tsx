@@ -13,6 +13,7 @@ import { AccountEditPage } from '@/pages/AccountEditPage'
 import { AccountEditConnectionPage } from '@/pages/AccountEditConnectionPage'
 import { AccountEditTimerPage } from '@/pages/AccountEditTimerPage'
 import { AccountEditAlgorithmPage } from '@/pages/AccountEditAlgorithmPage'
+import { AccountEditNotificationPage } from '@/pages/AccountEditNotificationPage'
 import { AccountEditControlPage } from '@/pages/AccountEditControlPage'
 import { AccountHoldingsPage } from '@/pages/AccountHoldingsPage'
 import { ExecutionDetailPage } from '@/pages/ExecutionDetailPage'
@@ -102,6 +103,7 @@ const router = createBrowserRouter([
           { path: 'accounts/:id/edit/portfolio', element: <AccountEditPage section="portfolio" /> },
           { path: 'accounts/:id/edit/timer', element: <AccountEditTimerPage /> },
           { path: 'accounts/:id/edit/algorithm', element: <AccountEditAlgorithmPage /> },
+          { path: 'accounts/:id/edit/notification', element: <AccountEditNotificationPage /> },
           { path: 'accounts/:id/edit/control', element: <AccountEditControlPage /> },
           { path: 'accounts/:id/holdings', element: <AccountHoldingsPage /> },
           { path: 'accounts/:id/history', element: <AccountHistoryPage /> },

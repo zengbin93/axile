@@ -7,8 +7,9 @@
 
 import { feishuKeyPatch } from '@/features/account/feishuUpdate'
 import { InkRewrite } from '@/components/ui/InkRewrite'
+import { Link } from '@/components/ui/nav'
 import { useCallback, useEffect, useState, type CSSProperties } from 'react'
-import { Check, ChevronDown, Eye, EyeOff } from 'lucide-react'
+import { Check, ExternalLink, Eye, EyeOff } from 'lucide-react'
 import { useParams, useViewTransitionState } from 'react-router'
 import { ErrorNotice } from '@/components/ui/ErrorNotice'
 import { Skeleton } from '@/components/ui/Skeleton'
@@ -28,14 +29,13 @@ import {
   readAccountConfigSummary,
   writeAccountConfigSummary,
 } from '@/features/account/configSummary'
-import { getAccount, testAccountFeishu, testAccountNotificationFunction, updateAccount, type AccountFeishuTestResult, type AccountUpdatePayload } from '@/lib/api/accounts'
+import { getAccount, testAccountFeishu, updateAccount, type AccountFeishuTestResult, type AccountUpdatePayload } from '@/lib/api/accounts'
 import { usePolling } from '@/lib/hooks/usePolling'
 import { useDomainStore } from '@/stores/domain'
 import { useChannelCatalogStore, useChannelDescriptor } from '@/stores/channels'
 import { useToastStore } from '@/stores/ui'
 import {
   TEXT,
-  AREA,
   EditError,
   EditLoading,
   EditSaveBar,
@@ -53,7 +53,6 @@ interface Draft {
   clearFeishu: boolean
   feishu: string
   notificationMode: 'default' | 'function'
-  notificationCode: string
   longLev: string
   shortLev: string
   portfolioId: number | null
@@ -87,7 +86,6 @@ function draftOf(acc: Account): Draft {
     clearFeishu: false,
     feishu: '',
     notificationMode: acc.execution_notification_mode ?? 'default',
-    notificationCode: acc.execution_notification_code ?? '',
     longLev: String(acc.long_leverage ?? ''),
     shortLev: String(acc.short_leverage ?? ''),
     portfolioId: acc.portfolio_id,
@@ -107,8 +105,6 @@ function buildPatch(draft: Draft, acc: Account, showShortLeverage: boolean): Acc
   const feishuKey = extractFeishuKey(draft.feishu)
   Object.assign(patch, feishuKeyPatch(feishuKey, draft.clearFeishu))
   if (draft.notificationMode !== acc.execution_notification_mode) patch.execution_notification_mode = draft.notificationMode
-  const nextCode = draft.notificationMode === 'function' ? draft.notificationCode : null
-  if (nextCode !== acc.execution_notification_code) patch.execution_notification_code = nextCode
 
   const nl = Number(draft.longLev) || 0
   if (nl !== (acc.long_leverage ?? 0)) patch.long_leverage = nl
@@ -142,7 +138,6 @@ const FIELD_LABEL: Record<string, string> = {
   remark: '备注',
   feishu_key: '飞书',
   execution_notification_mode: '通知模式',
-  execution_notification_code: '通知函数',
   long_leverage: '做多杠杆',
   short_leverage: '做空杠杆',
   weight_precision: '权重精度',
@@ -221,7 +216,6 @@ export function AccountEditPage({ section = 'basic' }: { section?: EditSection }
   const [draft, setDraft] = useState<Draft | null>(null)
   const [feishuTest, setFeishuTest] = useState<AccountFeishuTestResult | 'busy' | null>(null)
   const [feishuKeyRevealed, setFeishuKeyRevealed] = useState(false)
-  const [feishuAdvancedOpen, setFeishuAdvancedOpen] = useState(false)
   const [saveError, setSaveError] = useState<Error | null>(null)
 
   /** 草稿重置为服务端当前值；数据未就绪时返回 false（供首帧初始化门控）。 */
@@ -317,23 +311,12 @@ export function AccountEditPage({ section = 'basic' }: { section?: EditSection }
     setDraft((prev) => (prev ? { ...prev, ...patch } : prev))
   }
   // 飞书 key 容忍粘贴整条 webhook 链接：账户专用测试接口与保存都使用规整后的裸 key，
-  // 测试请求同时携带当前卡片草稿，故无需先保存即可验证最终发送形态。
+  // 测试使用当前输入的机器人 key，无需先保存。
   const feishuKey = extractFeishuKey(d.feishu)
-  const notificationError = d.notificationMode === 'function' && !d.notificationCode.trim()
-    ? '通知函数不能为空'
-    : null
   const runFeishuTest = async () => {
     setFeishuTest('busy')
     try {
       setFeishuTest(await testAccountFeishu(accountId, feishuKey))
-    } catch (e) {
-      setFeishuTest({ ok: false, message: e instanceof Error ? e.message : String(e) })
-    }
-  }
-  const runFunctionTest = async () => {
-    setFeishuTest('busy')
-    try {
-      setFeishuTest(await testAccountNotificationFunction(accountId, d.notificationCode))
     } catch (e) {
       setFeishuTest({ ok: false, message: e instanceof Error ? e.message : String(e) })
     }
@@ -354,7 +337,7 @@ export function AccountEditPage({ section = 'basic' }: { section?: EditSection }
   const changes = summarize(patch, acc, portfolios)
   const dirty = changes.length > 0
   const blocked = Boolean(
-    levErr || timeoutErr || weightPrecisionErr || notificationError || portfolios == null || portfoliosError || channelCatalogError,
+    levErr || timeoutErr || weightPrecisionErr || portfolios == null || portfoliosError || channelCatalogError,
   )
 
   const save = async () => {
@@ -367,7 +350,6 @@ export function AccountEditPage({ section = 'basic' }: { section?: EditSection }
       const updated = await updateAccount(accountId, patch)
       // 保存响应直接写摘要缓存：返回详情时 hero 配置带首帧即新值，FLIP 落地同文。
       writeAccountConfigSummary(accountId, updated, { showShortLeverage })
-      if (d.notificationMode === 'default') setDraft((previous) => previous ? { ...previous, notificationCode: '' } : previous)
       toast('账户已更新')
       void refreshAccounts()
       account.refresh()
@@ -390,8 +372,27 @@ export function AccountEditPage({ section = 'basic' }: { section?: EditSection }
             <input className={TEXT} value={d.remark} placeholder="可选" onChange={(e) => set({ remark: e.target.value })} />
           </Row>
         </Section>
-        <Section label="飞书通知">
-          <Row label="机器人 Key" hint={d.clearFeishu ? '保存后关闭' : (feishuKey || acc.feishu_configured ? '已配置' : '未配置')} top span>
+        <Section label="执行通知">
+          <Row label="通知方式" span top>
+            <div className="flex flex-wrap items-center gap-3 pt-1 text-[14px]">
+              <span className="text-ink-1">{d.notificationMode === 'function' ? '自定义函数' : '飞书 Webhook'}</span>
+              {d.notificationMode === 'function' && (
+                <button type="button" className="cursor-pointer text-accent" onClick={() => set({ notificationMode: 'default' })}>
+                  启用飞书 Webhook
+                </button>
+              )}
+              {d.notificationMode === 'function' && (
+                <Link className="inline-flex items-center gap-1 text-accent hover:underline" to={`/accounts/${accountId}/edit/notification`}>
+                  编辑与测试 <ExternalLink size={13} aria-hidden />
+                </Link>
+              )}
+            </div>
+            {acc.execution_notification_mode === 'function' && d.notificationMode === 'default' && (
+              <p className="mt-1 text-[13px] text-ink-3">保存账户后切换；自定义函数会保留。</p>
+            )}
+          </Row>
+          {d.notificationMode === 'default' && (
+            <Row label="Webhook" hint={d.clearFeishu ? '保存后关闭' : (feishuKey || acc.feishu_configured ? '已配置' : '未配置')} top span>
             <div className="flex items-center gap-2">
               <div className="relative min-w-0 flex-1">
                 <input
@@ -429,73 +430,31 @@ export function AccountEditPage({ section = 'basic' }: { section?: EditSection }
                   setFeishuTest(null)
                 }}
               >
-                <InkRewrite text={d.clearFeishu ? '撤销清除' : '清除通知'} tone="label" />
+                <InkRewrite text={d.clearFeishu ? '撤销清除' : '清除 Webhook'} tone="label" />
               </button>
               <button
                 type="button"
                 className="flex-none cursor-pointer rounded-[9px] border border-line bg-surface px-4 py-2 text-[15px] text-ink-2 transition-[border-color] hover:border-ink-3/40 disabled:opacity-45"
-                disabled={!feishuKey || feishuTest === 'busy'}
+                disabled={(!feishuKey && !acc.feishu_configured) || d.clearFeishu || feishuTest === 'busy'}
                 onClick={() => void runFeishuTest()}
               >
                 {feishuTest === 'busy' ? '测试中…' : '测试推送'}
               </button>
             </div>
-            <div className="mt-1.5 text-[13px]" aria-live="polite">
-              {feishuTest && feishuTest !== 'busy' ? (
-                <span className={`inline-flex items-center gap-1.5 ${feishuTest.ok ? 'text-accent' : 'text-warn'}`}>
-                  {feishuTest.ok && <Check size={14} />}
-                  {feishuTest.message}
-                </span>
-              ) : (
-                <span className="text-ink-3">推送一张使用当前页面草稿的样例卡片，成交为样例、非真实执行。</span>
-              )}
-            </div>
-          </Row>
-
-          <Row label="执行通知" top span>
-            <div className="text-[14px] text-ink-2">
-              {d.notificationMode === 'default' ? '默认飞书卡片' : '自定义通知函数'}
-            </div>
-            <div className="mt-3 border-t border-line">
-              <button
-                type="button"
-                className="inline-flex items-center gap-2 py-3 text-[14px] font-semibold text-ink-3 transition-colors hover:text-ink-1 motion-reduce:transition-none"
-                aria-expanded={feishuAdvancedOpen}
-                onClick={() => setFeishuAdvancedOpen((open) => !open)}
-              >
-                <span>高级通知设置</span>
-                <ChevronDown size={15} className={`transition-transform duration-200 motion-reduce:transition-none ${feishuAdvancedOpen ? 'rotate-180' : ''}`} aria-hidden />
-              </button>
-              <div inert={!feishuAdvancedOpen} className={`grid transition-[grid-template-rows] duration-200 motion-reduce:transition-none ${feishuAdvancedOpen ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'}`}>
-                <div className="min-h-0 overflow-hidden pb-3">
-                  <Select
-                    value={d.notificationMode}
-                    onChange={(value) => set({ notificationMode: value as 'default' | 'function' })}
-                    options={[{ value: 'default', label: '默认飞书卡片' }, { value: 'function', label: '自定义函数' }]}
-                  />
-                  {d.notificationMode === 'function' && (
-                    <div className="mt-3">
-                      <p className="mb-2 text-[13px] text-ink-3">定义同步函数 notify(context)。context 包含 account、execution、assets、targets、positions、orders、trades、symbols 和 summary；函数自行发送通知。</p>
-                      <textarea
-                        aria-label="执行通知函数"
-                        className={`${AREA} min-h-52 w-full resize-y font-mono`}
-                        value={d.notificationCode}
-                        spellCheck={false}
-                        onChange={(event) => set({ notificationCode: event.target.value })}
-                        placeholder={'def notify(context):\n    print(context["execution"]["status"])'}
-                      />
-                      {notificationError && <p className="mt-1 text-[13px] text-warn">{notificationError}</p>}
-                      <p className="mt-1 text-[12px] text-ink-3">试跑会实际执行函数，可能向外发送消息。样例事件中 is_test 为 true。</p>
-                      <button type="button" className="mt-2 cursor-pointer rounded-[9px] border border-line px-4 py-2 text-[14px] text-ink-2 disabled:opacity-45" disabled={Boolean(notificationError) || feishuTest === 'busy'} onClick={() => void runFunctionTest()}>
-                        试跑函数
-                      </button>
-                      {feishuTest && feishuTest !== 'busy' && <p className={`mt-2 text-[13px] ${feishuTest.ok ? 'text-accent' : 'text-warn'}`}>{feishuTest.message}</p>}
-                    </div>
-                  )}
-                </div>
+            {feishuTest && feishuTest !== 'busy' && (
+              <div className={`mt-1.5 inline-flex items-center gap-1.5 text-[13px] ${feishuTest.ok ? 'text-accent' : 'text-warn'}`} role="status">
+                {feishuTest.ok && <Check size={14} />}
+                {feishuTest.message}
               </div>
-            </div>
-          </Row>
+            )}
+            <Link
+              className="mt-4 inline-flex items-center gap-1 text-[13px] text-ink-3 transition-colors hover:text-accent hover:underline"
+              to={`/accounts/${accountId}/edit/notification`}
+            >
+              高级设置 · 自定义执行通知函数 <ExternalLink size={13} aria-hidden />
+            </Link>
+            </Row>
+          )}
         </Section>
         </>
       )}

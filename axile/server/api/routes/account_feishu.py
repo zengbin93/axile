@@ -271,10 +271,10 @@ async def test_account_feishu(
     payload: AccountFeishuTestRequest,
 ) -> AccountFeishuTestResult:
     """使用账户当前资产、目标快照与页面草稿推送样例执行结果卡片。"""
-    key = payload.feishu_key.strip()
-    if not key:
-        return AccountFeishuTestResult(ok=False, message="请先填写飞书机器人 key")
     account = await _get_account_or_404(session, account_id)
+    key = payload.feishu_key.strip() or account.feishu_key or ""
+    if not key:
+        return AccountFeishuTestResult(ok=False, message="请先配置飞书 Webhook")
     card = await _build_test_card(session, account)
     await session.close()
     try:
