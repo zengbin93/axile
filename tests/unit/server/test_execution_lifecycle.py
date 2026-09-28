@@ -564,7 +564,7 @@ def test_timeout_termination_sends_alert(monkeypatch) -> None:
     async def fake_append_execution_event(**_: object) -> None:
         return None
 
-    async def fake_send_feishu_error(error: Exception, _account: object, _key: object) -> None:
+    async def fake_send_feishu_error(error: Exception, _account: object, _key: object, **_kwargs: object) -> None:
         sent.append(str(error))
 
     class _FakeSession:

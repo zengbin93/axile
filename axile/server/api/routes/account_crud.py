@@ -11,6 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from sqlmodel import and_, delete, desc, func, select
 
 from axile.channels import get_channel
+from axile.common.notification_config import validate_notification_config
 from axile.common.trade_channel import TradeChannel
 from axile.executor.account_control.models import AccountControlOverride
 from axile.server.api.deps import HistoryPaginationDep, SchedDep, SessionDep
@@ -318,6 +319,7 @@ async def create_account(
         account_config = _validate_channel_account_config(account.trade_channel, account.account_config)
         _check_algorithm_channel_compat(account.algorithm, str(account.trade_channel), "下单算法")
         _check_algorithm_channel_compat(account.empty_positions_algorithm, str(account.trade_channel), "清仓算法")
+        validate_notification_config(account.execution_notification_mode, account.execution_notification_code)
         parse_cron_expr(account.cron_expr)
         db_account = await _create_account_record(session, account, account_config)
         await enqueue_account_runtime_sync(
@@ -674,6 +676,13 @@ async def update_account(
         _check_algorithm_channel_compat(next_empty_algorithm, str(next_trade_channel), "清仓算法")
 
         data = _build_account_update_data(account)
+        next_notification_mode = str(data.get("execution_notification_mode", db_account.execution_notification_mode))
+        next_notification_code = data.get("execution_notification_code", db_account.execution_notification_code)
+        validate_notification_config(
+            next_notification_mode, next_notification_code if isinstance(next_notification_code, str) else None
+        )
+        if next_notification_mode == "default":
+            data["execution_notification_code"] = None
         if account.account_config is not None or account.trade_channel is not None:
             data["account_config"] = normalized_account_config
         runtime_changed = bool({"account_config", "trade_channel", "is_started"} & data.keys())

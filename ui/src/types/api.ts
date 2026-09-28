@@ -186,7 +186,8 @@ export interface Account {
   forbidden_symbols: string[] | null
   risk_symbols: string[] | null
   feishu_configured: boolean
-  feishu_card_config: FeishuCardConfig | null
+  execution_notification_mode: 'default' | 'function'
+  execution_notification_code: string | null
   portfolio_id: number | null
   write_empty_record: number | null
   /** 执行层总超时（秒）。一次执行跑满该额度即硬中断（不撤单），与算法级 `max_wait_seconds` 不同层。 */
@@ -246,10 +247,6 @@ export interface PerformanceCalendar {
   closed_ranges: CalendarRange[]
   unavailable_ranges: CalendarRange[]
 }
-
-export type FeishuCardConfig =
-  | { mode: 'template'; template_id: string }
-  | { mode: 'custom'; card: Record<string, unknown> }
 
 export type AccountControlTrigger = 'wait' | 'block'
 

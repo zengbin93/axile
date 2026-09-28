@@ -28,7 +28,7 @@ import {
   readAccountConfigSummary,
   writeAccountConfigSummary,
 } from '@/features/account/configSummary'
-import { getAccount, testAccountFeishu, updateAccount, type AccountFeishuTestResult, type AccountUpdatePayload } from '@/lib/api/accounts'
+import { getAccount, testAccountFeishu, testAccountNotificationFunction, updateAccount, type AccountFeishuTestResult, type AccountUpdatePayload } from '@/lib/api/accounts'
 import { usePolling } from '@/lib/hooks/usePolling'
 import { useDomainStore } from '@/stores/domain'
 import { useChannelCatalogStore, useChannelDescriptor } from '@/stores/channels'
@@ -44,24 +44,7 @@ import {
   Section,
   Toggle,
 } from '@/features/account/editUi'
-import type { Account, FeishuCardConfig, PortfolioLite } from '@/types/api'
-
-type FeishuCardMode = 'default' | 'template' | 'custom'
-
-const FEISHU_TEMPLATE_VARIABLES = [
-  'account_mark', 'dt', 'algorithm', 'total_assets', 'available_cash', 'market_value',
-  'positions', 'trades', 'account', 'execution', 'strategy', 'assets', 'targets',
-  'orders', 'symbols', 'summary',
-]
-
-/** 通知卡片三态：默认是主角，模板 / 自定义面向高级用户，收进「高级设置」折叠条。 */
-const FEISHU_CARD_MODES: Record<FeishuCardMode, { label: string; description: string }> = {
-  default: { label: '默认', description: '使用内置账户执行结果卡片' },
-  template: { label: '模板 ID', description: '使用你在飞书卡片搭建工具中发布的模板' },
-  custom: { label: '自定义卡片', description: '卡片内容将原样发送，不替换变量' },
-}
-
-const FEISHU_CARD_MODE_ORDER: FeishuCardMode[] = ['default', 'template', 'custom']
+import type { Account, PortfolioLite } from '@/types/api'
 
 /** 总览草稿：不含定时 / 算法（各在子页独立保存）。 */
 interface Draft {
@@ -69,9 +52,8 @@ interface Draft {
   remark: string
   clearFeishu: boolean
   feishu: string
-  feishuCardMode: FeishuCardMode
-  feishuTemplateId: string
-  feishuCardText: string
+  notificationMode: 'default' | 'function'
+  notificationCode: string
   longLev: string
   shortLev: string
   portfolioId: number | null
@@ -99,15 +81,13 @@ function sameList(a: string[], b: string[]): boolean {
 }
 
 function draftOf(acc: Account): Draft {
-  const cardConfig = acc.feishu_card_config
   return {
     name: acc.name,
     remark: acc.remark ?? '',
     clearFeishu: false,
     feishu: '',
-    feishuCardMode: cardConfig?.mode ?? 'default',
-    feishuTemplateId: cardConfig?.mode === 'template' ? cardConfig.template_id : '',
-    feishuCardText: cardConfig?.mode === 'custom' ? JSON.stringify(cardConfig.card, null, 2) : '',
+    notificationMode: acc.execution_notification_mode ?? 'default',
+    notificationCode: acc.execution_notification_code ?? '',
     longLev: String(acc.long_leverage ?? ''),
     shortLev: String(acc.short_leverage ?? ''),
     portfolioId: acc.portfolio_id,
@@ -119,44 +99,6 @@ function draftOf(acc: Account): Draft {
   }
 }
 
-function customCardDepth(value: unknown): number {
-  if (Array.isArray(value)) return 1 + Math.max(0, ...value.map(customCardDepth))
-  if (value && typeof value === 'object') return 1 + Math.max(0, ...Object.values(value).map(customCardDepth))
-  return 0
-}
-
-function parseCustomCard(raw: string): { config: FeishuCardConfig | null; error: string | null } {
-  if (!raw.trim()) return { config: null, error: '卡片内容不能为空' }
-  let value: unknown
-  try {
-    value = JSON.parse(raw)
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error)
-    const position = /position (\d+)/i.exec(message)?.[1]
-    if (!position) return { config: null, error: message }
-    const offset = Number(position)
-    const before = raw.slice(0, offset)
-    const line = before.split('\n').length
-    const column = offset - before.lastIndexOf('\n')
-    return { config: null, error: `第 ${line} 行第 ${column} 列：JSON 格式有误` }
-  }
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return { config: null, error: '卡片内容必须是 JSON 对象' }
-  const card = value as Record<string, unknown>
-  if ('msg_type' in card || 'card' in card) return { config: null, error: '请只粘贴卡片主体，不要包含 webhook 消息信封' }
-  if (new TextEncoder().encode(JSON.stringify(card)).length > 20 * 1024) return { config: null, error: '卡片内容不得超过 20 KiB' }
-  if (customCardDepth(card) > 20) return { config: null, error: '卡片内容嵌套不得超过 20 层' }
-  return { config: { mode: 'custom', card }, error: null }
-}
-
-function draftFeishuCardConfig(draft: Draft): FeishuCardConfig | null {
-  if (draft.feishuCardMode === 'default') return null
-  if (draft.feishuCardMode === 'template') {
-    const templateId = draft.feishuTemplateId.trim()
-    return templateId ? { mode: 'template', template_id: templateId } : null
-  }
-  return parseCustomCard(draft.feishuCardText).config
-}
-
 function buildPatch(draft: Draft, acc: Account, showShortLeverage: boolean): AccountUpdatePayload {
   const patch: AccountUpdatePayload = {}
   const name = draft.name.trim()
@@ -164,10 +106,9 @@ function buildPatch(draft: Draft, acc: Account, showShortLeverage: boolean): Acc
   if (draft.remark !== (acc.remark ?? '')) patch.remark = draft.remark || null
   const feishuKey = extractFeishuKey(draft.feishu)
   Object.assign(patch, feishuKeyPatch(feishuKey, draft.clearFeishu))
-  const feishuCardConfig = draftFeishuCardConfig(draft)
-  if (JSON.stringify(feishuCardConfig) !== JSON.stringify(acc.feishu_card_config)) {
-    patch.feishu_card_config = feishuCardConfig
-  }
+  if (draft.notificationMode !== acc.execution_notification_mode) patch.execution_notification_mode = draft.notificationMode
+  const nextCode = draft.notificationMode === 'function' ? draft.notificationCode : null
+  if (nextCode !== acc.execution_notification_code) patch.execution_notification_code = nextCode
 
   const nl = Number(draft.longLev) || 0
   if (nl !== (acc.long_leverage ?? 0)) patch.long_leverage = nl
@@ -200,7 +141,8 @@ const FIELD_LABEL: Record<string, string> = {
   name: '名称',
   remark: '备注',
   feishu_key: '飞书',
-  feishu_card_config: '通知卡片',
+  execution_notification_mode: '通知模式',
+  execution_notification_code: '通知函数',
   long_leverage: '做多杠杆',
   short_leverage: '做空杠杆',
   weight_precision: '权重精度',
@@ -279,7 +221,6 @@ export function AccountEditPage({ section = 'basic' }: { section?: EditSection }
   const [draft, setDraft] = useState<Draft | null>(null)
   const [feishuTest, setFeishuTest] = useState<AccountFeishuTestResult | 'busy' | null>(null)
   const [feishuKeyRevealed, setFeishuKeyRevealed] = useState(false)
-  const [showFeishuVariables, setShowFeishuVariables] = useState(false)
   const [feishuAdvancedOpen, setFeishuAdvancedOpen] = useState(false)
   const [saveError, setSaveError] = useState<Error | null>(null)
 
@@ -378,22 +319,26 @@ export function AccountEditPage({ section = 'basic' }: { section?: EditSection }
   // 飞书 key 容忍粘贴整条 webhook 链接：账户专用测试接口与保存都使用规整后的裸 key，
   // 测试请求同时携带当前卡片草稿，故无需先保存即可验证最终发送形态。
   const feishuKey = extractFeishuKey(d.feishu)
-  const customCardResult = d.feishuCardMode === 'custom' ? parseCustomCard(d.feishuCardText) : null
-  const feishuCardError =
-    d.feishuCardMode === 'template'
-      ? d.feishuTemplateId.trim()
-        ? null
-        : '模板 ID 不能为空'
-      : customCardResult?.error ?? null
-  const currentFeishuCardConfig = draftFeishuCardConfig(d)
+  const notificationError = d.notificationMode === 'function' && !d.notificationCode.trim()
+    ? '通知函数不能为空'
+    : null
   const runFeishuTest = async () => {
     setFeishuTest('busy')
     try {
-      setFeishuTest(await testAccountFeishu(accountId, feishuKey, currentFeishuCardConfig))
+      setFeishuTest(await testAccountFeishu(accountId, feishuKey))
     } catch (e) {
       setFeishuTest({ ok: false, message: e instanceof Error ? e.message : String(e) })
     }
   }
+  const runFunctionTest = async () => {
+    setFeishuTest('busy')
+    try {
+      setFeishuTest(await testAccountNotificationFunction(accountId, d.notificationCode))
+    } catch (e) {
+      setFeishuTest({ ok: false, message: e instanceof Error ? e.message : String(e) })
+    }
+  }
+
 
   // 杠杆边界校验由渠道目录给出；空=不改，0=该方向不启用。与服务端同口径，
   // 避免像旧版那样「填 999 也能保存、错误配置直进仓位计算」。
@@ -409,7 +354,7 @@ export function AccountEditPage({ section = 'basic' }: { section?: EditSection }
   const changes = summarize(patch, acc, portfolios)
   const dirty = changes.length > 0
   const blocked = Boolean(
-    levErr || timeoutErr || weightPrecisionErr || feishuCardError || portfolios == null || portfoliosError || channelCatalogError,
+    levErr || timeoutErr || weightPrecisionErr || notificationError || portfolios == null || portfoliosError || channelCatalogError,
   )
 
   const save = async () => {
@@ -422,6 +367,7 @@ export function AccountEditPage({ section = 'basic' }: { section?: EditSection }
       const updated = await updateAccount(accountId, patch)
       // 保存响应直接写摘要缓存：返回详情时 hero 配置带首帧即新值，FLIP 落地同文。
       writeAccountConfigSummary(accountId, updated, { showShortLeverage })
+      if (d.notificationMode === 'default') setDraft((previous) => previous ? { ...previous, notificationCode: '' } : previous)
       toast('账户已更新')
       void refreshAccounts()
       account.refresh()
@@ -488,7 +434,7 @@ export function AccountEditPage({ section = 'basic' }: { section?: EditSection }
               <button
                 type="button"
                 className="flex-none cursor-pointer rounded-[9px] border border-line bg-surface px-4 py-2 text-[15px] text-ink-2 transition-[border-color] hover:border-ink-3/40 disabled:opacity-45"
-                disabled={!feishuKey || Boolean(feishuCardError) || feishuTest === 'busy'}
+                disabled={!feishuKey || feishuTest === 'busy'}
                 onClick={() => void runFeishuTest()}
               >
                 {feishuTest === 'busy' ? '测试中…' : '测试推送'}
@@ -506,13 +452,10 @@ export function AccountEditPage({ section = 'basic' }: { section?: EditSection }
             </div>
           </Row>
 
-          <Row label="通知卡片" top span>
-            <div>
-              <div className="text-[15px] font-medium text-ink-1">{FEISHU_CARD_MODES[d.feishuCardMode].label}</div>
-              <div className="mt-0.5 text-[13px] text-ink-3">{FEISHU_CARD_MODES[d.feishuCardMode].description}</div>
+          <Row label="执行通知" top span>
+            <div className="text-[14px] text-ink-2">
+              {d.notificationMode === 'default' ? '默认飞书卡片' : '自定义通知函数'}
             </div>
-
-            {/* 模板 / 自定义面向高级用户：收进折叠条，默认面只留摘要。收放范式同 AlgorithmEditor 的 AdvancedSettings。 */}
             <div className="mt-3 border-t border-line">
               <button
                 type="button"
@@ -520,115 +463,35 @@ export function AccountEditPage({ section = 'basic' }: { section?: EditSection }
                 aria-expanded={feishuAdvancedOpen}
                 onClick={() => setFeishuAdvancedOpen((open) => !open)}
               >
-                <span>高级设置</span>
-                <ChevronDown
-                  size={15}
-                  className={`transition-transform duration-200 motion-reduce:transition-none ${feishuAdvancedOpen ? 'rotate-180' : ''}`}
-                  aria-hidden
-                />
+                <span>高级通知设置</span>
+                <ChevronDown size={15} className={`transition-transform duration-200 motion-reduce:transition-none ${feishuAdvancedOpen ? 'rotate-180' : ''}`} aria-hidden />
               </button>
-              <div
-                inert={!feishuAdvancedOpen}
-                className={`grid transition-[grid-template-rows] duration-200 motion-reduce:transition-none ${feishuAdvancedOpen ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'}`}
-              >
-                <div className="min-h-0 overflow-hidden">
-                  <div className="pb-2" role="radiogroup" aria-label="通知卡片">
-                    {FEISHU_CARD_MODE_ORDER.map((mode) => {
-                      const meta = FEISHU_CARD_MODES[mode]
-                      const selected = d.feishuCardMode === mode
-                      return (
-                        <div
-                          key={mode}
-                          className={`border-l-[3px] pl-3 transition-colors duration-200 motion-reduce:transition-none ${selected ? 'border-accent' : 'border-transparent'}`}
-                        >
-                          <button
-                            type="button"
-                            role="radio"
-                            aria-checked={selected}
-                            className="-mx-2 flex w-[calc(100%+1rem)] cursor-pointer items-start rounded-lg px-2 py-2.5 text-left transition-colors duration-200 hover:bg-fill focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent motion-reduce:transition-none"
-                            onClick={() => {
-                              if (selected) return
-                              set({ feishuCardMode: mode })
-                              setFeishuTest(null)
-                              if (mode === 'default') setShowFeishuVariables(false)
-                            }}
-                          >
-                            <span>
-                              <span className={`block text-[15px] font-medium transition-colors duration-200 motion-reduce:transition-none ${selected ? 'text-ink-1' : 'text-ink-2'}`}>
-                                {meta.label}
-                              </span>
-                              <span className="mt-0.5 block text-[13px] leading-relaxed text-ink-3">{meta.description}</span>
-                            </span>
-                          </button>
-                          {mode !== 'default' && (
-                            <div
-                              inert={!selected}
-                              className={`grid transition-[grid-template-rows] duration-200 motion-reduce:transition-none ${selected ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'}`}
-                            >
-                              <div className="min-h-0 overflow-hidden">
-                                {mode === 'template' ? (
-                                  <div className="pt-1 pb-4">
-                                    <label className="text-[13px] text-ink-2" htmlFor="feishu-template-id">模板 ID</label>
-                                    <input
-                                      id="feishu-template-id"
-                                      className={`${TEXT} mt-1`}
-                                      value={d.feishuTemplateId}
-                                      spellCheck={false}
-                                      onChange={(event) => {
-                                        set({ feishuTemplateId: event.target.value })
-                                        setFeishuTest(null)
-                                      }}
-                                    />
-                                    <div className="mt-1.5 flex items-center justify-between gap-3 text-[13px]">
-                                      <span className={feishuCardError ? 'text-warn' : 'text-ink-3'}>{feishuCardError ?? '模板可以使用 Axon 提供的通知变量'}</span>
-                                      <button type="button" className="cursor-pointer text-ink-2 hover:text-ink-1" onClick={() => setShowFeishuVariables((value) => !value)}>
-                                        {showFeishuVariables ? '收起变量' : '查看变量'}
-                                      </button>
-                                    </div>
-                                    <div inert={!showFeishuVariables} className={`grid transition-[grid-template-rows] duration-200 motion-reduce:transition-none ${showFeishuVariables ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'}`}>
-                                      <div className="min-h-0 overflow-hidden">
-                                        <div className="mt-2 flex flex-wrap gap-1.5 border-l-2 border-line pl-3">
-                                          {FEISHU_TEMPLATE_VARIABLES.map((name) => <code key={name} className="text-[12px] text-ink-2">{name}</code>)}
-                                        </div>
-                                      </div>
-                                    </div>
-                                  </div>
-                                ) : (
-                                  <div className="pt-1 pb-4">
-                                    <label className="text-[13px] text-ink-2" htmlFor="feishu-custom-card">卡片内容</label>
-                                    <textarea
-                                      id="feishu-custom-card"
-                                      className={`${AREA} mt-1 min-h-52 resize-y`}
-                                      value={d.feishuCardText}
-                                      placeholder={'{\n  "header": { ... },\n  "elements": [ ... ]\n}'}
-                                      spellCheck={false}
-                                      onChange={(event) => {
-                                        set({ feishuCardText: event.target.value })
-                                        setFeishuTest(null)
-                                      }}
-                                    />
-                                    <div className="mt-1.5 flex items-center justify-between gap-3 text-[13px]">
-                                      <span className={feishuCardError ? 'text-warn' : 'text-ink-3'}>{feishuCardError ?? '格式有效，发送时保持原始卡片结构'}</span>
-                                      <button
-                                        type="button"
-                                        className="cursor-pointer text-ink-2 hover:text-ink-1 disabled:cursor-not-allowed disabled:opacity-45"
-                                        disabled={Boolean(feishuCardError)}
-                                        onClick={() => {
-                                          if (customCardResult?.config?.mode === 'custom') set({ feishuCardText: JSON.stringify(customCardResult.config.card, null, 2) })
-                                        }}
-                                      >
-                                        格式化
-                                      </button>
-                                    </div>
-                                  </div>
-                                )}
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                      )
-                    })}
-                  </div>
+              <div inert={!feishuAdvancedOpen} className={`grid transition-[grid-template-rows] duration-200 motion-reduce:transition-none ${feishuAdvancedOpen ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'}`}>
+                <div className="min-h-0 overflow-hidden pb-3">
+                  <Select
+                    value={d.notificationMode}
+                    onChange={(value) => set({ notificationMode: value as 'default' | 'function' })}
+                    options={[{ value: 'default', label: '默认飞书卡片' }, { value: 'function', label: '自定义函数' }]}
+                  />
+                  {d.notificationMode === 'function' && (
+                    <div className="mt-3">
+                      <p className="mb-2 text-[13px] text-ink-3">定义同步函数 notify(context)。context 包含 account、execution、assets、targets、positions、orders、trades、symbols 和 summary；函数自行发送通知。</p>
+                      <textarea
+                        aria-label="执行通知函数"
+                        className={`${AREA} min-h-52 w-full resize-y font-mono`}
+                        value={d.notificationCode}
+                        spellCheck={false}
+                        onChange={(event) => set({ notificationCode: event.target.value })}
+                        placeholder={'def notify(context):\n    print(context["execution"]["status"])'}
+                      />
+                      {notificationError && <p className="mt-1 text-[13px] text-warn">{notificationError}</p>}
+                      <p className="mt-1 text-[12px] text-ink-3">试跑会实际执行函数，可能向外发送消息。样例事件中 is_test 为 true。</p>
+                      <button type="button" className="mt-2 cursor-pointer rounded-[9px] border border-line px-4 py-2 text-[14px] text-ink-2 disabled:opacity-45" disabled={Boolean(notificationError) || feishuTest === 'busy'} onClick={() => void runFunctionTest()}>
+                        试跑函数
+                      </button>
+                      {feishuTest && feishuTest !== 'busy' && <p className={`mt-2 text-[13px] ${feishuTest.ok ? 'text-accent' : 'text-warn'}`}>{feishuTest.message}</p>}
+                    </div>
+                  )}
                 </div>
               </div>
             </div>

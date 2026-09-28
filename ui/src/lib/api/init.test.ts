@@ -18,6 +18,8 @@ describe('saveExecutionAlert', () => {
         values: {
           sqlalchemy_database_configured: true,
           exe_err_feishu_configured: true,
+          system_execution_notification_mode: 'default',
+          system_execution_notification_code: '',
           environment: 'local',
           app_log_dir: './logs',
           axile_log_rotation: '1 day',
@@ -33,17 +35,17 @@ describe('saveExecutionAlert', () => {
     }) as typeof fetch
 
     await initStatus()
-    const result = await saveExecutionAlert('new-key')
+    const result = await saveExecutionAlert('new-key', 'default', '')
 
     expect(result.ok).toBeTrue()
     expect(requests[1]?.input).toBe('/api/v1/init/execution-alert')
     expect(requests[1]?.init?.method).toBe('PATCH')
-    expect(requests[1]?.init?.body).toBe(JSON.stringify({ exe_err_feishu_key: 'new-key' }))
+    expect(requests[1]?.init?.body).toBe(JSON.stringify({ exe_err_feishu_key: 'new-key', system_execution_notification_mode: 'default', system_execution_notification_code: '' }))
     expect(peekInitValues()?.exe_err_feishu_key).toBe('new-key')
   })
 })
 
-const values = initValuesFromStatus({ sqlalchemy_database_configured: true, exe_err_feishu_configured: true, environment: 'local', app_log_dir: './logs', axile_log_rotation: '1 day', algorithm_modules: [], algorithm_directories: [] })
+const values = initValuesFromStatus({ sqlalchemy_database_configured: true, exe_err_feishu_configured: true, system_execution_notification_mode: 'default', system_execution_notification_code: '', environment: 'local', app_log_dir: './logs', axile_log_rotation: '1 day', algorithm_modules: [], algorithm_directories: [] })
 test('仅修改高级配置不提交隐藏凭证或默认数据库', () => {
   const payload = JSON.parse(JSON.stringify(initSavePayload({ ...values, app_log_dir: './new-logs' }, true)))
   expect(payload.app_log_dir).toBe('./new-logs')

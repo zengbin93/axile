@@ -7,11 +7,14 @@
 from __future__ import annotations
 
 import asyncio
+import uuid
 
 import aiohttp
 import loguru
 
+from axile.common.config import settings
 from axile.common.feishu import push_feishu_card
+from axile.common.notification_function import run_notification_function
 from axile.executor.algorithms.utils.clock import clock_now
 from axile.server.db.models import Account
 
@@ -161,6 +164,9 @@ async def send_feishu_error(
     error: Exception,
     account: Account | None,
     feishu_key: str,
+    *,
+    event_type: str = "execution_error",
+    execution_id: str | None = None,
 ) -> None:
     """
     将执行异常发送到飞书.
@@ -174,6 +180,29 @@ async def send_feishu_error(
     feishu_key : str
         飞书机器人 webhook key。
     """
+    if settings.system_execution_notification_mode == "function":
+        import traceback
+
+        context: dict[str, object] = {
+            "event_id": f"system:{execution_id}:{event_type}" if execution_id else f"system:{uuid.uuid4().hex}",
+            "event_type": event_type,
+            "execution_id": execution_id,
+            "occurred_at": clock_now().isoformat(),
+            "account": {"id": account.id, "name": account.name} if account else None,
+            "error": {
+                "type": type(error).__name__,
+                "message": str(error),
+                "traceback": "".join(traceback.format_exception(error)),
+            },
+            "is_test": False,
+        }
+        result = await asyncio.to_thread(
+            run_notification_function, settings.system_execution_notification_code, context
+        )
+        if not result.ok:
+            loguru.logger.error(f"自定义系统执行通知失败: {result.error}")
+        loguru.logger.info("系统执行通知完成 execution_id={} mode=function ok={}", execution_id, result.ok)
+        return
     if feishu_key == "":
         return
 
@@ -185,5 +214,7 @@ async def send_feishu_error(
         external_ip = await get_external_ip()
         card_dict = build_error_card(error_msg, account_name, external_ip)
         await asyncio.to_thread(push_feishu_card, card_dict, feishu_key)
+        loguru.logger.info("系统执行通知完成 execution_id={} mode=default ok=true", execution_id)
     except Exception as feishu_error:
         loguru.logger.error(f"发送飞书错误通知失败: {feishu_error}")
+        loguru.logger.info("系统执行通知完成 execution_id={} mode=default ok=false", execution_id)

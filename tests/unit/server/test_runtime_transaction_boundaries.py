@@ -70,7 +70,7 @@ def test_routes_release_transactions_before_worker(
                 elif entry == "feishu":
                     account = await session.get(Account, 1)
                     assert account is not None
-                    await account_feishu._build_test_card(session, account, None)
+                    await account_feishu._build_test_card(session, account)
                 elif entry == "account_target":
                     await account_execution.refresh_account_target_snapshot(session, 1)
                 elif entry == "portfolio_target":

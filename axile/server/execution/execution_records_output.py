@@ -25,6 +25,7 @@ def sanitize_standard_input_for_audit(raw_input: UnifiedStandardInput | dict[str
     payload = raw_input.to_dict() if isinstance(raw_input, UnifiedStandardInput) else raw_input
     sanitized = dict(payload)
     sanitized.pop("account_config", None)
+    sanitized.pop("execution_notification_code", None)
     if sanitized.get("feishu_key"):
         sanitized["feishu_key"] = "***"
     return sanitized
@@ -84,6 +85,8 @@ async def append_execute_record_from_output(
         持久化后的执行记录。
     """
     result["execution_kind"] = execution_kind.value
+    if isinstance(result.get("inputs"), dict):
+        result["inputs"] = sanitize_standard_input_for_audit(result["inputs"])
     # 落库边界按当前 status 重新派生展示结论，防止绕过校验器的中途改写造成两套结论分离。
     result["outcome"] = outcome_from_status(output.status).value
     result["outcome_reason"] = output.outcome_reason

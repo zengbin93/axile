@@ -14,7 +14,6 @@ import type {
   Message,
   PortfolioAccountList,
   TargetWeightSnapshot,
-  FeishuCardConfig,
 } from '@/types/api'
 
 /** 账户写入载荷；凭证只能从表单写入，绝不会存在于读取模型中。 */
@@ -32,12 +31,15 @@ export interface AccountFeishuTestResult {
 export function testAccountFeishu(
   id: number,
   feishuKey: string,
-  feishuCardConfig: FeishuCardConfig | null,
 ): Promise<AccountFeishuTestResult> {
   return apiSend<AccountFeishuTestResult>('POST', `/account/${id}/feishu/test`, {
     feishu_key: feishuKey,
-    feishu_card_config: feishuCardConfig,
   })
+}
+
+/** 用当前页面草稿运行一次样例执行通知函数。 */
+export function testAccountNotificationFunction(id: number, code: string): Promise<AccountFeishuTestResult> {
+  return apiSend<AccountFeishuTestResult>('POST', `/account/${id}/notification/test`, { code })
 }
 
 export interface SchedulePreview {

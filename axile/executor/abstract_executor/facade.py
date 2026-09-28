@@ -12,7 +12,6 @@ from typing import TYPE_CHECKING, cast
 from axile.executor.abstract_executor.support import _coerce_object_dict, _coerce_trade_rules
 from axile.executor.account_control.decorators import controlled_operation
 from axile.executor.models.execution_result import ExecutionOutcome, ExecutionStatus
-from axile.executor.models.feishu import FeishuCardConfig
 from axile.executor.models.unified_account_assets import Position, UnifiedAccountAssets
 from axile.executor.models.unified_callback import OrderUpdateCallback, PriceDataCallback, TradeRecordCallback
 from axile.executor.models.unified_input import DEFAULT_EXECUTION_TIMEOUT_SECONDS, UnifiedStandardInput
@@ -53,7 +52,8 @@ class _EmptyPositionsPlan:
     algorithm: dict[str, object]
     forbidden_symbols: list[str]
     feishu_key: str | None
-    feishu_card_config: FeishuCardConfig | None
+    execution_notification_mode: str
+    execution_notification_code: str | None
     feishu_account: dict[str, object]
     extra: dict[str, object]
     execution_timeout: int
@@ -507,7 +507,7 @@ class AbstractExecutorFacadeMixin:
             else []
         )
         feishu_key_raw = kwargs.get("feishu_key")
-        feishu_card_config_raw = kwargs.get("feishu_card_config")
+        notification_code_raw = kwargs.get("execution_notification_code")
         timeout_raw = kwargs.get("execution_timeout")
         return _EmptyPositionsPlan(
             curr_target=curr_target,
@@ -516,9 +516,8 @@ class AbstractExecutorFacadeMixin:
             algorithm=_coerce_object_dict(kwargs.get("algorithm", executor._get_default_algorithm())),
             forbidden_symbols=forbidden_symbols,
             feishu_key=feishu_key_raw if isinstance(feishu_key_raw, str) else None,
-            feishu_card_config=FeishuCardConfig.model_validate(feishu_card_config_raw)
-            if isinstance(feishu_card_config_raw, dict)
-            else None,
+            execution_notification_mode=str(kwargs.get("execution_notification_mode", "default")),
+            execution_notification_code=notification_code_raw if isinstance(notification_code_raw, str) else None,
             feishu_account=_coerce_object_dict(kwargs.get("feishu_account", {})),
             extra=_coerce_object_dict(kwargs.get("extra", {})),
             execution_timeout=as_timeout_int(timeout_raw, DEFAULT_CLEAR_TIMEOUT),
@@ -556,7 +555,8 @@ class AbstractExecutorFacadeMixin:
             curr_target=plan.curr_target,
             last_target=plan.last_target,
             feishu_key=plan.feishu_key,
-            feishu_card_config=plan.feishu_card_config,
+            execution_notification_mode=plan.execution_notification_mode,
+            execution_notification_code=plan.execution_notification_code,
             feishu_account=plan.feishu_account,
             extra=plan.extra,
             execution_timeout=plan.execution_timeout,

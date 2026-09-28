@@ -262,6 +262,8 @@ async def _notify_timeout_termination_if_needed(
             RuntimeError(f"执行被总超时终止（execution_id={execution_id}）：{termination.reason}"),
             account,
             settings.exe_err_feishu_key,
+            event_type="execution_timeout",
+            execution_id=execution_id,
         )
     except Exception as exc:  # noqa: BLE001
         loguru.logger.warning(f"总超时告警发送失败 execution_id={execution_id}: {exc}")
@@ -665,7 +667,7 @@ async def handle_inline_execution_failure(
 
     from axile.common.config import settings
 
-    await send_feishu_error(error, account, settings.exe_err_feishu_key)
+    await send_feishu_error(error, account, settings.exe_err_feishu_key, execution_id=execution_id)
 
 
 def _release_execution_slots(account_id: int, execution_id: str) -> None:

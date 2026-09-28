@@ -4,13 +4,14 @@ from __future__ import annotations
 
 import queue
 import threading
-from typing import Any, Protocol, TypedDict
+from typing import Protocol, TypedDict
 
 import loguru
+from pydantic_core import to_jsonable_python
 
 from axile.common.feishu import push_feishu_card
+from axile.common.notification_function import run_notification_function
 from axile.executor.algorithms.utils import clock_now
-from axile.executor.models.feishu import FeishuCardConfig
 from axile.executor.models.unified_account_assets import Position, UnifiedAccountAssets, is_degraded_snapshot_source
 from axile.executor.models.unified_order import TradeRecord, UnifiedOrder
 from axile.executor.models.unified_output import UnifiedStandardOutput
@@ -185,7 +186,7 @@ def _structured_template_variables(
     legacy: dict[str, object],
     assets: UnifiedAccountAssets | None,
 ) -> dict[str, object]:
-    """构造版本化、跨渠道且不含连接信息的模板变量."""
+    """构造跨渠道且不含连接信息的执行通知变量."""
     inputs = output.inputs
     audit_value = inputs.extra.get("audit") if inputs else None
     audit: dict[str, object] = audit_value if isinstance(audit_value, dict) else {}
@@ -214,6 +215,9 @@ def _structured_template_variables(
                 "status": str(result.status),
                 "success": result.success,
                 "error": result.error,
+                "outcome": str(result.outcome),
+                "outcome_reason": result.outcome_reason,
+                "reason_code": result.reason_code,
                 "target_volume": result.target_volume,
                 "sizing": result.sizing.model_dump(mode="json") if result.sizing else None,
                 "first_tick": result.first_tick.model_dump(mode="json", exclude={"extra"})
@@ -238,13 +242,16 @@ def _structured_template_variables(
             "status": status,
             "success": output.success,
             "error": output.error,
+            "outcome": str(output.outcome),
+            "outcome_reason": output.outcome_reason,
+            "reason_code": output.reason_code,
             "channel_type": str(output.channel_type),
             "is_test": bool(audit.get("is_test", False)),
         },
         "strategy": {
-            "algorithm": _redact_sensitive(inputs.algorithm) if inputs else {},
-            "symbol_algorithms": _redact_sensitive(inputs.symbol_algorithms) if inputs else {},
-            "trade_rules": _redact_sensitive(inputs.trade_rules) if inputs else {},
+            "algorithm": _redact_sensitive(to_jsonable_python(inputs.algorithm)) if inputs else {},
+            "symbol_algorithms": _redact_sensitive(to_jsonable_python(inputs.symbol_algorithms)) if inputs else {},
+            "trade_rules": _redact_sensitive(to_jsonable_python(inputs.trade_rules)) if inputs else {},
             "forbidden_symbols": list(inputs.forbidden_symbols) if inputs else [],
             "risk_symbols": list(inputs.risk_symbols) if inputs else [],
         },
@@ -297,50 +304,89 @@ def send_execute_results_to_feishu(
     source: FeishuNotificationSource,
     output: UnifiedStandardOutput,
     feishu_key: str | None = None,
-    card_config: FeishuCardConfig | None = None,
     template_id: str = "AAqRUQhyOM90g",
     notification_snapshot: dict[str, object] | None = None,
-) -> None:
+) -> bool:
     """发送执行结果到飞书群机器人."""
     if not feishu_key:
         source.logger.info("未提供飞书key，跳过通知发送")
-        return
+        return False
 
     card = build_execute_results_feishu_card(
-        source, output, card_config, template_id=template_id, notification_snapshot=notification_snapshot
+        source, output, template_id=template_id, notification_snapshot=notification_snapshot
     )
 
     try:
         push_feishu_card(card, feishu_key)
         source.logger.info(f"飞书通知发送成功 - 账户: {source._get_account_mark()}")
+        return True
     except Exception as exc:
         source.logger.error(f"发送飞书通知失败: {exc}")
+        return False
 
 
 def build_execute_results_feishu_card(
     source: FeishuNotificationSource,
     output: UnifiedStandardOutput,
-    card_config: FeishuCardConfig | None = None,
     *,
     template_id: str = "AAqRUQhyOM90g",
     notification_snapshot: dict[str, object] | None = None,
 ) -> ObjectDict:
     """按账户配置构造可直接发送的执行结果卡片."""
-    if card_config and card_config.mode == "custom":
-        card: ObjectDict = dict(card_config.card or {})
-    else:
-        assets = _select_notification_assets(source, output, notification_snapshot)
-        legacy = _legacy_template_variables(source, output, assets)
-        custom_template = card_config.template_id if card_config and card_config.mode == "template" else None
-        variables = _structured_template_variables(source, output, legacy, assets) if custom_template else legacy
-        card = {
-            "type": "template",
-            "data": {
-                "template_id": custom_template or template_id,
-                "template_variable": variables,
-            },
-        }
-    return card
+    assets = _select_notification_assets(source, output, notification_snapshot)
+    return {
+        "type": "template",
+        "data": {
+            "template_id": template_id,
+            "template_variable": _legacy_template_variables(source, output, assets),
+        },
+    }
+
+
+def build_execution_notification_context(
+    source: FeishuNotificationSource,
+    output: UnifiedStandardOutput,
+    notification_snapshot: dict[str, object] | None = None,
+    *,
+    is_test: bool = False,
+) -> dict[str, object]:
+    """为渠道无关的通知函数构造脱敏执行快照。"""
+    assets = _select_notification_assets(source, output, notification_snapshot)
+    legacy = _legacy_template_variables(source, output, assets)
+    context = _structured_template_variables(source, output, legacy, assets)
+    context.pop("schema_version", None)
+    for key in legacy:
+        if key not in {"positions", "trades"}:
+            context.pop(key, None)
+    execution = context.get("execution")
+    if isinstance(execution, dict):
+        execution["is_test"] = is_test
+        context["event_id"] = f"execution:{execution.get('id')}" if execution.get("id") else None
+    return to_jsonable_python(context)
+
+
+def dispatch_execution_notification(
+    source: FeishuNotificationSource,
+    output: UnifiedStandardOutput,
+    feishu_key: str | None,
+    mode: str,
+    code: str | None,
+    notification_snapshot: dict[str, object] | None,
+) -> None:
+    """按照账户当前模式发送默认飞书通知或执行用户函数。"""
+    audit = output.inputs.extra.get("audit", {}) if output.inputs else {}
+    execution_id = audit.get("execution_id") if isinstance(audit, dict) else None
+    if mode == "function":
+        context = build_execution_notification_context(source, output, notification_snapshot)
+        result = run_notification_function(code or "", context)
+        if not result.ok:
+            source.logger.error(f"自定义执行通知失败: {result.error}")
+        loguru.logger.info(
+            "执行通知完成 execution_id={} mode=function ok={} error={}", execution_id, result.ok, result.error
+        )
+        return
+    ok = send_execute_results_to_feishu(source, output, feishu_key, notification_snapshot=notification_snapshot)
+    loguru.logger.info("执行通知完成 execution_id={} mode=default ok={}", execution_id, ok)
 
 
 # ---- 有界后台通知派发器 ----
@@ -355,7 +401,7 @@ _FEISHU_NOTIFY_QUEUE_MAXSIZE = 64
 """待发通知队列容量；超出后丢弃最新通知，避免无界堆积。"""
 
 _FeishuNotifyTask = tuple[
-    "FeishuNotificationSource", UnifiedStandardOutput, str, FeishuCardConfig | None, dict[str, object] | None
+    "FeishuNotificationSource", UnifiedStandardOutput, str | None, str, str | None, dict[str, object] | None
 ]
 
 _notify_queue: queue.Queue[_FeishuNotifyTask] = queue.Queue(maxsize=_FEISHU_NOTIFY_QUEUE_MAXSIZE)
@@ -366,17 +412,11 @@ _notify_workers_lock = threading.Lock()
 def _feishu_notify_worker_loop() -> None:
     """后台 worker 主循环：串行消费队列并发送飞书通知，异常不退出。"""
     while True:
-        source, output, feishu_key, card_config, notification_snapshot = _notify_queue.get()
+        source, output, feishu_key, mode, code, notification_snapshot = _notify_queue.get()
         try:
-            notification_kwargs: dict[str, Any] = (
-                {"notification_snapshot": notification_snapshot} if notification_snapshot else {}
-            )
-            if card_config is None:
-                send_execute_results_to_feishu(source, output, feishu_key, **notification_kwargs)
-            else:
-                send_execute_results_to_feishu(source, output, feishu_key, card_config, **notification_kwargs)
+            dispatch_execution_notification(source, output, feishu_key, mode, code, notification_snapshot)
         except Exception as exc:  # noqa: BLE001 - 通知任务异常不得拖垮 worker
-            loguru.logger.error(f"飞书通知任务执行异常: {exc}")
+            loguru.logger.error(f"执行通知任务异常: {exc}")
         finally:
             _notify_queue.task_done()
 
@@ -402,7 +442,8 @@ def enqueue_execute_results_to_feishu(
     source: FeishuNotificationSource,
     output: UnifiedStandardOutput,
     feishu_key: str | None = None,
-    card_config: FeishuCardConfig | None = None,
+    mode: str = "default",
+    code: str | None = None,
     notification_snapshot: dict[str, object] | None = None,
 ) -> None:
     """
@@ -428,10 +469,10 @@ def enqueue_execute_results_to_feishu(
     warning**，用「丢通知」换取「主执行链路不阻塞、线程与内存有界」。绝不为单次
     执行新建线程。
     """
-    if not feishu_key:
+    if mode != "function" and not feishu_key:
         return
     _ensure_feishu_notify_workers_started()
     try:
-        _notify_queue.put_nowait((source, output, feishu_key, card_config, notification_snapshot))
+        _notify_queue.put_nowait((source, output, feishu_key, mode, code, notification_snapshot))
     except queue.Full:
-        loguru.logger.warning(f"飞书通知队列已满（maxsize={_FEISHU_NOTIFY_QUEUE_MAXSIZE}），丢弃本次通知以避免无界堆积")
+        loguru.logger.warning(f"执行通知队列已满（maxsize={_FEISHU_NOTIFY_QUEUE_MAXSIZE}），丢弃本次通知以避免无界堆积")

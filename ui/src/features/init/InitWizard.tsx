@@ -26,6 +26,7 @@ import {
   saveInit,
   testDb,
   testFeishu,
+  testSystemNotificationFunction,
   type InitValues,
 } from '@/lib/api/init'
 import { useToastStore } from '@/stores/ui'
@@ -86,6 +87,8 @@ const EDIT_STEP_LABELS = ['执行告警'] as const
 interface Draft {
   sqlalchemy_database_uri: string
   exe_err_feishu_key: string
+  system_execution_notification_mode: 'default' | 'function'
+  system_execution_notification_code: string
   environment: string
   app_log_dir: string
   axile_log_rotation: string
@@ -98,6 +101,8 @@ function draftFromInitial(initial: InitValues, isEdit = false): Draft {
   return {
     sqlalchemy_database_uri: initial.sqlalchemy_database_uri || (isEdit ? '' : DEFAULT_DB_URI),
     exe_err_feishu_key: initial.exe_err_feishu_key ?? '',
+    system_execution_notification_mode: initial.system_execution_notification_mode ?? 'default',
+    system_execution_notification_code: initial.system_execution_notification_code ?? '',
     environment: initial.environment || 'local',
     app_log_dir: initial.app_log_dir || './logs',
     axile_log_rotation: initial.axile_log_rotation || '1 day',
@@ -115,6 +120,8 @@ function advancedValues(draft: Draft, initial: InitValues): InitValues {
     ...initial,
     sqlalchemy_database_uri: draft.sqlalchemy_database_uri,
     exe_err_feishu_key: draft.exe_err_feishu_key,
+    system_execution_notification_mode: draft.system_execution_notification_mode,
+    system_execution_notification_code: draft.system_execution_notification_code,
     environment: draft.environment,
     app_log_dir: draft.app_log_dir,
     axile_log_rotation: draft.axile_log_rotation,
@@ -264,11 +271,12 @@ export function InitWizard({
   const [savedAlertKey, setSavedAlertKey] = useState(
     initial.exe_err_feishu_key ?? '',
   )
+  const [savedNotification, setSavedNotification] = useState({ mode: initial.system_execution_notification_mode, code: initial.system_execution_notification_code })
   const [draft, setDraft] = useState<Draft>(() => draftFromInitial(initial, isEdit))
   const initialDraft = draftFromInitial(initial, isEdit)
   const currentAdvancedValues = advancedValues(draft, initial)
   const advancedChanges = advancedConfigChanges(initial, currentAdvancedValues)
-  const alertDirty = draft.exe_err_feishu_key !== savedAlertKey
+  const alertDirty = draft.exe_err_feishu_key !== savedAlertKey || draft.system_execution_notification_mode !== savedNotification.mode || draft.system_execution_notification_code !== savedNotification.code
   const set = (patch: Partial<Draft>) => {
     setSaveError(null)
     if (patch.exe_err_feishu_key !== undefined) setFeishuTest(null)
@@ -288,6 +296,15 @@ export function InitWizard({
     setFeishuTest('busy')
     try {
       setFeishuTest(await testFeishu(draft.exe_err_feishu_key))
+    } catch (e) {
+      setFeishuTest({ ok: false, message: errText(e) })
+    }
+  }
+
+  const runFunctionTest = async () => {
+    setFeishuTest('busy')
+    try {
+      setFeishuTest(await testSystemNotificationFunction(draft.system_execution_notification_code))
     } catch (e) {
       setFeishuTest({ ok: false, message: errText(e) })
     }
@@ -313,8 +330,10 @@ export function InitWizard({
     setSaveError(null)
     try {
       if (isEdit && editSection === 'alert') {
-        const result = await saveExecutionAlert(draft.exe_err_feishu_key)
+        const result = await saveExecutionAlert(draft.exe_err_feishu_key.trim() || null, draft.system_execution_notification_mode, draft.system_execution_notification_code)
         setSavedAlertKey(draft.exe_err_feishu_key)
+        setSavedNotification({ mode: draft.system_execution_notification_mode, code: draft.system_execution_notification_mode === 'function' ? draft.system_execution_notification_code : '' })
+        if (draft.system_execution_notification_mode === 'default') set({ system_execution_notification_code: '' })
         toast(result.message)
         setSaving(false)
         return
@@ -405,6 +424,40 @@ export function InitWizard({
                     }
                     placeholder="留空则不推送"
                   />
+                  <details className="mt-4 border-t border-line pt-3">
+                    <summary className="cursor-pointer text-[14px] text-ink-2">高级通知设置</summary>
+                    <label className={labelCls}>通知方式</label>
+                    <select
+                      className={inputCls}
+                      value={draft.system_execution_notification_mode}
+                      onChange={(e) => set({ system_execution_notification_mode: e.target.value as 'default' | 'function' })}
+                    >
+                      <option value="default">默认飞书卡片</option>
+                      <option value="function">自定义函数</option>
+                    </select>
+                    {draft.system_execution_notification_mode === 'function' && (
+                      <div className="mt-3">
+                        <p className="text-[13px] text-ink-3">定义同步函数 notify(context)。context 包含 event_type、occurred_at、account、error 和 is_test；函数自行发送通知。</p>
+                        <textarea
+                          aria-label="系统执行通知函数"
+                          className={`${inputCls} mt-2 min-h-52 resize-y font-mono`}
+                          value={draft.system_execution_notification_code}
+                          spellCheck={false}
+                          onChange={(e) => set({ system_execution_notification_code: e.target.value })}
+                          placeholder={'def notify(context):\n    print(context["error"]["message"])'}
+                        />
+                        <p className="mt-1 text-[12px] text-ink-3">试跑会实际执行函数，可能向外发送消息。样例事件中 is_test 为 true。</p>
+                        <button
+                          type="button"
+                          className="mt-2 cursor-pointer rounded-[11px] border border-line px-4 py-2 text-[14px] text-ink-2 disabled:opacity-45"
+                          disabled={!draft.system_execution_notification_code.trim() || feishuTest === 'busy'}
+                          onClick={() => void runFunctionTest()}
+                        >
+                          试跑函数
+                        </button>
+                      </div>
+                    )}
+                  </details>
                   {isEdit ? (
                     <>
                       <div className="mt-4 flex flex-wrap items-center gap-3">

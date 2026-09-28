@@ -44,6 +44,7 @@ def test_migration_history_is_linear() -> None:
         "0014_ctp_market_value.py",
         "0015_tq_market_value.py",
         "0016_account_copy_source.py",
+        "0017_notification_functions.py",
     ]
     initial = _load_migration(migration_paths[0])
     calendar = _load_migration(migration_paths[1])
@@ -74,6 +75,9 @@ def test_migration_history_is_linear() -> None:
     account_copy_source = _load_migration(migration_paths[15])
     assert account_copy_source.revision == "0016"
     assert account_copy_source.down_revision == "0015"
+    notification_functions = _load_migration(migration_paths[16])
+    assert notification_functions.revision == "0017"
+    assert notification_functions.down_revision == "0016"
     assert ctp_account_control_preset.revision == "0009"
     assert ctp_account_control_preset.down_revision == "0008"
     assert account_runtime_sync.revision == "0010"
@@ -112,6 +116,31 @@ def test_feishu_card_config_migration_adds_nullable_account_column() -> None:
         row = connection.execute(sa.text("SELECT feishu_card_config FROM account WHERE id = 1")).one()
         assert columns["feishu_card_config"]["nullable"] is True
         assert row[0] is None
+
+
+def test_notification_function_migration_discards_old_card_config() -> None:
+    """旧模板与 JSON 值失效，账户获得默认模式与唯一函数槽位。"""
+    migration = _load_migration(_MIGRATIONS_DIR / "0017_notification_functions.py")
+    engine = sa.create_engine("sqlite://")
+    metadata = sa.MetaData()
+    sa.Table(
+        "account",
+        metadata,
+        sa.Column("id", sa.Integer(), primary_key=True),
+        sa.Column("feishu_card_config", sa.JSON(), nullable=True),
+    )
+    with engine.begin() as connection:
+        metadata.create_all(connection)
+        connection.execute(sa.text("INSERT INTO account (id, feishu_card_config) VALUES (1, '{}')"))
+        migration.op = Operations(MigrationContext.configure(connection))
+        migration.upgrade()
+        columns = {column["name"] for column in sa.inspect(connection).get_columns("account")}
+        assert "feishu_card_config" not in columns
+        assert {"execution_notification_mode", "execution_notification_code"} <= columns
+        row = connection.execute(
+            sa.text("SELECT execution_notification_mode, execution_notification_code FROM account WHERE id = 1")
+        ).one()
+        assert row == ("default", None)
 
 
 def test_account_asset_snapshot_migration_backfills_execution_assets() -> None:

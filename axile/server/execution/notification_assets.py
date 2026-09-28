@@ -13,7 +13,9 @@ from axile.server.repositories import get_recent_account_asset_snapshots_for_acc
 
 async def load_notification_snapshot(account: Account) -> dict[str, object] | None:
     """仅为配置了飞书通知的账户读取备用快照，查询失败不影响执行。"""
-    if not account.feishu_key or account.id is None:
+    if (
+        not account.feishu_key and getattr(account, "execution_notification_mode", "default") != "function"
+    ) or account.id is None:
         return None
     try:
         async with SessionLocal() as session:

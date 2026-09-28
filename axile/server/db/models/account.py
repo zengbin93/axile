@@ -13,7 +13,6 @@ from sqlmodel._compat import SQLModelConfig
 
 from axile.common.trade_channel import TradeChannel
 from axile.executor.account_control.models import AccountControlOverride
-from axile.executor.models.feishu import FeishuCardConfig
 from axile.executor.models.unified_input import DEFAULT_EXECUTION_TIMEOUT_SECONDS
 from axile.server.db.models.account_runtime_sync import AccountRuntimeSyncPublic
 from axile.server.db.models.base import PydanticJSONType, now_str
@@ -309,11 +308,10 @@ class AccountBase(SQLModel):
         description="风险品种,自动平仓,非必填",
     )
     feishu_key: Optional[str] = Field(sa_column=Column(Text, nullable=True), description="飞书KEY, 可选")
-    feishu_card_config: FeishuCardConfig | None = Field(
-        default=None,
-        sa_column=Column(PydanticJSONType(FeishuCardConfig), nullable=True),
-        description="账户飞书通知卡片配置；null 使用 Axon 默认卡片",
+    execution_notification_mode: str = Field(
+        default="default", sa_column=Column(Text, nullable=False, server_default="default")
     )
+    execution_notification_code: str | None = Field(default=None, sa_column=Column(Text, nullable=True))
     portfolio_id: Optional[int] = Field(
         default=None,
         sa_column=Column(Integer, ForeignKey("portfolio.id", ondelete="SET NULL"), nullable=True),
@@ -428,7 +426,8 @@ class AccountPublic(SQLModel):
     forbidden_symbols: Optional[List[str]] = None
     risk_symbols: Optional[List[str]] = None
     feishu_configured: bool = False
-    feishu_card_config: FeishuCardConfig | None = None
+    execution_notification_mode: str = "default"
+    execution_notification_code: str | None = None
     portfolio_id: Optional[int] = None
     write_empty_record: Optional[int] = None
     execution_timeout: int
@@ -612,7 +611,8 @@ class AccountUpdate(SQLModel):
     forbidden_symbols: Optional[List[str]] = None
     risk_symbols: Optional[List[str]] = None
     feishu_key: Optional[str] = None
-    feishu_card_config: FeishuCardConfig | None = None
+    execution_notification_mode: str | None = None
+    execution_notification_code: str | None = None
     portfolio_id: Optional[int] = None
     write_empty_record: Optional[int] = None
     execution_timeout: Optional[int] = Field(default=None, ge=1, le=_MAX_EXECUTION_TIMEOUT)

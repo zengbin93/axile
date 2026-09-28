@@ -11,10 +11,14 @@ from pydantic import BaseModel, ConfigDict
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from axile.common.feishu import push_feishu_card
+from axile.common.notification_function import run_notification_function
 from axile.executor.algorithms.utils import clock_now
-from axile.executor.feishu_notifications import LoggerLike, build_execute_results_feishu_card
+from axile.executor.feishu_notifications import (
+    LoggerLike,
+    build_execute_results_feishu_card,
+    build_execution_notification_context,
+)
 from axile.executor.models.execution_result import AlgorithmResult, ExecutionStatus
-from axile.executor.models.feishu import FeishuCardConfig
 from axile.executor.models.unified_account_assets import UnifiedAccountAssets
 from axile.executor.models.unified_input import UnifiedStandardInput
 from axile.executor.models.unified_order import OrderDirection, OrderType, TradeRecord, UnifiedOrder
@@ -35,7 +39,12 @@ class AccountFeishuTestRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     feishu_key: str
-    feishu_card_config: FeishuCardConfig | None = None
+
+
+class AccountNotificationFunctionTestRequest(BaseModel):
+    """使用当前编辑草稿试跑账户执行通知函数。"""
+
+    code: str
 
 
 class AccountFeishuTestResult(BaseModel):
@@ -71,7 +80,6 @@ class _TestLogger:
 
 def _test_input(
     account: Account,
-    card_config: FeishuCardConfig | None,
     curr_target: dict[str, float],
     last_target: dict[str, float],
 ) -> UnifiedStandardInput:
@@ -86,7 +94,6 @@ def _test_input(
             "trade_rules": account.trade_rules or {},
             "forbidden_symbols": account.forbidden_symbols or [],
             "risk_symbols": account.risk_symbols or [],
-            "feishu_card_config": card_config.model_dump(mode="json", exclude_none=True) if card_config else None,
             "feishu_account": {
                 "id": account.id,
                 "name": account.name,
@@ -214,7 +221,6 @@ async def _build_sample_output(
     session: AsyncSession,
     account: Account,
     assets: UnifiedAccountAssets,
-    card_config: FeishuCardConfig | None,
 ) -> UnifiedStandardOutput:
     """用真实资产叠加样例成交，构造接近真实执行版面的输出。"""
     legs = _sample_legs(assets)
@@ -223,7 +229,7 @@ async def _build_sample_output(
     algorithm = str(account.algorithm.get("method", "Unknown")) if isinstance(account.algorithm, dict) else "Unknown"
     return UnifiedStandardOutput(
         account_assets=assets,
-        inputs=_test_input(account, card_config, curr_target=curr_target, last_target=_holding_weights(assets)),
+        inputs=_test_input(account, curr_target=curr_target, last_target=_holding_weights(assets)),
         symbol_results=_sample_symbol_results(legs, algorithm),
         status=ExecutionStatus.SUCCEEDED,
         channel_type=account.trade_channel,
@@ -234,18 +240,9 @@ async def _build_sample_output(
 async def _build_test_card(
     session: AsyncSession,
     account: Account,
-    card_config: FeishuCardConfig | None,
 ) -> dict[str, object]:
-    """读取当前账户资产并构造样例卡片；自定义卡片不访问渠道。"""
+    """读取当前账户资产并构造默认样例卡片。"""
     source = _TestNotificationSource(account.name)
-    if card_config and card_config.mode == "custom":
-        output = UnifiedStandardOutput(
-            account_assets=UnifiedAccountAssets.unavailable(),
-            inputs=None,
-            status=ExecutionStatus.NOOP,
-            channel_type=account.trade_channel,
-        )
-        return build_execute_results_feishu_card(source, output, card_config)
 
     account_id = account.id
     if account_id is None:
@@ -263,8 +260,8 @@ async def _build_test_card(
     finally:
         clear_account_asset_refresh(account_id)
 
-    output = await _build_sample_output(session, account, assets, card_config)
-    return build_execute_results_feishu_card(source, output, card_config)
+    output = await _build_sample_output(session, account, assets)
+    return build_execute_results_feishu_card(source, output)
 
 
 @router.post("/{account_id}/feishu/test", response_model=AccountFeishuTestResult)
@@ -278,10 +275,26 @@ async def test_account_feishu(
     if not key:
         return AccountFeishuTestResult(ok=False, message="请先填写飞书机器人 key")
     account = await _get_account_or_404(session, account_id)
-    card = await _build_test_card(session, account, payload.feishu_card_config)
+    card = await _build_test_card(session, account)
     await session.close()
     try:
         await asyncio.to_thread(push_feishu_card, card, key)
     except Exception as exc:  # noqa: BLE001 - 统一转为可展示的联通测试结果
         return AccountFeishuTestResult(ok=False, message=f"推送失败：{str(exc)[:200]}")
     return AccountFeishuTestResult(ok=True, message="样例卡片已发送，请在群内确认。")
+
+
+@router.post("/{account_id}/notification/test", response_model=AccountFeishuTestResult)
+async def test_account_notification_function(
+    session: SessionDep,
+    account_id: int,
+    payload: AccountNotificationFunctionTestRequest,
+) -> AccountFeishuTestResult:
+    """在独立进程中用脱敏样例执行结果运行页面草稿函数。"""
+    account = await _get_account_or_404(session, account_id)
+    output = await _build_sample_output(session, account, UnifiedAccountAssets.unavailable())
+    context = build_execution_notification_context(_TestNotificationSource(account.name), output, is_test=True)
+    result = await asyncio.to_thread(run_notification_function, payload.code, context)
+    return AccountFeishuTestResult(
+        ok=result.ok, message="样例函数运行成功" if result.ok else result.error or "运行失败"
+    )

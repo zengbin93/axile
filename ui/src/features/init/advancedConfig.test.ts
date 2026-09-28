@@ -6,6 +6,8 @@ import type { InitValues } from '@/lib/api/init'
 const initial: InitValues = {
   sqlalchemy_database_uri: 'sqlite+aiosqlite:///./axile.db',
   exe_err_feishu_key: '',
+  system_execution_notification_mode: 'default',
+  system_execution_notification_code: '',
   environment: 'local',
   app_log_dir: './logs',
   axile_log_rotation: '1 day',

@@ -7,6 +7,7 @@ Notes
 因此在服务端处于初始化向导模式（数据库尚未迁移）时也能正常工作。
 """
 
+import asyncio
 import os
 import signal
 from typing import Any, Literal
@@ -23,9 +24,11 @@ from axile.common.config import (
     SqliteDsn,
     is_configured,
     settings,
-    update_config_toml_value,
+    update_config_toml_values,
     write_config_toml,
 )
+from axile.common.notification_config import validate_notification_config
+from axile.common.notification_function import run_notification_function
 from axile.executor.algorithms.utils.clock import get_default_clock
 from axile.server.error_notifications import build_test_card
 
@@ -68,12 +71,20 @@ class FeishuTestRequest(BaseModel):
     key: str
 
 
+class NotificationFunctionTestRequest(BaseModel):
+    """系统通知函数试跑请求。"""
+
+    code: str
+
+
 class ExecutionAlertUpdateRequest(BaseModel):
     """系统级执行错误告警配置更新载荷."""
 
     model_config = ConfigDict(extra="forbid")
 
-    exe_err_feishu_key: str = ""
+    exe_err_feishu_key: str | None = None
+    system_execution_notification_mode: Literal["default", "function"] = "default"
+    system_execution_notification_code: str = ""
 
 
 class TestResult(BaseModel):
@@ -98,6 +109,8 @@ class InitSaveRequest(BaseModel):
 
     sqlalchemy_database_uri: str | None = None
     exe_err_feishu_key: str | None = None
+    system_execution_notification_mode: Literal["default", "function"] = "default"
+    system_execution_notification_code: str = ""
     environment: Literal["local", "staging", "production"] = "local"
     app_log_dir: str = "./logs"
     axile_log_rotation: str = "1 day"
@@ -119,6 +132,8 @@ def _prefill_values() -> dict[str, Any]:
     return {
         "sqlalchemy_database_configured": bool(settings.sqlalchemy_database_uri),
         "exe_err_feishu_configured": bool(settings.exe_err_feishu_key),
+        "system_execution_notification_mode": settings.system_execution_notification_mode,
+        "system_execution_notification_code": settings.system_execution_notification_code,
         "environment": settings.environment,
         "app_log_dir": str(settings.app_log_dir),
         "axile_log_rotation": settings.axile_log_rotation,
@@ -228,16 +243,52 @@ def update_execution_alert(payload: ExecutionAlertUpdateRequest) -> TestResult:
         )
 
     try:
-        update_config_toml_value("exe_err_feishu_key", payload.exe_err_feishu_key)
+        validate_notification_config(
+            payload.system_execution_notification_mode, payload.system_execution_notification_code
+        )
+        next_feishu_key = (
+            settings.exe_err_feishu_key if payload.exe_err_feishu_key is None else payload.exe_err_feishu_key
+        )
+        update_config_toml_values(
+            {
+                "exe_err_feishu_key": next_feishu_key,
+                "system_execution_notification_mode": payload.system_execution_notification_mode,
+                "system_execution_notification_code": payload.system_execution_notification_code
+                if payload.system_execution_notification_mode == "function"
+                else "",
+            }
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     except OSError as exc:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"写入配置文件失败：{exc}",
         ) from exc
 
-    settings.exe_err_feishu_key = payload.exe_err_feishu_key
+    settings.exe_err_feishu_key = next_feishu_key
+    settings.system_execution_notification_mode = payload.system_execution_notification_mode
+    settings.system_execution_notification_code = (
+        payload.system_execution_notification_code if payload.system_execution_notification_mode == "function" else ""
+    )
     logger.info("执行错误告警配置已更新并立即生效。")
     return TestResult(ok=True, message="执行告警配置已保存并立即生效。")
+
+
+@router.post("/execution-alert/function/test")
+async def test_system_notification_function(payload: NotificationFunctionTestRequest) -> TestResult:
+    """以明确标记的样例异常运行系统通知函数。"""
+    context: dict[str, object] = {
+        "event_id": "system:sample",
+        "event_type": "execution_error",
+        "execution_id": None,
+        "occurred_at": "sample",
+        "account": {"id": 0, "name": "样例账户"},
+        "error": {"type": "RuntimeError", "message": "样例执行异常", "traceback": "样例堆栈"},
+        "is_test": True,
+    }
+    result = await asyncio.to_thread(run_notification_function, payload.code, context)
+    return TestResult(ok=result.ok, message="样例函数运行成功" if result.ok else result.error or "运行失败")
 
 
 def _restart_process() -> None:
@@ -271,6 +322,12 @@ def init_save(payload: InitSaveRequest, background_tasks: BackgroundTasks) -> Te
     HTTPException
         数据库地址不合法时返回 422；写入文件失败时返回 500。
     """
+    try:
+        validate_notification_config(
+            payload.system_execution_notification_mode, payload.system_execution_notification_code
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     database_uri = (
         payload.sqlalchemy_database_uri
         if payload.sqlalchemy_database_uri is not None
@@ -288,6 +345,10 @@ def init_save(payload: InitSaveRequest, background_tasks: BackgroundTasks) -> Te
     values: dict[str, Any] = {
         "sqlalchemy_database_uri": database_uri,
         "exe_err_feishu_key": feishu_key,
+        "system_execution_notification_mode": payload.system_execution_notification_mode,
+        "system_execution_notification_code": payload.system_execution_notification_code
+        if payload.system_execution_notification_mode == "function"
+        else "",
         "environment": payload.environment,
         "app_log_dir": payload.app_log_dir,
         "axile_log_rotation": payload.axile_log_rotation,

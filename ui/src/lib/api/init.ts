@@ -5,6 +5,8 @@ import { apiGet, apiSend } from '@/lib/api/client'
 export interface InitStatusValues {
   sqlalchemy_database_configured: boolean
   exe_err_feishu_configured: boolean
+  system_execution_notification_mode: 'default' | 'function'
+  system_execution_notification_code: string
   environment: string
   app_log_dir: string
   axile_log_rotation: string
@@ -17,6 +19,8 @@ export interface InitValues {
   sqlalchemy_database_uri: string
   /** 执行错误告警飞书机器人 key（系统级，区别于账户各自的 `feishu_key`）；空串表示不推送。 */
   exe_err_feishu_key: string
+  system_execution_notification_mode: 'default' | 'function'
+  system_execution_notification_code: string
   environment: string
   app_log_dir: string
   axile_log_rotation: string
@@ -50,6 +54,8 @@ export function initValuesFromStatus(values: InitStatusValues): InitValues {
   return {
     sqlalchemy_database_uri: '',
     exe_err_feishu_key: '',
+    system_execution_notification_mode: values.system_execution_notification_mode ?? 'default',
+    system_execution_notification_code: values.system_execution_notification_code ?? '',
     environment: values.environment,
     app_log_dir: values.app_log_dir,
     axile_log_rotation: values.axile_log_rotation,
@@ -82,15 +88,22 @@ export function testFeishu(key: string): Promise<TestResult> {
 }
 
 /** 保存系统级执行错误告警配置；成功后当前服务进程立即使用新值。 */
-export function saveExecutionAlert(exeErrFeishuKey: string): Promise<TestResult> {
+export function saveExecutionAlert(exeErrFeishuKey: string | null, mode: 'default' | 'function', code: string): Promise<TestResult> {
   return apiSend<TestResult>('PATCH', '/init/execution-alert', {
     exe_err_feishu_key: exeErrFeishuKey,
+    system_execution_notification_mode: mode,
+    system_execution_notification_code: code,
   }).then((result) => {
     if (result.ok && cachedInitValues) {
-      cachedInitValues = { ...cachedInitValues, exe_err_feishu_key: exeErrFeishuKey }
+      cachedInitValues = { ...cachedInitValues, exe_err_feishu_key: exeErrFeishuKey ?? cachedInitValues.exe_err_feishu_key, system_execution_notification_mode: mode, system_execution_notification_code: mode === 'function' ? code : '' }
     }
     return result
   })
+}
+
+/** 用样例异常运行系统通知函数草稿。 */
+export function testSystemNotificationFunction(code: string): Promise<TestResult> {
+  return apiSend<TestResult>('POST', '/init/execution-alert/function/test', { code })
 }
 
 /** 保存初始化配置；成功后后端将自退出并由 supervisor 拉起重启。 */

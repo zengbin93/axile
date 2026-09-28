@@ -70,6 +70,8 @@ def test_init_status_never_returns_credential_values(client: TestClient, monkeyp
     assert set(response.json()["values"]) == {
         "sqlalchemy_database_configured",
         "exe_err_feishu_configured",
+        "system_execution_notification_mode",
+        "system_execution_notification_code",
         "environment",
         "app_log_dir",
         "axile_log_rotation",
@@ -78,6 +80,39 @@ def test_init_status_never_returns_credential_values(client: TestClient, monkeyp
     }
     assert sentinel_uri not in response.text
     assert sentinel_key not in response.text
+
+
+def test_system_notification_function_can_be_saved_without_feishu_key(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """系统只保存一份当前源码，并在保存后立即生效。"""
+    toml_path = tmp_path / "config.toml"
+    toml_path.write_text('exe_err_feishu_key = ""\n', encoding="utf-8")
+    monkeypatch.setattr(cfg, "CONFIG_TOML_PATH", toml_path)
+    response = client.patch(
+        "/api/v1/init/execution-alert",
+        json={
+            "exe_err_feishu_key": "",
+            "system_execution_notification_mode": "function",
+            "system_execution_notification_code": "def notify(context):\n    pass",
+        },
+    )
+    assert response.status_code == 200
+    assert cfg.settings.system_execution_notification_mode == "function"
+    assert "def notify(context)" in toml_path.read_text(encoding="utf-8")
+
+
+def test_system_notification_function_sample_run(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    """试跑使用样例异常并返回函数错误。"""
+    captured: list[dict[str, object]] = []
+    monkeypatch.setattr(
+        init_module,
+        "run_notification_function",
+        lambda _code, context: captured.append(context) or type("Result", (), {"ok": True})(),
+    )
+    response = client.post("/api/v1/init/execution-alert/function/test", json={"code": "def notify(context): pass"})
+    assert response.json()["ok"] is True
+    assert captured[0]["is_test"] is True
 
 
 def test_validation_error_never_echoes_or_logs_input() -> None:
@@ -207,10 +242,10 @@ def test_update_execution_alert_write_failure_keeps_runtime_value(
     monkeypatch.setattr(cfg, "CONFIG_TOML_PATH", toml_path)
     monkeypatch.setattr(cfg.settings, "exe_err_feishu_key", "old-key")
 
-    def _raise_write_error(_key: str, _value: object) -> None:
+    def _raise_write_error(_values: object) -> None:
         raise OSError("disk full")
 
-    monkeypatch.setattr(init_module, "update_config_toml_value", _raise_write_error)
+    monkeypatch.setattr(init_module, "update_config_toml_values", _raise_write_error)
 
     response = client.patch(
         "/api/v1/init/execution-alert",

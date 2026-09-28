@@ -12,7 +12,6 @@ from axile.executor.abstract_executor.base import AbstractExecutor
 from axile.executor.algorithms.core.base import AlgorithmResult
 from axile.executor.feishu_notifications import build_execute_results_feishu_card, send_execute_results_to_feishu
 from axile.executor.models.execution_result import ExecutionStatus
-from axile.executor.models.feishu import FeishuCardConfig
 from axile.executor.models.unified_account_assets import Position, PositionDirection, UnifiedAccountAssets
 from axile.executor.models.unified_input import CTPAccountConfig, UnifiedStandardInput
 from axile.executor.models.unified_order import OrderDirection, OrderType, TradeRecord, UnifiedOrder
@@ -271,7 +270,7 @@ def test_execute_with_feishu_key_uses_extracted_sender(monkeypatch) -> None:
                 success=True,
             )
 
-    def _fake_enqueue(source: object, output: object, feishu_key: object) -> None:
+    def _fake_enqueue(source: object, output: object, feishu_key: object, *args: object) -> None:
         sent.append((source, output, feishu_key))
 
     monkeypatch.setattr(
@@ -454,8 +453,8 @@ def test_send_execute_results_to_feishu_builds_expected_card(monkeypatch) -> Non
     ]
 
 
-def test_custom_feishu_template_receives_structured_redacted_variables() -> None:
-    """自定义模板应获得版本化变量，但不得泄露凭据或渠道扩展字段。"""
+def test_custom_notification_context_is_redacted() -> None:
+    """通知函数获得统一执行数据，但不能读到渠道凭据。"""
     standard_input = UnifiedStandardInput.from_dict(
         {
             "channel_type": TradeChannel.CTP.value,
@@ -476,37 +475,12 @@ def test_custom_feishu_template_receives_structured_redacted_variables() -> None
     )
     output = _minimal_output()
     output.inputs = standard_input
-    config = FeishuCardConfig(mode="template", template_id="user-template")
-
-    card = build_execute_results_feishu_card(_NotificationSource(), output, config)
-
-    assert card["data"]["template_id"] == "user-template"  # type: ignore[index]
-    variables = card["data"]["template_variable"]  # type: ignore[index]
-    assert variables["schema_version"] == 1  # type: ignore[index]
-    assert variables["account"] == {"id": 7, "name": "期货账户", "mark": "acct-demo"}  # type: ignore[index]
-    assert variables["execution"]["id"] == "exec-1"  # type: ignore[index]
-    assert variables["strategy"]["algorithm"]["params"] == {"pace": 2}  # type: ignore[index]
-    assert "account_config" not in variables
-
-
-def test_custom_feishu_card_is_sent_unchanged() -> None:
-    """自定义卡片不应执行占位符替换或包裹模板结构。"""
-    raw_card = {"header": {"title": {"tag": "plain_text", "content": "{{account.name}}"}}, "elements": []}
-    config = FeishuCardConfig(mode="custom", card=raw_card)
-
-    card = build_execute_results_feishu_card(_NotificationSource(), _minimal_output(), config)
-
-    assert card == raw_card
-
-
-def test_feishu_card_config_rejects_webhook_envelope() -> None:
-    """账户配置只接受卡片主体，避免重复包裹 webhook 信封。"""
-    try:
-        FeishuCardConfig(mode="custom", card={"msg_type": "interactive", "card": {}})
-    except ValueError as exc:
-        assert "卡片主体" in str(exc)
-    else:
-        raise AssertionError("webhook 信封应被拒绝")
+    context = feishu_module.build_execution_notification_context(_NotificationSource(), output)
+    assert context["account"] == {"id": 7, "name": "期货账户", "mark": "acct-demo"}
+    assert context["execution"]["id"] == "exec-1"
+    assert context["strategy"]["algorithm"]["params"] == {"pace": 2}
+    assert "account_config" not in str(context)
+    assert "connection-secret" not in str(context)
 
 
 def _minimal_output() -> UnifiedStandardOutput:
@@ -536,6 +510,20 @@ def test_enqueue_feishu_skips_without_key(monkeypatch) -> None:
     feishu_module.enqueue_execute_results_to_feishu(_NotificationSource(), _minimal_output(), None)
 
     assert started == []
+
+
+def test_custom_notification_enqueues_without_feishu_key(monkeypatch) -> None:
+    """自定义通知函数无需飞书 key 也会投递。"""
+    queued: list[tuple[object, ...]] = []
+    monkeypatch.setattr(feishu_module, "_ensure_feishu_notify_workers_started", lambda: None)
+    monkeypatch.setattr(
+        feishu_module, "_notify_queue", type("Queue", (), {"put_nowait": lambda _self, item: queued.append(item)})()
+    )
+    feishu_module.enqueue_execute_results_to_feishu(
+        _NotificationSource(), _minimal_output(), None, "function", "def notify(context): pass"
+    )
+    assert len(queued) == 1
+    assert queued[0][3] == "function"
 
 
 def test_enqueue_feishu_drops_when_queue_full(monkeypatch) -> None:
@@ -570,7 +558,11 @@ def test_enqueue_feishu_delivers_through_bounded_worker(monkeypatch) -> None:
         captured.append((source, output, feishu_key))
         done.set()
 
-    monkeypatch.setattr(feishu_module, "send_execute_results_to_feishu", _fake_send)
+    monkeypatch.setattr(
+        feishu_module,
+        "dispatch_execution_notification",
+        lambda source, output, key, mode, code, snapshot: _fake_send(source, output, key),
+    )
 
     source = _NotificationSource()
     feishu_module.enqueue_execute_results_to_feishu(source, _minimal_output(), "hook-worker")
@@ -592,7 +584,11 @@ def test_feishu_worker_survives_task_exception(monkeypatch) -> None:
             raise RuntimeError("push failed")
         done.set()
 
-    monkeypatch.setattr(feishu_module, "send_execute_results_to_feishu", _flaky_send)
+    monkeypatch.setattr(
+        feishu_module,
+        "dispatch_execution_notification",
+        lambda source, output, key, mode, code, snapshot: _flaky_send(source, output, key),
+    )
 
     feishu_module.enqueue_execute_results_to_feishu(_NotificationSource(), _minimal_output(), "boom")
     feishu_module.enqueue_execute_results_to_feishu(_NotificationSource(), _minimal_output(), "ok")

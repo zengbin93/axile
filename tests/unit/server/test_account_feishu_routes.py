@@ -10,34 +10,37 @@ from axile.server.api.routes.account_feishu import AccountFeishuTestRequest
 from tests.unit.server._execution_test_support import build_account
 
 
-def test_custom_card_test_push_skips_account_asset_query(monkeypatch) -> None:
-    """原样自定义卡片测试不应建立交易渠道连接."""
+def test_notification_function_test_uses_sample_without_channel_query(monkeypatch) -> None:
+    """通知函数试跑使用样例上下文，不连接交易渠道。"""
     account = build_account()
-    pushed: list[tuple[dict[str, object], str]] = []
+    captured = []
 
     async def _get_account(_session: object, _account_id: int):
         return account
 
     async def _unexpected_query(_account: object):
-        raise AssertionError("自定义卡片不应查询账户资产")
+        raise AssertionError("函数试跑不应查询账户资产")
+
+    async def _no_snapshot(_session: object, _account_id: int, _portfolio_id: int):
+        return None
 
     monkeypatch.setattr(account_feishu, "_get_account_or_404", _get_account)
     monkeypatch.setattr(account_feishu, "query_account_assets", _unexpected_query)
-    monkeypatch.setattr(account_feishu, "push_feishu_card", lambda card, key: pushed.append((card, key)))
-
+    monkeypatch.setattr(account_feishu, "get_latest_account_target_snapshot", _no_snapshot)
+    monkeypatch.setattr(
+        account_feishu,
+        "run_notification_function",
+        lambda code, context: captured.append((code, context)) or SimpleNamespace(ok=True),
+    )
     result = asyncio.run(
-        account_feishu.test_account_feishu(
-            SimpleNamespace(close=AsyncMock()),
+        account_feishu.test_account_notification_function(
+            SimpleNamespace(close=AsyncMock(), get=AsyncMock()),
             1,
-            AccountFeishuTestRequest(
-                feishu_key="hook-test",
-                feishu_card_config={"mode": "custom", "card": {"header": {}, "elements": []}},
-            ),
+            account_feishu.AccountNotificationFunctionTestRequest(code="def notify(context): pass"),
         )
     )
-
     assert result.ok is True
-    assert pushed == [({"header": {}, "elements": []}, "hook-test")]
+    assert captured[0][1]["execution"]["is_test"] is True
 
 
 def _sample_assets() -> UnifiedAccountAssets:
@@ -109,45 +112,3 @@ def test_default_card_test_push_carries_sample_trades(monkeypatch) -> None:
     # 首腿加仓一倍、次腿减半：目标量与真实执行同口径聚合自 symbol_results。
     assert positions["rb2610"]["target_volume"] == "20.0000"
     assert positions["au2506"]["target_volume"] == "1.0000"
-
-
-def test_template_card_test_push_uses_target_snapshot_weights(monkeypatch) -> None:
-    """模板卡片测试应以账户最近目标权重快照作为样例目标。"""
-    account = build_account()
-    pushed: list[tuple[dict[str, object], str]] = []
-
-    async def _get_account(_session: object, _account_id: int):
-        return account
-
-    async def _query_assets(_account: object):
-        return _sample_assets()
-
-    async def _snapshot(_session: object, _account_id: int, _portfolio_id: int):
-        return SimpleNamespace(normalized_weights={"rb2610": 0.6, "au2506": 0.4})
-
-    monkeypatch.setattr(account_feishu, "_get_account_or_404", _get_account)
-    monkeypatch.setattr(account_feishu, "query_account_assets", _query_assets)
-    monkeypatch.setattr(account_feishu, "get_latest_account_target_snapshot", _snapshot)
-    monkeypatch.setattr(account_feishu, "push_feishu_card", lambda card, key: pushed.append((card, key)))
-
-    result = asyncio.run(
-        account_feishu.test_account_feishu(
-            SimpleNamespace(close=AsyncMock()),
-            1,
-            AccountFeishuTestRequest(
-                feishu_key="hook-test",
-                feishu_card_config={"mode": "template", "template_id": "tpl-demo"},
-            ),
-        )
-    )
-
-    assert result.ok is True
-    card, _key = pushed[0]
-    data = card["data"]
-    assert isinstance(data, dict)
-    assert data["template_id"] == "tpl-demo"
-    variables = data["template_variable"]
-    assert isinstance(variables, dict)
-    assert variables["targets"]["current"] == {"rb2610": 0.6, "au2506": 0.4}
-    assert variables["execution"]["is_test"] is True
-    assert variables["execution"]["status"] == "SUCCEEDED"

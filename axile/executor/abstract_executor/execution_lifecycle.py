@@ -7,7 +7,7 @@ execution 内部共享查询入口。
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, cast
 
 from axile.executor.abstract_executor.execution_runtime_facade import (
     AbstractExecutorExecutionRuntimeFacadeMixin,
@@ -100,26 +100,16 @@ class AbstractExecutorExecutionLifecycleMixin(AbstractExecutorExecutionRuntimeFa
 
             # 通知是尾部副作用，不影响主执行结果的返回；投递到有界后台队列，
             # 统一经有界后台队列发送，隔离飞书网络延迟且避免线程随执行次数增长。
-            if standard_input.feishu_key:
-                executor.logger.info("异步发送飞书通知")
-                notification_kwargs: dict[str, Any] = (
-                    {"notification_snapshot": notification_snapshot} if notification_snapshot else {}
+            if standard_input.feishu_key or standard_input.execution_notification_mode == "function":
+                executor.logger.info("异步处理执行通知")
+                enqueue_execute_results_to_feishu(
+                    cast("FeishuNotificationSource", executor),
+                    output,
+                    standard_input.feishu_key,
+                    standard_input.execution_notification_mode,
+                    standard_input.execution_notification_code,
+                    notification_snapshot,
                 )
-                if standard_input.feishu_card_config is None:
-                    enqueue_execute_results_to_feishu(
-                        cast("FeishuNotificationSource", executor),
-                        output,
-                        standard_input.feishu_key,
-                        **notification_kwargs,
-                    )
-                else:
-                    enqueue_execute_results_to_feishu(
-                        cast("FeishuNotificationSource", executor),
-                        output,
-                        standard_input.feishu_key,
-                        standard_input.feishu_card_config,
-                        **notification_kwargs,
-                    )
 
             executor.logger.debug(f"交易执行完成 - 成功: {output.success}")
             return output

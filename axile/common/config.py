@@ -84,6 +84,8 @@ class Settings(BaseSettings):
 
     sqlalchemy_database_uri: SqliteDsn = MultiHostUrl("sqlite+aiosqlite:///./axile.db")
     exe_err_feishu_key: str = ""
+    system_execution_notification_mode: Literal["default", "function"] = "default"
+    system_execution_notification_code: str = ""
     app_log_dir: Path = Path("./logs")
     axile_log_rotation: str = "1 day"
     algorithm_modules: list[str] = []
@@ -176,4 +178,12 @@ def update_config_toml_value(key: str, value: Any) -> None:
     """
     document = tomlkit.parse(CONFIG_TOML_PATH.read_text(encoding="utf-8"))
     document[key] = value
+    CONFIG_TOML_PATH.write_text(tomlkit.dumps(document), encoding="utf-8")
+
+
+def update_config_toml_values(values: dict[str, Any]) -> None:
+    """将一组运行期配置一起写入配置文件。"""
+    document = tomlkit.parse(CONFIG_TOML_PATH.read_text(encoding="utf-8"))
+    for key, value in values.items():
+        document[key] = value
     CONFIG_TOML_PATH.write_text(tomlkit.dumps(document), encoding="utf-8")
