@@ -9,7 +9,7 @@ import {
   algorithmSchemaDefaults, algorithmSchemaFields, algorithmFieldOptions, algorithmNumericDisplay,
   validateAlgorithmSchemaParams, type AlgorithmSchemaField,
 } from '@/features/setup/algorithmSchema'
-import { validateAlgorithmParams, type AlgorithmRef } from '@/features/setup/algorithms'
+import { algoLabel, validateAlgorithmParams, type AlgorithmRef } from '@/features/setup/algorithms'
 import { algorithmCatalog, availableAlgorithms } from '@/features/setup/algorithmCatalog'
 import type { AlgorithmInfo, AlgorithmSlot, TradeChannel } from '@/types/api'
 
@@ -310,9 +310,10 @@ export interface AlgorithmEditorProps {
   onChange: (value: AlgorithmRef | null) => void
   allowClear?: boolean
   onValidationError?: (error: string | null) => void
+  nameVtName?: string
 }
 
-export function AlgorithmEditor({ slot, channel, value, onChange, allowClear, onValidationError }: AlgorithmEditorProps) {
+export function AlgorithmEditor({ slot, channel, value, onChange, allowClear, onValidationError, nameVtName }: AlgorithmEditorProps) {
   const catalog = useSyncExternalStore(algorithmCatalog.subscribe, algorithmCatalog.getSnapshot, algorithmCatalog.getSnapshot)
   useEffect(() => {
     const state = algorithmCatalog.getSnapshot()
@@ -346,7 +347,11 @@ export function AlgorithmEditor({ slot, channel, value, onChange, allowClear, on
         <>
           <div className="mb-3 flex flex-wrap items-center gap-3">
             <Select ariaLabel={slot === 'trade' ? '主交易算法' : '清仓算法'}
-              className="min-w-0 max-w-full justify-between px-3 py-1.5 text-[15px]" value={value.method} onChange={pick} options={options} />
+              className="min-w-0 max-w-full justify-between px-3 py-1.5 text-[15px]" value={value.method} onChange={pick} options={options}
+              selectedValue={<span className="block min-w-0 truncate">
+                <span style={nameVtName ? { viewTransitionName: nameVtName } : undefined}>{algoLabel(value.method)}</span>
+                <span className="text-ink-3"> · {value.method}</span>
+              </span>} />
             {catalog.loading && <Skeleton className="h-4 w-8" />}
             {fallback && JSON.stringify(value) !== JSON.stringify(fallback) && <button type="button" className="text-sm text-ink-3 hover:text-ink-1"
               onClick={() => onChange(structuredClone(fallback))}>恢复默认</button>}

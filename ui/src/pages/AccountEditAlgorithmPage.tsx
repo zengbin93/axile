@@ -4,7 +4,7 @@
  * 主交易 + 清仓算法完整编辑器；保存只 PATCH 算法相关字段，保存与取消都不离开本页。
  */
 
-import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useParams, useViewTransitionState } from 'react-router'
 import { getAccount, updateAccount } from '@/lib/api/accounts'
 import { usePolling } from '@/lib/hooks/usePolling'
@@ -17,6 +17,7 @@ import {
   readAccountConfigSummary,
   writeAccountConfigSummary,
 } from '@/features/account/configSummary'
+import { algorithmTransitionSlot, readAlgorithmAccountPreview, writeAlgorithmAccountPreview } from '@/features/account/algorithmNameTransition'
 import {
   algorithmRefOf,
   describeAlgorithmRef,
@@ -50,6 +51,7 @@ export function AccountEditAlgorithmPage() {
 }
 
 function AccountAlgorithmForm({ accountId }: { accountId: number }) {
+  const accountPreview = readAlgorithmAccountPreview(accountId)
   const runtime = useAccountRuntimeSync(accountId)
   const alive = useRef(true)
   useEffect(() => { alive.current = true; return () => { alive.current = false } }, [])
@@ -61,13 +63,13 @@ function AccountAlgorithmForm({ accountId }: { accountId: number }) {
     intervalMs: 0,
   })
   const [savedAccount, setSavedAccount] = useState<Account | null>(null)
-  const acc = savedAccount ?? account.data
+  const acc = savedAccount ?? account.data ?? accountPreview
   const cachedAccount = accounts?.find((item) => item.account_id === accountId) ?? null
   const descriptor = useChannelDescriptor(acc?.trade_channel)
 
-  // Hero 配置带「算法」值 ↔ 本页「当前配置 · 下单」摘要的 FLIP：门控与缓存协议
-  // 同浅配置页（见 AccountEditPage）——首帧落点靠缓存，真源/保存响应写新值。
+  // Hero 配置带算法名 ↔ 对应选择器选中名称；首帧靠详情预览保留落点。
   const tSelf = useViewTransitionState(`/accounts/${accountId}/edit/algorithm`)
+  const tDetail = useViewTransitionState(`/accounts/${accountId}`)
   const cachedConfig = acc ? null : readAccountConfigSummary(accountId)
   useEffect(() => {
     if (acc && descriptor) {
@@ -88,9 +90,9 @@ function AccountAlgorithmForm({ accountId }: { accountId: number }) {
     </div>
   )
 
-  const [ready, setReady] = useState(false)
-  const [trade, setTrade] = useState<AlgorithmRef | null>(null)
-  const [empty, setEmpty] = useState<AlgorithmRef | null>(null)
+  const [ready, setReady] = useState(() => algorithmRefOf(accountPreview?.algorithm) !== null)
+  const [trade, setTrade] = useState<AlgorithmRef | null>(() => algorithmRefOf(accountPreview?.algorithm))
+  const [empty, setEmpty] = useState<AlgorithmRef | null>(() => algorithmRefOf(accountPreview?.empty_positions_algorithm))
   const [saving, setSaving] = useState(false)
   const [tradeError, setTradeError] = useState<string | null>(null)
   const [emptyError, setEmptyError] = useState<string | null>(null)
@@ -112,12 +114,9 @@ function AccountAlgorithmForm({ accountId }: { accountId: number }) {
   if (account.error && !acc)
     return <EditError error={account.error} onRetry={account.refresh} />
 
-  const isReady = !(account.loading || !ready || !acc || !trade || !descriptor)
-  // 「当前配置」摘要常挂：加载（缓存）→ 就绪（草稿）只换文本、不换节点。
-  // view transition 的具名捕获认 DOM 节点——摘要若随加载/就绪分支整体重挂，
-  // 进行中的组动画会被浏览器杀掉（表现就是「正向 FLIP 不飞」）。
-  // 兜底链必须是 草稿 → 真源 → 缓存：acc 已到位而草稿未初始化的中间态若直接掉缓存
-  // （cachedConfig 在 acc 存在时为 null），摘要会消失一个 commit、换节点杀动画。
+  const isReady = !(!ready || !acc || !trade || !descriptor)
+  // 「当前配置」摘要沿用 草稿 → 真源 → 缓存 的兜底链，加载期间保持内容稳定。
+  // 具名捕获现在落在选择器的算法名称；详情预览使选择器首帧就能渲染。
   const savedTradeSum = acc ? describeAlgorithmRef(algorithmRefOf(acc.algorithm)) : null
   const tradeSynopsis = trade
     ? describeAlgorithmRef(trade)
@@ -127,28 +126,25 @@ function AccountAlgorithmForm({ accountId }: { accountId: number }) {
   const emptySynopsis = isReady
     ? describeAlgorithmRef(empty)
     : (savedEmptySum ?? cachedConfig?.emptyAlgorithm ?? null)
-  // 「下单 / 清仓」值与 hero 配置带同文才挂共享名（草稿改了就退化为整页交叉淡，不做内容 morph）。
+  // 草稿与持久配置同文时才让所点击的算法名共享；避免未保存选择飞向旧名称。
   const tradeSame = trade == null || tradeSynopsis === savedTradeSum
   const emptySame = !isReady || describeAlgorithmRef(empty) === savedEmptySum
-  const tradeVtStyle: CSSProperties | undefined =
-    tSelf && tradeSame
-      ? { viewTransitionName: accountConfigVtName(accountId, 'algorithm') }
-      : undefined
-  const emptyVtStyle: CSSProperties | undefined =
-    tSelf && emptySame
-      ? { viewTransitionName: accountConfigVtName(accountId, 'empty') }
-      : undefined
+  const activeSlot = algorithmTransitionSlot(accountId)
+  const tradeNameVt = tSelf && tDetail && activeSlot === 'trade' && tradeSame
+    ? accountConfigVtName(accountId, 'algorithm') : undefined
+  const emptyNameVt = tSelf && tDetail && activeSlot === 'empty' && emptySame
+    ? accountConfigVtName(accountId, 'empty') : undefined
 
   /** 标题 + 当前配置摘要：加载与就绪两态共用（同位同节点）；下单 / 清仓都常挂。 */
   const synopsis = tradeSynopsis != null && (
     <EditSynopsis note={isReady ? '保存后用于后续执行，已在途任务不变。' : undefined}>
       <div className="grid grid-cols-[3rem_minmax(0,1fr)] gap-x-3 gap-y-0.5">
         <span className="font-normal text-ink-3">下单</span>
-        <span className="inline-block" style={tradeVtStyle}>
+        <span className="inline-block">
           {tradeSynopsis}
         </span>
         <span className="font-normal text-ink-3">清仓</span>
-        <span className="inline-block" style={emptyVtStyle}>
+        <span className="inline-block">
           {emptySynopsis ?? '—'}
         </span>
       </div>
@@ -194,6 +190,7 @@ function AccountAlgorithmForm({ accountId }: { accountId: number }) {
       const updated = await updateAccount(accountId, patch)
       if (!alive.current) return
       setSavedAccount(updated)
+      writeAlgorithmAccountPreview(accountId, updated)
       setTrade(algorithmRefOf(updated.algorithm) ?? descriptor.defaults.trade_algorithm)
       setEmpty(algorithmRefOf(updated.empty_positions_algorithm))
       runtime.acceptSaved(updated.runtime_sync)
@@ -221,6 +218,7 @@ function AccountAlgorithmForm({ accountId }: { accountId: number }) {
   ) => (
     <Row label={label} top span>
       <AlgorithmEditor
+        nameVtName={slot === 'trade' ? tradeNameVt : emptyNameVt}
         onValidationError={slot === 'trade' ? setTradeError : setEmptyError}
         slot={slot}
         channel={acc.trade_channel}

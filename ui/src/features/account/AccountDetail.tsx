@@ -1,6 +1,6 @@
 import { executionOutcome } from '@/features/account/executionOutcome'
 import { formatRecentExecution } from '@/lib/scheduleTime'
-import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react'
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type CSSProperties } from 'react'
 import { useViewTransitionState } from 'react-router'
 import { ArrowLeft, ArrowLeftRight, RefreshCw } from 'lucide-react'
 import { cardPerformance, currentEquity } from '@/features/dashboard/performance'
@@ -40,6 +40,9 @@ import { isExecutingStatus, phaseLabel, runVerb } from '@/features/dashboard/exe
 import { executionJustSettled, useRunning } from '@/stores/liveExec'
 import { useDomainStore } from '@/stores/domain'
 import { algorithmRefOf, describeAlgorithmRef } from '@/features/setup/algorithms'
+import { algorithmCatalog } from '@/features/setup/algorithmCatalog'
+import { algorithmTransitionSlot, readAlgorithmAccountPreview, selectAlgorithmTransitionSlot, writeAlgorithmAccountPreview } from '@/features/account/algorithmNameTransition'
+import { isCurrentTabClick } from '@/lib/navigationPreparation'
 import {
   accountConfigVtName,
   describeLeverage,
@@ -266,9 +269,12 @@ export function AccountDetail({
 
   // Hero 配置带（杠杆 / 品种控制 / 算法）：取自本组件已在轮询的账户详情，零新增请求。
   // 配置事实而非盈亏或偏离：中性色、零动效；每项兼作对应编辑分区的入口。
-  // 值文本与编辑分区页「当前配置」摘要是同一句话的两个落点：去往/离开该分区时挂
-  // 共享名做平移 + 微缩（身份对 + 几何真变）；模块级摘要缓存保证两端首帧都有落点。
-  const acc = account.data
+  // 杠杆 / 品种值落在编辑页摘要；算法名落在对应选择器的选中名称。
+  const acc = account.data ?? readAlgorithmAccountPreview(accountId)
+  const catalog = useSyncExternalStore(algorithmCatalog.subscribe, algorithmCatalog.getSnapshot, algorithmCatalog.getSnapshot)
+  useEffect(() => {
+    if (!catalog.data && !catalog.error) void algorithmCatalog.load()
+  }, [catalog.data, catalog.error])
   const tEditLeverage = useViewTransitionState(`/accounts/${accountId}/edit/leverage`)
   const tEditSymbols = useViewTransitionState(`/accounts/${accountId}/edit/symbols`)
   const tEditAlgorithm = useViewTransitionState(`/accounts/${accountId}/edit/algorithm`)
@@ -276,8 +282,11 @@ export function AccountDetail({
   const positionValueLabel = positionValueLabelOf(channelDescriptor?.ui)
   // 真源到位即写缓存：编辑页首帧同步读出，FLIP 落点不断档。
   useEffect(() => {
-    if (acc) writeAccountConfigSummary(accountId, acc, { showShortLeverage })
-  }, [acc, accountId, showShortLeverage])
+    if (acc) {
+      writeAccountConfigSummary(accountId, acc, { showShortLeverage })
+      writeAlgorithmAccountPreview(accountId, acc)
+    }
+  }, [acc, accountId, showShortLeverage, catalog.data])
   const cachedConfig = acc ? null : readAccountConfigSummary(accountId)
   /** 配置带常挂：详情未加载且缓存未命中时值位骨架占位（null）。 */
   const configLoading = acc == null && account.loading && cachedConfig == null
@@ -296,6 +305,16 @@ export function AccountDetail({
   const emptyAlgorithmText = acc
     ? describeAlgorithmRef(algorithmRefOf(acc.empty_positions_algorithm))
     : (cachedConfig?.emptyAlgorithm ?? null)
+  const activateAlgorithm = (slot: 'trade' | 'empty', event: React.MouseEvent<HTMLAnchorElement>) => {
+    if (!isCurrentTabClick(event)) return
+    selectAlgorithmTransitionSlot(accountId, slot)
+    const raw = slot === 'trade' ? acc?.algorithm : acc?.empty_positions_algorithm
+    if (!algorithmRefOf(raw)) return
+    const kind = slot === 'trade' ? 'algorithm' : 'empty'
+    event.currentTarget.querySelector<HTMLElement>('[data-config-value]')?.style.setProperty(
+      'view-transition-name', accountConfigVtName(accountId, kind),
+    )
+  }
   const onToggleStarted = async () => {
     const next = !isStarted
     setStartedOverride(next)
@@ -578,7 +597,7 @@ export function AccountDetail({
          * 形态——每项是独立 inline 单元，折行只发生在项间，算法参数句内部的「·」不再
          * 与分段符糊成一片。带常挂（缓存/骨架占位），卡高不随账户详情到位而长个。
          * 四项等距左对齐；算法名过长时 OverflowText 截断。整项可点跳编辑分区。
-         * 值文本挂共享名：与目标编辑页的「当前配置」摘要值配对 FLIP（各自门控）。
+         * 杠杆 / 品种值去摘要；算法名去对应选择器。算法入口只飞本次点击的名称。
          */}
         <div className="mt-4 flex flex-wrap items-center gap-x-6 gap-y-1.5 border-t border-line pt-3.5 text-[14px]">
           <HeroConfigItem
@@ -600,14 +619,16 @@ export function AccountDetail({
             to={`/accounts/${accountId}/edit/algorithm`}
             title="执行算法"
             value={configLoading ? null : (algorithmText ?? '—')}
-            vtName={tEditAlgorithm ? accountConfigVtName(accountId, 'algorithm') : undefined}
+            vtName={tEditAlgorithm && algorithmTransitionSlot(accountId) === 'trade' && algorithmRefOf(acc?.algorithm) ? accountConfigVtName(accountId, 'algorithm') : undefined}
+            onActivate={(event) => activateAlgorithm('trade', event)}
           />
           <HeroConfigItem
             label="清仓"
             to={`/accounts/${accountId}/edit/algorithm`}
             title="清仓算法"
             value={configLoading ? null : (emptyAlgorithmText ?? '—')}
-            vtName={tEditAlgorithm ? accountConfigVtName(accountId, 'empty') : undefined}
+            vtName={tEditAlgorithm && algorithmTransitionSlot(accountId) === 'empty' && algorithmRefOf(acc?.empty_positions_algorithm) ? accountConfigVtName(accountId, 'empty') : undefined}
+            onActivate={(event) => activateAlgorithm('empty', event)}
           />
         </div>
       </Card>
@@ -1002,6 +1023,7 @@ function HeroConfigItem({
   value,
   grow = false,
   vtName,
+  onActivate,
 }: {
   label: string
   to: string
@@ -1012,11 +1034,13 @@ function HeroConfigItem({
   grow?: boolean
   /** 正在去往/离开对应编辑分区时为共享名（值文本 FLIP 配对）；否则不挂。 */
   vtName?: string
+  onActivate?: React.MouseEventHandler<HTMLAnchorElement>
 }) {
   const vtStyle: CSSProperties | undefined = vtName ? { viewTransitionName: vtName } : undefined
   return (
     <Link
       to={to}
+      onClick={onActivate}
       title={title}
       className={`group flex min-w-0 items-center gap-1.5 ${grow ? 'min-w-48 flex-1' : 'flex-none'}`}
     >
@@ -1025,11 +1049,11 @@ function HeroConfigItem({
         <SkeletonText className="w-14" />
       ) : grow ? (
         // 壳包 OverflowText：共享名挂在与值同盒的 wrapper 上，不进 marquee 组件内部。
-        <span className="block min-w-0 flex-1" style={vtStyle}>
+        <span data-config-value className="block min-w-0 flex-1" style={vtStyle}>
           <OverflowText className="num font-medium text-ink-1 group-hover:underline" text={value} />
         </span>
       ) : (
-        <span className="num whitespace-nowrap font-medium text-ink-1 group-hover:underline" style={vtStyle}>
+        <span data-config-value className="num whitespace-nowrap font-medium text-ink-1 group-hover:underline" style={vtStyle}>
           {value}
         </span>
       )}

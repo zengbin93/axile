@@ -1,8 +1,8 @@
 /**
  * 账户配置人话摘要（杠杆 / 品种控制 / 下单算法 / 清仓算法）与其共享元素 FLIP 协议。
  *
- * Hero 配置带的值 ↔ 各编辑分区页「当前配置」摘要值是**同一句话的两个落点**，
- * 挂同一个 ``viewTransitionName`` 做平移 + 微缩（account-name / equity-amount 同族语汇）。
+ * 杠杆 / 品种值 ↔ 编辑页「当前配置」摘要；算法名 ↔ 对应算法选择器中的名称。
+ * 同一文字的两个落点挂同一个 ``viewTransitionName`` 做平移 + 微缩。
  *
  * 落点缺失即假连续，而 ``usePolling`` 是组件本地状态、编辑页首帧必冷——故本模块
  * 持一份模块级缓存（AlgorithmEditor 的 ``_algosCache`` 同款先例）：任何页面拿到账户
@@ -15,7 +15,7 @@ import { algorithmRefOf, describeAlgorithmRef } from '@/features/setup/algorithm
 export type AccountConfigKind = 'leverage' | 'symbols' | 'algorithm' | 'empty'
 
 /**
- * Hero 配置带值 ↔ 编辑分区页摘要值 的共享元素名。
+ * Hero 配置带值 ↔ 编辑分区页对应落点的共享元素名。
  *
  * 两侧都用 ``useViewTransitionState`` 对目标编辑路径做精确门控（该 hook 对过渡的
  * current/next 双向匹配），去程与返程同一份判定，挂名自然一致。

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import type { KeyboardEvent as ReactKeyboardEvent, ReactElement } from 'react'
 import { createPortal } from 'react-dom'
 
@@ -57,6 +57,7 @@ export function Select<T>({
   className,
   ariaLabel,
   disabled = false,
+  selectedValue,
 }: {
   value: T
   options: SelectOption<T>[]
@@ -66,6 +67,8 @@ export function Select<T>({
   className?: string
   ariaLabel?: string
   disabled?: boolean
+  /** 需要把选中值的局部文字单独作为共享元素时，由调用方提供触发器内容。 */
+  selectedValue?: ReactNode
 }): ReactElement {
   const listId = useId()
   const triggerRef = useRef<HTMLButtonElement>(null)
@@ -228,7 +231,7 @@ export function Select<T>({
         onKeyDown={onTriggerKey}
       >
         <span className={`min-w-0 text-left ${selected ? '' : 'text-ink-3'}`}>
-          <OverflowText text={selected ? selected.label : placeholder} />
+          {selectedValue ?? <OverflowText text={selected ? selected.label : placeholder} />}
           {selected?.description && (
             <OverflowText text={selected.description} className="mt-0.5 text-[13px] font-normal text-ink-3" />
           )}
