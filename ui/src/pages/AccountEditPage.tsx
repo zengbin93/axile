@@ -459,7 +459,7 @@ export function AccountEditPage({ section = 'basic' }: { section?: EditSection }
             <div className="mt-3 border-t border-line">
               <button
                 type="button"
-                className="flex w-full items-center justify-between py-3 text-[14px] font-semibold text-ink-3 transition-colors hover:text-ink-1 motion-reduce:transition-none"
+                className="inline-flex items-center gap-2 py-3 text-[14px] font-semibold text-ink-3 transition-colors hover:text-ink-1 motion-reduce:transition-none"
                 aria-expanded={feishuAdvancedOpen}
                 onClick={() => setFeishuAdvancedOpen((open) => !open)}
               >
