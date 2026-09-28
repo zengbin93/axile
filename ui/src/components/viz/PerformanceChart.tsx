@@ -19,7 +19,7 @@ import { chartAxis } from '@/components/viz/performanceCanvas'
 import { amount, feeText, shanghaiTime, type CostSummary } from '@/features/history/costs'
 import { returnText } from '@/features/history/performance'
 import { bindingSelection, clampViewport, intervalReturn, intervalSelection, nearestIndex, pointTime, precisePoints, reconcileSelection, timeLabel, type ChartSelection, type Viewport } from '@/features/history/chartModel'
-import { bindingAt, CHART_HEIGHT, drawOverlay, drawScene, hasExecutionMarker, PLOT, plotRight, pointLabel, readCanvasTheme, seriesKeys, xPosition, xTime, type ChartScene } from '@/components/viz/performanceCanvas'
+import { bindingAtObservation, bindingObservationSpan, CHART_HEIGHT, drawOverlay, drawScene, hasExecutionMarker, PLOT, plotRight, pointLabel, readCanvasTheme, seriesKeys, xPosition, xTime, type ChartScene } from '@/components/viz/performanceCanvas'
 import { closedDaysBetween, createTimeScale, type TimeScaleMode } from '@/features/history/timeScale'
 
 interface Props {
@@ -125,7 +125,7 @@ function CanvasPerformanceChart({ data, daily, backtestMode, scaleMode, costs, i
     : readingCost.coverage == null ? '成交额覆盖 —（数据不完整）'
     : `${(readingCost.coverage * 100).toFixed(1)}% 成交额覆盖`
   const coverageNeedsAttention = costReady && readingCost != null && readingCost.count > 0 && (costIncomplete || readingCost.coverage == null)
-  const binding = bindingAt(data, bindingTime ?? times[pointIndex])
+  const binding = bindingAtObservation(data, times, bindingTime ?? times[pointIndex])
   const bindingName = !binding || binding.binding.portfolio_id == null ? '未绑定' : portfolioNames.get(binding.binding.portfolio_id) ?? `组合 #${binding.binding.portfolio_id}`
   const tradingScene = useMemo<ChartScene>(() => ({ data, times, width: size.width, viewport, daily, backtestMode, returnRange, costs, portfolioNames, domain: full, scale: timeScale, showExecutions, closedGapDays, theme: container.current ? readCanvasTheme(container.current) : { bg: '', surface: '', ink: '', muted: '', line: '', accent: '', warn: '', fill: '', font: '' } }), [data, times, size, viewport, daily, backtestMode, returnRange, costs, portfolioNames, full, timeScale, showExecutions, closedGapDays])
 
@@ -312,7 +312,7 @@ function CanvasPerformanceChart({ data, daily, backtestMode, scaleMode, costs, i
     } else if (active.moved) {
       if (active.kind !== 'pan' && active.pending) onSelect(active.pending)
     } else if (active.bindingTime != null) {
-      const period = bindingAt(data, active.bindingTime)
+      const period = bindingAtObservation(data, times, active.bindingTime)
       if (exact && period) {
         const next = bindingSelection(times, shanghaiTime(period.binding.time), shanghaiTime(period.end), period.binding === data.bindings.at(-1))
         if (next) onSelect(next)
@@ -398,8 +398,10 @@ function CanvasPerformanceChart({ data, daily, backtestMode, scaleMode, costs, i
         onPointerLeave={event => { if (!drag.current) { magnetRecordId.current = null; setMagnet(null); showHover(null); setCursor(null); if (event.pointerType !== 'touch') setBindingTime(null) } }}
         onDoubleClick={() => setViewport(full)}>
         {data.bindings.map((period, index) => {
-          const start = Math.max(PLOT.left, xPosition(shanghaiTime(period.time), size.width, viewport, timeScale))
-          const end = Math.min(plotRight(size.width), xPosition(index + 1 < data.bindings.length ? shanghaiTime(data.bindings[index + 1].time) : viewport.end, size.width, viewport, timeScale))
+          const span = bindingObservationSpan(data, times, index)
+          if (!span) return null
+          const start = Math.max(PLOT.left, xPosition(span.start, size.width, viewport, timeScale))
+          const end = Math.min(plotRight(size.width), xPosition(span.end, size.width, viewport, timeScale))
           if (end - start < 90) return null
           const name = period.portfolio_id == null ? '未绑定' : portfolioNames.get(period.portfolio_id) ?? `组合 #${period.portfolio_id}`
           return <div key={`${period.time}-${index}`} className="pointer-events-auto absolute cursor-crosshair touch-pan-y px-2 text-[11px] leading-6 text-ink-3"

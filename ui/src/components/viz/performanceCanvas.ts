@@ -135,16 +135,30 @@ function textFit(ctx: CanvasRenderingContext2D, text: string, width: number): st
 }
 
 function drawBindings(ctx: CanvasRenderingContext2D, scene: ChartScene) {
-  const { data, width, viewport, theme } = scene
+  const { data, width, viewport, theme, times } = scene
   ctx.fillStyle = theme.muted; ctx.fillText('组合绑定', PLOT.left, PLOT.binding - 12)
-  data.bindings.forEach((binding, i) => {
-    const start = Math.max(PLOT.left, xPosition(shanghaiTime(binding.time), width, viewport, scene.scale))
-    const end = Math.min(plotRight(width), xPosition(i + 1 < data.bindings.length ? shanghaiTime(data.bindings[i + 1].time) : viewport.end, width, viewport, scene.scale))
+  data.bindings.forEach((_, i) => {
+    const span = bindingObservationSpan(data, times, i)
+    if (!span) return
+    const start = Math.max(PLOT.left, xPosition(span.start, width, viewport, scene.scale))
+    const end = Math.min(plotRight(width), xPosition(span.end, width, viewport, scene.scale))
     if (end <= start) return
     line(ctx, start, PLOT.binding + PLOT.bindingHeight - 1, end, PLOT.binding + PLOT.bindingHeight - 1, theme.line)
-    const boundary = xPosition(shanghaiTime(binding.time), width, viewport, scene.scale)
+    const boundary = xPosition(span.start, width, viewport, scene.scale)
     if (boundary >= PLOT.left) line(ctx, boundary, PLOT.binding + 4, boundary, PLOT.binding + PLOT.bindingHeight - 1, theme.muted)
   })
+}
+
+/** 将绑定区间映射到首个受其影响的收益观测点。 */
+export function bindingObservationSpan(data: AccountPerformance, times: number[], index: number): { start: number; end: number } | null {
+  const binding = data.bindings[index]
+  if (!binding || !times.length) return null
+  const start = times.find(time => time >= shanghaiTime(binding.time))
+  if (start == null) return null
+  const next = data.bindings[index + 1]
+  const end = next ? (times.find(time => time >= shanghaiTime(next.time)) ?? times.at(-1)) : times.at(-1)
+  if (end == null || end <= start) return null
+  return { start, end }
 }
 
 function drawReturns(ctx: CanvasRenderingContext2D, scene: ChartScene) {
@@ -339,14 +353,18 @@ export function drawOverlay(canvas: HTMLCanvasElement, scene: ChartScene, hover:
   const { width, viewport, theme, times, data } = scene
   const right = plotRight(width)
   ctx.font = `11px ${theme.font}`
-  const binding = bindingTime == null ? null : bindingAt(data, bindingTime)
+  const binding = bindingTime == null ? null : bindingAtObservation(data, times, bindingTime)
   if (binding) {
-    const a = Math.max(PLOT.left, xPosition(shanghaiTime(binding.binding.time), width, viewport, scene.scale))
-    const b = Math.min(right, xPosition(shanghaiTime(binding.end), width, viewport, scene.scale))
-    ctx.fillStyle = theme.accent; ctx.globalAlpha = 0.1
-    ctx.fillRect(a, PLOT.binding, Math.max(0, b - a), PLOT.bindingHeight)
-    ctx.globalAlpha = 1
-    line(ctx, a, PLOT.binding + PLOT.bindingHeight - 1, b, PLOT.binding + PLOT.bindingHeight - 1, theme.accent)
+    const index = data.bindings.indexOf(binding.binding)
+    const span = bindingObservationSpan(data, times, index)
+    if (span) {
+      const a = Math.max(PLOT.left, xPosition(span.start, width, viewport, scene.scale))
+      const b = Math.min(right, xPosition(span.end, width, viewport, scene.scale))
+      ctx.fillStyle = theme.accent; ctx.globalAlpha = 0.1
+      ctx.fillRect(a, PLOT.binding, Math.max(0, b - a), PLOT.bindingHeight)
+      ctx.globalAlpha = 1
+      line(ctx, a, PLOT.binding + PLOT.bindingHeight - 1, b, PLOT.binding + PLOT.bindingHeight - 1, theme.accent)
+    }
   }
   if (magnetRecordId != null && selection?.kind !== 'execution') {
     const row = data.executions?.find(value => value.record.id === magnetRecordId)
@@ -422,6 +440,12 @@ export function drawOverlay(canvas: HTMLCanvasElement, scene: ChartScene, hover:
 export function bindingAt(data: AccountPerformance, time: number) {
   const index = data.bindings.findLastIndex(b => shanghaiTime(b.time) <= time)
   return index < 0 ? null : { binding: data.bindings[index], end: data.bindings[index + 1]?.time ?? data.end }
+}
+
+/** 绑定行按最近一次已发生的收益观测来解释鼠标位置。 */
+export function bindingAtObservation(data: AccountPerformance, times: number[], time: number) {
+  const observed = times.findLast(value => value <= time)
+  return observed == null ? null : bindingAt(data, observed)
 }
 
 export function pointLabel(point: PerformancePoint): string {
