@@ -1,5 +1,6 @@
 /**
- * 账户域页头原子：统一大标题（``页名 · 账户名`` + 渠道 chip）与账户名共享元素门控。
+ * 账户域页头原子：统一大标题（``页名 · 账户名`` + 渠道 chip）。账户名可点击返回账户概览，
+ * 并按身份协议参与共享元素 FLIP。
  *
  * 身份协议（先命名同一逻辑物；FLIP 只在「身份对 + 几何真变」时才有信息量）：
  * - 挂名只服务几何真变的配对：详情头（hero 卡内 16/620）↔ 各页标题槽（内容顶 18/640），
@@ -11,6 +12,7 @@
  */
 import { useViewTransitionState } from 'react-router'
 import { Chip } from '@/components/ui/Card'
+import { Link } from '@/components/ui/nav'
 import { channelLabel } from '@/features/dashboard/display'
 import type { TradeChannel } from '@/types/api'
 
@@ -60,11 +62,13 @@ export function AccountPageTitle({
     <>
       <h1 className="text-[19px] font-[640]">
         {page} ·{' '}
-        <span
+        <Link
+          to={`/accounts/${accountId}`}
+          className="cursor-pointer text-inherit no-underline"
           style={nameVt ? { viewTransitionName: `account-name-${accountId}` } : undefined}
         >
           {name ?? `账户 #${accountId}`}
-        </span>
+        </Link>
       </h1>
       {channel && (
         // 渠道徽章与账户名同一逻辑单元：复用 nameVt 开关同轨飞行；name 不挂名的过渡
