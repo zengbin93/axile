@@ -258,7 +258,7 @@ function OrderTree({ orders, currency, units }: { orders: ExecOrder[]; currency:
           <div key={o.order_id} className="num py-1 text-[12.5px]">
             <div className="text-ink-2">
               {o.side === 'sell' ? '卖' : o.side === 'buy' ? '买' : ''} {ORDER_TYPE_LABEL[o.order_type] ?? o.order_type}
-              {o.price != null && <span> @{fmtPrice(o.price, units, currency)}</span>}
+              {o.order_type !== 'MARKET' && o.price != null && <span> @{fmtPrice(o.price, units, currency)}</span>}
               {' · '}成交 {fmtQty(o.filled_volume ?? 0, units, false)}/{fmtQty(o.volume ?? 0, units)}
               {o.status && <span className="text-ink-3"> · {o.status}</span>}
               {o.client_order_id && <span className="text-ink-3"> · {o.client_order_id}</span>}

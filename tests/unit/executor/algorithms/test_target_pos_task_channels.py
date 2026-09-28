@@ -347,8 +347,122 @@ def test_target_pos_task_params_expose_execution_defaults() -> None:
         "chase_interval": 5.0,
         "max_wait_seconds": 60,
         "price_strategy": "PASSIVE",
+        "close_order_type": "LIMIT",
+        "open_order_type": "LIMIT",
         "offset_priority": "昨今",
     }
+
+
+@pytest.mark.parametrize("channel", [TradeChannel.CTP, TradeChannel.TQ])
+def test_target_pos_task_market_close_keeps_offsets_and_limit_open(channel: TradeChannel) -> None:
+    executor = _FuturesExecutor(channel)
+    result = ctp_target_pos_task_algorithm(
+        cast("ExecutorProtocol", executor),
+        AlgorithmInput(
+            symbol="rb2610",
+            target_volume=1,
+            trade_rule={},
+            params=CTPTargetPosTaskParams(close_order_type="MARKET", chase_enabled=True, max_wait_seconds=1),
+        ),
+    )
+
+    assert result.status == ExecutionStatus.SUCCEEDED
+    assert [(order.order_type, order.price, order.extra["offset_flag"]) for order in executor.orders] == [
+        (OrderType.MARKET, 0, "4"),
+        (OrderType.MARKET, 0, "3"),
+        (OrderType.LIMIT, 3199, "0"),
+    ]
+    assert result.memory["execution_details"]["rb2610_adjustment"]["close_order_type"] == "MARKET"
+
+
+@pytest.mark.parametrize("channel", [TradeChannel.CTP, TradeChannel.TQ])
+def test_target_pos_task_market_open_does_not_require_quote(channel: TradeChannel) -> None:
+    executor = _FuturesExecutor(channel)
+    executor.short_today = executor.short_yesterday = 0
+    executor.get_market_data = lambda: None
+    result = ctp_target_pos_task_algorithm(
+        cast("ExecutorProtocol", executor),
+        AlgorithmInput(
+            symbol="rb2610",
+            target_volume=1,
+            trade_rule={},
+            params=CTPTargetPosTaskParams(open_order_type="MARKET", max_wait_seconds=1),
+        ),
+    )
+
+    assert result.status == ExecutionStatus.SUCCEEDED
+    assert [(order.order_type, order.price, order.extra["offset_flag"]) for order in executor.orders] == [
+        (OrderType.MARKET, 0, "0")
+    ]
+
+
+def test_target_pos_task_missing_quote_fails_limit_without_order() -> None:
+    executor = _FuturesExecutor(TradeChannel.CTP)
+    executor.get_market_data = lambda: None
+    result = ctp_target_pos_task_algorithm(
+        cast("ExecutorProtocol", executor),
+        AlgorithmInput(symbol="rb2610", target_volume=1, trade_rule={}, params=CTPTargetPosTaskParams()),
+    )
+
+    assert result.status == ExecutionStatus.FAILED
+    assert "缺少有效行情" in (result.error or "")
+    assert executor.orders == []
+
+
+def test_target_pos_task_market_close_then_missing_quote_stops_limit_open() -> None:
+    executor = _FuturesExecutor(TradeChannel.CTP)
+    executor.get_market_data = lambda: None
+    result = ctp_target_pos_task_algorithm(
+        cast("ExecutorProtocol", executor),
+        AlgorithmInput(
+            symbol="rb2610",
+            target_volume=1,
+            trade_rule={},
+            params=CTPTargetPosTaskParams(close_order_type="MARKET", max_wait_seconds=1),
+        ),
+    )
+
+    assert result.status == ExecutionStatus.PARTIAL
+    assert "开仓缺少有效行情" in (result.error or "")
+    assert [order.extra["offset_flag"] for order in executor.orders] == ["4", "3"]
+    assert all(order.order_type == OrderType.MARKET for order in executor.orders)
+
+
+def test_target_pos_task_market_slices_use_market_bounds() -> None:
+    executor = MagicMock()
+    executor.get_order_volume_bounds.return_value = (1, 2)
+    executor.place_order.side_effect = [
+        UnifiedOrder(
+            order_id=str(index),
+            symbol="rb2610",
+            direction=OrderDirection.BUY,
+            order_type=OrderType.MARKET,
+            volume=2,
+            price=0,
+            status=OrderStatus.PENDING,
+        )
+        for index in range(2)
+    ]
+    tracker = MagicMock()
+    orders, submitted = _place_volume_slices(
+        executor,
+        OrderDirection.BUY,
+        4,
+        0,
+        offset_flag="4",
+        trade_rule={},
+        tracker=tracker,
+        order_type=OrderType.MARKET,
+    )
+
+    assert submitted == 4
+    assert len(orders) == 2
+    executor.get_order_volume_bounds.assert_called_once_with(OrderType.MARKET, {})
+    assert all(call.kwargs["chase_enabled"] is False for call in tracker.add_order.call_args_list)
+    assert [call.kwargs["details"]["order"]["order_type"] for call in executor.emit_audit_event.call_args_list] == [
+        "MARKET",
+        "MARKET",
+    ]
 
 
 @pytest.mark.parametrize(

@@ -16,6 +16,8 @@ export const SINGLE_MAKER_DEFAULT_PARAMS: Readonly<Record<string, unknown>> = {
 
 export const TARGET_POS_DEFAULT_PARAMS: Readonly<Record<string, unknown>> = {
   price_strategy: 'PASSIVE',
+  close_order_type: 'LIMIT',
+  open_order_type: 'LIMIT',
   offset_priority: '昨今',
   max_wait_seconds: 60,
   chase_enabled: false,
@@ -63,6 +65,13 @@ export function validateAlgorithmParams(params: Record<string, unknown>, method?
 
   if (has('price_strategy') && params.price_strategy !== 'PASSIVE' && params.price_strategy !== 'ACTIVE') {
     return `下单价格（price_strategy）必须是 PASSIVE 或 ACTIVE`
+  }
+  if (method === 'TARGET-POS-TASK') {
+    for (const key of ['close_order_type', 'open_order_type'] as const) {
+      if (has(key) && params[key] !== 'LIMIT' && params[key] !== 'MARKET') {
+        return `${key === 'close_order_type' ? '平仓订单' : '开仓订单'}（${key}）必须是 LIMIT 或 MARKET`
+      }
+    }
   }
   if (has('offset_priority') && params.offset_priority !== '昨今' && params.offset_priority !== '今昨') {
     return `平仓优先（offset_priority）必须是 昨今 或 今昨`

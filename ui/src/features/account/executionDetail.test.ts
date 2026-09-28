@@ -298,6 +298,15 @@ describe('formatOrderTradeCounts', () => {
 })
 
 describe('buildExecutionDetail · 目标变化', () => {
+  it('展示目标持仓算法的开平仓订单类型', () => {
+    const { events, artifacts } = baseFixture()
+    const standardInput = artifacts.find(artifact => artifact.artifact_type === 'standard_input')!
+    const input = standardInput.content.input as Record<string, unknown>
+    input.algorithm = { method: 'TARGET-POS-TASK', params: { close_order_type: 'MARKET', open_order_type: 'LIMIT', price_strategy: 'PASSIVE' } }
+    const tc = buildExecutionDetail(events, artifacts).targetChange
+    expect(tc?.algoParams).toContain('平仓市价')
+    expect(tc?.algoParams).toContain('开仓限价')
+  })
   it('给出 last→curr 与算法参数摘要', () => {
     const { events, artifacts } = baseFixture()
     const tc = buildExecutionDetail(events, artifacts).targetChange

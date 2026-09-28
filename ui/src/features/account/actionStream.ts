@@ -127,8 +127,10 @@ function submitText(e: ExecutionEvent, units: ActionDisplayUnits): string {
   const order = asDict(details?.order)
   const side = sideText(asStr(order?.direction))
   const vol = fmtQty(asNum(order?.volume), units)
+  const isMarket = asStr(order?.order_type).toUpperCase() === 'MARKET'
   const price = fmtPrice(asNum(order?.price), units)
   const tail = [side, vol].filter(Boolean).join(' ')
+  if (isMarket) return `市价下单${tail ? ` ${tail}` : ''}`
   return `挂单${tail ? ` ${tail}` : ''}${price ? ` @${price}` : ''}`
 }
 

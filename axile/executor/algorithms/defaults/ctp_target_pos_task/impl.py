@@ -18,6 +18,7 @@ from typing import Any, Dict, List, Literal, Tuple, cast
 from pydantic import Field
 
 from axile.common.trade_channel import TradeChannel
+from axile.domain.execution import ExecutionEventStatus, ExecutionEventType, ExecutionReasonFamily
 from axile.executor.account_control.exceptions import AccountControlBlockedError
 from axile.executor.algorithms.common.params import BaseAlgorithmParams, ChaseParamsMixin
 from axile.executor.algorithms.core.base import (
@@ -61,11 +62,31 @@ class CTPTargetPosTaskParams(BaseAlgorithmParams, ChaseParamsMixin):
     price_strategy: Literal["PASSIVE", "ACTIVE"] = Field(
         default="PASSIVE",
         title="报价方式",
-        description="本方挂单或对手价报价；品种 price 规则优先。",
+        description="限价单使用本方价或对手价；品种 price 规则优先。",
         json_schema_extra={
             "x-order": 10,
             "x-control": "choice",
             "x-enum-labels": {"PASSIVE": "本方挂单", "ACTIVE": "对手价"},
+        },
+    )
+    close_order_type: Literal["LIMIT", "MARKET"] = Field(
+        default="LIMIT",
+        title="平仓订单",
+        description="平仓使用限价或市价；报价方式仅对限价单生效。",
+        json_schema_extra={
+            "x-order": 11,
+            "x-control": "choice",
+            "x-enum-labels": {"LIMIT": "限价", "MARKET": "市价"},
+        },
+    )
+    open_order_type: Literal["LIMIT", "MARKET"] = Field(
+        default="LIMIT",
+        title="开仓订单",
+        description="开仓使用限价或市价；报价方式仅对限价单生效。",
+        json_schema_extra={
+            "x-order": 12,
+            "x-control": "choice",
+            "x-enum-labels": {"LIMIT": "限价", "MARKET": "市价"},
         },
     )
     offset_priority: Literal["昨今", "今昨"] = Field(
@@ -268,10 +289,10 @@ def _calculate_order_price(
     Returns
     -------
     float
-        计算得出的下单价格；缺少行情时返回 ``0`` 以触发下游市价单语义。
+        计算得出的限价；缺少有效行情时返回 ``0``，由调用方拒绝限价报单。
     """
     if market_data is None:
-        return 0.0  # 市场数据缺失时使用市价单
+        return 0.0
 
     price_data = market_data
 
@@ -338,22 +359,21 @@ def _place_volume_slices(
     offset_flag: str,
     trade_rule: Dict[str, Any] | None,
     tracker: OrderTracker | None = None,
+    order_type: OrderType = OrderType.LIMIT,
 ) -> Tuple[List[UnifiedOrder], float]:
     """按有效单笔上限拆单提交；返回订单列表与成功提交手数。"""
     orders: List[UnifiedOrder] = []
     if volume <= 0:
         return orders, 0.0
     getter = getattr(executor, "get_order_volume_bounds", None)
-    bounds = (
-        cast("tuple[int | None, int | None] | None", getter(OrderType.LIMIT, trade_rule)) if callable(getter) else None
-    )
+    bounds = cast("tuple[int | None, int | None] | None", getter(order_type, trade_rule)) if callable(getter) else None
     slices = split_order_volumes(volume, bounds[1], min_size=bounds[0]) if bounds is not None else [volume]
     submitted = 0.0
     for chunk in slices:
         try:
             order = executor.place_order(
                 direction,
-                OrderType.LIMIT,
+                order_type,
                 chunk,
                 limit_price,
                 offset_flag=offset_flag,
@@ -370,12 +390,37 @@ def _place_volume_slices(
             ):
                 raise
             executor.logger.error(
-                f"拆单提交失败: {direction.value} {chunk}手@{limit_price} offset={offset_flag}, 错误: {exc}"
+                f"拆单提交失败: {direction.value} {chunk}手 {order_type.value}@{limit_price} offset={offset_flag}, 错误: {exc}"
             )
             break
         orders.append(order)
+        emit_audit_event = getattr(executor, "emit_audit_event", None)
+        if callable(emit_audit_event):
+            emit_audit_event(
+                event_type=ExecutionEventType.ORDER_SUBMITTED,
+                status=ExecutionEventStatus.INFO,
+                reason_family=ExecutionReasonFamily.EXECUTION_STRATEGY,
+                reason_code="COMMON.ORDER_SUBMITTED",
+                symbol=order.symbol,
+                order_id=order.order_id,
+                details={
+                    "order": {
+                        "direction": direction.value,
+                        "order_type": order_type.value,
+                        "volume": float(chunk),
+                        "price": float(limit_price),
+                        "offset_flag": offset_flag,
+                    }
+                },
+            )
         if tracker is not None:
-            tracker.add_order(order, direction=direction, offset_flag=offset_flag, trade_rule=trade_rule)
+            tracker.add_order(
+                order,
+                direction=direction,
+                offset_flag=offset_flag,
+                trade_rule=trade_rule,
+                chase_enabled=order_type == OrderType.LIMIT,
+            )
             tracker.explicit_error = None
             tracker.explicit_blocked_error = None
         submitted += float(chunk)
@@ -397,6 +442,7 @@ def _submit_close_leg(
     failure_level: str = "warning",
     trade_rule: Dict[str, Any] | None = None,
     tracker: OrderTracker | None = None,
+    order_type: OrderType = OrderType.LIMIT,
 ) -> Tuple[List[UnifiedOrder], float]:
     """提交单腿平仓订单（可按单笔上限拆单），并按调用方要求记录日志."""
     _ = symbol
@@ -410,6 +456,7 @@ def _submit_close_leg(
             offset_flag=offset_flag,
             trade_rule=trade_rule,
             tracker=tracker,
+            order_type=order_type,
         )
         if not orders:
             raise RuntimeError("平仓拆单后无任何订单提交成功")
@@ -431,6 +478,7 @@ def _smart_close_position(
     offset_priority: str = "昨今",
     trade_rule: Dict[str, Any] | None = None,
     tracker: OrderTracker | None = None,
+    order_type: OrderType = OrderType.LIMIT,
 ) -> Tuple[List[UnifiedOrder], float, bool]:
     """
     按昨仓 / 今仓可用量智能拆分平仓顺序。
@@ -446,7 +494,7 @@ def _smart_close_position(
     close_volume : float
         计划平掉的手数。
     limit_price : float
-        本次平仓使用的限价。
+        本次平仓使用的下单价格；市价单传入 ``0``。
     offset_priority : str, default="昨今"
         平仓优先级，支持 ``昨今`` 和 ``今昨``。
 
@@ -507,6 +555,7 @@ def _smart_close_position(
             failure_message=f"{offset_name}失败: {{error}}",
             trade_rule=trade_rule,
             tracker=tracker,
+            order_type=order_type,
         )
         if not leg_orders:
             continue
@@ -532,6 +581,7 @@ def _smart_close_position(
             failure_level="error",
             trade_rule=trade_rule,
             tracker=tracker,
+            order_type=order_type,
         )
         if leg_orders:
             orders.extend(leg_orders)
@@ -558,6 +608,8 @@ def _execute_position_adjustment(
     *,
     trade_rule: Dict[str, Any] | None = None,
     tracker: OrderTracker | None = None,
+    close_order_type: OrderType = OrderType.LIMIT,
+    open_order_type: OrderType = OrderType.LIMIT,
 ) -> List[UnifiedOrder]:
     """
     按目标净持仓执行单品种持仓调整。
@@ -596,94 +648,74 @@ def _execute_position_adjustment(
         executor.logger.info(f"{symbol} 持仓已达目标，无需调整")
         return orders
 
-    # 先根据净持仓调整方向选出报价侧，后续平仓腿和开仓腿共用这份价格策略。
-    if adjust_volume > 0:
-        limit_price = _calculate_order_price(market_data, price_type, "BUY")
-    else:
-        limit_price = _calculate_order_price(market_data, price_type, "SELL")
+    # 同方向的开平腿共用报价侧；仅限价腿读取行情。
+    direction = OrderDirection.BUY if adjust_volume > 0 else OrderDirection.SELL
+
+    def price_for(order_type: OrderType, action: str) -> float | None:
+        if order_type == OrderType.MARKET:
+            return 0.0
+        limit_price = _calculate_order_price(market_data, price_type, direction)
+        if math.isfinite(limit_price) and limit_price > 0:
+            return limit_price
+        message = f"{symbol} {action}缺少有效行情，未提交限价单"
+        executor.logger.error(message)
+        if tracker is not None:
+            tracker.explicit_error = message
+        return None
 
     executor.logger.info(
         f"{symbol}: 当前净持仓={current_net}, 目标={target_volume}, "
-        f"调整={adjust_volume}, 价格={limit_price}, 策略={price_type}"
+        f"调整={adjust_volume}, 报价策略={price_type}, 平仓类型={close_order_type.value}, 开仓类型={open_order_type.value}"
     )
 
-    # CTP 调整遵循“先平反向仓，再开同向仓”的顺序，尽量避免净持仓先进一步偏离目标，
-    # 同时让 offset_flag 与交易所持仓规则保持一致。
-    if adjust_volume > 0:  # 需要增加净持仓
-        if position_detail.short_total > 0:  # 先平空头
-            close_volume = min(abs(adjust_volume), position_detail.short_total)
-            close_orders, executed_volume, close_ok = _smart_close_position(
-                executor,
-                symbol,
-                "BUY",
-                close_volume,
-                limit_price,
-                offset_priority,
-                trade_rule=trade_rule,
-                tracker=tracker,
+    # 先平反向仓，再开同向仓；平仓未完整提交时不继续开仓。
+    remaining = abs(adjust_volume)
+    opposite_volume = position_detail.short_total if direction == OrderDirection.BUY else position_detail.long_total
+    if opposite_volume > 0:
+        close_volume = min(remaining, opposite_volume)
+        close_price = price_for(close_order_type, "平仓")
+        if close_price is None:
+            return orders
+        close_orders, submitted, close_ok = _smart_close_position(
+            executor,
+            symbol,
+            direction.value,
+            close_volume,
+            close_price,
+            offset_priority,
+            trade_rule=trade_rule,
+            tracker=tracker,
+            order_type=close_order_type,
+        )
+        orders.extend(close_orders)
+        if not close_ok:
+            close_side = "空" if direction == OrderDirection.BUY else "多"
+            executor.logger.error(
+                f"{symbol}: 平{close_side}未完成（目标平仓 {close_volume} 手，已提交 {submitted} 手），停止后续开仓"
             )
-            orders.extend(close_orders)
-            if not close_ok:
-                # 平仓未完成时不得把未平余量转成反向/同向开仓，避免锁仓放大风险。
-                executor.logger.error(
-                    f"{symbol}: 平空未完成（目标平仓 {close_volume} 手，已提交 {executed_volume} 手），停止后续开仓"
-                )
-                return orders
-            adjust_volume -= executed_volume
+            return orders
+        remaining -= submitted
 
-        if adjust_volume > 0:  # 开多头
-            open_orders, submitted = _place_volume_slices(
-                executor,
-                OrderDirection.BUY,
-                adjust_volume,
-                limit_price,
-                offset_flag=THOST_FTDC_OF_Open,
-                trade_rule=trade_rule,
-                tracker=tracker,
+    if remaining > 0:
+        open_price = price_for(open_order_type, "开仓")
+        if open_price is None:
+            return orders
+        open_orders, submitted = _place_volume_slices(
+            executor,
+            direction,
+            remaining,
+            open_price,
+            offset_flag=THOST_FTDC_OF_Open,
+            trade_rule=trade_rule,
+            tracker=tracker,
+            order_type=open_order_type,
+        )
+        orders.extend(open_orders)
+        if open_orders:
+            open_side = "多" if direction == OrderDirection.BUY else "空"
+            executor.logger.info(
+                f"开{open_side}仓: {symbol} 提交 {submitted}手@{open_price}, 末单ID: {open_orders[-1].order_id}"
             )
-            orders.extend(open_orders)
-            if open_orders:
-                executor.logger.info(
-                    f"开多仓: {symbol} 提交 {submitted}手@{limit_price}, 末单ID: {open_orders[-1].order_id}"
-                )
-
-    else:  # 需要减少净持仓
-        adjust_volume = abs(adjust_volume)
-        if position_detail.long_total > 0:  # 先平多头
-            close_volume = min(adjust_volume, position_detail.long_total)
-            close_orders, executed_volume, close_ok = _smart_close_position(
-                executor,
-                symbol,
-                "SELL",
-                close_volume,
-                limit_price,
-                offset_priority,
-                trade_rule=trade_rule,
-                tracker=tracker,
-            )
-            orders.extend(close_orders)
-            if not close_ok:
-                executor.logger.error(
-                    f"{symbol}: 平多未完成（目标平仓 {close_volume} 手，已提交 {executed_volume} 手），停止后续开仓"
-                )
-                return orders
-            adjust_volume -= executed_volume
-
-        if adjust_volume > 0:  # 开空头
-            open_orders, submitted = _place_volume_slices(
-                executor,
-                OrderDirection.SELL,
-                adjust_volume,
-                limit_price,
-                offset_flag=THOST_FTDC_OF_Open,
-                trade_rule=trade_rule,
-                tracker=tracker,
-            )
-            orders.extend(open_orders)
-            if open_orders:
-                executor.logger.info(
-                    f"开空仓: {symbol} 提交 {submitted}手@{limit_price}, 末单ID: {open_orders[-1].order_id}"
-                )
 
     return orders
 
@@ -693,7 +725,7 @@ def _execute_position_adjustment(
     channels=[TradeChannel.CTP, TradeChannel.TQ],
     params_class=CTPTargetPosTaskParams,
     label="期货目标持仓",
-    description="按目标净持仓安排开平仓，并按设置处理今仓、昨仓。仅用于 CTP；品种规则可覆盖报价和平仓顺序。",
+    description="按目标净持仓安排开平仓，并按设置处理今仓、昨仓。适用于 CTP 和 TQ；品种规则可覆盖报价和平仓顺序。",
 )
 def ctp_target_pos_task_algorithm(executor: ExecutorProtocol, algorithm_input: AlgorithmInput) -> AlgorithmResult:
     """
@@ -795,6 +827,8 @@ def ctp_target_pos_task_algorithm(executor: ExecutorProtocol, algorithm_input: A
                 offset_priority,
                 trade_rule=trade_rule,
                 tracker=tracker,
+                close_order_type=OrderType(params.close_order_type),
+                open_order_type=OrderType(params.open_order_type),
             )
 
             execution_memory[f"{symbol}_adjustment"] = {
@@ -803,6 +837,8 @@ def ctp_target_pos_task_algorithm(executor: ExecutorProtocol, algorithm_input: A
                 "orders_generated": len(symbol_orders),
                 "price_type": price_type,
                 "offset_priority": offset_priority,
+                "close_order_type": params.close_order_type,
+                "open_order_type": params.open_order_type,
             }
 
         if tracker.get_pending_count() > 0:

@@ -66,6 +66,8 @@ def test_list_algorithms_returns_builtin_metadata(client: TestClient) -> None:
             "TARGET-POS-TASK",
             {
                 "price_strategy": "PASSIVE",
+                "close_order_type": "LIMIT",
+                "open_order_type": "LIMIT",
                 "offset_priority": "昨今",
                 "max_wait_seconds": 60,
                 "chase_enabled": False,

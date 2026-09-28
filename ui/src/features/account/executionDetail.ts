@@ -394,6 +394,10 @@ function algoParamsText(params: Dict | null): string | null {
   const parts: string[] = []
   const strategy = asStr(params.price_strategy)
   if (strategy) parts.push(strategy)
+  const closeType = asStr(params.close_order_type)
+  const openType = asStr(params.open_order_type)
+  if (closeType === 'LIMIT' || closeType === 'MARKET') parts.push(`平仓${closeType === 'MARKET' ? '市价' : '限价'}`)
+  if (openType === 'LIMIT' || openType === 'MARKET') parts.push(`开仓${openType === 'MARKET' ? '市价' : '限价'}`)
   if (params.chase_enabled === true) {
     const n = asNum(params.max_chase_count)
     const iv = asNum(params.chase_interval)

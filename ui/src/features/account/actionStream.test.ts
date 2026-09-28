@@ -26,6 +26,12 @@ function ev(patch: Partial<ExecutionEvent>): ExecutionEvent {
 }
 
 describe('buildSymbolActionStream', () => {
+  it('直接提交的市价单显示订单类型，不显示零价', () => {
+    const lines = buildSymbolActionStream([
+      ev({ details: { order: { direction: 'BUY', order_type: 'MARKET', volume: 2, price: 0 } } }),
+    ], 'rb2610')
+    expect(lines[0]?.text).toBe('市价下单 买 2')
+  })
   it.each(['部分成交', '待成交', '已报', 'CLOSED', 'FILLED', 'UNKNOWN'])('订单状态精确回放，不把 %s 判作全部成交', status => {
     const lines = buildSymbolActionStream([ev({ event_type: 'order_terminal', details: { order: { terminal_status: status, volume: 2, filled_volume: 1 } } })], 'rb2610')
     expect(lines[0].text).toContain(status)

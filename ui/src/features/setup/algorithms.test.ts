@@ -46,6 +46,9 @@ describe('validateAlgorithmParams', () => {
 
   it('拒绝非法枚举、非整数追单次数和非数字等待时间', () => {
     expect(validateAlgorithmParams({ price_strategy: 'MARKET' })).toContain('price_strategy')
+    expect(validateAlgorithmParams({ close_order_type: 'INVALID' }, 'TARGET-POS-TASK')).toContain('close_order_type')
+    expect(validateAlgorithmParams({ open_order_type: 'INVALID' }, 'TARGET-POS-TASK')).toContain('open_order_type')
+    expect(validateAlgorithmParams({ close_order_type: 'MARKET', open_order_type: 'LIMIT' }, 'TARGET-POS-TASK')).toBeNull()
     expect(validateAlgorithmParams({ offset_priority: '开平' })).toContain('offset_priority')
     expect(validateAlgorithmParams({ on_missing_book: 'fallback' })).toContain('on_missing_book')
     expect(validateAlgorithmParams({ max_wait_seconds: '60' })).toContain('必须是数字')
