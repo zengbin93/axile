@@ -64,7 +64,7 @@ export function AccountPageTitle({
         {page} ·{' '}
         <Link
           to={`/accounts/${accountId}`}
-          className="cursor-pointer text-inherit no-underline"
+          className="cursor-pointer hover:underline"
           style={nameVt ? { viewTransitionName: `account-name-${accountId}` } : undefined}
         >
           {name ?? `账户 #${accountId}`}
