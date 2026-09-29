@@ -115,6 +115,7 @@ export function PythonFunctionEditor({
   controls,
   resultContent,
   docHref,
+  workbenchTitle = '目标函数',
   height = '320px',
   minHeight,
   maxHeight,
@@ -136,6 +137,7 @@ export function PythonFunctionEditor({
   controls?: ReactNode
   resultContent?: ReactNode
   docHref?: string
+  workbenchTitle?: string
   height?: string
   minHeight?: string
   maxHeight?: string
@@ -349,7 +351,7 @@ export function PythonFunctionEditor({
   const workbenchHeader = (
     <div className="@container flex h-8 min-w-0 items-center gap-1 border-b border-line bg-surface px-3 text-[12px] text-ink-2">
       <div className="flex min-w-0 flex-1 items-center overflow-hidden whitespace-nowrap">
-        <button type="button" className="flex-none text-ink-1" onClick={(event) => openMenu('symbols', event.currentTarget)}>目标函数</button>
+        <button type="button" className="flex-none text-ink-1" onClick={(event) => openMenu('symbols', event.currentTarget)}>{workbenchTitle}</button>
         {(chain.length > 3 ? [chain[0], null, chain.at(-1)!] : chain).map((item, index) => <span key={item?.name ?? 'ellipsis'} className="flex min-w-0 items-center gap-1 pl-1">
           <span aria-hidden>›</span><button type="button" className="min-w-0 max-w-32" onClick={(event) => openMenu('symbols', event.currentTarget, item ? index === 0 ? roots ?? [] : chain[chain.indexOf(item) - 1]?.children ?? roots ?? [] : chain[0]?.children ?? [], item?.name)}>{item ? <OverflowText text={item.name} /> : '…'}</button>
         </span>)}
@@ -357,7 +359,7 @@ export function PythonFunctionEditor({
       <button type="button" className={`${toolbarActionClass} hidden items-center gap-1 @min-[480px]:inline-flex`} disabled={disabled} onClick={() => void paste()}><Clipboard size={12} /> 粘贴</button>
       <button type="button" className={`${toolbarActionClass} hidden items-center gap-2 @min-[480px]:inline-flex`} disabled={disabled || formatting} onClick={() => formatRef.current()}>{formatting ? '格式化中…' : '格式化'}{shortcutHint('格式化')}</button>
       <button type="button" className={toolbarActionClass} aria-haspopup="menu" aria-expanded={menu?.kind === 'actions'} onClick={(event) => openMenu('actions', event.currentTarget)}>菜单</button>
-      <a className={`${toolbarActionClass} hidden @min-[480px]:block`} href="/docs/custom-calc" target="_blank" rel="noopener">开发文档 ↗</a>
+      {docHref && <a className={`${toolbarActionClass} hidden @min-[480px]:block`} href={docHref} target="_blank" rel="noopener">开发文档 ↗</a>}
     </div>
   )
   const popup = menu && createPortal(<div ref={menuRef} role="menu" tabIndex={-1} onKeyDown={(event) => {
@@ -368,7 +370,7 @@ export function PythonFunctionEditor({
       buttons[(buttons.indexOf(document.activeElement as HTMLButtonElement) + buttons.length + (event.key === 'ArrowDown' ? 1 : -1)) % buttons.length]?.focus()
     }
   }} style={{ left: Math.max(8, menu.x), top: Math.max(8, menu.y) }} className="fixed z-[100] max-h-[65vh] w-[min(15rem,calc(100vw-16px))] overflow-auto rounded-md border border-line bg-surface p-1 text-[12px] text-ink-1 shadow-lg">
-    {menu.kind === 'symbols' ? ((menu.items ?? roots)?.length ? (menu.items ?? roots)!.map((item, index) => <button key={index} role="menuitem" className={`block w-full truncate px-2 py-1.5 text-left hover:bg-fill ${menu.active === item.name ? 'text-accent' : ''}`} onClick={() => jumpSymbol(item)}>{item.name} · {('location' in item ? item.location.range.start.line : item.selectionRange.start.line) + 1}</button>) : <span className="block p-2 text-ink-3">暂无符号</span>) : <>{[...actions, '粘贴', '格式化', '开发文档 ↗'].map((name) => <button key={name} role="menuitem" disabled={actionDisabled(name)} className={`${toolbarActionClass} flex w-full items-center justify-between gap-4 py-1.5 text-left`} onClick={() => name === '开发文档 ↗' ? window.open('/docs/custom-calc', '_blank', 'noopener') : command(name)}><span>{name}</span>{shortcutHint(name)}</button>)}<div className="border-t border-line px-2 py-1 text-ink-3">Python · 4 空格</div></>}
+    {menu.kind === 'symbols' ? ((menu.items ?? roots)?.length ? (menu.items ?? roots)!.map((item, index) => <button key={index} role="menuitem" className={`block w-full truncate px-2 py-1.5 text-left hover:bg-fill ${menu.active === item.name ? 'text-accent' : ''}`} onClick={() => jumpSymbol(item)}>{item.name} · {('location' in item ? item.location.range.start.line : item.selectionRange.start.line) + 1}</button>) : <span className="block p-2 text-ink-3">暂无符号</span>) : <>{[...actions, '粘贴', '格式化', ...(docHref ? ['开发文档 ↗'] : [])].map((name) => <button key={name} role="menuitem" disabled={actionDisabled(name)} className={`${toolbarActionClass} flex w-full items-center justify-between gap-4 py-1.5 text-left`} onClick={() => name === '开发文档 ↗' ? window.open(docHref!, '_blank', 'noopener') : command(name)}><span>{name}</span>{shortcutHint(name)}</button>)}<div className="border-t border-line px-2 py-1 text-ink-3">Python · 4 空格</div></>}
   </div>, document.body)
   const tools = (
     <div className="flex flex-none flex-wrap items-center gap-1 border-b border-line bg-surface px-3 py-1.5 text-[12px] text-ink-2" aria-label="编辑操作">

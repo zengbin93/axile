@@ -10,7 +10,8 @@ import { Select } from '@/components/ui/Select'
 import { Segmented } from '@/components/ui/Segmented'
 import { Tooltip } from '@/components/ui/Tooltip'
 import { ConfirmModal, type ConfirmSpec } from '@/components/ui/ConfirmModal'
-import { PythonFunctionEditor, PythonRunResultBody, type PythonEditorHandle, type PythonProblem } from '@/components/ui/PythonFunctionEditor'
+import type { PythonEditorHandle } from '@/components/ui/PythonFunctionEditor'
+import { PythonWorkbenchPane } from '@/components/ui/PythonWorkbenchPane'
 import { PythonRunPanel } from '@/components/ui/PythonRunPanel'
 import { channelLabel } from '@/features/dashboard/display'
 import { WeightResult } from '@/features/portfolio/WeightResult'
@@ -38,7 +39,6 @@ const MIN_INSPECTOR_WIDTH = 260
 const MAX_INSPECTOR_WIDTH = 480
 const INSPECTOR_WIDTH_KEY = 'axon.portfolioWorkbench.inspectorWidth'
 const PANEL_SPLIT_KEY = 'axon.portfolioWorkbench.panelSplit'
-const EDITOR_SPLIT_KEY = 'axon.portfolioWorkbench.editorSplit'
 
 function clampInspectorWidth(width: number, containerWidth = Number.POSITIVE_INFINITY) {
   const available = Math.max(MIN_INSPECTOR_WIDTH, containerWidth - 520)
@@ -55,12 +55,6 @@ function initialPanelSplit() {
   if (typeof window === 'undefined') return 0.5
   const stored = Number(window.localStorage.getItem(PANEL_SPLIT_KEY))
   return Number.isFinite(stored) && stored >= 0.2 && stored <= 0.8 ? stored : 0.5
-}
-
-function initialEditorSplit() {
-  if (typeof window === 'undefined') return 0.35
-  const stored = Number(window.localStorage.getItem(EDITOR_SPLIT_KEY))
-  return Number.isFinite(stored) && stored >= 0.2 && stored <= 0.8 ? stored : 0.35
 }
 
 /**
@@ -98,20 +92,15 @@ export function PortfolioEditPage() {
   // 「目标」面板默认展开生效 tab：这是组合域的「当前事实」，多数进来是为看它或试跑。
   const [resultOpen, setResultOpen] = useState(true)
   const [targetTab, setTargetTab] = useState<'effective' | 'trial'>('effective')
-  const [problemsOpen, setProblemsOpen] = useState(false)
-  const [codeProblems, setCodeProblems] = useState<PythonProblem[]>([])
   const [followersOpen, setFollowersOpen] = useState(true)
   const [inspectorWidth, setInspectorWidth] = useState(initialInspectorWidth)
   const [resizingInspector, setResizingInspector] = useState(false)
   const [panelSplit, setPanelSplit] = useState(initialPanelSplit)
-  const [editorSplit, setEditorSplit] = useState(initialEditorSplit)
   const [resizingPanels, setResizingPanels] = useState(false)
   const nameEditorRef = useRef<HTMLDivElement>(null)
   const editorRef = useRef<PythonEditorHandle>(null)
-  const [editorHeader, setEditorHeader] = useState<HTMLDivElement | null>(null)
   const [editorStatus, setEditorStatus] = useState<HTMLDivElement | null>(null)
   const workbenchRef = useRef<HTMLDivElement>(null)
-  const editorPaneRef = useRef<HTMLDivElement>(null)
   const inspectorRef = useRef<HTMLDivElement>(null)
   const inspectorControlsRef = useRef<HTMLElement>(null)
 
@@ -155,9 +144,7 @@ export function PortfolioEditPage() {
     if (calc.editorResult.valid) {
       setResultOpen(true)
       setTargetTab('trial')
-      setProblemsOpen(false)
     } else {
-      setProblemsOpen(true)
       setResultOpen(false)
     }
   }, [calc.editorResult])
@@ -273,17 +260,6 @@ export function PortfolioEditPage() {
     return Math.min(Math.max((clientY - controlsBounds.bottom) / available, minShare), 1 - minShare)
   }
 
-  // 右列 split：问题面板贴底（VSCode Problems 位），editorSplit 是问题区占可用高度
-  // （列高 − 分隔条 − 面板标题）的份额；从底部量指针位置。
-  const editorSplitAt = (clientY: number) => {
-    const bounds = editorPaneRef.current?.getBoundingClientRect()
-    if (!bounds) return editorSplit
-    const available = bounds.height - 5 - 36
-    if (available <= 0) return editorSplit
-    const minShare = Math.min(0.45, 120 / available)
-    return Math.min(Math.max((bounds.bottom - clientY - 41) / available, minShare), 1 - minShare)
-  }
-
   // 七条轨道始终同构：控制区 / 弹性留白 / 结果标题 / 结果正文 / 分隔条 / 跟随账户标题 / 跟随账户正文。
   // 正文高度由内容驱动：有真内容（权重列表 / 跟随账户）的轨道才 fr 分高，否则 auto 贴
   // 内容一行、剩余空间沉底；弹性留白只在两侧都不分高时 1fr（把面板钉在列底，与双收起的
@@ -310,11 +286,6 @@ export function PortfolioEditPage() {
   } ${resultFr && followersFr ? '5px' : '0px'} 36px ${
     !followersOpen ? 'minmax(0, 0fr)' : followersFr ? `minmax(0, ${resultFr ? 1 - panelSplit : 1}fr)` : 'auto'
   }`
-
-  // 右列轨道：代码区 / 分隔条 / 问题标题 / 问题正文；收起时正文归零、分隔条让位。
-  const editorRows = problemsOpen
-    ? `minmax(0, ${1 - editorSplit}fr) 5px 36px minmax(0, ${editorSplit}fr)`
-    : 'minmax(0, 1fr) 0px 36px minmax(0, 0fr)'
 
   // 保存后留在原地：toast 确认、基线更新为已保存态，迭代循环不跳出工作台。
   const publish = async (validated = false) => {
@@ -665,116 +636,24 @@ export function PortfolioEditPage() {
           </section>
         </div>
 
-        {/* 右列：代码 + 问题面板共用一条水平分界（VSCode 底部 Problems 位），
-            问题贴着它诊断的代码，错误行点击就地滚入可视区。 */}
-        <div
-          ref={editorPaneRef}
-          className={`grid min-h-0 transition-[grid-template-rows] duration-200 motion-reduce:transition-none ${
-            resizingPanels ? '!transition-none' : ''
-          }`}
-          style={{ gridTemplateRows: editorRows }}
-        >
-          <div className="flex min-h-[420px] min-w-0 flex-col bg-code-bg md:min-h-0">
-          <div ref={setEditorHeader} className="h-8 flex-none" />
-          <PythonFunctionEditor
-            ref={editorRef}
-            headerTarget={editorHeader}
-            statusTarget={editorStatus}
-            onProblems={setCodeProblems}
-            layout="workbench"
-            fill
-            code={code}
-            onChange={(value) => {
-              setCode(value)
-              setSaveError(null)
-            }}
-            running={calc.validating}
-            stale={calc.stale}
-            result={calc.editorResult}
-            onRun={() => void calc.run()}
-          />
-          </div>
-
-          <div
-            role="separator"
-            aria-label="调整代码与问题的高度"
-            aria-orientation="horizontal"
-            aria-valuemin={20}
-            aria-valuemax={80}
-            aria-valuenow={Math.round(editorSplit * 100)}
-            tabIndex={problemsOpen ? 0 : -1}
-            inert={!problemsOpen}
-            title="拖动分配代码与问题的高度 · 双击平均分配"
-            className={`group relative z-10 cursor-row-resize touch-none outline-none ${
-              problemsOpen ? 'block' : 'invisible'
-            }`}
-            onDoubleClick={() => {
-              setEditorSplit(0.35)
-              window.localStorage.setItem(EDITOR_SPLIT_KEY, '0.35')
-            }}
-            onPointerDown={(event) => {
-              if (!problemsOpen) return
-              event.preventDefault()
-              event.currentTarget.setPointerCapture(event.pointerId)
-              setResizingPanels(true)
-              setEditorSplit(editorSplitAt(event.clientY))
-            }}
-            onPointerMove={(event) => {
-              if (event.currentTarget.hasPointerCapture(event.pointerId)) setEditorSplit(editorSplitAt(event.clientY))
-            }}
-            onPointerUp={(event) => {
-              const finalSplit = editorSplitAt(event.clientY)
-              if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-                event.currentTarget.releasePointerCapture(event.pointerId)
-              }
-              setEditorSplit(finalSplit)
-              setResizingPanels(false)
-              window.localStorage.setItem(EDITOR_SPLIT_KEY, String(finalSplit))
-            }}
-            onPointerCancel={() => setResizingPanels(false)}
-            onKeyDown={(event) => {
-              let next = editorSplit
-              if (event.key === 'ArrowUp') next += 0.05
-              else if (event.key === 'ArrowDown') next -= 0.05
-              else if (event.key === 'Home') next = 0.2
-              else if (event.key === 'End') next = 0.8
-              else return
-              event.preventDefault()
-              next = Math.min(Math.max(next, 0.2), 0.8)
-              setEditorSplit(next)
-              window.localStorage.setItem(EDITOR_SPLIT_KEY, String(next))
-            }}
-          >
-            <span className="absolute inset-x-0 top-1/2 h-px bg-line transition-colors duration-130 group-hover:bg-accent group-focus:bg-accent" />
-          </div>
-
-          <PythonRunPanel
-            kind="problems"
-            title="代码问题 / 试跑"
-            statusOverride={<span className="ml-auto self-center px-3 text-[12px] text-ink-3">{codeProblems.filter((problem) => problem.source === 'ty').length} 个静态问题</span>}
-            contentOverride={(
-              <div className="space-y-3">
-                <p className="text-[12px] text-ink-3">代码问题 · ty</p>
-                {codeProblems.filter((problem) => problem.source === 'ty').map((problem, index) => (
-                  <button key={`${index}-${problem.line}`} type="button" className="block w-full border-l-2 border-warn px-3 py-2 text-left text-[13px] text-warn" onClick={() => editorRef.current?.revealLine(problem.line)}>
-                    第 {problem.line} 行 · {problem.message}
-                  </button>
-                ))}
-                {!codeProblems.some((problem) => problem.source === 'ty') && <p className="text-[13px] text-ink-3">暂无静态诊断。</p>}
-                <p className="border-t border-line pt-3 text-[12px] text-ink-3">试跑结果{calc.stale ? ' · 代码已修改，以下为旧结果' : ''}</p>
-                {!calc.stale && calc.editorResult?.errorLine != null && <button type="button" className="text-[12px] text-accent" onClick={() => editorRef.current?.revealLine(calc.editorResult!.errorLine!)}>定位到第 {calc.editorResult.errorLine} 行</button>}
-                {calc.editorResult ? <PythonRunResultBody result={calc.editorResult} stale={calc.stale} /> : <p className="text-[13px] text-ink-3">尚未试跑</p>}
-              </div>
-            )}
-            open={problemsOpen}
-            onToggle={() => setProblemsOpen((open) => !open)}
-            className="border-t border-line"
-            running={calc.validating}
-            result={calc.editorResult}
-            stale={false}
-            onRevealError={(line) => editorRef.current?.revealLine(line)}
-          />
-        </div>
+        {/* 右列代码工作台：组合页只提供草稿与试跑状态。 */}
+        <PythonWorkbenchPane
+          editorRef={editorRef}
+          statusTarget={editorStatus}
+          storageKey="axon.portfolioWorkbench.editorSplit"
+          title="目标函数"
+          docHref="/docs/custom-calc"
+          code={code}
+          onChange={(value) => {
+            setCode(value)
+            setSaveError(null)
+          }}
+          running={calc.validating}
+          stale={calc.stale}
+          result={calc.editorResult}
+          onRun={() => void calc.run()}
+          onResizeChange={setResizingPanels}
+        />
 
         <div
           role="separator"
