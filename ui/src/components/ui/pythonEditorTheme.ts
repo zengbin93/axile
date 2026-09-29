@@ -5,7 +5,7 @@ import { tags } from '@lezer/highlight'
 /** 草稿与只读源码共享全局主题 token，亮暗主题无需重建编辑器。 */
 export const pythonEditorTheme = [
   EditorView.theme({
-    '&': { backgroundColor: 'var(--color-code-bg)', color: 'var(--color-code-fg)', fontSize: '14px' },
+    '&': { backgroundColor: 'var(--color-code-bg)', color: 'var(--color-code-fg)', fontSize: 'var(--python-editor-font-size, 14px)' },
     '&.cm-focused': { outline: 'none' },
     '.cm-gutters': { backgroundColor: 'var(--color-code-bg)', color: 'var(--color-ink-3)', border: 'none' },
     '.cm-content': { fontFamily: 'var(--font-mono)' },

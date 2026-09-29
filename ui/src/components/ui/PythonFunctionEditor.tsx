@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type ReactNode, type Ref } from 'react'
+import { useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type CSSProperties, type ReactNode, type Ref } from 'react'
 import { createPortal } from 'react-dom'
 import { python } from '@codemirror/lang-python'
 import { foldable, foldGutter, foldedRanges, foldState } from '@codemirror/language'
@@ -20,6 +20,7 @@ import { PythonSourcePreview, type SourcePreview } from '@/components/ui/PythonS
 import { quickFix, renamePythonSymbol } from '@/components/ui/pythonLanguageFeatures'
 import { jumpToDefinition, findReferences } from '@codemirror/lsp-client'
 import { pythonEditorTheme } from '@/components/ui/pythonEditorTheme'
+import { pythonEditorZoomKeys, usePythonEditorFontSize } from '@/components/ui/pythonEditorFontSize'
 import { pythonStickyScroll } from '@/components/ui/pythonStickyScroll'
 import { PythonSymbolTree, symbolPath } from '@/components/ui/PythonSymbolTree'
 
@@ -257,6 +258,7 @@ export function PythonFunctionEditor({
   statusTarget?: HTMLElement | null
 }) {
   const cmRef = useRef<ReactCodeMirrorRef>(null)
+  const fontSize = usePythonEditorFontSize()
   const hasCode = code.trim().length > 0
   const onRunRef = useRef(onRun)
   onRunRef.current = onRun
@@ -359,6 +361,7 @@ export function PythonFunctionEditor({
 
   const extensions = useMemo(() => [
     pythonEditorTheme,
+    pythonEditorZoomKeys,
     pythonStickyScroll,
     python(),
     centeredFoldGutter,
@@ -511,6 +514,7 @@ export function PythonFunctionEditor({
     } : undefined} className={`relative bg-code-bg ${fill ? 'min-h-0 flex-1' : ''}`}>
       <CodeMirror
         ref={cmRef}
+        style={{ '--python-editor-font-size': `${fontSize}px` } as CSSProperties}
         className={
           fill
             ? 'h-full [&_.cm-editor]:h-full [&_.cm-editor]:!bg-code-bg [&_.cm-gutters]:!bg-code-bg [&_.cm-scroller]:h-full'

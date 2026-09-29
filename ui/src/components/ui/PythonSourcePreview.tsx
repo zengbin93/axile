@@ -1,12 +1,14 @@
 import { useEffect, useRef } from 'react'
+import type { CSSProperties } from 'react'
 import { createPortal } from 'react-dom'
 import CodeMirror from '@uiw/react-codemirror'
 import { python } from '@codemirror/lang-python'
 import { EditorView } from '@codemirror/view'
 import { pythonEditorTheme } from '@/components/ui/pythonEditorTheme'
+import { pythonEditorZoomKeys, usePythonEditorFontSize } from '@/components/ui/pythonEditorFontSize'
 import { pythonStickyScroll } from '@/components/ui/pythonStickyScroll'
 
-const sourceExtensions = [python(), pythonEditorTheme, pythonStickyScroll]
+const sourceExtensions = [python(), pythonEditorTheme, pythonEditorZoomKeys, pythonStickyScroll]
 
 export interface SourcePreview {
   uri: string
@@ -17,6 +19,7 @@ export interface SourcePreview {
 /** 定义与引用的依赖源码只读预览；原草稿及撤销栈始终留在原编辑器。 */
 export function PythonSourcePreview({ source, onClose }: { source: SourcePreview; onClose: () => void }) {
   const dialog = useRef<HTMLDialogElement>(null)
+  const fontSize = usePythonEditorFontSize()
   useEffect(() => {
     dialog.current?.showModal()
     return () => source.resolve(null)
@@ -28,7 +31,7 @@ export function PythonSourcePreview({ source, onClose }: { source: SourcePreview
           <span className="min-w-0 flex-1 break-all text-[12px]">{decodeURIComponent(source.uri)} · 只读</span>
           <button type="button" onClick={onClose}>关闭 · Esc</button>
         </header>
-        <CodeMirror value={source.code} readOnly editable={false} theme="none" extensions={sourceExtensions} onCreateEditor={source.resolve} height="100%" className="min-h-0 flex-1 overflow-auto" />
+        <CodeMirror value={source.code} readOnly editable={false} theme="none" extensions={sourceExtensions} onCreateEditor={source.resolve} height="100%" className="min-h-0 flex-1 overflow-auto" style={{ '--python-editor-font-size': `${fontSize}px` } as CSSProperties} />
       </div>
     </dialog>, document.body,
   )
