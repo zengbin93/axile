@@ -66,6 +66,9 @@ function createHover(view: EditorView, html: string, shouldFocus: () => boolean)
   content.setAttribute('aria-label', 'Python 文档')
   content.innerHTML = html
   pinDocumentationContext(dom, content)
+  if (content.childElementCount === 1 && content.firstElementChild?.matches('pre:has(> code)')) {
+    dom.classList.add('cm-python-hover-code-only')
+  }
   const signature = dom.querySelector<HTMLElement>('.cm-python-hover-signature')
   // Keep a readable body even when CodeMirror clamps the hover near a viewport edge.
   const sizeObserver = new ResizeObserver(([entry]) => {
@@ -164,6 +167,7 @@ const hoverTheme = EditorView.theme({
     width: 'max-content', maxWidth: 'min(680px, calc(100vw - 24px))', maxHeight: 'min(420px, 55vh)',
     overflow: 'hidden', borderRadius: '6px',
   },
+  '.cm-python-hover-code-only': { minWidth: 'min(220px, calc(100vw - 24px))' },
   '.cm-python-hover[style*="width"]': { maxWidth: 'calc(100vw - 24px)', maxHeight: 'calc(100vh - 24px)' },
   '.cm-python-hover-doc': {
     minWidth: '0', minHeight: '0', flex: '1 1 auto', overflow: 'auto', overscrollBehavior: 'contain',
@@ -198,6 +202,10 @@ const hoverTheme = EditorView.theme({
     backgroundColor: 'var(--color-code-bg)', color: 'var(--color-code-fg)', fontFamily: 'var(--font-mono)', lineHeight: '1.6',
   },
   '.cm-python-hover-signature pre': { margin: '0', padding: '7px 0', border: 'none', backgroundColor: 'transparent' },
+  '.cm-python-hover-code-only .cm-python-hover-doc': { padding: '9px 12px' },
+  '.cm-python-hover-code-only .cm-python-hover-doc > pre': {
+    margin: '0', padding: '0', borderRadius: '0', backgroundColor: 'transparent',
+  },
   '.cm-python-hover-doc ul, .cm-python-hover-doc ol': { margin: '8px 0', paddingLeft: '22px' },
   '.cm-python-hover-doc ul': { listStyleType: 'disc' },
   '.cm-python-hover-doc ol': { listStyleType: 'decimal' },
