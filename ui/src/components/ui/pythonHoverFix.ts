@@ -3,6 +3,7 @@ export interface HoverFix {
   to: number
   message: string
   source: string
+  canFix: boolean
 }
 
 /** 选择鼠标所在诊断；多个范围重叠时优先取最具体的一条。 */

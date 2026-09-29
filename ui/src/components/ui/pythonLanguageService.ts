@@ -142,8 +142,8 @@ export function connectPython(
             }
           }, {
             delay: 350,
-            // 入口类型提示仍留在问题列表和代码标记中，避免与类型 hover 共用浮层。
-            tooltipFilter: diagnostics => diagnostics.filter(diagnostic => diagnostic.source !== '入口契约'),
+            // 诊断仍留在问题列表和代码标记中；悬停内容统一由 pythonHover 渲染。
+            tooltipFilter: () => [],
           }),
         ]) })
         forceLinting(view)

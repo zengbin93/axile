@@ -29,8 +29,10 @@ export function pythonHover(kind: PythonEditorKind) {
     const doc = view.state.doc
     const fixes: HoverFix[] = []
     forEachDiagnostic(view.state, (diagnostic, from, to) => {
-      const action = diagnostic.actions?.find((item) => item.name === '快速修复')
-      if (action) fixes.push({ from, to, message: diagnostic.message.split('\n')[0], source: diagnostic.source ?? 'ty' })
+      fixes.push({
+        from, to, message: diagnostic.message, source: diagnostic.source ?? 'ty',
+        canFix: !!diagnostic.actions?.some((item) => item.name === '快速修复'),
+      })
     })
     const fix = fixAtPosition(fixes, pos)
     plugin.client.sync()
@@ -78,8 +80,19 @@ export function pythonHover(kind: PythonEditorKind) {
 function createHover(view: EditorView, html: string, shouldFocus: () => boolean, fix: HoverFix | null, kind: PythonEditorKind, pinHover: () => void) {
   const dom = document.createElement('div')
   dom.className = 'cm-python-hover'
+  const content = dom.appendChild(document.createElement('div'))
+  content.className = 'cm-python-hover-doc cm-lsp-documentation quiet-scrollbar'
+  content.tabIndex = 0
+  content.setAttribute('role', 'region')
+  content.setAttribute('aria-label', 'Python 文档与诊断')
+  content.innerHTML = html
+  if (!html && !fix) content.hidden = true
+  if (!fix && content.childElementCount === 1 && content.firstElementChild?.matches('pre:has(> code)')) {
+    dom.classList.add('cm-python-hover-code-only')
+  }
+  arrangeDocumentation(content)
   if (fix) {
-    const diagnostic = dom.appendChild(document.createElement('div'))
+    const diagnostic = content.insertBefore(document.createElement('div'), content.firstChild)
     diagnostic.className = 'cm-python-hover-diagnostic'
     const message = diagnostic.appendChild(document.createElement('span'))
     message.textContent = fix.message
@@ -87,17 +100,6 @@ function createHover(view: EditorView, html: string, shouldFocus: () => boolean,
     source.className = 'cm-python-hover-diagnostic-source'
     source.textContent = fix.source
   }
-  const content = dom.appendChild(document.createElement('div'))
-  content.className = 'cm-python-hover-doc cm-lsp-documentation quiet-scrollbar'
-  content.tabIndex = 0
-  content.setAttribute('role', 'region')
-  content.setAttribute('aria-label', 'Python 文档')
-  content.innerHTML = html
-  if (!html) content.hidden = true
-  if (content.childElementCount === 1 && content.firstElementChild?.matches('pre:has(> code)')) {
-    dom.classList.add('cm-python-hover-code-only')
-  }
-  arrangeDocumentation(content)
   const copyTimers: number[] = []
   for (const pre of content.querySelectorAll<HTMLPreElement>('pre:has(> code)')) {
     const code = pre.querySelector<HTMLElement>(':scope > code')!
@@ -122,7 +124,7 @@ function createHover(view: EditorView, html: string, shouldFocus: () => boolean,
       }
     })
   }
-  if (fix) {
+  if (fix?.canFix) {
     const footer = dom.appendChild(document.createElement('div'))
     footer.className = 'cm-python-hover-fix'
     const button = footer.appendChild(document.createElement('button'))
@@ -213,9 +215,9 @@ const hoverTheme = EditorView.theme({
   },
   '.cm-python-hover:has(.cm-python-hover-diagnostic)': { minWidth: 'min(360px, calc(100vw - 24px))' },
   '.cm-python-hover-diagnostic': {
-    display: 'flex', alignItems: 'baseline', gap: '8px', padding: '8px 10px',
+    display: 'flex', alignItems: 'baseline', gap: '8px', margin: '-8px -10px 8px', padding: '8px 10px',
     borderBottom: '1px solid var(--color-line)', color: 'var(--color-ink-1)',
-    fontFamily: 'var(--font-sans)', fontSize: '13px', lineHeight: '1.5', overflowWrap: 'anywhere',
+    fontFamily: 'var(--font-sans)', fontSize: '13px', lineHeight: '1.5', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere',
   },
   '.cm-python-hover-diagnostic > :first-child': { minWidth: '0', flex: '1 1 auto' },
   '.cm-python-hover-diagnostic-source': { flex: 'none', color: 'var(--color-ink-3)', fontSize: '11px' },
