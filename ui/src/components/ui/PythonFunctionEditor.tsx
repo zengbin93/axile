@@ -2,7 +2,7 @@ import { useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState,
 import { createPortal } from 'react-dom'
 import { python } from '@codemirror/lang-python'
 import { foldable, foldGutter, foldedRanges, foldState } from '@codemirror/language'
-import { lintGutter, linter, forceLinting, forEachDiagnostic, type Diagnostic } from '@codemirror/lint'
+import { linter, forceLinting, forEachDiagnostic, type Diagnostic } from '@codemirror/lint'
 import { Compartment, StateEffect } from '@codemirror/state'
 import { undo, redo, isolateHistory } from '@codemirror/commands'
 import { openSearchPanel, gotoLine } from '@codemirror/search'
@@ -110,11 +110,18 @@ const centeredFoldGutter = [
   EditorView.theme({
     '.cm-foldGutter .cm-gutterElement': { display: 'flex', alignItems: 'center', justifyContent: 'center', minWidth: '18px' },
     '.cm-foldGutter .cm-gutterElement span': { display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0' },
-    '.cm-foldGutter .cm-gutterElement span:not(.cm-python-foldedMarker)': { opacity: '0' },
-    '.cm-foldGutter .cm-gutterElement.cm-python-revealedFoldLine span:not(.cm-python-foldedMarker)': { opacity: '1' },
+    '.cm-foldGutter .cm-gutterElement span:not(.cm-python-foldedMarker)': {
+      opacity: '0', transition: 'opacity 140ms cubic-bezier(.4, 0, .2, 1)',
+    },
+    '.cm-foldGutter .cm-gutterElement.cm-python-revealedFoldLine span:not(.cm-python-foldedMarker)': {
+      opacity: '1', transitionDuration: '180ms',
+    },
     '.cm-foldGutter .cm-python-foldedMarker': { color: 'var(--color-code-fg)' },
     '@media (hover: none)': {
       '.cm-foldGutter .cm-gutterElement span:not(.cm-python-foldedMarker)': { opacity: '1' },
+    },
+    '@media (prefers-reduced-motion: reduce)': {
+      '.cm-foldGutter .cm-gutterElement span:not(.cm-python-foldedMarker)': { transition: 'none' },
     },
   }),
   foldGutterHover,
@@ -354,7 +361,6 @@ export function PythonFunctionEditor({
     pythonEditorTheme,
     pythonStickyScroll,
     python(),
-    lintGutter(),
     centeredFoldGutter,
     foldedLineHighlight,
     languageSlot.of([]),
