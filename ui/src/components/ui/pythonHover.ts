@@ -121,24 +121,20 @@ function createHover(view: EditorView, html: string, shouldFocus: () => boolean,
   copy.className = 'cm-python-hover-copy'
   copy.title = '复制悬停内容'
   copy.setAttribute('aria-label', '复制悬停内容')
-  copy.innerHTML = '<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><rect x="5" y="5" width="8" height="9" rx="1.5"/><path d="M3 11H2.5A1.5 1.5 0 0 1 1 9.5v-7A1.5 1.5 0 0 1 2.5 1h7A1.5 1.5 0 0 1 11 2.5V3"/></svg><span>复制</span>'
-  const copyLabel = copy.querySelector('span')!
+  copy.innerHTML = '<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><rect x="5" y="5" width="8" height="9" rx="1.5"/><path d="M3 11H2.5A1.5 1.5 0 0 1 1 9.5v-7A1.5 1.5 0 0 1 2.5 1h7A1.5 1.5 0 0 1 11 2.5V3"/></svg>'
   let copyTimer: number | undefined
   copy.addEventListener('pointerdown', event => event.preventDefault())
   copy.addEventListener('click', async () => {
     if (copyTimer !== undefined) window.clearTimeout(copyTimer)
     try {
       await navigator.clipboard.writeText(hoverCopyText(content))
-      copyLabel.textContent = '已复制'
       copy.title = '已复制悬停内容'
       copy.setAttribute('aria-label', '已复制悬停内容')
     } catch {
-      copyLabel.textContent = '复制失败'
       copy.title = '复制失败'
       copy.setAttribute('aria-label', '复制失败')
     }
     copyTimer = window.setTimeout(() => {
-      copyLabel.textContent = '复制'
       copy.title = '复制悬停内容'
       copy.setAttribute('aria-label', '复制悬停内容')
     }, 1600)
@@ -239,7 +235,7 @@ const hoverTheme = EditorView.theme({
     color: 'var(--color-ink-2)', lineHeight: '1.65', whiteSpace: 'normal', overflowWrap: 'anywhere',
   },
   '.cm-python-hover-actions': {
-    display: 'flex', alignItems: 'center', gap: '6px', flex: 'none', padding: '6px 22px 6px 10px',
+    display: 'flex', alignItems: 'center', gap: '6px', flex: 'none', padding: '6px 14px 6px 10px',
     borderTop: '1px solid var(--color-line)', color: 'var(--color-ink-3)', fontSize: '12px', lineHeight: '1.5',
   },
   '.cm-python-hover-actions > span': { fontSize: '11px' },
@@ -279,8 +275,8 @@ const hoverTheme = EditorView.theme({
     margin: '0', padding: '0', borderRadius: '0', backgroundColor: 'transparent',
   },
   '.cm-python-hover-copy': {
-    display: 'inline-flex', alignItems: 'center', gap: '4px', flex: 'none', marginLeft: 'auto',
-    padding: '2px 6px', border: '1px solid var(--color-line)', borderRadius: '4px',
+    display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flex: 'none', marginLeft: 'auto',
+    width: '28px', height: '28px', padding: '0', border: '1px solid var(--color-line)', borderRadius: '4px',
     backgroundColor: 'var(--color-surface)', color: 'var(--color-ink-2)', cursor: 'pointer', font: 'inherit',
   },
   '.cm-python-hover-copy:hover': { color: 'var(--color-ink-1)', backgroundColor: 'var(--color-bg-subtle)' },
