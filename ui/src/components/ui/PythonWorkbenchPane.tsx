@@ -8,10 +8,10 @@ import type { PythonEditorKind } from '@/components/ui/pythonEditorContract'
 const DEFAULT_SPLIT = 0.35
 type OutputTab = 'problems' | 'result'
 
-function initialSplit(storageKey: string) {
-  if (typeof window === 'undefined') return DEFAULT_SPLIT
+function storedSplit(storageKey: string): number | null {
+  if (typeof window === 'undefined') return null
   const stored = Number(window.localStorage.getItem(storageKey))
-  return Number.isFinite(stored) && stored >= 0.2 && stored <= 0.8 ? stored : DEFAULT_SPLIT
+  return window.localStorage.getItem(storageKey) != null && Number.isFinite(stored) && stored >= 0 && stored <= 0.8 ? stored : null
 }
 
 /** 工作台的代码区、静态问题与试跑结果；业务页提供代码、执行行为和状态栏槽位。 */
@@ -37,7 +37,9 @@ export function PythonWorkbenchPane({
   const [problemsOpen, setProblemsOpen] = useState(false)
   const [problems, setProblems] = useState<PythonProblem[]>([])
   const [activeTab, setActiveTab] = useState<OutputTab>('problems')
-  const [split, setSplit] = useState(() => initialSplit(storageKey))
+  const [savedSplit] = useState(() => storedSplit(storageKey))
+  const [split, setSplit] = useState(savedSplit ?? DEFAULT_SPLIT)
+  const [customSplit, setCustomSplit] = useState(savedSplit != null)
   const [resizing, setResizing] = useState(false)
   const [header, setHeader] = useState<HTMLDivElement | null>(null)
   const paneRef = useRef<HTMLDivElement>(null)
@@ -77,15 +79,24 @@ export function PythonWorkbenchPane({
     if (!bounds) return split
     const available = bounds.height - 5 - 36
     if (available <= 0) return split
-    const minShare = Math.min(0.45, 120 / available)
+    const minShare = Math.min(0.45, 36 / available)
     return Math.min(Math.max((bounds.bottom - clientY - 41) / available, minShare), 1 - minShare)
+  }
+  const currentSplit = () => {
+    const available = (paneRef.current?.getBoundingClientRect().height ?? 0) - 41
+    const panelHeight = paneRef.current?.querySelector('section[aria-label="代码检查"]')?.getBoundingClientRect().height ?? 0
+    return available > 0 ? Math.max(0, panelHeight - 36) / available : split
   }
   const persistSplit = (value: number) => {
     setSplit(value)
+    setCustomSplit(true)
     window.localStorage.setItem(storageKey, String(value))
   }
+  const fitProblems = activeTab === 'problems' && !customSplit && !resizing
   const rows = problemsOpen
-    ? `minmax(0, ${1 - split}fr) 5px 36px minmax(0, ${split}fr)`
+    ? fitProblems
+      ? 'minmax(0, 1fr) 5px 36px fit-content(40%)'
+      : `minmax(0, ${1 - split}fr) 5px 36px minmax(0, ${split}fr)`
     : 'minmax(0, 1fr) 0px 36px minmax(0, 0fr)'
   const run = () => {
     setActiveTab('result')
@@ -123,9 +134,10 @@ export function PythonWorkbenchPane({
         role="separator"
         aria-label="调整代码与问题的高度"
         aria-orientation="horizontal"
-        aria-valuemin={20}
+        aria-valuemin={0}
         aria-valuemax={80}
-        aria-valuenow={Math.round(split * 100)}
+        aria-valuenow={fitProblems ? undefined : Math.round(split * 100)}
+        aria-valuetext={fitProblems ? '代码问题按内容高度展开' : undefined}
         tabIndex={problemsOpen ? 0 : -1}
         inert={!problemsOpen}
         title="拖动分配代码与问题的高度 · 双击平均分配"
@@ -149,14 +161,14 @@ export function PythonWorkbenchPane({
         }}
         onPointerCancel={() => setResizingState(false)}
         onKeyDown={(event) => {
-          let next = split
+          let next = fitProblems ? currentSplit() : split
           if (event.key === 'ArrowUp') next += 0.05
           else if (event.key === 'ArrowDown') next -= 0.05
-          else if (event.key === 'Home') next = 0.2
+          else if (event.key === 'Home') next = 0
           else if (event.key === 'End') next = 0.8
           else return
           event.preventDefault()
-          persistSplit(Math.min(Math.max(next, 0.2), 0.8))
+          persistSplit(Math.min(Math.max(next, 0), 0.8))
         }}
       >
         <span className="absolute inset-x-0 top-1/2 h-px bg-line transition-colors duration-130 group-hover:bg-accent group-focus:bg-accent" />
