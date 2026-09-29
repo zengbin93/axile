@@ -20,6 +20,7 @@ export function PythonRunPanel({
   onRevealError,
   className,
   title,
+  hideTitle,
   headerExtra,
   statusOverride,
   contentOverride,
@@ -36,6 +37,7 @@ export function PythonRunPanel({
   className?: string
   /** 覆盖默认标题（「试跑结果」/「问题」）：双来源面板（如 生效/试跑 分段）改名用。 */
   title?: string
+  hideTitle?: boolean
   /** 标题按钮与状态行之间的头部插槽（如 Segmented 分段）。 */
   headerExtra?: ReactNode
   /** 覆盖头部右侧状态行：内容语义不由试跑状态机描述时（如生效快照的新旧）。 */
@@ -51,6 +53,7 @@ export function PythonRunPanel({
   return (
     <WorkbenchPanel
       title={panelTitle}
+      hideTitle={hideTitle}
       open={open}
       onToggle={onToggle}
       className={className}

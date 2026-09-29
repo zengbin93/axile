@@ -5,6 +5,7 @@ export interface SegmentedOption<T extends string> {
   value: T
   label: string
   icon?: ReactNode
+  badge?: ReactNode
   disabled?: boolean
 }
 
@@ -104,7 +105,7 @@ export function Segmented<T extends string>({
           }`}
           onClick={() => onChange(o.value)}
         >
-          {o.icon}{o.label}
+          {o.icon}{o.label}{o.badge}
         </button>
       ))}
       {trailing && <div className="relative z-10 ml-0.5 flex items-center border-l border-line/70 pl-0.5">{trailing}</div>}

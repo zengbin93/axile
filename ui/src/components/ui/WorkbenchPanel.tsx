@@ -4,6 +4,7 @@ import { ChevronDown } from 'lucide-react'
 /** 工作台内可折叠面板的统一外壳；高度轨道由所在工作台分配。 */
 export function WorkbenchPanel({
   title,
+  hideTitle = false,
   open,
   onToggle,
   headerExtra,
@@ -14,6 +15,7 @@ export function WorkbenchPanel({
   stale = false,
 }: {
   title: string
+  hideTitle?: boolean
   open: boolean
   onToggle: () => void
   headerExtra?: ReactNode
@@ -32,6 +34,7 @@ export function WorkbenchPanel({
         <button
           type="button"
           aria-expanded={open}
+          aria-label={hideTitle ? `${open ? '收起' : '展开'}${title}` : undefined}
           className={`flex cursor-pointer items-center gap-1.5 px-3.5 text-[12px] font-semibold tracking-wide text-ink-1 ${open ? 'border-b border-accent' : ''}`}
           onClick={onToggle}
         >
@@ -40,7 +43,7 @@ export function WorkbenchPanel({
             aria-hidden
             className={`text-ink-3 transition-transform duration-200 motion-reduce:transition-none ${open ? '' : '-rotate-90'}`}
           />
-          {title}
+          {!hideTitle && title}
         </button>
         {headerExtra}
         {status}

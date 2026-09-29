@@ -1,8 +1,11 @@
 import { useEffect, useRef, useState, type Ref } from 'react'
 import { PythonFunctionEditor, PythonRunResultBody, type PythonEditorHandle, type PythonProblem, type PythonValidationState } from '@/components/ui/PythonFunctionEditor'
 import { PythonRunPanel } from '@/components/ui/PythonRunPanel'
+import { Segmented } from '@/components/ui/Segmented'
+import { CircleX, TriangleAlert } from 'lucide-react'
 
 const DEFAULT_SPLIT = 0.35
+type OutputTab = 'problems' | 'result'
 
 function initialSplit(storageKey: string) {
   if (typeof window === 'undefined') return DEFAULT_SPLIT
@@ -30,15 +33,37 @@ export function PythonWorkbenchPane({
 }) {
   const [problemsOpen, setProblemsOpen] = useState(false)
   const [problems, setProblems] = useState<PythonProblem[]>([])
+  const [activeTab, setActiveTab] = useState<OutputTab>('problems')
   const [split, setSplit] = useState(() => initialSplit(storageKey))
   const [resizing, setResizing] = useState(false)
   const [header, setHeader] = useState<HTMLDivElement | null>(null)
   const paneRef = useRef<HTMLDivElement>(null)
   const internalEditorRef = useRef<PythonEditorHandle>(null)
+  const previousStaticCount = useRef(0)
 
   useEffect(() => {
-    if (result) setProblemsOpen(!result.valid)
+    if (result) {
+      setActiveTab('result')
+      setProblemsOpen(true)
+    }
   }, [result])
+
+  const staticProblems = problems.filter((problem) => problem.source === 'ty')
+  const outputTabs = [
+    {
+      value: 'problems' as const,
+      label: '代码问题',
+      badge: staticProblems.length > 0 ? <span className="rounded-full bg-warn/15 px-1.5 text-[10px] tabular-nums text-warn">{staticProblems.length}</span> : undefined,
+    },
+    { value: 'result' as const, label: '试跑结果' },
+  ]
+  useEffect(() => {
+    if (staticProblems.length > previousStaticCount.current && !running) {
+      setActiveTab('problems')
+      setProblemsOpen(true)
+    }
+    previousStaticCount.current = staticProblems.length
+  }, [staticProblems.length, running])
 
   const setResizingState = (value: boolean) => {
     setResizing(value)
@@ -59,7 +84,11 @@ export function PythonWorkbenchPane({
   const rows = problemsOpen
     ? `minmax(0, ${1 - split}fr) 5px 36px minmax(0, ${split}fr)`
     : 'minmax(0, 1fr) 0px 36px minmax(0, 0fr)'
-  const staticProblems = problems.filter((problem) => problem.source === 'ty')
+  const run = () => {
+    setActiveTab('result')
+    setProblemsOpen(true)
+    onRun()
+  }
 
   return (
     <div ref={paneRef} className={`grid min-h-0 transition-[grid-template-rows] duration-200 motion-reduce:transition-none ${resizing ? '!transition-none' : ''}`} style={{ gridTemplateRows: rows }}>
@@ -81,7 +110,7 @@ export function PythonWorkbenchPane({
           running={running}
           stale={stale}
           result={result}
-          onRun={onRun}
+          onRun={run}
           workbenchTitle={title}
           docHref={docHref}
         />
@@ -130,21 +159,29 @@ export function PythonWorkbenchPane({
       </div>
       <PythonRunPanel
         kind="problems"
-        title="代码问题 / 试跑"
-        statusOverride={<span className="ml-auto self-center px-3 text-[12px] text-ink-3">{staticProblems.length} 个静态问题</span>}
+        title="代码检查"
+        hideTitle
+        headerExtra={<Segmented size="sm" className="my-auto" value={activeTab} options={outputTabs} onChange={(tab) => { setActiveTab(tab); setProblemsOpen(true) }} />}
+        statusOverride={activeTab === 'result' ? <span className="ml-auto self-center px-3 text-[12px] text-ink-3">{running ? '试跑中…' : stale ? '上次试跑结果' : result ? (result.valid ? '试跑通过' : '试跑失败') : '尚未试跑'}</span> : <></>}
         contentOverride={(
-          <div className="space-y-3">
-            <p className="text-[12px] text-ink-3">代码问题 · ty</p>
-            {staticProblems.map((problem, index) => (
-              <button key={`${index}-${problem.line}`} type="button" className="block w-full border-l-2 border-warn px-3 py-2 text-left text-[13px] text-warn" onClick={() => internalEditorRef.current?.revealLine(problem.line)}>
-                第 {problem.line} 行 · {problem.message}
-              </button>
-            ))}
-            {staticProblems.length === 0 && <p className="text-[13px] text-ink-3">暂无静态诊断。</p>}
-            <p className="border-t border-line pt-3 text-[12px] text-ink-3">试跑结果{stale ? ' · 代码已修改，以下为旧结果' : ''}</p>
-            {!stale && result?.errorLine != null && <button type="button" className="text-[12px] text-accent" onClick={() => internalEditorRef.current?.revealLine(result.errorLine!)}>定位到第 {result.errorLine} 行</button>}
-            {result ? <PythonRunResultBody result={result} stale={stale} /> : <p className="text-[13px] text-ink-3">尚未试跑</p>}
-          </div>
+          activeTab === 'problems' ? (
+            <div className="-mx-3.5 -my-3 divide-y divide-line/60">
+              {staticProblems.map((problem, index) => (
+                <button key={`${index}-${problem.line}`} type="button" className="flex w-full cursor-pointer items-start gap-2.5 px-3.5 py-2 text-left transition-colors hover:bg-fill focus-visible:outline-2 focus-visible:outline-accent focus-visible:-outline-offset-2 motion-reduce:transition-none" onClick={() => internalEditorRef.current?.revealLine(problem.line)}>
+                  {problem.severity === 'error' ? <CircleX size={15} className="mt-0.5 flex-none text-warn" aria-hidden /> : <TriangleAlert size={15} className="mt-0.5 flex-none text-warn" aria-hidden />}
+                  <span className="min-w-0 flex-1 text-[13px] leading-5 text-ink-1">{problem.message}</span>
+                  <span className="flex-none whitespace-nowrap text-[11px] leading-5 text-ink-3">第 {problem.line} 行</span>
+                </button>
+              ))}
+              {staticProblems.length === 0 && <p className="px-3.5 py-3 text-[13px] text-ink-3">暂无静态诊断。</p>}
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {stale && <p className="text-[12px] text-ink-3">代码已修改，以下为旧结果</p>}
+              {!stale && result?.errorLine != null && <button type="button" className="text-[12px] text-accent" onClick={() => internalEditorRef.current?.revealLine(result.errorLine!)}>定位到第 {result.errorLine} 行</button>}
+              {result ? <PythonRunResultBody result={result} stale={stale} /> : <p className="text-[13px] text-ink-3">{running ? '试跑中…' : '尚未试跑'}</p>}
+            </div>
+          )
         )}
         open={problemsOpen}
         onToggle={() => setProblemsOpen((open) => !open)}
