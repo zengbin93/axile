@@ -4,6 +4,7 @@ import { apiSend } from '@/lib/api/client'
 export type PythonEditorKind = 'portfolio' | 'account_notification' | 'system_notification'
 
 export interface ContractDiagnostic {
+  code?: string
   range: TextEdit['range']
   severity: number
   message: string

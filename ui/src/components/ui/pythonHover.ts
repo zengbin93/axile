@@ -1,6 +1,8 @@
 import { activateHover, closeHoverTooltips, EditorView, hoverTooltip, keymap, repositionTooltips } from '@codemirror/view'
+import { forEachDiagnostic } from '@codemirror/lint'
 import { LSPPlugin } from '@codemirror/lsp-client'
 import type { Hover, MarkedString } from 'vscode-languageserver-protocol'
+import { applyHoverFix, fixAtPosition, type HoverFix } from '@/components/ui/pythonHoverFix'
 
 function renderMarked(plugin: LSPPlugin, value: MarkedString): string {
   if (typeof value === 'string') return plugin.docToHTML(value, 'markdown')
@@ -15,22 +17,29 @@ export function pythonHover() {
     const focus = focusNext
     focusNext = false
     const plugin = LSPPlugin.get(view)
-    if (!plugin?.client.connected || plugin.client.serverCapabilities?.hoverProvider === false) return null
+    if (!plugin?.client.connected) return null
     const doc = view.state.doc
+    const fixes: HoverFix[] = []
+    forEachDiagnostic(view.state, (diagnostic, from, to) => {
+      const action = diagnostic.actions?.find((item) => item.name === '快速修复')
+      if (action) fixes.push({ from, to, message: diagnostic.message.split('\n')[0], action })
+    })
+    const fix = fixAtPosition(fixes, pos)
     plugin.client.sync()
     try {
-      const result = await plugin.client.request<object, Hover | null>('textDocument/hover', {
-        textDocument: { uri: plugin.uri }, position: plugin.toPosition(pos),
-      })
-      if (!result || view.state.doc !== doc || LSPPlugin.get(view) !== plugin) return null
-      const contents = result.contents
-      const html = Array.isArray(contents) ? contents.map(value => renderMarked(plugin, value)).join('<hr>')
+      const result = plugin.client.serverCapabilities?.hoverProvider === false ? null
+        : await plugin.client.request<object, Hover | null>('textDocument/hover', {
+          textDocument: { uri: plugin.uri }, position: plugin.toPosition(pos),
+        }).catch(() => null)
+      if ((!result && !fix) || view.state.doc !== doc || LSPPlugin.get(view) !== plugin) return null
+      const contents = result?.contents
+      const html = !contents ? '' : Array.isArray(contents) ? contents.map(value => renderMarked(plugin, value)).join('<hr>')
         : typeof contents === 'string' || 'language' in contents ? renderMarked(plugin, contents) : plugin.docToHTML(contents)
       return {
-        pos: result.range ? plugin.fromPosition(result.range.start) : pos,
-        end: result.range ? plugin.fromPosition(result.range.end) : pos,
+        pos: result?.range ? plugin.fromPosition(result.range.start) : fix?.from ?? pos,
+        end: result?.range ? plugin.fromPosition(result.range.end) : fix?.to ?? pos,
         above: true,
-        create: () => createHover(view, html, () => focus),
+        create: () => createHover(view, html, () => focus, fix),
       }
     } catch { return null }
   }, { hideOn: tr => tr.docChanged || !!tr.selection })
@@ -53,7 +62,7 @@ export function pythonHover() {
   } }])]
 }
 
-function createHover(view: EditorView, html: string, shouldFocus: () => boolean) {
+function createHover(view: EditorView, html: string, shouldFocus: () => boolean, fix: HoverFix | null) {
   const dom = document.createElement('div')
   dom.className = 'cm-python-hover'
   const content = dom.appendChild(document.createElement('div'))
@@ -62,6 +71,7 @@ function createHover(view: EditorView, html: string, shouldFocus: () => boolean)
   content.setAttribute('role', 'region')
   content.setAttribute('aria-label', 'Python 文档')
   content.innerHTML = html
+  if (!html) content.hidden = true
   if (content.childElementCount === 1 && content.firstElementChild?.matches('pre:has(> code)')) {
     dom.classList.add('cm-python-hover-code-only')
   }
@@ -88,6 +98,23 @@ function createHover(view: EditorView, html: string, shouldFocus: () => boolean)
         button.title = '复制失败'
         button.setAttribute('aria-label', '复制失败')
       }
+    })
+  }
+  if (fix) {
+    const footer = dom.appendChild(document.createElement('div'))
+    footer.className = 'cm-python-hover-fix'
+    const message = footer.appendChild(document.createElement('span'))
+    message.textContent = fix.message
+    const button = footer.appendChild(document.createElement('button'))
+    button.type = 'button'
+    button.textContent = '快速修复'
+    button.setAttribute('aria-label', '快速修复：' + fix.message)
+    button.addEventListener('pointerdown', (event) => event.preventDefault())
+    button.addEventListener('click', (event) => {
+      event.preventDefault()
+      event.stopPropagation()
+      view.dispatch({ effects: closeHoverTooltips })
+      applyHoverFix(view, fix)
     })
   }
   const grip = dom.appendChild(document.createElement('div'))
@@ -167,6 +194,17 @@ const hoverTheme = EditorView.theme({
     padding: '8px 10px', fontFamily: 'var(--font-sans)', fontSize: '13px',
     color: 'var(--color-ink-2)', lineHeight: '1.65', whiteSpace: 'normal', overflowWrap: 'anywhere',
   },
+  '.cm-python-hover-fix': {
+    display: 'flex', alignItems: 'center', gap: '10px', flex: 'none', padding: '8px 10px',
+    borderTop: '1px solid var(--color-line)', color: 'var(--color-ink-2)', fontSize: '12px', lineHeight: '1.5',
+  },
+  '.cm-python-hover-fix span': { minWidth: '0', flex: '1 1 auto', overflowWrap: 'anywhere' },
+  '.cm-python-hover-fix button': {
+    flex: 'none', border: '1px solid var(--color-line)', borderRadius: '4px', padding: '3px 8px',
+    backgroundColor: 'var(--color-bg-subtle)', color: 'var(--color-accent)', cursor: 'pointer', font: 'inherit',
+  },
+  '.cm-python-hover-fix button:hover': { backgroundColor: 'var(--color-fill)' },
+  '.cm-python-hover-fix button:focus-visible': { outline: '2px solid var(--color-accent)', outlineOffset: '1px' },
   '.cm-python-hover-section': { display: 'flow-root', paddingBottom: '4px' },
   '.cm-python-hover-doc .cm-python-hover-section > :first-child': {
     position: 'sticky', top: '-8px', zIndex: '1', margin: '0 -10px 4px', padding: '6px 10px',

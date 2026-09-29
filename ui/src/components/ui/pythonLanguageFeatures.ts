@@ -159,11 +159,13 @@ export function renamePythonSymbol(view: EditorView): boolean {
   return true
 }
 
-export function quickFix(view: EditorView, kind: PythonEditorKind): boolean {
+export function quickFix(view: EditorView, kind: PythonEditorKind, from?: number, to?: number): boolean {
   const plugin = LSPPlugin.get(view)
   if (!plugin || view.state.readOnly) return false
   const doc = view.state.doc
-  const range = { start: plugin.toPosition(view.state.selection.main.from), end: plugin.toPosition(view.state.selection.main.to) }
+  const targetFrom = from ?? view.state.selection.main.from
+  const targetTo = to ?? view.state.selection.main.to
+  const range = { start: plugin.toPosition(targetFrom), end: plugin.toPosition(targetTo) }
   void (async () => {
     try {
       plugin.client.sync()
@@ -178,7 +180,7 @@ export function quickFix(view: EditorView, kind: PythonEditorKind): boolean {
       }).catch(() => null)
       if (view.state.doc !== doc) return
       const fixes = (actions ?? []).filter((item): item is CodeAction => typeof item.command !== 'string' && !('disabled' in item && item.disabled))
-      const cursor = plugin.toPosition(view.state.selection.main.head)
+      const cursor = plugin.toPosition(targetFrom)
       for (const fix of contractResult.status === 'fulfilled' ? contractResult.value.fixes : []) {
         const annotation = fix.edits[0]
         if (!annotation || annotation.range.start.line !== cursor.line) continue

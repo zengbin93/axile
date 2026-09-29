@@ -7,16 +7,11 @@ import { pythonHover } from '@/components/ui/pythonHover'
 import { apiGet } from '@/lib/api/client'
 import { checkPythonContract, type PythonEditorKind } from '@/components/ui/pythonEditorContract'
 import { pythonVisualFeatures, quickFix, renamePythonSymbol } from '@/components/ui/pythonLanguageFeatures'
-import type { DocumentSymbol, SymbolInformation } from 'vscode-languageserver-protocol'
+import type { CodeAction, Command, Diagnostic as ProtocolDiagnostic, DocumentSymbol, SymbolInformation } from 'vscode-languageserver-protocol'
+import { actionTargetsDiagnostic } from '@/components/ui/pythonQuickFixAvailability'
 
 export type LanguageStatus = 'connecting' | 'ready' | 'reconnecting'
 export type DocumentSymbols = DocumentSymbol[] | SymbolInformation[]
-type LspDiagnostic = {
-  range: { start: { line: number; character: number }; end: { line: number; character: number } }
-  severity?: number
-  message: string
-}
-
 /** 重连时只替换语言扩展，保留编辑文档、选择和撤销栈。 */
 export function connectPython(
   view: EditorView,
@@ -109,7 +104,7 @@ export function connectPython(
             try {
               active.sync()
               const [tyResult, contractResult] = await Promise.allSettled([
-                active.request<object, { items?: LspDiagnostic[] }>(
+                active.request<object, { items?: ProtocolDiagnostic[] }>(
                   'textDocument/diagnostic', { textDocument: { uri: message.uri } },
                 ),
                 checkPythonContract(doc.toString(), kind),
@@ -117,13 +112,28 @@ export function connectPython(
               if (editor.state.doc !== doc || !active.connected) return []
               const tyItems = tyResult.status === 'fulfilled' ? tyResult.value.items ?? [] : []
               const contractItems = contractResult.status === 'fulfilled' ? contractResult.value.diagnostics : []
-              return [...tyItems, ...contractItems].map((item) => ({
-                from: plugin.fromPosition(item.range.start, doc),
-                to: plugin.fromPosition(item.range.end, doc),
-                severity: item.severity === 1 ? 'error' : item.severity === 2 ? 'warning' : 'info',
-                message: item.message,
-                source: 'source' in item ? String(item.source) : 'ty',
-              }))
+              const codeActions = tyItems.length ? await active.request<object, (CodeAction | Command)[] | null>(
+                'textDocument/codeAction', {
+                  textDocument: { uri: message.uri },
+                  range: { start: { line: 0, character: 0 }, end: plugin.toPosition(doc.length) },
+                  context: { diagnostics: tyItems, only: ['quickfix'], triggerKind: 1 },
+                },
+              ).catch(() => null) : null
+              if (editor.state.doc !== doc || !active.connected) return []
+              return [...tyItems, ...contractItems].map((item) => {
+                const isContract = 'source' in item && item.source === '入口契约'
+                const canFix = !editor.state.readOnly && (isContract
+                  ? item.severity === 3 && (contractResult.status === 'fulfilled' && contractResult.value.fixes.some((fix) => fix.edits[0]?.range.start.line === item.range.start.line))
+                  : (codeActions ?? []).some((action) => actionTargetsDiagnostic(action, item)))
+                return {
+                  from: plugin.fromPosition(item.range.start, doc),
+                  to: plugin.fromPosition(item.range.end, doc),
+                  severity: item.severity === 1 ? 'error' : item.severity === 2 ? 'warning' : 'info',
+                  message: typeof item.message === 'string' ? item.message : item.message.value,
+                  source: isContract ? '入口契约' : 'ty',
+                  actions: canFix ? [{ name: '快速修复', apply: (target: EditorView, from: number, to: number) => { quickFix(target, kind, from, to) } }] : [],
+                } satisfies Diagnostic
+              })
             } catch {
               return []
             }
