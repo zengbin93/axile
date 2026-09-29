@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type ReactNode, type Ref } from 'react'
 import { createPortal } from 'react-dom'
 import { python } from '@codemirror/lang-python'
-import { foldGutter } from '@codemirror/language'
+import { foldGutter, foldedRanges, foldState } from '@codemirror/language'
 import { lintGutter, linter, forceLinting, forEachDiagnostic, type Diagnostic } from '@codemirror/lint'
 import { Compartment, StateEffect } from '@codemirror/state'
 import { undo, redo, isolateHistory } from '@codemirror/commands'
 import { openSearchPanel, gotoLine } from '@codemirror/search'
-import { EditorView } from '@codemirror/view'
+import { Decoration, EditorView } from '@codemirror/view'
 import CodeMirror, { type ReactCodeMirrorRef } from '@uiw/react-codemirror'
 import { Check, Clipboard, Play, TriangleAlert } from 'lucide-react'
 import { InkRewrite } from '@/components/ui/InkRewrite'
@@ -25,11 +25,18 @@ import { pythonStickyScroll } from '@/components/ui/pythonStickyScroll'
 export interface PythonProblem { line: number; message: string; source: string; severity: string }
 const runtimeChanged = StateEffect.define<null>()
 const basicSetup = { foldGutter: false, highlightActiveLine: true, highlightActiveLineGutter: true, autocompletion: true }
+const foldedLine = Decoration.line({ class: 'cm-python-foldedLine' })
+const foldedLineHighlight = EditorView.decorations.compute([foldState], (state) => {
+  const lines = new Set<number>()
+  foldedRanges(state).between(0, state.doc.length, (from) => { lines.add(state.doc.lineAt(from).from) })
+  return Decoration.set([...lines].sort((a, b) => a - b).map((from) => foldedLine.range(from)))
+})
 const centeredFoldGutter = [
   foldGutter({
     markerDOM: (open) => {
       const marker = document.createElement('span')
       marker.title = open ? '折叠代码' : '展开代码'
+      if (!open) marker.className = 'cm-python-foldedMarker'
       const icon = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
       icon.setAttribute('viewBox', '0 0 16 16')
       icon.setAttribute('width', '14')
@@ -50,6 +57,7 @@ const centeredFoldGutter = [
   EditorView.theme({
     '.cm-foldGutter .cm-gutterElement': { display: 'flex', alignItems: 'center', justifyContent: 'center', minWidth: '18px' },
     '.cm-foldGutter .cm-gutterElement span': { display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0' },
+    '.cm-foldGutter .cm-python-foldedMarker': { color: 'var(--color-code-fg)' },
   }),
 ]
 const toolbarActionClass = 'flex-none rounded px-2 py-1 cursor-pointer transition-colors duration-150 hover:bg-fill hover:text-ink-1 active:bg-ink-1/10 active:text-ink-1 aria-expanded:bg-fill aria-expanded:text-ink-1 focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-1 disabled:pointer-events-none disabled:opacity-40 motion-reduce:transition-none'
@@ -289,6 +297,7 @@ export function PythonFunctionEditor({
     python(),
     lintGutter(),
     centeredFoldGutter,
+    foldedLineHighlight,
     languageSlot.of([]),
     editingExtensions(() => formatRef.current(), () => onRunRef.current()),
     linter((editor): Diagnostic[] => {

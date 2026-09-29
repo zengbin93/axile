@@ -9,6 +9,11 @@ export const pythonEditorTheme = [
     '&.cm-focused': { outline: 'none' },
     '.cm-gutters': { backgroundColor: 'var(--color-code-bg)', color: 'var(--color-ink-3)', border: 'none' },
     '.cm-content': { fontFamily: 'var(--font-mono)' },
+    '.cm-line.cm-python-foldedLine': { backgroundColor: 'color-mix(in srgb, var(--color-code-selection) 42%, transparent)' },
+    '.cm-foldPlaceholder': {
+      backgroundColor: 'transparent', border: 'none', borderRadius: '0',
+      color: 'var(--color-code-fg)', margin: '0 2px', padding: '0',
+    },
     '.cm-cursor': { borderLeftColor: 'var(--color-code-fg)' },
     '&.cm-focused .cm-selectionBackground, .cm-selectionBackground, ::selection': {
       backgroundColor: 'var(--color-code-selection) !important',
