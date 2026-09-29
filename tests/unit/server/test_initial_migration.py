@@ -46,6 +46,7 @@ def test_migration_history_is_linear() -> None:
         "0016_account_copy_source.py",
         "0017_notification_functions.py",
         "0018_single_account_notification.py",
+        "0019_default_notification_card_type.py",
     ]
     initial = _load_migration(migration_paths[0])
     calendar = _load_migration(migration_paths[1])
@@ -187,6 +188,33 @@ def test_single_account_notification_migration_preserves_enabled_notifications()
             ("default", None),
             ("default", None),
         ]
+
+
+def test_default_notification_type_migration_updates_only_unmodified_templates() -> None:
+    """旧默认函数自动修正类型标注，自定义源码保持原样。"""
+    from axile.common.default_account_notification import DEFAULT_ACCOUNT_NOTIFICATION_CODE
+
+    migration = _load_migration(_MIGRATIONS_DIR / "0019_default_notification_card_type.py")
+    engine = sa.create_engine("sqlite://")
+    metadata = sa.MetaData()
+    sa.Table(
+        "account",
+        metadata,
+        sa.Column("id", sa.Integer(), primary_key=True),
+        sa.Column("execution_notification_code", sa.Text()),
+    )
+    with engine.begin() as connection:
+        metadata.create_all(connection)
+        connection.execute(
+            sa.text("INSERT INTO account VALUES (1, :old), (2, :custom), (3, NULL)"),
+            {"old": migration._OLD_DEFAULT_CODE, "custom": "def notify(context): pass"},
+        )
+        migration.op = Operations(MigrationContext.configure(connection))
+        migration.upgrade()
+        rows = (
+            connection.execute(sa.text("SELECT execution_notification_code FROM account ORDER BY id")).scalars().all()
+        )
+        assert rows == [DEFAULT_ACCOUNT_NOTIFICATION_CODE, "def notify(context): pass", None]
 
 
 def test_account_asset_snapshot_migration_backfills_execution_assets() -> None:
