@@ -172,6 +172,7 @@ export function AccountEditNotificationPage() {
         </div>
 
         <PythonWorkbenchPane
+          kind="account_notification"
           editorRef={editorRef}
           statusTarget={editorStatus}
           storageKey="axon.notificationWorkbench.editorSplit"

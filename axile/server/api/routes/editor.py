@@ -16,6 +16,8 @@ import anyio
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, Field
 
+from axile.server.editor_contract import EditorKind, check_editor_contract
+
 router = APIRouter(prefix="/editor", tags=["editor"])
 MAX_MESSAGE = 2 * 1024 * 1024
 MAX_SESSIONS = 8
@@ -49,6 +51,19 @@ class FormatRequest(BaseModel):
     """待格式化的完整文档，不执行代码."""
 
     code: str = Field(max_length=MAX_MESSAGE)
+
+
+class ContractRequest(BaseModel):
+    """当前代码及页面要求的入口契约。"""
+
+    code: str = Field(max_length=MAX_MESSAGE)
+    kind: EditorKind
+
+
+@router.post("/contract")
+async def editor_contract(payload: ContractRequest) -> dict[str, list[dict[str, object]]]:
+    """为编辑器返回入口函数诊断与类型标注修复。"""
+    return check_editor_contract(payload.code, payload.kind)
 
 
 async def stop_process(process: asyncio.subprocess.Process) -> None:

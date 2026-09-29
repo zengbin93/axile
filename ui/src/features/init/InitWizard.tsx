@@ -7,6 +7,7 @@ import { Toast } from '@/components/Toast'
 import { ConfirmModal, type ConfirmSpec } from '@/components/ui/ConfirmModal'
 import { DirectoryPicker } from '@/components/ui/DirectoryPicker'
 import { OverflowText } from '@/components/ui/OverflowText'
+import { PythonFunctionEditor } from '@/components/ui/PythonFunctionEditor'
 import { Select } from '@/components/ui/Select'
 import { SettingsSaveBar } from '@/components/ui/SettingsSaveBar'
 import { StringTagInput } from '@/components/ui/StringTagInput'
@@ -438,23 +439,19 @@ export function InitWizard({
                     {draft.system_execution_notification_mode === 'function' && (
                       <div className="mt-3">
                         <p className="text-[13px] text-ink-3">定义同步函数 notify(context)。context 包含 event_type、occurred_at、account、error 和 is_test；函数自行发送通知。</p>
-                        <textarea
-                          aria-label="系统执行通知函数"
-                          className={`${inputCls} mt-2 min-h-52 resize-y font-mono`}
-                          value={draft.system_execution_notification_code}
-                          spellCheck={false}
-                          onChange={(e) => set({ system_execution_notification_code: e.target.value })}
-                          placeholder={'def notify(context):\n    print(context["error"]["message"])'}
-                        />
+                        <div className="mt-2">
+                          <PythonFunctionEditor
+                            kind="system_notification"
+                            code={draft.system_execution_notification_code}
+                            onChange={(value) => set({ system_execution_notification_code: value })}
+                            running={feishuTest === 'busy'}
+                            result={null}
+                            onRun={() => void runFunctionTest()}
+                            workbenchTitle="系统执行通知函数"
+                            height="260px"
+                          />
+                        </div>
                         <p className="mt-1 text-[12px] text-ink-3">试跑会实际执行函数，可能向外发送消息。样例事件中 is_test 为 true。</p>
-                        <button
-                          type="button"
-                          className="mt-2 cursor-pointer rounded-[11px] border border-line px-4 py-2 text-[14px] text-ink-2 disabled:opacity-45"
-                          disabled={!draft.system_execution_notification_code.trim() || feishuTest === 'busy'}
-                          onClick={() => void runFunctionTest()}
-                        >
-                          试跑函数
-                        </button>
                       </div>
                     )}
                   </details>

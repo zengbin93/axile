@@ -619,6 +619,7 @@ export function PortfolioEditPage() {
 
         {/* 右列代码工作台：组合页只提供草稿与试跑状态。 */}
         <PythonWorkbenchPane
+          kind="portfolio"
           editorRef={editorRef}
           statusTarget={editorStatus}
           storageKey="axon.portfolioWorkbench.editorSplit"

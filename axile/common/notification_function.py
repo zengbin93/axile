@@ -8,6 +8,8 @@ import subprocess
 import sys
 from dataclasses import dataclass
 
+from axile.common.function_contract import accepts_context
+
 NOTIFICATION_FUNCTION_TIMEOUT_SECONDS = 15
 
 
@@ -28,9 +30,15 @@ def validate_notification_function(code: str) -> None:
         tree = ast.parse(code, filename="<notification>")
     except SyntaxError as exc:
         raise ValueError(f"第 {exc.lineno} 行语法错误: {exc.msg}") from exc
-    functions = [node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == "notify"]
+    functions = [
+        node
+        for node in tree.body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == "notify"
+    ]
     if not functions:
         raise ValueError("脚本必须定义 notify(context) 函数")
+    if isinstance(functions[-1], ast.AsyncFunctionDef):
+        raise ValueError("notify 必须是同步函数")
     parameters = functions[-1].args
     if (
         len(parameters.posonlyargs) + len(parameters.args) != 1
@@ -79,8 +87,8 @@ def _run_child() -> None:
         with contextlib.redirect_stdout(sys.stderr):
             exec(compile(request["code"], "<notification>", "exec"), namespace)  # noqa: S102
             function = namespace["notify"]
-            if not callable(function) or len(inspect.signature(function).parameters) != 1:
-                raise TypeError("notify 必须且只能接收一个 context 参数")
+            if not accepts_context(function):
+                raise TypeError("notify 必须是同步函数，且只能接收一个位置参数 context")
             result = function(request["context"])
             if inspect.isawaitable(result):
                 raise TypeError("notify 必须是同步函数")

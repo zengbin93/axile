@@ -3,6 +3,7 @@ import { PythonFunctionEditor, PythonRunResultBody, type PythonEditorHandle, typ
 import { PythonRunPanel } from '@/components/ui/PythonRunPanel'
 import { Segmented } from '@/components/ui/Segmented'
 import { CircleX, TriangleAlert } from 'lucide-react'
+import type { PythonEditorKind } from '@/components/ui/pythonEditorContract'
 
 const DEFAULT_SPLIT = 0.35
 type OutputTab = 'problems' | 'result'
@@ -15,9 +16,11 @@ function initialSplit(storageKey: string) {
 
 /** 工作台的代码区、静态问题与试跑结果；业务页提供代码、执行行为和状态栏槽位。 */
 export function PythonWorkbenchPane({
+  kind,
   code, onChange, running, stale, result, onRun, editorRef, statusTarget, storageKey,
   title, docHref, onResizeChange,
 }: {
+  kind: PythonEditorKind
   code: string
   onChange: (code: string) => void
   running: boolean
@@ -48,7 +51,7 @@ export function PythonWorkbenchPane({
     }
   }, [result])
 
-  const staticProblems = problems.filter((problem) => problem.source === 'ty')
+  const staticProblems = problems.filter((problem) => problem.source === 'ty' || problem.source === '入口契约')
   const outputTabs = [
     {
       value: 'problems' as const,
@@ -95,6 +98,7 @@ export function PythonWorkbenchPane({
       <div className="flex min-h-[420px] min-w-0 flex-col bg-code-bg md:min-h-0">
         <div ref={setHeader} className="h-8 flex-none" />
         <PythonFunctionEditor
+          kind={kind}
           ref={(handle) => {
             internalEditorRef.current = handle
             if (typeof editorRef === 'function') editorRef(handle)

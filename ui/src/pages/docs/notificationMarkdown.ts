@@ -25,9 +25,10 @@ export const EXECUTION_FIELDS: NotificationField[] = [
 export const NOTIFY_CODE = `import json
 import os
 from urllib import request
+from axile.common.notification_context import AccountNotificationContext
 
 
-def notify(context: dict) -> None:
+def notify(context: AccountNotificationContext) -> None:
     # 试跑执行当前草稿；如不想发送真实消息，先检查此标记。
     if context["execution"]["is_test"]:
         return

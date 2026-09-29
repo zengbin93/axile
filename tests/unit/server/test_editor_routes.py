@@ -76,6 +76,53 @@ def test_formatting_and_syntax_errors(client):
     assert client.post("/editor/format", json={"code": "def broken("}).status_code == 422
 
 
+@pytest.mark.parametrize(
+    ("kind", "name", "type_name"),
+    [
+        ("portfolio", "calculate_portfolio", "Context"),
+        ("account_notification", "notify", "AccountNotificationContext"),
+        ("system_notification", "notify", "SystemNotificationContext"),
+    ],
+)
+def test_contract_reports_entry_and_annotation_fix(client, kind, name, type_name):
+    missing = client.post("/editor/contract", json={"kind": kind, "code": "x = 1\n"}).json()
+    assert name in missing["diagnostics"][0]["message"]
+    code = f"def {name}(context):\n    return {{}}\n"
+    report = client.post("/editor/contract", json={"kind": kind, "code": code}).json()
+    assert len(report["diagnostics"]) == 1
+    assert report["diagnostics"][0]["severity"] == 3
+    assert report["fixes"][0]["edits"][0]["newText"] == f": {type_name}"
+    assert report["fixes"][0]["edits"][1]["newText"].endswith(f"import {type_name}\n")
+
+
+def test_contract_rejects_uncallable_signatures(client):
+    for code in ("def notify(*, context):\n    pass\n", "async def notify(context):\n    pass\n"):
+        report = client.post("/editor/contract", json={"kind": "account_notification", "code": code}).json()
+        assert report["diagnostics"][0]["severity"] == 1
+    code = "from __future__ import annotations\ndef calculate_portfolio(context):\n    return {}\n"
+    report = client.post("/editor/contract", json={"kind": "portfolio", "code": code}).json()
+    assert report["fixes"][0]["edits"][1]["range"]["start"]["line"] == 1
+
+
+def test_contract_fix_uses_utf16_columns(client):
+    code = "def notify(上下文):\n    pass\n"
+    report = client.post("/editor/contract", json={"kind": "system_notification", "code": code}).json()
+    assert report["fixes"][0]["edits"][0]["range"]["start"]["character"] == len("def notify(上下文")
+
+
+def test_typed_notification_context_is_checked_by_ty(client):
+    code = (
+        "from axile.common.notification_context import AccountNotificationContext\n"
+        "def notify(context: AccountNotificationContext) -> None:\n"
+        '    count: str = context["summary"]["trade_count"]\n'
+    )
+    with client.websocket_connect("/editor/lsp") as socket:
+        session, _ = initialize(socket)
+        open_document(socket, session["uri"], code)
+        report = request(socket, 31, "textDocument/diagnostic", {"textDocument": {"uri": session["uri"]}})
+        assert any("str" in item["message"] and "int" in item["message"] for item in report["items"]), report
+
+
 def test_source_access_is_read_only_and_scoped(client, tmp_path):
     source = Path(editor.__file__).resolve()
     assert client.get("/editor/source", params={"uri": source.as_uri()}).status_code == 200

@@ -4,6 +4,7 @@ import { foldService } from '@codemirror/language'
 import { isolateHistory } from '@codemirror/commands'
 import { LSPPlugin } from '@codemirror/lsp-client'
 import type { CodeAction, Command, Diagnostic, FoldingRange, InlayHint, SemanticTokens, SemanticTokensOptions, TextEdit, WorkspaceEdit } from 'vscode-languageserver-protocol'
+import { checkPythonContract, type PythonEditorKind } from '@/components/ui/pythonEditorContract'
 
 type Visuals = { decorations: DecorationSet; folds: { from: number; to: number }[] }
 const setVisuals = StateEffect.define<Visuals>()
@@ -158,7 +159,7 @@ export function renamePythonSymbol(view: EditorView): boolean {
   return true
 }
 
-export function quickFix(view: EditorView): boolean {
+export function quickFix(view: EditorView, kind: PythonEditorKind): boolean {
   const plugin = LSPPlugin.get(view)
   if (!plugin || view.state.readOnly) return false
   const doc = view.state.doc
@@ -166,13 +167,23 @@ export function quickFix(view: EditorView): boolean {
   void (async () => {
     try {
       plugin.client.sync()
-      const report = await plugin.client.request<object, { items?: Diagnostic[] }>('textDocument/diagnostic', { textDocument: { uri: plugin.uri } })
+      const [contractResult, tyResult] = await Promise.allSettled([
+        checkPythonContract(doc.toString(), kind),
+        plugin.client.request<object, { items?: Diagnostic[] }>('textDocument/diagnostic', { textDocument: { uri: plugin.uri } }),
+      ])
+      const diagnostics = tyResult.status === 'fulfilled' ? tyResult.value.items ?? [] : []
       const actions = await plugin.client.request<object, (CodeAction | Command)[] | null>('textDocument/codeAction', {
         textDocument: { uri: plugin.uri }, range,
-        context: { diagnostics: report.items ?? [], only: ['quickfix'], triggerKind: 1 },
-      })
+        context: { diagnostics, only: ['quickfix'], triggerKind: 1 },
+      }).catch(() => null)
       if (view.state.doc !== doc) return
       const fixes = (actions ?? []).filter((item): item is CodeAction => typeof item.command !== 'string' && !('disabled' in item && item.disabled))
+      const cursor = plugin.toPosition(view.state.selection.main.head)
+      for (const fix of contractResult.status === 'fulfilled' ? contractResult.value.fixes : []) {
+        const annotation = fix.edits[0]
+        if (!annotation || annotation.range.start.line !== cursor.line) continue
+        fixes.push({ title: fix.title, kind: 'quickfix', edit: { changes: { [plugin.uri]: fix.edits } } })
+      }
       if (!fixes.length) { showDialog(view, { label: '当前位置没有可用的快速修复' }); return }
       showDialog(view, {
         focus: true,

@@ -11,6 +11,7 @@ import CodeMirror, { type ReactCodeMirrorRef } from '@uiw/react-codemirror'
 import { Check, Clipboard, Play, TriangleAlert } from 'lucide-react'
 import { InkRewrite } from '@/components/ui/InkRewrite'
 import { connectPython, type DocumentSymbols, type LanguageStatus } from '@/components/ui/pythonLanguageService'
+import type { PythonEditorKind } from '@/components/ui/pythonEditorContract'
 import { OverflowText } from '@/components/ui/OverflowText'
 import { LSPPlugin } from '@codemirror/lsp-client'
 import type { DocumentSymbol, SymbolInformation, Range } from 'vscode-languageserver-protocol'
@@ -210,6 +211,7 @@ export function PythonRunResultBody({
  * 两种布局都支持 Ctrl/Cmd+Enter 试跑；失败时错误行进 lint 并滚入可视区。
  */
 export function PythonFunctionEditor({
+  kind,
   code,
   onChange,
   running,
@@ -232,6 +234,7 @@ export function PythonFunctionEditor({
   headerTarget,
   statusTarget,
 }: {
+  kind: PythonEditorKind
   code: string
   onChange: (code: string) => void
   running: boolean
@@ -285,10 +288,10 @@ export function PythonFunctionEditor({
 
   useEffect(() => {
     if (!view) return
-    return connectPython(view, languageSlot, (status) => { setLanguageStatus(status); if (status !== 'ready') setSymbols(null) }, (uri, code) => new Promise((resolve) => {
+    return connectPython(view, languageSlot, kind, (status) => { setLanguageStatus(status); if (status !== 'ready') setSymbols(null) }, (uri, code) => new Promise((resolve) => {
       setSourcePreview({ uri, code, resolve })
     }), (next) => setSymbols(next))
-  }, [view, languageSlot])
+  }, [view, languageSlot, kind])
 
   const replaceCode = useCallback((text: string) => {
     const editor = cmRef.current?.view
@@ -443,7 +446,7 @@ export function PythonFunctionEditor({
     if (name === '定义') jumpToDefinition(editor)
     if (name === '引用') findReferences(editor)
     if (name === '重命名') renamePythonSymbol(editor)
-    if (name === '快速修复') quickFix(editor)
+    if (name === '快速修复') quickFix(editor, kind)
   }
   useEffect(() => {
     if (!menu) return

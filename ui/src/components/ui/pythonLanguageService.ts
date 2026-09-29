@@ -5,6 +5,7 @@ import { LSPClient, LSPPlugin, serverCompletion, signatureHelp, jumpToDefinition
 import DOMPurify from 'dompurify'
 import { pythonHover } from '@/components/ui/pythonHover'
 import { apiGet } from '@/lib/api/client'
+import { checkPythonContract, type PythonEditorKind } from '@/components/ui/pythonEditorContract'
 import { pythonVisualFeatures, quickFix, renamePythonSymbol } from '@/components/ui/pythonLanguageFeatures'
 import type { DocumentSymbol, SymbolInformation } from 'vscode-languageserver-protocol'
 
@@ -20,6 +21,7 @@ type LspDiagnostic = {
 export function connectPython(
   view: EditorView,
   slot: Compartment,
+  kind: PythonEditorKind,
   onStatus: (status: LanguageStatus) => void,
   displaySource: (uri: string, code: string) => Promise<EditorView | null>,
   onSymbols?: (symbols: DocumentSymbols | null, doc: Text) => void,
@@ -99,23 +101,28 @@ export function connectPython(
           pythonHover(),
           ...(onSymbols ? [documentSymbols(onSymbols)] : []),
           keymap.of([...jumpToDefinitionKeymap, ...findReferencesKeymap,
-            { key: 'F2', run: renamePythonSymbol }, { key: 'Mod-.', run: quickFix }]),
+            { key: 'F2', run: renamePythonSymbol }, { key: 'Mod-.', run: (editor) => quickFix(editor, kind) }]),
           linter(async (editor): Promise<Diagnostic[]> => {
             const plugin = LSPPlugin.get(editor)
             if (!plugin || !active.connected) return []
             const doc = editor.state.doc
             try {
               active.sync()
-              const report = await active.request<object, { items?: LspDiagnostic[] }>(
-                'textDocument/diagnostic', { textDocument: { uri: message.uri } },
-              )
+              const [tyResult, contractResult] = await Promise.allSettled([
+                active.request<object, { items?: LspDiagnostic[] }>(
+                  'textDocument/diagnostic', { textDocument: { uri: message.uri } },
+                ),
+                checkPythonContract(doc.toString(), kind),
+              ])
               if (editor.state.doc !== doc || !active.connected) return []
-              return (report.items ?? []).map((item) => ({
+              const tyItems = tyResult.status === 'fulfilled' ? tyResult.value.items ?? [] : []
+              const contractItems = contractResult.status === 'fulfilled' ? contractResult.value.diagnostics : []
+              return [...tyItems, ...contractItems].map((item) => ({
                 from: plugin.fromPosition(item.range.start, doc),
                 to: plugin.fromPosition(item.range.end, doc),
                 severity: item.severity === 1 ? 'error' : item.severity === 2 ? 'warning' : 'info',
                 message: item.message,
-                source: 'ty',
+                source: 'source' in item ? String(item.source) : 'ty',
               }))
             } catch {
               return []

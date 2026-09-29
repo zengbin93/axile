@@ -2,9 +2,6 @@ import { activateHover, closeHoverTooltips, EditorView, hoverTooltip, keymap, re
 import { LSPPlugin } from '@codemirror/lsp-client'
 import type { Hover, MarkedString } from 'vscode-languageserver-protocol'
 
-/** Keep the user's reading size for this page, without persisting document content. */
-let readingSize: { width: number; height: number } | undefined
-
 function renderMarked(plugin: LSPPlugin, value: MarkedString): string {
   if (typeof value === 'string') return plugin.docToHTML(value, 'markdown')
   // A fence longer than any run in the source preserves embedded backticks.
@@ -119,22 +116,14 @@ function createHover(view: EditorView, html: string, shouldFocus: () => boolean)
     if (!drag) return
     // CodeMirror keeps the text anchor fixed, including when the hover is above it.
     const above = dom.closest('.cm-tooltip')?.classList.contains('cm-tooltip-above')
-    readingSize = {
-      width: Math.min(window.innerWidth - 24, Math.max(240, drag.width + event.clientX - drag.x)),
-      height: Math.min(window.innerHeight - 24, Math.max(100, drag.height + (above ? -1 : 1) * (event.clientY - drag.y))),
-    }
-    dom.style.width = `${readingSize.width}px`
-    dom.style.height = `${readingSize.height}px`
+    dom.style.width = `${Math.min(window.innerWidth - 24, Math.max(240, drag.width + event.clientX - drag.x))}px`
+    dom.style.height = `${Math.min(window.innerHeight - 24, Math.max(100, drag.height + (above ? -1 : 1) * (event.clientY - drag.y)))}px`
     repositionTooltips(view)
   })
   grip.addEventListener('lostpointercapture', () => { drag = undefined })
   return {
     dom,
     mount() {
-      if (readingSize) {
-        dom.style.width = `${readingSize.width}px`
-        dom.style.height = `${readingSize.height}px`
-      }
       if (shouldFocus()) content.focus({ preventScroll: true })
     },
     destroy() { copyTimers.forEach(window.clearTimeout) },

@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-import inspect
 import math
 import traceback
 from dataclasses import dataclass
 from typing import cast
 
+from axile.common.function_contract import accepts_context
 from axile.server.context import Context
 
 
@@ -119,8 +119,8 @@ def calculate_portfolio_target(code: str, context: Context) -> PortfolioFunction
         function = namespace.get("calculate_portfolio")
         if not callable(function):
             raise ValueError("脚本必须定义 calculate_portfolio(context) 函数")
-        if len(inspect.signature(function).parameters) != 1:
-            raise TypeError("calculate_portfolio 必须且只能接收一个 context 参数")
+        if not accepts_context(function):
+            raise TypeError("calculate_portfolio 必须是同步函数，且只能接收一个位置参数 context")
         return PortfolioFunctionResult(ok=True, target=_normalize_target(function(context)))
     except BaseException as exc:  # noqa: BLE001 - 用户函数错误需结构化返回
         if bool(getattr(exc, "requires_session_recovery", False)):
