@@ -176,6 +176,7 @@ export function AccountEditNotificationPage() {
           statusTarget={editorStatus}
           storageKey="axon.notificationWorkbench.editorSplit"
           title="通知函数"
+          docHref="/docs/notification"
           code={code}
           onChange={(value) => { setCode(value); setError(null) }}
           running={busy === 'test'}

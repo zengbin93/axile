@@ -26,6 +26,7 @@ import { SystemConfigPage } from '@/pages/SystemConfigPage'
 import { WizardLayout } from '@/features/setup/WizardLayout'
 import { SetupHub } from '@/pages/setup/SetupHub'
 import { CustomCalcDocPage } from '@/pages/docs/CustomCalcDocPage'
+import { NotificationDocPage } from '@/pages/docs/NotificationDocPage'
 import {
   AcctChannel,
   AcctConnect,
@@ -117,6 +118,7 @@ const router = createBrowserRouter([
         ],
       },
       { path: 'docs/custom-calc', element: <CustomCalcDocPage /> },
+      { path: 'docs/notification', element: <NotificationDocPage /> },
       {
         path: 'setup',
         element: <WizardLayout />,
