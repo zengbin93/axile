@@ -127,7 +127,11 @@ export function connectPython(
             } catch {
               return []
             }
-          }, { delay: 350 }),
+          }, {
+            delay: 350,
+            // 入口类型提示仍留在问题列表和代码标记中，避免与类型 hover 共用浮层。
+            tooltipFilter: diagnostics => diagnostics.filter(diagnostic => diagnostic.source !== '入口契约'),
+          }),
         ]) })
         forceLinting(view)
         onStatus('ready')

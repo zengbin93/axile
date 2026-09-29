@@ -37,6 +37,7 @@ export function editingExtensions(format: () => void, run: () => void) {
     EditorView.theme({
       '.cm-activeLine, .cm-activeLineGutter': { backgroundColor: 'color-mix(in srgb, var(--color-code-selection) 22%, transparent)' },
       '.cm-panels, .cm-tooltip': { backgroundColor: 'var(--color-surface)', color: 'var(--color-ink-1)', borderColor: 'var(--color-line)' },
+      '.cm-tooltip-hover:has(> .cm-tooltip-lint:empty):not(:has(> .cm-python-hover)), .cm-tooltip-hover > .cm-tooltip-lint:empty': { display: 'none' },
       '.cm-search input, .cm-textfield': { backgroundColor: 'var(--color-code-bg)', color: 'var(--color-code-fg)' },
       '.cm-button': { backgroundImage: 'none', backgroundColor: 'var(--color-surface)', color: 'var(--color-ink-1)' },
       '.cm-diagnostic-error, .cm-diagnostic-warning': { borderLeftColor: 'var(--color-warn)' },
