@@ -21,6 +21,7 @@ import { quickFix, renamePythonSymbol } from '@/components/ui/pythonLanguageFeat
 import { jumpToDefinition, findReferences } from '@codemirror/lsp-client'
 import { pythonEditorTheme } from '@/components/ui/pythonEditorTheme'
 import { pythonStickyScroll } from '@/components/ui/pythonStickyScroll'
+import { PythonSymbolTree, symbolPath } from '@/components/ui/PythonSymbolTree'
 
 export interface PythonProblem { line: number; message: string; source: string; severity: string }
 const runtimeChanged = StateEffect.define<null>()
@@ -201,7 +202,7 @@ export function PythonFunctionEditor({
   const [languageStatus, setLanguageStatus] = useState<LanguageStatus>('connecting')
   const [position, setPosition] = useState({ line: 1, column: 1 })
   const [symbols, setSymbols] = useState<DocumentSymbols | null>(null)
-  const [menu, setMenu] = useState<{ kind: 'actions' | 'symbols'; x: number; y: number; items?: DocumentSymbol[] | SymbolInformation[]; active?: string } | null>(null)
+  const [menu, setMenu] = useState<{ kind: 'actions' | 'symbols'; x: number; y: number } | null>(null)
   const menuRef = useRef<HTMLDivElement>(null)
   const [formatting, setFormatting] = useState(false)
   const [editorMessage, setEditorMessage] = useState('')
@@ -359,9 +360,9 @@ export function PythonFunctionEditor({
     setMenu(null)
     editor.focus()
   }
-  const openMenu = (kind: 'actions' | 'symbols', target: HTMLElement, items?: DocumentSymbol[] | SymbolInformation[], active?: string) => {
+  const openMenu = (kind: 'actions' | 'symbols', target: HTMLElement) => {
     const rect = target.getBoundingClientRect()
-    setMenu({ kind, x: Math.min(rect.left, window.innerWidth - 240), y: Math.min(rect.bottom + 3, window.innerHeight - 350), items, active })
+    setMenu({ kind, x: Math.min(rect.left, window.innerWidth - 288), y: Math.min(rect.bottom + 3, window.innerHeight - 350) })
   }
   const command = (name: string) => {
     setMenu(null)
@@ -380,7 +381,7 @@ export function PythonFunctionEditor({
   useEffect(() => {
     if (!menu) return
     const close = (event: PointerEvent) => { if (!menuRef.current?.contains(event.target as Node)) { setMenu(null); if (!(event.target instanceof HTMLElement && event.target.closest('button, a, input, .cm-editor'))) editor?.focus() } }
-    menuRef.current?.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus()
+    if (menu.kind === 'actions') menuRef.current?.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus()
     document.addEventListener('pointerdown', close)
     return () => document.removeEventListener('pointerdown', close)
   }, [menu, editor])
@@ -389,9 +390,9 @@ export function PythonFunctionEditor({
   const workbenchHeader = (
     <div className="@container flex h-8 min-w-0 items-center gap-1 border-b border-line bg-surface px-3 text-[12px] text-ink-2">
       <div className="flex min-w-0 flex-1 items-center overflow-hidden whitespace-nowrap">
-        <button type="button" className="flex-none text-ink-1" onClick={(event) => openMenu('symbols', event.currentTarget)}>{workbenchTitle}</button>
-        {(chain.length > 3 ? [chain[0], null, chain.at(-1)!] : chain).map((item, index) => <span key={item?.name ?? 'ellipsis'} className="flex min-w-0 items-center gap-1 pl-1">
-          <span aria-hidden>›</span><button type="button" className="min-w-0 max-w-32" onClick={(event) => openMenu('symbols', event.currentTarget, item ? index === 0 ? roots ?? [] : chain[chain.indexOf(item) - 1]?.children ?? roots ?? [] : chain[0]?.children ?? [], item?.name)}>{item ? <OverflowText text={item.name} /> : '…'}</button>
+        <button type="button" className="flex-none text-ink-1" aria-haspopup="tree" aria-expanded={menu?.kind === 'symbols'} onClick={(event) => openMenu('symbols', event.currentTarget)}>{workbenchTitle}</button>
+        {(chain.length > 3 ? [chain[0], null, chain.at(-1)!] : chain).map((item) => <span key={item?.name ?? 'ellipsis'} className="flex min-w-0 items-center gap-1 pl-1">
+          <span aria-hidden>›</span><button type="button" className="min-w-0 max-w-32" aria-haspopup="tree" aria-expanded={menu?.kind === 'symbols'} onClick={(event) => openMenu('symbols', event.currentTarget)}>{item ? <OverflowText text={item.name} /> : '…'}</button>
         </span>)}
       </div>
       <button type="button" className={`${toolbarActionClass} hidden items-center gap-1 @min-[480px]:inline-flex`} disabled={disabled} onClick={() => void paste()}><Clipboard size={12} /> 粘贴</button>
@@ -400,15 +401,15 @@ export function PythonFunctionEditor({
       {docHref && <a className={`${toolbarActionClass} hidden @min-[480px]:block`} href={docHref} target="_blank" rel="noopener">开发文档 ↗</a>}
     </div>
   )
-  const popup = menu && createPortal(<div ref={menuRef} role="menu" tabIndex={-1} onKeyDown={(event) => {
+  const popup = menu && createPortal(<div ref={menuRef} tabIndex={-1} onKeyDown={(event) => {
     if (event.key === 'Escape') { setMenu(null); editor?.focus() }
-    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+    if (menu.kind === 'actions' && (event.key === 'ArrowDown' || event.key === 'ArrowUp')) {
       event.preventDefault()
       const buttons = [...event.currentTarget.querySelectorAll<HTMLButtonElement>('button:not(:disabled)')]
       buttons[(buttons.indexOf(document.activeElement as HTMLButtonElement) + buttons.length + (event.key === 'ArrowDown' ? 1 : -1)) % buttons.length]?.focus()
     }
-  }} style={{ left: Math.max(8, menu.x), top: Math.max(8, menu.y) }} className="fixed z-[100] max-h-[65vh] w-[min(15rem,calc(100vw-16px))] overflow-auto rounded-md border border-line bg-surface p-1 text-[12px] text-ink-1 shadow-lg">
-    {menu.kind === 'symbols' ? ((menu.items ?? roots)?.length ? (menu.items ?? roots)!.map((item, index) => <button key={index} role="menuitem" className={`block w-full truncate px-2 py-1.5 text-left hover:bg-fill ${menu.active === item.name ? 'text-accent' : ''}`} onClick={() => jumpSymbol(item)}>{item.name} · {('location' in item ? item.location.range.start.line : item.selectionRange.start.line) + 1}</button>) : <span className="block p-2 text-ink-3">暂无符号</span>) : <>{[...actions, '粘贴', '格式化', ...(docHref ? ['开发文档 ↗'] : [])].map((name) => <button key={name} role="menuitem" disabled={actionDisabled(name)} className={`${toolbarActionClass} flex w-full items-center justify-between gap-4 py-1.5 text-left`} onClick={() => name === '开发文档 ↗' ? window.open(docHref!, '_blank', 'noopener') : command(name)}><span>{name}</span>{shortcutHint(name)}</button>)}<div className="border-t border-line px-2 py-1 text-ink-3">Python · 4 空格</div></>}
+  }} style={{ left: Math.max(8, menu.x), top: Math.max(8, menu.y) }} role={menu.kind === 'actions' ? 'menu' : undefined} className={`fixed z-[100] max-h-[65vh] overflow-auto rounded-md border border-line bg-surface p-1 text-[12px] text-ink-1 shadow-lg ${menu.kind === 'symbols' ? 'w-[min(18rem,calc(100vw-16px))]' : 'w-[min(15rem,calc(100vw-16px))]'}`}>
+    {menu.kind === 'symbols' ? <PythonSymbolTree key={`${menu.x}:${menu.y}`} symbols={roots} activePath={cursor ? symbolPath(symbols, cursor.line, cursor.character) : []} onJump={jumpSymbol} /> : <>{[...actions, '粘贴', '格式化', ...(docHref ? ['开发文档 ↗'] : [])].map((name) => <button key={name} role="menuitem" disabled={actionDisabled(name)} className={`${toolbarActionClass} flex w-full items-center justify-between gap-4 py-1.5 text-left`} onClick={() => name === '开发文档 ↗' ? window.open(docHref!, '_blank', 'noopener') : command(name)}><span>{name}</span>{shortcutHint(name)}</button>)}<div className="border-t border-line px-2 py-1 text-ink-3">Python · 4 空格</div></>}
   </div>, document.body)
   const tools = (
     <div className="flex flex-none flex-wrap items-center gap-1 border-b border-line bg-surface px-3 py-1.5 text-[12px] text-ink-2" aria-label="编辑操作">
