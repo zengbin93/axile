@@ -6,7 +6,7 @@ import { linter, forceLinting, forEachDiagnostic, type Diagnostic } from '@codem
 import { Compartment, StateEffect } from '@codemirror/state'
 import { undo, redo, isolateHistory } from '@codemirror/commands'
 import { openSearchPanel, gotoLine } from '@codemirror/search'
-import { Decoration, EditorView, ViewPlugin, type ViewUpdate } from '@codemirror/view'
+import { Decoration, EditorView, ViewPlugin, scrollPastEnd, type ViewUpdate } from '@codemirror/view'
 import CodeMirror, { type ReactCodeMirrorRef } from '@uiw/react-codemirror'
 import { Check, Clipboard, Play, TriangleAlert } from 'lucide-react'
 import { InkRewrite } from '@/components/ui/InkRewrite'
@@ -366,6 +366,7 @@ export function PythonFunctionEditor({
     pythonEditorTheme,
     pythonEditorZoomKeys,
     pythonStickyScroll,
+    scrollPastEnd(),
     python(),
     centeredFoldGutter,
     foldedLineHighlight,
