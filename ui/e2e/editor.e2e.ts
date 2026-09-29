@@ -122,6 +122,21 @@ test('definition opens read-only source and rename is undoable', async ({ page }
   await expect(page.getByTestId('code')).not.toContainText('latest_price')
 })
 
+test('modifier click follows a definition and clears its link on release', async ({ page }) => {
+  const symbol = page.locator('.cm-python-semantic-method, .cm-python-semantic-function').filter({ hasText: /^get_price$/ }).first()
+  const modifier = process.platform === 'darwin' ? 'Meta' : 'Control'
+  await symbol.hover()
+  await page.keyboard.down(modifier)
+  await expect(page.locator('.cm-python-definitionLink')).toHaveText('get_price')
+  await page.keyboard.up(modifier)
+  await expect(page.locator('.cm-python-definitionLink')).toHaveCount(0)
+  await page.keyboard.down(modifier)
+  await expect(page.locator('.cm-python-definitionLink')).toHaveText('get_price')
+  await symbol.click({ modifiers: [modifier] })
+  await page.keyboard.up(modifier)
+  await expect(page.getByRole('dialog', { name: '只读源码预览' })).toContainText('context.py')
+})
+
 test('hover, signature help and quick fixes use ty results', async ({ page }) => {
   await page.locator('.cm-python-semantic-method, .cm-python-semantic-function').filter({ hasText: /^get_price$/ }).hover()
   await expect(page.locator('.cm-tooltip')).toContainText('get_price')

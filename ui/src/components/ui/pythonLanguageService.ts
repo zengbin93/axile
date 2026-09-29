@@ -9,6 +9,7 @@ import { checkPythonContract, type PythonEditorKind } from '@/components/ui/pyth
 import { pythonVisualFeatures, quickFix, renamePythonSymbol } from '@/components/ui/pythonLanguageFeatures'
 import type { CodeAction, Command, Diagnostic as ProtocolDiagnostic, DocumentSymbol, SymbolInformation } from 'vscode-languageserver-protocol'
 import { actionTargetsDiagnostic } from '@/components/ui/pythonQuickFixAvailability'
+import { pythonDefinitionClick } from '@/components/ui/pythonDefinitionClick'
 
 export type LanguageStatus = 'connecting' | 'ready' | 'reconnecting'
 export type DocumentSymbols = DocumentSymbol[] | SymbolInformation[]
@@ -94,6 +95,7 @@ export function connectPython(
           active.plugin(message.uri, 'python'),
           pythonVisualFeatures(),
           pythonHover(kind),
+          pythonDefinitionClick,
           ...(onSymbols ? [documentSymbols(onSymbols)] : []),
           keymap.of([...jumpToDefinitionKeymap, ...findReferencesKeymap,
             { key: 'F2', run: renamePythonSymbol }, { key: 'Mod-.', run: (editor) => quickFix(editor, kind) }]),
