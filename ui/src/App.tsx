@@ -103,7 +103,7 @@ const router = createBrowserRouter([
           { path: 'accounts/:id/edit/portfolio', element: <AccountEditPage section="portfolio" /> },
           { path: 'accounts/:id/edit/timer', element: <AccountEditTimerPage /> },
           { path: 'accounts/:id/edit/algorithm', element: <AccountEditAlgorithmPage /> },
-          { path: 'accounts/:id/edit/notification', element: <AccountEditNotificationPage /> },
+          { path: 'accounts/:id/edit/notification', element: <AccountEditNotificationPage />, handle: { fullBleed: true } },
           { path: 'accounts/:id/edit/control', element: <AccountEditControlPage /> },
           { path: 'accounts/:id/holdings', element: <AccountHoldingsPage /> },
           { path: 'accounts/:id/history', element: <AccountHistoryPage /> },
