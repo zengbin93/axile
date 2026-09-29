@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react'
-import { Check, ChevronDown, Circle, TriangleAlert } from 'lucide-react'
+import { Check, Circle, TriangleAlert } from 'lucide-react'
 import { InkRewrite } from '@/components/ui/InkRewrite'
+import { WorkbenchPanel } from '@/components/ui/WorkbenchPanel'
 import {
   PYTHON_RUN_STYLE,
   pythonRunStatus,
@@ -48,28 +49,14 @@ export function PythonRunPanel({
   const panelTitle = title ?? (kind === 'result' ? '试跑结果' : '问题')
 
   return (
-    <section
-      aria-label={panelTitle}
-      className={`row-span-2 grid min-h-0 overflow-hidden bg-surface [grid-template-rows:subgrid] ${className ?? ''}`}
-    >
-      <header className={`flex h-9 flex-none items-stretch ${open ? 'border-b border-line' : ''}`}>
-        <button
-          type="button"
-          aria-expanded={open}
-          className={`flex cursor-pointer items-center gap-1.5 px-3.5 text-[12px] font-semibold tracking-wide text-ink-1 ${
-            open ? 'border-b border-accent' : ''
-          }`}
-          onClick={onToggle}
-        >
-          <ChevronDown
-            size={13}
-            aria-hidden
-            className={`text-ink-3 transition-transform duration-200 motion-reduce:transition-none ${open ? '' : '-rotate-90'}`}
-          />
-          {panelTitle}
-        </button>
-        {headerExtra}
-        {statusOverride ?? (
+    <WorkbenchPanel
+      title={panelTitle}
+      open={open}
+      onToggle={onToggle}
+      className={className}
+      headerExtra={headerExtra}
+      stale={stale}
+      status={statusOverride ?? (
         <span className="ml-auto flex items-center gap-1.5 px-3.5 text-[12.5px]">
           {status === 'pass' && kind === 'result' ? (
             <Check size={13} className="text-accent" />
@@ -84,13 +71,8 @@ export function PythonRunPanel({
             textClassName={failed && kind === 'problems' ? 'text-warn' : style.text}
           />
         </span>
-        )}
-      </header>
-
-      <div
-        inert={!open}
-        className={`min-h-0 flex-1 overflow-auto px-3.5 py-3 [scrollbar-gutter:stable] ${stale ? 'opacity-55' : ''}`}
-      >
+      )}
+    >
         {contentOverride ?? (
         kind === 'result' ? (
           result?.valid ? (
@@ -129,7 +111,6 @@ export function PythonRunPanel({
           </p>
         )
         )}
-      </div>
-    </section>
+    </WorkbenchPanel>
   )
 }

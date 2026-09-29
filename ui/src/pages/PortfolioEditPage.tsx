@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { useParams, useViewTransitionState } from 'react-router'
-import { ChevronDown, Pencil, Play, RefreshCw, Zap } from 'lucide-react'
+import { Pencil, Play, RefreshCw, Zap } from 'lucide-react'
 import { Link } from '@/components/ui/nav'
 import { Chip } from '@/components/ui/Card'
 import { Skeleton } from '@/components/ui/Skeleton'
@@ -13,6 +13,7 @@ import { ConfirmModal, type ConfirmSpec } from '@/components/ui/ConfirmModal'
 import type { PythonEditorHandle } from '@/components/ui/PythonFunctionEditor'
 import { PythonWorkbenchPane } from '@/components/ui/PythonWorkbenchPane'
 import { PythonRunPanel } from '@/components/ui/PythonRunPanel'
+import { WorkbenchPanel } from '@/components/ui/WorkbenchPanel'
 import { channelLabel } from '@/features/dashboard/display'
 import { WeightResult } from '@/features/portfolio/WeightResult'
 import { SnapshotResult } from '@/features/portfolio/SnapshotResult'
@@ -561,32 +562,14 @@ export function PortfolioEditPage() {
             <span className="absolute inset-x-0 top-1/2 h-px bg-line transition-colors duration-130 group-hover:bg-accent group-focus:bg-accent" />
           </div>
 
-          {/* 跟随账户占原问题位：跟随关系是组合的静态元数据，跟试跑结果同属左列上下文。
-              面板 chrome 与 PythonRunPanel 同构（36px 标题 + chevron 收放 + subgrid 正文）。 */}
-          <section
-            aria-label="跟随账户"
-            className="row-span-2 grid min-h-0 overflow-hidden border-t border-line bg-surface [grid-template-rows:subgrid] md:border-r"
-          >
-            <header className={`flex h-9 flex-none items-stretch ${followersOpen ? 'border-b border-line' : ''}`}>
-              <button
-                type="button"
-                aria-expanded={followersOpen}
-                className={`flex cursor-pointer items-center gap-1.5 px-3.5 text-[12px] font-semibold tracking-wide text-ink-1 ${
-                  followersOpen ? 'border-b border-accent' : ''
-                }`}
-                onClick={() => setFollowersOpen((open) => !open)}
-              >
-                <ChevronDown
-                  size={13}
-                  aria-hidden
-                  className={`text-ink-3 transition-transform duration-200 motion-reduce:transition-none ${
-                    followersOpen ? '' : '-rotate-90'
-                  }`}
-                />
-                跟随账户 · {followers.length}
-              </button>
-              {/* 动作贴着它的作用对象：通知全部跟随账户立即调仓；有账户在途执行时禁用。 */}
-              {followers.length > 0 && (
+          {/* 跟随关系是组合的静态元数据；面板外壳与「目标」共用。 */}
+          <WorkbenchPanel
+            title={`跟随账户 · ${followers.length}`}
+            open={followersOpen}
+            onToggle={() => setFollowersOpen((open) => !open)}
+            className="border-t border-line md:border-r"
+            bodyClassName="px-1.5 py-1.5"
+            status={followers.length > 0 ? (
                 <Tooltip
                   content={
                     anyFollowerRunning
@@ -606,9 +589,8 @@ export function PortfolioEditPage() {
                     </button>
                   </span>
                 </Tooltip>
-              )}
-            </header>
-            <div inert={!followersOpen} className="min-h-0 flex-1 overflow-auto px-1.5 py-1.5 [scrollbar-gutter:stable]">
+              ) : undefined}
+          >
               <ErrorNotice title="触发执行失败" error={actionError} variant="mutation" onRetry={runFanout} />
               {followers.length > 0 ? (
                 <ul className="flex flex-col">
@@ -632,8 +614,7 @@ export function PortfolioEditPage() {
               ) : (
                 <p className="px-2 py-1.5 text-[13.5px] text-ink-3">暂无账户跟随该组合。</p>
               )}
-            </div>
-          </section>
+          </WorkbenchPanel>
         </div>
 
         {/* 右列代码工作台：组合页只提供草稿与试跑状态。 */}
