@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ast
 import json
+import os
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -49,7 +50,9 @@ def validate_notification_function(code: str) -> None:
         raise ValueError("notify 必须且只能接收一个 context 参数")
 
 
-def run_notification_function(code: str, context: dict[str, object]) -> NotificationFunctionResult:
+def run_notification_function(
+    code: str, context: dict[str, object], *, feishu_key: str | None = None
+) -> NotificationFunctionResult:
     """运行通知函数并强制限制墙钟时间。"""
     try:
         validate_notification_function(code)
@@ -60,6 +63,7 @@ def run_notification_function(code: str, context: dict[str, object]) -> Notifica
             capture_output=True,
             timeout=NOTIFICATION_FUNCTION_TIMEOUT_SECONDS,
             check=False,
+            env={**os.environ, "AXILE_ACCOUNT_FEISHU_KEY": feishu_key or ""},
         )
         response = json.loads(process.stdout)
         return NotificationFunctionResult(
@@ -87,7 +91,7 @@ def _run_child() -> None:
         with contextlib.redirect_stdout(sys.stderr):
             exec(compile(request["code"], "<notification>", "exec"), namespace)  # noqa: S102
             function = namespace["notify"]
-            if not accepts_context(function):
+            if not callable(function) or not accepts_context(function):
                 raise TypeError("notify 必须是同步函数，且只能接收一个位置参数 context")
             result = function(request["context"])
             if inspect.isawaitable(result):

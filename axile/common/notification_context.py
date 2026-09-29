@@ -43,6 +43,7 @@ class AccountNotificationContext(TypedDict):
     trades: list[dict[str, object]]
     symbols: list[dict[str, object]]
     summary: AccountNotificationSummary
+    default_feishu_variables: dict[str, object]
 
 
 class SystemNotificationError(TypedDict):

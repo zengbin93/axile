@@ -10,6 +10,7 @@ from loguru import logger
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from axile.common.default_account_notification import DEFAULT_ACCOUNT_NOTIFICATION_CODE
 from axile.common.feishu import push_feishu_card
 from axile.common.notification_function import run_notification_function
 from axile.executor.algorithms.utils import clock_now
@@ -33,6 +34,12 @@ from axile.server.target_weight_snapshots import get_latest_account_target_snaps
 router = APIRouter()
 
 
+@router.get("/{account_id}/notification/default")
+def get_default_account_notification(account_id: int) -> dict[str, str]:
+    """提供可恢复的默认飞书执行通知函数源码。"""
+    return {"code": DEFAULT_ACCOUNT_NOTIFICATION_CODE}
+
+
 class AccountFeishuTestRequest(BaseModel):
     """账户飞书通知测试载荷."""
 
@@ -45,6 +52,7 @@ class AccountNotificationFunctionTestRequest(BaseModel):
     """使用当前编辑草稿试跑账户执行通知函数。"""
 
     code: str
+    feishu_key: str | None = None
 
 
 class AccountFeishuTestResult(BaseModel):
@@ -294,7 +302,10 @@ async def test_account_notification_function(
     account = await _get_account_or_404(session, account_id)
     output = await _build_sample_output(session, account, UnifiedAccountAssets.unavailable())
     context = build_execution_notification_context(_TestNotificationSource(account.name), output, is_test=True)
-    result = await asyncio.to_thread(run_notification_function, payload.code, context)
+    key = payload.feishu_key if "feishu_key" in payload.model_fields_set else account.feishu_key
+    if payload.code == DEFAULT_ACCOUNT_NOTIFICATION_CODE and not key:
+        return AccountFeishuTestResult(ok=False, message="请先配置飞书 Webhook")
+    result = await asyncio.to_thread(run_notification_function, payload.code, context, feishu_key=key)
     return AccountFeishuTestResult(
         ok=result.ok, message="样例函数运行成功" if result.ok else result.error or "运行失败"
     )

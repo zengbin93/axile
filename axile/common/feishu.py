@@ -8,7 +8,7 @@ _FEISHU_HOOK_BASE: Final = "https://open.feishu.cn/open-apis/bot/v2/hook/"
 _FEISHU_TIMEOUT_SECONDS: Final = 15
 
 
-def push_feishu_card(card: dict[str, object], key: str) -> None:
+def push_feishu_card(card: dict[str, object], key: str, *, timeout: float = _FEISHU_TIMEOUT_SECONDS) -> None:
     """向飞书自定义机器人发送交互卡片.
 
     Parameters
@@ -17,6 +17,8 @@ def push_feishu_card(card: dict[str, object], key: str) -> None:
         飞书交互卡片内容。
     key : str
         飞书群自定义机器人 webhook key。
+    timeout : float, default=15
+        HTTP 请求超时时间（秒）。
 
     Raises
     ------
@@ -28,7 +30,7 @@ def push_feishu_card(card: dict[str, object], key: str) -> None:
     response = requests.post(
         f"{_FEISHU_HOOK_BASE}{key}",
         json=cast(Any, {"msg_type": "interactive", "card": card}),
-        timeout=_FEISHU_TIMEOUT_SECONDS,
+        timeout=timeout,
     )
     response.raise_for_status()
     try:

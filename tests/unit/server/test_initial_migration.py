@@ -45,6 +45,7 @@ def test_migration_history_is_linear() -> None:
         "0015_tq_market_value.py",
         "0016_account_copy_source.py",
         "0017_notification_functions.py",
+        "0018_single_account_notification.py",
     ]
     initial = _load_migration(migration_paths[0])
     calendar = _load_migration(migration_paths[1])
@@ -141,6 +142,51 @@ def test_notification_function_migration_discards_old_card_config() -> None:
             sa.text("SELECT execution_notification_mode, execution_notification_code FROM account WHERE id = 1")
         ).one()
         assert row == ("default", None)
+
+
+def test_single_account_notification_migration_preserves_enabled_notifications() -> None:
+    """默认飞书、自定义函数、未配置三种旧账户按实际通知行为迁移。"""
+    from axile.common.default_account_notification import DEFAULT_ACCOUNT_NOTIFICATION_CODE
+
+    migration = _load_migration(_MIGRATIONS_DIR / "0018_single_account_notification.py")
+    engine = sa.create_engine("sqlite://")
+    metadata = sa.MetaData()
+    sa.Table(
+        "account",
+        metadata,
+        sa.Column("id", sa.Integer(), primary_key=True),
+        sa.Column("feishu_key", sa.Text()),
+        sa.Column("execution_notification_mode", sa.Text(), nullable=False),
+        sa.Column("execution_notification_code", sa.Text()),
+    )
+    with engine.begin() as connection:
+        metadata.create_all(connection)
+        connection.execute(
+            sa.text(
+                "INSERT INTO account VALUES (1, 'hook', 'default', NULL), "
+                "(2, NULL, 'function', 'def notify(context): pass'), "
+                "(3, NULL, 'default', NULL), "
+                "(4, NULL, 'default', 'def notify(context): pass')"
+            )
+        )
+        migration.op = Operations(MigrationContext.configure(connection))
+        migration.upgrade()
+        columns = {column["name"] for column in sa.inspect(connection).get_columns("account")}
+        assert "execution_notification_mode" not in columns
+        rows = (
+            connection.execute(sa.text("SELECT execution_notification_code FROM account ORDER BY id")).scalars().all()
+        )
+        assert rows == [DEFAULT_ACCOUNT_NOTIFICATION_CODE, "def notify(context): pass", None, None]
+        migration.downgrade()
+        restored = connection.execute(
+            sa.text("SELECT execution_notification_mode, execution_notification_code FROM account ORDER BY id")
+        ).all()
+        assert restored == [
+            ("default", None),
+            ("function", "def notify(context): pass"),
+            ("default", None),
+            ("default", None),
+        ]
 
 
 def test_account_asset_snapshot_migration_backfills_execution_assets() -> None:

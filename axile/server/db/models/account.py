@@ -308,9 +308,6 @@ class AccountBase(SQLModel):
         description="风险品种,自动平仓,非必填",
     )
     feishu_key: Optional[str] = Field(sa_column=Column(Text, nullable=True), description="飞书KEY, 可选")
-    execution_notification_mode: str = Field(
-        default="default", sa_column=Column(Text, nullable=False, server_default="default")
-    )
     execution_notification_code: str | None = Field(default=None, sa_column=Column(Text, nullable=True))
     portfolio_id: Optional[int] = Field(
         default=None,
@@ -426,7 +423,6 @@ class AccountPublic(SQLModel):
     forbidden_symbols: Optional[List[str]] = None
     risk_symbols: Optional[List[str]] = None
     feishu_configured: bool = False
-    execution_notification_mode: str = "default"
     execution_notification_code: str | None = None
     portfolio_id: Optional[int] = None
     write_empty_record: Optional[int] = None
@@ -611,7 +607,6 @@ class AccountUpdate(SQLModel):
     forbidden_symbols: Optional[List[str]] = None
     risk_symbols: Optional[List[str]] = None
     feishu_key: Optional[str] = None
-    execution_notification_mode: str | None = None
     execution_notification_code: str | None = None
     portfolio_id: Optional[int] = None
     write_empty_record: Optional[int] = None

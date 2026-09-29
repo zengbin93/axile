@@ -169,7 +169,6 @@ def _build_clear_positions_backend_request(
     empty_kwargs = {
         "algorithm": resolved_algorithm,
         "feishu_key": account.feishu_key if account.feishu_key else None,
-        "execution_notification_mode": account.execution_notification_mode,
         "execution_notification_code": account.execution_notification_code,
         "feishu_account": {
             "id": account.id,

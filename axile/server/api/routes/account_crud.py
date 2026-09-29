@@ -11,7 +11,8 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from sqlmodel import and_, delete, desc, func, select
 
 from axile.channels import get_channel
-from axile.common.notification_config import validate_notification_config
+from axile.common.default_account_notification import DEFAULT_ACCOUNT_NOTIFICATION_CODE
+from axile.common.notification_function import validate_notification_function
 from axile.common.trade_channel import TradeChannel
 from axile.executor.account_control.models import AccountControlOverride
 from axile.server.api.deps import HistoryPaginationDep, SchedDep, SessionDep
@@ -205,7 +206,14 @@ async def _create_account_record(
     Account
         已加入当前会话、并完成初始组合绑定的账户对象。
     """
-    db_account = Account.model_validate(account.model_copy(update={"account_config": account_config}))
+    code = account.execution_notification_code
+    if code is not None and not code.strip():
+        code = None
+    if code is None and account.feishu_key and "execution_notification_code" not in account.model_fields_set:
+        code = DEFAULT_ACCOUNT_NOTIFICATION_CODE
+    db_account = Account.model_validate(
+        account.model_copy(update={"account_config": account_config, "execution_notification_code": code})
+    )
     session.add(db_account)
     await session.flush()
 
@@ -319,7 +327,8 @@ async def create_account(
         account_config = _validate_channel_account_config(account.trade_channel, account.account_config)
         _check_algorithm_channel_compat(account.algorithm, str(account.trade_channel), "下单算法")
         _check_algorithm_channel_compat(account.empty_positions_algorithm, str(account.trade_channel), "清仓算法")
-        validate_notification_config(account.execution_notification_mode, account.execution_notification_code)
+        if account.execution_notification_code and account.execution_notification_code.strip():
+            validate_notification_function(account.execution_notification_code)
         parse_cron_expr(account.cron_expr)
         db_account = await _create_account_record(session, account, account_config)
         await enqueue_account_runtime_sync(
@@ -676,11 +685,21 @@ async def update_account(
         _check_algorithm_channel_compat(next_empty_algorithm, str(next_trade_channel), "清仓算法")
 
         data = _build_account_update_data(account)
-        next_notification_mode = str(data.get("execution_notification_mode", db_account.execution_notification_mode))
+        if (
+            isinstance(data.get("execution_notification_code"), str)
+            and not str(data["execution_notification_code"]).strip()
+        ):
+            data["execution_notification_code"] = None
+        if (
+            data.get("feishu_key")
+            and not db_account.feishu_key
+            and not db_account.execution_notification_code
+            and "execution_notification_code" not in data
+        ):
+            data["execution_notification_code"] = DEFAULT_ACCOUNT_NOTIFICATION_CODE
         next_notification_code = data.get("execution_notification_code", db_account.execution_notification_code)
-        validate_notification_config(
-            next_notification_mode, next_notification_code if isinstance(next_notification_code, str) else None
-        )
+        if next_notification_code:
+            validate_notification_function(str(next_notification_code))
         if account.account_config is not None or account.trade_channel is not None:
             data["account_config"] = normalized_account_config
         runtime_changed = bool({"account_config", "trade_channel", "is_started"} & data.keys())

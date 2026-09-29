@@ -12,6 +12,7 @@ import pytest
 from fastapi import FastAPI, HTTPException, Response
 from fastapi.testclient import TestClient
 
+from axile.common.default_account_notification import DEFAULT_ACCOUNT_NOTIFICATION_CODE
 from axile.common.trade_channel import TradeChannel
 from axile.executor.account_control.registry import (
     ensure_default_account_control_registry_bootstrapped,
@@ -20,7 +21,7 @@ from axile.executor.account_control.registry import (
 from axile.server.api.deps import get_db, get_scheduler
 from axile.server.api.routes import account as account_routes
 from axile.server.api.routes import account_crud as account_crud_routes
-from axile.server.db.models import Account, AccountRuntimeSync, AccountUpdate
+from axile.server.db.models import Account, AccountCreate, AccountRuntimeSync, AccountUpdate
 
 
 @pytest.fixture(autouse=True)
@@ -267,6 +268,43 @@ def test_create_account_requires_explicit_account_control_preset() -> None:
 
     assert response.status_code == 422
     assert any(error["loc"][-1] == "account_control_preset" for error in response.json()["detail"])
+
+
+def test_new_account_with_webhook_gets_default_notification_function(monkeypatch: pytest.MonkeyPatch) -> None:
+    """创建账户时提供飞书 Key，就把可编辑的默认函数存入唯一槽位。"""
+    monkeypatch.setattr(account_crud_routes, "add_record_portfolio_account", _noop_async)
+    session = _RouteSession()
+    payload = AccountCreate.model_validate(_account_payload() | {"feishu_key": "hook"})
+    account = asyncio.run(account_crud_routes._create_account_record(session, payload, payload.account_config))
+    assert account.execution_notification_code == DEFAULT_ACCOUNT_NOTIFICATION_CODE
+
+    disabled = AccountCreate.model_validate(
+        _account_payload() | {"feishu_key": "hook", "execution_notification_code": None}
+    )
+    assert (
+        asyncio.run(
+            account_crud_routes._create_account_record(_RouteSession(), disabled, disabled.account_config)
+        ).execution_notification_code
+        is None
+    )
+
+
+def test_first_webhook_patch_installs_default_function_and_explicit_clear_disables_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """首次填写 Webhook 自动启用默认函数，显式清空函数后保持关闭。"""
+    monkeypatch.setattr(account_crud_routes, "enqueue_account_runtime_sync", _noop_async)
+    monkeypatch.setattr(account_crud_routes, "reconcile_account_runtime", _synchronized_runtime_sync)
+    session = _RouteSession(_build_account())
+    client = TestClient(_build_app(session))
+
+    assert client.patch("/account/1", json={"feishu_key": "hook"}).status_code == 200
+    assert session.account is not None
+    assert session.account.execution_notification_code == DEFAULT_ACCOUNT_NOTIFICATION_CODE
+    assert client.patch("/account/1", json={"execution_notification_code": None}).status_code == 200
+    assert session.account.execution_notification_code is None
+    assert client.patch("/account/1", json={"feishu_key": "new-hook"}).status_code == 200
+    assert session.account.execution_notification_code is None
 
 
 def test_create_account_rejects_unknown_account_control_preset(monkeypatch) -> None:

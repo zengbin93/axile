@@ -118,8 +118,7 @@ class UnifiedStandardInput(BaseModel):
 
     # 通知配置
     feishu_key: str | None = Field(None, description="飞书通知key")
-    execution_notification_mode: str = Field(default="default", description="执行通知模式")
-    execution_notification_code: str | None = Field(default=None, description="自定义执行通知函数源码")
+    execution_notification_code: str | None = Field(default=None, description="执行通知函数源码；空值不通知")
     feishu_account: dict[str, object] = Field(default={}, description="通知可使用的脱敏账户元数据")
 
     # 执行配置
@@ -308,7 +307,6 @@ class UnifiedStandardInput(BaseModel):
             forbidden_symbols=_as_str_list(data.get("forbidden_symbols", [])),
             risk_symbols=_as_str_list(data.get("risk_symbols", [])),
             feishu_key=feishu_key_obj if isinstance(feishu_key_obj, str) else None,
-            execution_notification_mode=str(data.get("execution_notification_mode", "default")),
             execution_notification_code=data.get("execution_notification_code")
             if isinstance(data.get("execution_notification_code"), str)
             else None,
@@ -340,7 +338,6 @@ class UnifiedStandardInput(BaseModel):
             "risk_symbols": self.risk_symbols,
             "execution_timeout": self.execution_timeout,
             "feishu_account": self.feishu_account,
-            "execution_notification_mode": self.execution_notification_mode,
         }
 
         # 添加可选字段

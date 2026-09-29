@@ -269,7 +269,6 @@ def _build_rebalance_standard_input(
             "forbidden_symbols": account.forbidden_symbols,
             "risk_symbols": account.risk_symbols,
             "feishu_key": feishu_key,
-            "execution_notification_mode": account.execution_notification_mode,
             "execution_notification_code": account.execution_notification_code,
             "feishu_account": {
                 "id": account.id,

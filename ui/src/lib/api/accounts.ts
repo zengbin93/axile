@@ -38,8 +38,17 @@ export function testAccountFeishu(
 }
 
 /** 用当前页面草稿运行一次样例执行通知函数。 */
-export function testAccountNotificationFunction(id: number, code: string): Promise<AccountFeishuTestResult> {
-  return apiSend<AccountFeishuTestResult>('POST', `/account/${id}/notification/test`, { code })
+export function testAccountNotificationFunction(id: number, code: string, feishuKey?: string | null): Promise<AccountFeishuTestResult> {
+  return apiSend<AccountFeishuTestResult>('POST', `/account/${id}/notification/test`, {
+    code,
+    ...(feishuKey !== undefined ? { feishu_key: feishuKey } : {}),
+  })
+}
+
+/** 读取与执行链路相同的默认飞书函数源码。 */
+export async function getDefaultAccountNotification(id: number): Promise<string> {
+  const result = await apiGet<{ code: string }>(`/account/${id}/notification/default`)
+  return result.code
 }
 
 export interface SchedulePreview {

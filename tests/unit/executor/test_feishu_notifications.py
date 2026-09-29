@@ -5,12 +5,14 @@ from __future__ import annotations
 import queue
 import threading
 
+from axile.common.default_account_notification import DEFAULT_ACCOUNT_NOTIFICATION_CODE
+from axile.common.notification_function import run_notification_function
 from axile.common.trade_channel import TradeChannel
 from axile.executor import feishu_notifications as feishu_module
 from axile.executor.abstract_executor import execution_lifecycle as abstract_executor_execution_lifecycle_module
 from axile.executor.abstract_executor.base import AbstractExecutor
 from axile.executor.algorithms.core.base import AlgorithmResult
-from axile.executor.feishu_notifications import build_execute_results_feishu_card, send_execute_results_to_feishu
+from axile.executor.feishu_notifications import build_execute_results_feishu_card
 from axile.executor.models.execution_result import ExecutionStatus
 from axile.executor.models.unified_account_assets import Position, PositionDirection, UnifiedAccountAssets
 from axile.executor.models.unified_input import CTPAccountConfig, UnifiedStandardInput
@@ -295,6 +297,7 @@ def test_execute_with_feishu_key_uses_extracted_sender(monkeypatch) -> None:
             "curr_target": {"rb2610": 0.1},
             "algorithm": {"method": "TEST"},
             "feishu_key": "hook-exec",
+            "execution_notification_code": "def notify(context): pass",
         }
     )
 
@@ -361,14 +364,8 @@ def test_empty_positions_does_not_send_second_card(monkeypatch) -> None:
     assert result.success is True  # fake execute 不进入真实通知入口
 
 
-def test_send_execute_results_to_feishu_builds_expected_card(monkeypatch) -> None:
-    """飞书通知模块应构造卡片并发送到指定 webhook。"""
-    pushed: list[tuple[dict[str, object], str]] = []
-
-    def _push_card(card: dict[str, object], feishu_key: str) -> None:
-        pushed.append((card, feishu_key))
-
-    monkeypatch.setattr(feishu_module, "push_feishu_card", _push_card)
+def test_default_card_builder_preserves_positions_and_trades() -> None:
+    """默认卡片保留原有持仓和成交展示。"""
 
     order = UnifiedOrder(
         order_id="order-1",
@@ -419,11 +416,7 @@ def test_send_execute_results_to_feishu_builds_expected_card(monkeypatch) -> Non
         success=True,
     )
 
-    send_execute_results_to_feishu(_NotificationSource(), output, "hook-demo")
-
-    assert len(pushed) == 1
-    card, key = pushed[0]
-    assert key == "hook-demo"
+    card = build_execute_results_feishu_card(_NotificationSource(), output)
     data = card["data"]
     assert isinstance(data, dict)
     template_variable = data["template_variable"]
@@ -451,6 +444,29 @@ def test_send_execute_results_to_feishu_builds_expected_card(monkeypatch) -> Non
             "trade_id": "trade-1",
         }
     ]
+
+
+def test_default_notification_function_uses_existing_card_variables(monkeypatch) -> None:
+    """默认源码可运行，卡片变量与现有默认构造器保持一致。"""
+    from axile.common import feishu
+
+    source = _NotificationSource()
+    output = _minimal_output()
+    context = feishu_module.build_execution_notification_context(source, output)
+    sent: list[tuple[object, str]] = []
+    monkeypatch.setenv("AXILE_ACCOUNT_FEISHU_KEY", "hook")
+    monkeypatch.setattr(feishu, "push_feishu_card", lambda card, key, **kwargs: sent.append((card, key)))
+    namespace: dict[str, object] = {}
+    exec(DEFAULT_ACCOUNT_NOTIFICATION_CODE, namespace)
+    namespace["notify"](context)
+
+    assert sent[0][1] == "hook"
+    assert sent[0][0]["data"]["template_variable"] == context["default_feishu_variables"]
+    old_variables = build_execute_results_feishu_card(source, output)["data"]["template_variable"]
+    assert {key: value for key, value in old_variables.items() if key != "dt"} == {
+        key: value for key, value in context["default_feishu_variables"].items() if key != "dt"
+    }
+    assert run_notification_function(DEFAULT_ACCOUNT_NOTIFICATION_CODE, context).ok is True
 
 
 def test_custom_notification_context_is_redacted() -> None:
@@ -499,7 +515,7 @@ def _minimal_output() -> UnifiedStandardOutput:
 
 
 def test_enqueue_feishu_skips_without_key(monkeypatch) -> None:
-    """未提供 feishu_key 时应直接跳过，不启动 worker、不投递任务。"""
+    """没有通知函数时应直接跳过，不启动 worker、不投递任务。"""
     started: list[bool] = []
     monkeypatch.setattr(
         feishu_module,
@@ -520,10 +536,10 @@ def test_custom_notification_enqueues_without_feishu_key(monkeypatch) -> None:
         feishu_module, "_notify_queue", type("Queue", (), {"put_nowait": lambda _self, item: queued.append(item)})()
     )
     feishu_module.enqueue_execute_results_to_feishu(
-        _NotificationSource(), _minimal_output(), None, "function", "def notify(context): pass"
+        _NotificationSource(), _minimal_output(), None, "def notify(context): pass"
     )
     assert len(queued) == 1
-    assert queued[0][3] == "function"
+    assert queued[0][3] == "def notify(context): pass"
 
 
 def test_enqueue_feishu_drops_when_queue_full(monkeypatch) -> None:
@@ -543,7 +559,9 @@ def test_enqueue_feishu_drops_when_queue_full(monkeypatch) -> None:
         lambda message, *args, **kwargs: warnings.append(str(message)),
     )
 
-    feishu_module.enqueue_execute_results_to_feishu(_NotificationSource(), _minimal_output(), "hook")
+    feishu_module.enqueue_execute_results_to_feishu(
+        _NotificationSource(), _minimal_output(), "hook", "def notify(context): pass"
+    )
 
     assert len(warnings) == 1
     assert "队列已满" in warnings[0]
@@ -561,11 +579,13 @@ def test_enqueue_feishu_delivers_through_bounded_worker(monkeypatch) -> None:
     monkeypatch.setattr(
         feishu_module,
         "dispatch_execution_notification",
-        lambda source, output, key, mode, code, snapshot: _fake_send(source, output, key),
+        lambda source, output, key, code, snapshot: _fake_send(source, output, key),
     )
 
     source = _NotificationSource()
-    feishu_module.enqueue_execute_results_to_feishu(source, _minimal_output(), "hook-worker")
+    feishu_module.enqueue_execute_results_to_feishu(
+        source, _minimal_output(), "hook-worker", "def notify(context): pass"
+    )
 
     assert done.wait(timeout=5.0), "后台 worker 未在超时内消费通知任务"
     assert captured[0][0] is source
@@ -587,11 +607,15 @@ def test_feishu_worker_survives_task_exception(monkeypatch) -> None:
     monkeypatch.setattr(
         feishu_module,
         "dispatch_execution_notification",
-        lambda source, output, key, mode, code, snapshot: _flaky_send(source, output, key),
+        lambda source, output, key, code, snapshot: _flaky_send(source, output, key),
     )
 
-    feishu_module.enqueue_execute_results_to_feishu(_NotificationSource(), _minimal_output(), "boom")
-    feishu_module.enqueue_execute_results_to_feishu(_NotificationSource(), _minimal_output(), "ok")
+    feishu_module.enqueue_execute_results_to_feishu(
+        _NotificationSource(), _minimal_output(), "boom", "def notify(context): pass"
+    )
+    feishu_module.enqueue_execute_results_to_feishu(
+        _NotificationSource(), _minimal_output(), "ok", "def notify(context): pass"
+    )
 
     assert done.wait(timeout=5.0), "异常任务后 worker 未继续消费下一个任务"
     assert "boom" in calls and "ok" in calls

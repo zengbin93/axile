@@ -52,7 +52,6 @@ class _EmptyPositionsPlan:
     algorithm: dict[str, object]
     forbidden_symbols: list[str]
     feishu_key: str | None
-    execution_notification_mode: str
     execution_notification_code: str | None
     feishu_account: dict[str, object]
     extra: dict[str, object]
@@ -516,7 +515,6 @@ class AbstractExecutorFacadeMixin:
             algorithm=_coerce_object_dict(kwargs.get("algorithm", executor._get_default_algorithm())),
             forbidden_symbols=forbidden_symbols,
             feishu_key=feishu_key_raw if isinstance(feishu_key_raw, str) else None,
-            execution_notification_mode=str(kwargs.get("execution_notification_mode", "default")),
             execution_notification_code=notification_code_raw if isinstance(notification_code_raw, str) else None,
             feishu_account=_coerce_object_dict(kwargs.get("feishu_account", {})),
             extra=_coerce_object_dict(kwargs.get("extra", {})),
@@ -555,7 +553,6 @@ class AbstractExecutorFacadeMixin:
             curr_target=plan.curr_target,
             last_target=plan.last_target,
             feishu_key=plan.feishu_key,
-            execution_notification_mode=plan.execution_notification_mode,
             execution_notification_code=plan.execution_notification_code,
             feishu_account=plan.feishu_account,
             extra=plan.extra,

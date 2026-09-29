@@ -30,17 +30,20 @@ def test_notification_function_test_uses_sample_without_channel_query(monkeypatc
     monkeypatch.setattr(
         account_feishu,
         "run_notification_function",
-        lambda code, context: captured.append((code, context)) or SimpleNamespace(ok=True),
+        lambda code, context, **kwargs: captured.append((code, context, kwargs)) or SimpleNamespace(ok=True),
     )
     result = asyncio.run(
         account_feishu.test_account_notification_function(
             SimpleNamespace(close=AsyncMock(), get=AsyncMock()),
             1,
-            account_feishu.AccountNotificationFunctionTestRequest(code="def notify(context): pass"),
+            account_feishu.AccountNotificationFunctionTestRequest(
+                code="def notify(context): pass", feishu_key="draft-key"
+            ),
         )
     )
     assert result.ok is True
     assert captured[0][1]["execution"]["is_test"] is True
+    assert captured[0][2]["feishu_key"] == "draft-key"
 
 
 def _sample_assets() -> UnifiedAccountAssets:

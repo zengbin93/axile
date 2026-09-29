@@ -11,6 +11,7 @@ export const NOTIFICATION_FIELDS: NotificationField[] = [
   { name: 'orders / trades', type: 'list[dict]', desc: '本次执行的订单和成交；列表可能为空。' },
   { name: 'symbols', type: 'list[dict]', desc: '各品种的状态、结论、原因、目标数量与订单成交计数。' },
   { name: 'summary', type: 'dict', desc: '品种、持仓、订单、成交、成功与失败品种的计数。' },
+  { name: 'default_feishu_variables', type: 'dict', desc: '默认飞书卡片的模板变量，可直接修改后发送。' },
 ]
 
 export const EXECUTION_FIELDS: NotificationField[] = [
@@ -46,7 +47,8 @@ def notify(context: AccountNotificationContext) -> None:
 
 export const CONTRACT_RULES = [
   '入口是同步 `notify(context)`，必须且只能接收一个参数；返回值被忽略。',
-  '函数自行选择通知渠道并发送消息；自定义模式不要求配置飞书 Webhook。',
+  '每个账户最多保存一个通知函数；源码为空时不通知。默认飞书通知也是一个可编辑函数。',
+  '函数可自行选择通知渠道；已配置的账户飞书 Key 通过子进程环境变量 AXILE_ACCOUNT_FEISHU_KEY 提供。',
   '函数在独立进程中运行，最长 15 秒。失败只记录通知错误，不改变交易结果，也不会自动补发默认飞书卡片。',
 ]
 
@@ -54,7 +56,7 @@ export const TEST_RULES = [
   '点击“试跑函数”会执行编辑器中的当前草稿，无需先保存。试跑可能真的向外发送消息。',
   '试跑使用脱敏的样例执行结果，`context["execution"]["is_test"]` 为 `True`；真实通知为 `False`。',
   '试跑成功只表示函数在样例上下文中执行成功；不能保证真实事件的字段都有值，或外部服务始终可用。',
-  '保存并启用后，后续账户执行通知使用已保存的函数源码。',
+  '保存后，后续账户执行通知使用已保存的唯一函数源码；清空并保存即可关闭。',
 ]
 
 export const FAILURE_RULES = [

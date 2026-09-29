@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { useParams } from 'react-router'
-import { Check, Circle, Play, TriangleAlert } from 'lucide-react'
+import { Check, Circle, Eye, EyeOff, Play, TriangleAlert } from 'lucide-react'
 import { Link, useNavigate } from '@/components/ui/nav'
 import { InkRewrite } from '@/components/ui/InkRewrite'
 import { PYTHON_RUN_STYLE, pythonRunStatus, type PythonEditorHandle, type PythonValidationState } from '@/components/ui/PythonFunctionEditor'
@@ -10,7 +10,9 @@ import { PythonWorkbenchPane } from '@/components/ui/PythonWorkbenchPane'
 import { WorkbenchPanel } from '@/components/ui/WorkbenchPanel'
 import { AccountPageTitle } from '@/features/account/pageHead'
 import { EditError, EditLoading } from '@/features/account/editUi'
-import { getAccount, testAccountNotificationFunction, updateAccount, type AccountFeishuTestResult } from '@/lib/api/accounts'
+import { extractFeishuKey, feishuKeyPatch } from '@/features/account/feishuUpdate'
+import { notificationDraft } from '@/features/account/notificationDraft'
+import { getAccount, getDefaultAccountNotification, testAccountNotificationFunction, updateAccount, type AccountFeishuTestResult } from '@/lib/api/accounts'
 import { usePolling } from '@/lib/hooks/usePolling'
 import { useDomainStore } from '@/stores/domain'
 import { useToastStore } from '@/stores/ui'
@@ -43,8 +45,13 @@ export function AccountEditNotificationPage() {
   })
   const [code, setCode] = useState<string | null>(null)
   const [savedCode, setSavedCode] = useState('')
+  const [defaultCode, setDefaultCode] = useState<string | null>(null)
+  const [webhookInput, setWebhookInput] = useState('')
+  const [clearWebhook, setClearWebhook] = useState(false)
+  const [keyRevealed, setKeyRevealed] = useState(false)
   const [test, setTest] = useState<AccountFeishuTestResult | null>(null)
   const [testedCode, setTestedCode] = useState<string | null>(null)
+  const [testedWebhook, setTestedWebhook] = useState<string | null | undefined>(undefined)
   const [resultOpen, setResultOpen] = useState(true)
   const [busy, setBusy] = useState<'test' | 'save' | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -56,18 +63,26 @@ export function AccountEditNotificationPage() {
   const workbenchRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
-    if (account.data && code === null) {
-      const initial = account.data.execution_notification_code ?? ''
-      setCode(initial)
-      setSavedCode(initial)
+    if (account.data && defaultCode !== null && code === null) {
+      const initial = notificationDraft(account.data.execution_notification_code, defaultCode)
+      setCode(initial.code)
+      setSavedCode(initial.savedCode)
     }
-  }, [account.data, code])
+  }, [account.data, code, defaultCode])
+
+  useEffect(() => {
+    void getDefaultAccountNotification(accountId).then(setDefaultCode).catch((cause: unknown) => {
+      setError(cause instanceof Error ? cause.message : String(cause))
+      setDefaultCode('')
+    })
+  }, [accountId])
 
   const result = useMemo<PythonValidationState | null>(() => test && ({
     valid: test.ok,
     errorMessage: test.ok ? null : test.message,
   }), [test])
-  const stale = test !== null && testedCode !== code
+  const currentWebhook = clearWebhook ? null : extractFeishuKey(webhookInput) || undefined
+  const stale = test !== null && (testedCode !== code || testedWebhook !== currentWebhook)
   const status = pythonRunStatus(busy === 'test', result, stale)
   const style = PYTHON_RUN_STYLE[status]
 
@@ -76,7 +91,8 @@ export function AccountEditNotificationPage() {
 
   const acc = account.data
   const empty = !code.trim()
-  const dirty = code !== savedCode || acc.execution_notification_mode !== 'function'
+  const webhookKey = extractFeishuKey(webhookInput)
+  const dirty = code !== savedCode || Boolean(webhookKey) || clearWebhook
   const inspectorRows = resultOpen
     ? 'auto minmax(0,0fr) 36px minmax(0,1fr)'
     : 'auto minmax(0,1fr) 36px minmax(0,0fr)'
@@ -93,25 +109,26 @@ export function AccountEditNotificationPage() {
     setBusy('test')
     setError(null)
     try {
-      setTest(await testAccountNotificationFunction(accountId, draft))
+      setTest(await testAccountNotificationFunction(accountId, draft, currentWebhook))
     } catch (cause) {
       setTest({ ok: false, message: cause instanceof Error ? cause.message : String(cause) })
     } finally {
       setTestedCode(draft)
+      setTestedWebhook(currentWebhook)
       setBusy(null)
       setResultOpen(true)
     }
   }
   const save = async () => {
-    if (empty || busy !== null) return
+    if (busy !== null) return
     setBusy('save')
     setError(null)
     try {
       await updateAccount(accountId, {
-        execution_notification_mode: 'function',
-        execution_notification_code: code,
+        execution_notification_code: code.trim() ? code : null,
+        ...feishuKeyPatch(webhookKey, clearWebhook),
       })
-      toast('自定义执行通知已启用')
+      toast(code.trim() ? '执行通知函数已保存' : '执行通知已关闭')
       void refreshAccounts()
       void navigate(`/accounts/${accountId}/edit`)
     } catch (cause) {
@@ -139,6 +156,42 @@ export function AccountEditNotificationPage() {
             <div className="flex flex-wrap items-baseline gap-2">
               <AccountPageTitle accountId={accountId} page="自定义执行通知" name={acc.name} channel={acc.trade_channel} market={acc.market} />
             </div>
+            <p className="mt-2 text-[13px] text-ink-3">
+              {code.trim() ? code === defaultCode ? '默认飞书函数' : '自定义函数' : '未配置通知函数'}
+              {code === defaultCode && !savedCode ? ' · 尚未保存' : ''}
+              {code === defaultCode && !acc.feishu_configured ? ' · 请配置 Webhook' : ''}
+            </p>
+            <div className="mt-2 flex gap-3 text-[13px]">
+              <button type="button" className="cursor-pointer text-accent disabled:opacity-45" disabled={!defaultCode || busy !== null} onClick={() => { setCode(defaultCode); setError(null) }}>恢复默认飞书函数</button>
+              <button type="button" className="cursor-pointer text-ink-2 disabled:opacity-45" disabled={empty || busy !== null} onClick={() => { setCode(''); setError(null) }}>清空函数</button>
+            </div>
+            {code === defaultCode && (
+              <div className="mt-4">
+                <label htmlFor="notification-webhook" className="text-[13px] text-ink-2">飞书 Webhook</label>
+                <div className="mt-1 flex items-center gap-1">
+                  <input
+                    id="notification-webhook"
+                    type={keyRevealed ? 'text' : 'password'}
+                    className="min-w-0 flex-1 rounded-[6px] border border-line bg-surface px-2 py-1.5 text-[13px] text-ink-1"
+                    value={webhookInput}
+                    placeholder={acc.feishu_configured && !clearWebhook ? '已配置 · 留空保持不变' : '粘贴 Webhook 链接或 Key'}
+                    spellCheck={false}
+                    autoComplete="off"
+                    onChange={(event) => { setWebhookInput(event.target.value); setClearWebhook(false) }}
+                    onBlur={() => setWebhookInput((value) => extractFeishuKey(value))}
+                  />
+                  <button type="button" className="cursor-pointer text-ink-3" aria-label={keyRevealed ? '隐藏 Key' : '显示 Key'} onClick={() => setKeyRevealed((value) => !value)}>
+                    {keyRevealed ? <EyeOff size={15} /> : <Eye size={15} />}
+                  </button>
+                </div>
+                {(acc.feishu_configured || clearWebhook) && (
+                  <button type="button" className="mt-1 cursor-pointer text-[12px] text-ink-3 hover:text-accent" onClick={() => { setClearWebhook((value) => !value); setWebhookInput('') }}>
+                    {clearWebhook ? '撤销清除 Webhook' : '清除 Webhook'}
+                  </button>
+                )}
+                <p className="mt-1 text-[12px] text-ink-3">试跑使用当前输入；保存时与函数一起更新。</p>
+              </div>
+            )}
             <button
               type="button"
               title="试跑会执行代码，可能向外发送消息"
@@ -238,19 +291,19 @@ export function AccountEditNotificationPage() {
         </div>
       </div>
       <footer className="flex h-7 flex-none items-center border-t border-line bg-surface px-2 text-[12px]">
-        <div className={`flex min-w-0 flex-1 items-center gap-1.5 truncate ${error || empty ? 'text-warn' : 'text-ink-2'}`} role={error ? 'alert' : 'status'} title={error ?? undefined}>
-          <span className={error || empty ? 'text-warn' : dirty ? 'text-accent' : 'text-ink-3'} aria-hidden>{error || empty ? '△' : dirty ? '●' : '✓'}</span>
-          <InkRewrite text={error ? '保存失败' : busy === 'save' ? '保存中…' : empty ? '内容不完整' : dirty ? '未保存' : '已启用'} tone="label" />
+        <div className={`flex min-w-0 flex-1 items-center gap-1.5 truncate ${error ? 'text-warn' : 'text-ink-2'}`} role={error ? 'alert' : 'status'} title={error ?? undefined}>
+          <span className={error ? 'text-warn' : dirty ? 'text-accent' : 'text-ink-3'} aria-hidden>{error ? '△' : dirty ? '●' : '✓'}</span>
+          <InkRewrite text={error ? '保存失败' : busy === 'save' ? '保存中…' : dirty ? '未保存' : empty ? '未配置' : '已保存'} tone="label" />
         </div>
         <div ref={setEditorStatus} className="mr-2 flex-none" />
         <button
           type="button"
-          title={error ?? '保存后启用自定义通知'}
+          title={error ?? '保存当前通知函数；空内容表示关闭通知'}
           className="h-full cursor-pointer px-2 font-[550] text-ink-1 hover:bg-fill disabled:cursor-default disabled:text-ink-3"
-          disabled={empty || busy !== null}
+          disabled={busy !== null || !dirty}
           onClick={() => void save()}
         >
-          {busy === 'save' ? '保存中…' : '保存并启用'}
+          {busy === 'save' ? '保存中…' : '保存'}
         </button>
       </footer>
     </section>

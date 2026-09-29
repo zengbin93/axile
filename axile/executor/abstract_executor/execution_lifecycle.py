@@ -100,13 +100,12 @@ class AbstractExecutorExecutionLifecycleMixin(AbstractExecutorExecutionRuntimeFa
 
             # 通知是尾部副作用，不影响主执行结果的返回；投递到有界后台队列，
             # 统一经有界后台队列发送，隔离飞书网络延迟且避免线程随执行次数增长。
-            if standard_input.feishu_key or standard_input.execution_notification_mode == "function":
+            if standard_input.execution_notification_code:
                 executor.logger.info("异步处理执行通知")
                 enqueue_execute_results_to_feishu(
                     cast("FeishuNotificationSource", executor),
                     output,
                     standard_input.feishu_key,
-                    standard_input.execution_notification_mode,
                     standard_input.execution_notification_code,
                     notification_snapshot,
                 )

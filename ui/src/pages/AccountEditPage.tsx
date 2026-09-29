@@ -5,7 +5,7 @@
  * 仍由各自的完整编辑器承载。保存保持最小 PATCH + 底栏变更摘要；保存与取消都不离开本页。
  */
 
-import { feishuKeyPatch } from '@/features/account/feishuUpdate'
+import { extractFeishuKey, feishuKeyPatch } from '@/features/account/feishuUpdate'
 import { InkRewrite } from '@/components/ui/InkRewrite'
 import { Link } from '@/components/ui/nav'
 import { useCallback, useEffect, useState, type CSSProperties } from 'react'
@@ -52,7 +52,6 @@ interface Draft {
   remark: string
   clearFeishu: boolean
   feishu: string
-  notificationMode: 'default' | 'function'
   longLev: string
   shortLev: string
   portfolioId: number | null
@@ -61,18 +60,6 @@ interface Draft {
   weightPrecision: string
   executionTimeout: string
   writeEmpty: boolean
-}
-
-/**
- * 从用户输入中提取飞书机器人 key.
-
- * 兼容直接粘贴整条 webhook 链接（形如 ``.../bot/v2/hook/<key>``）：截取 ``hook/`` 之后、
- * 下一个分隔符之前的片段；输入本就是裸 key 时原样返回。幂等，可重复套用。
- */
-function extractFeishuKey(raw: string): string {
-  const s = raw.trim()
-  const m = s.match(/hook\/([^/?#\s]+)/i)
-  return m ? m[1] : s
 }
 
 function sameList(a: string[], b: string[]): boolean {
@@ -85,7 +72,6 @@ function draftOf(acc: Account): Draft {
     remark: acc.remark ?? '',
     clearFeishu: false,
     feishu: '',
-    notificationMode: acc.execution_notification_mode ?? 'default',
     longLev: String(acc.long_leverage ?? ''),
     shortLev: String(acc.short_leverage ?? ''),
     portfolioId: acc.portfolio_id,
@@ -104,7 +90,6 @@ function buildPatch(draft: Draft, acc: Account, showShortLeverage: boolean): Acc
   if (draft.remark !== (acc.remark ?? '')) patch.remark = draft.remark || null
   const feishuKey = extractFeishuKey(draft.feishu)
   Object.assign(patch, feishuKeyPatch(feishuKey, draft.clearFeishu))
-  if (draft.notificationMode !== acc.execution_notification_mode) patch.execution_notification_mode = draft.notificationMode
 
   const nl = Number(draft.longLev) || 0
   if (nl !== (acc.long_leverage ?? 0)) patch.long_leverage = nl
@@ -137,7 +122,6 @@ const FIELD_LABEL: Record<string, string> = {
   name: '名称',
   remark: '备注',
   feishu_key: '飞书',
-  execution_notification_mode: '通知模式',
   long_leverage: '做多杠杆',
   short_leverage: '做空杠杆',
   weight_precision: '权重精度',
@@ -375,23 +359,12 @@ export function AccountEditPage({ section = 'basic' }: { section?: EditSection }
         <Section label="执行通知">
           <Row label="通知方式" span top>
             <div className="flex flex-wrap items-center gap-3 pt-1 text-[14px]">
-              <span className="text-ink-1">{d.notificationMode === 'function' ? '自定义函数' : '飞书 Webhook'}</span>
-              {d.notificationMode === 'function' && (
-                <button type="button" className="cursor-pointer text-accent" onClick={() => set({ notificationMode: 'default' })}>
-                  启用飞书 Webhook
-                </button>
-              )}
-              {d.notificationMode === 'function' && (
-                <Link className="inline-flex items-center gap-1 text-accent hover:underline" to={`/accounts/${accountId}/edit/notification`}>
-                  编辑与测试 <ExternalLink size={13} aria-hidden />
-                </Link>
-              )}
+              <span className="text-ink-1">{acc.execution_notification_code ? '已配置通知函数' : '未配置通知函数'}</span>
+              <Link className="inline-flex items-center gap-1 text-accent hover:underline" to={`/accounts/${accountId}/edit/notification`}>
+                编辑与测试 <ExternalLink size={13} aria-hidden />
+              </Link>
             </div>
-            {acc.execution_notification_mode === 'function' && d.notificationMode === 'default' && (
-              <p className="mt-1 text-[13px] text-ink-3">保存账户后切换；自定义函数会保留。</p>
-            )}
           </Row>
-          {d.notificationMode === 'default' && (
             <Row label="Webhook" hint={d.clearFeishu ? '保存后关闭' : (feishuKey || acc.feishu_configured ? '已配置' : '未配置')} top span>
             <div className="flex items-center gap-2">
               <div className="relative min-w-0 flex-1">
@@ -454,7 +427,6 @@ export function AccountEditPage({ section = 'basic' }: { section?: EditSection }
               高级设置 · 自定义执行通知函数 <ExternalLink size={13} aria-hidden />
             </Link>
             </Row>
-          )}
         </Section>
         </>
       )}

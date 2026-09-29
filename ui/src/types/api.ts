@@ -186,7 +186,6 @@ export interface Account {
   forbidden_symbols: string[] | null
   risk_symbols: string[] | null
   feishu_configured: boolean
-  execution_notification_mode: 'default' | 'function'
   execution_notification_code: string | null
   portfolio_id: number | null
   write_empty_record: number | null
