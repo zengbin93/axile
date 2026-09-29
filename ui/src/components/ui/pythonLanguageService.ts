@@ -93,7 +93,7 @@ export function connectPython(
         view.dispatch({ effects: slot.reconfigure([
           active.plugin(message.uri, 'python'),
           pythonVisualFeatures(),
-          pythonHover(),
+          pythonHover(kind),
           ...(onSymbols ? [documentSymbols(onSymbols)] : []),
           keymap.of([...jumpToDefinitionKeymap, ...findReferencesKeymap,
             { key: 'F2', run: renamePythonSymbol }, { key: 'Mod-.', run: (editor) => quickFix(editor, kind) }]),

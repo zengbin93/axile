@@ -1,8 +1,10 @@
-import { activateHover, closeHoverTooltips, EditorView, hoverTooltip, keymap, repositionTooltips } from '@codemirror/view'
+import { activateHover, closeHoverTooltips, EditorView, hoverTooltip, keymap, repositionTooltips, type Tooltip } from '@codemirror/view'
 import { forEachDiagnostic } from '@codemirror/lint'
 import { LSPPlugin } from '@codemirror/lsp-client'
 import type { Hover, MarkedString } from 'vscode-languageserver-protocol'
-import { applyHoverFix, fixAtPosition, type HoverFix } from '@/components/ui/pythonHoverFix'
+import { fixAtPosition, type HoverFix } from '@/components/ui/pythonHoverFix'
+import { quickFix } from '@/components/ui/pythonLanguageFeatures'
+import type { PythonEditorKind } from '@/components/ui/pythonEditorContract'
 
 function renderMarked(plugin: LSPPlugin, value: MarkedString): string {
   if (typeof value === 'string') return plugin.docToHTML(value, 'markdown')
@@ -11,9 +13,15 @@ function renderMarked(plugin: LSPPlugin, value: MarkedString): string {
   return plugin.docToHTML(`${fence}${value.language.replace(/[^\w+-]/g, '')}\n${value.value}\n${fence}`, 'markdown')
 }
 
-export function pythonHover() {
+export function pythonHover(kind: PythonEditorKind) {
   let focusNext = false
+  let reuseNext: Tooltip | null = null
   const hover = hoverTooltip(async (view, pos) => {
+    if (reuseNext) {
+      const tooltip = reuseNext
+      reuseNext = null
+      return tooltip
+    }
     const focus = focusNext
     focusNext = false
     const plugin = LSPPlugin.get(view)
@@ -22,7 +30,7 @@ export function pythonHover() {
     const fixes: HoverFix[] = []
     forEachDiagnostic(view.state, (diagnostic, from, to) => {
       const action = diagnostic.actions?.find((item) => item.name === '快速修复')
-      if (action) fixes.push({ from, to, message: diagnostic.message.split('\n')[0], action })
+      if (action) fixes.push({ from, to, message: diagnostic.message.split('\n')[0], source: diagnostic.source ?? 'ty' })
     })
     const fix = fixAtPosition(fixes, pos)
     plugin.client.sync()
@@ -39,7 +47,12 @@ export function pythonHover() {
         pos: result?.range ? plugin.fromPosition(result.range.start) : fix?.from ?? pos,
         end: result?.range ? plugin.fromPosition(result.range.end) : fix?.to ?? pos,
         above: true,
-        create: () => createHover(view, html, () => focus, fix),
+        create: () => createHover(view, html, () => focus, fix, kind, () => {
+          const active = view.state.field(hover.active)
+          if (!active.length) return
+          reuseNext = active[0]
+          activateHover(view, pos, 1, { tooltip: hover, until: tr => tr.docChanged || !!tr.selection })
+        }),
       }
     } catch { return null }
   }, { hideOn: tr => tr.docChanged || !!tr.selection })
@@ -62,9 +75,18 @@ export function pythonHover() {
   } }])]
 }
 
-function createHover(view: EditorView, html: string, shouldFocus: () => boolean, fix: HoverFix | null) {
+function createHover(view: EditorView, html: string, shouldFocus: () => boolean, fix: HoverFix | null, kind: PythonEditorKind, pinHover: () => void) {
   const dom = document.createElement('div')
   dom.className = 'cm-python-hover'
+  if (fix) {
+    const diagnostic = dom.appendChild(document.createElement('div'))
+    diagnostic.className = 'cm-python-hover-diagnostic'
+    const message = diagnostic.appendChild(document.createElement('span'))
+    message.textContent = fix.message
+    const source = diagnostic.appendChild(document.createElement('span'))
+    source.className = 'cm-python-hover-diagnostic-source'
+    source.textContent = fix.source
+  }
   const content = dom.appendChild(document.createElement('div'))
   content.className = 'cm-python-hover-doc cm-lsp-documentation quiet-scrollbar'
   content.tabIndex = 0
@@ -103,18 +125,20 @@ function createHover(view: EditorView, html: string, shouldFocus: () => boolean,
   if (fix) {
     const footer = dom.appendChild(document.createElement('div'))
     footer.className = 'cm-python-hover-fix'
-    const message = footer.appendChild(document.createElement('span'))
-    message.textContent = fix.message
     const button = footer.appendChild(document.createElement('button'))
     button.type = 'button'
-    button.textContent = '快速修复'
+    button.textContent = '快速修复…'
     button.setAttribute('aria-label', '快速修复：' + fix.message)
+    const shortcut = footer.appendChild(document.createElement('span'))
+    shortcut.textContent = navigator.platform.includes('Mac') ? '⌘+.' : 'Ctrl+.'
     button.addEventListener('pointerdown', (event) => event.preventDefault())
     button.addEventListener('click', (event) => {
       event.preventDefault()
       event.stopPropagation()
-      view.dispatch({ effects: closeHoverTooltips })
-      applyHoverFix(view, fix)
+      const anchor = button.getBoundingClientRect()
+      const host = dom.closest<HTMLElement>('.cm-tooltip-hover') ?? undefined
+      pinHover()
+      quickFix(view, kind, fix.from, fix.to, anchor, host, () => view.dispatch({ effects: closeHoverTooltips }))
     })
   }
   const grip = dom.appendChild(document.createElement('div'))
@@ -178,7 +202,7 @@ function arrangeDocumentation(content: HTMLElement) {
 
 const hoverTheme = EditorView.theme({
   '.cm-tooltip-hover:has(.cm-python-hover)': {
-    display: 'flex', flexDirection: 'column', overflow: 'hidden',
+    display: 'flex', flexDirection: 'column', overflow: 'visible',
     border: '1px solid var(--color-line)', borderRadius: '6px',
     backgroundColor: 'var(--color-surface)', boxShadow: 'var(--shadow-card)',
   },
@@ -187,6 +211,14 @@ const hoverTheme = EditorView.theme({
     width: 'max-content', maxWidth: 'min(680px, calc(100vw - 24px))', maxHeight: 'min(420px, 55vh)',
     overflow: 'hidden', borderRadius: '6px',
   },
+  '.cm-python-hover:has(.cm-python-hover-diagnostic)': { minWidth: 'min(360px, calc(100vw - 24px))' },
+  '.cm-python-hover-diagnostic': {
+    display: 'flex', alignItems: 'baseline', gap: '8px', padding: '8px 10px',
+    borderBottom: '1px solid var(--color-line)', color: 'var(--color-ink-1)',
+    fontFamily: 'var(--font-sans)', fontSize: '13px', lineHeight: '1.5', overflowWrap: 'anywhere',
+  },
+  '.cm-python-hover-diagnostic > :first-child': { minWidth: '0', flex: '1 1 auto' },
+  '.cm-python-hover-diagnostic-source': { flex: 'none', color: 'var(--color-ink-3)', fontSize: '11px' },
   '.cm-python-hover-code-only': { minWidth: 'min(220px, calc(100vw - 24px))' },
   '.cm-python-hover[style*="width"]': { maxWidth: 'calc(100vw - 24px)', maxHeight: 'calc(100vh - 24px)' },
   '.cm-python-hover-doc': {
@@ -195,15 +227,15 @@ const hoverTheme = EditorView.theme({
     color: 'var(--color-ink-2)', lineHeight: '1.65', whiteSpace: 'normal', overflowWrap: 'anywhere',
   },
   '.cm-python-hover-fix': {
-    display: 'flex', alignItems: 'center', gap: '10px', flex: 'none', padding: '8px 10px',
-    borderTop: '1px solid var(--color-line)', color: 'var(--color-ink-2)', fontSize: '12px', lineHeight: '1.5',
+    display: 'flex', alignItems: 'center', gap: '6px', flex: 'none', padding: '6px 10px',
+    borderTop: '1px solid var(--color-line)', color: 'var(--color-ink-3)', fontSize: '12px', lineHeight: '1.5',
   },
-  '.cm-python-hover-fix span': { minWidth: '0', flex: '1 1 auto', overflowWrap: 'anywhere' },
+  '.cm-python-hover-fix span': { fontSize: '11px' },
   '.cm-python-hover-fix button': {
-    flex: 'none', border: '1px solid var(--color-line)', borderRadius: '4px', padding: '3px 8px',
-    backgroundColor: 'var(--color-bg-subtle)', color: 'var(--color-accent)', cursor: 'pointer', font: 'inherit',
+    flex: 'none', border: '0', borderRadius: '3px', padding: '2px 4px', marginLeft: '-4px',
+    backgroundColor: 'transparent', color: 'var(--color-accent)', cursor: 'pointer', font: 'inherit',
   },
-  '.cm-python-hover-fix button:hover': { backgroundColor: 'var(--color-fill)' },
+  '.cm-python-hover-fix button:hover': { textDecoration: 'underline', textUnderlineOffset: '2px' },
   '.cm-python-hover-fix button:focus-visible': { outline: '2px solid var(--color-accent)', outlineOffset: '1px' },
   '.cm-python-hover-section': { display: 'flow-root', paddingBottom: '4px' },
   '.cm-python-hover-doc .cm-python-hover-section > :first-child': {

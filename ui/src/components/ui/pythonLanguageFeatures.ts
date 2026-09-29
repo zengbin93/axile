@@ -5,6 +5,7 @@ import { isolateHistory } from '@codemirror/commands'
 import { LSPPlugin } from '@codemirror/lsp-client'
 import type { CodeAction, Command, Diagnostic, FoldingRange, InlayHint, SemanticTokens, SemanticTokensOptions, TextEdit, WorkspaceEdit } from 'vscode-languageserver-protocol'
 import { checkPythonContract, type PythonEditorKind } from '@/components/ui/pythonEditorContract'
+import { showQuickFixMenu } from '@/components/ui/pythonQuickFixMenu'
 
 type Visuals = { decorations: DecorationSet; folds: { from: number; to: number }[] }
 const setVisuals = StateEffect.define<Visuals>()
@@ -159,9 +160,9 @@ export function renamePythonSymbol(view: EditorView): boolean {
   return true
 }
 
-export function quickFix(view: EditorView, kind: PythonEditorKind, from?: number, to?: number): boolean {
+export function quickFix(view: EditorView, kind: PythonEditorKind, from?: number, to?: number, anchor?: DOMRect, host?: HTMLElement, onDismiss?: () => void): boolean {
   const plugin = LSPPlugin.get(view)
-  if (!plugin || view.state.readOnly) return false
+  if (!plugin || view.state.readOnly) { onDismiss?.(); return false }
   const doc = view.state.doc
   const targetFrom = from ?? view.state.selection.main.from
   const targetTo = to ?? view.state.selection.main.to
@@ -178,7 +179,7 @@ export function quickFix(view: EditorView, kind: PythonEditorKind, from?: number
         textDocument: { uri: plugin.uri }, range,
         context: { diagnostics, only: ['quickfix'], triggerKind: 1 },
       }).catch(() => null)
-      if (view.state.doc !== doc) return
+      if (view.state.doc !== doc) { onDismiss?.(); return }
       const fixes = (actions ?? []).filter((item): item is CodeAction => typeof item.command !== 'string' && !('disabled' in item && item.disabled))
       const cursor = plugin.toPosition(targetFrom)
       for (const fix of contractResult.status === 'fulfilled' ? contractResult.value.fixes : []) {
@@ -186,32 +187,18 @@ export function quickFix(view: EditorView, kind: PythonEditorKind, from?: number
         if (!annotation || annotation.range.start.line !== cursor.line) continue
         fixes.push({ title: fix.title, kind: 'quickfix', edit: { changes: { [plugin.uri]: fix.edits } } })
       }
-      if (!fixes.length) { showDialog(view, { label: '当前位置没有可用的快速修复' }); return }
-      showDialog(view, {
-        focus: true,
-        content: (_editor, close) => {
-          const form = document.createElement('form')
-          form.setAttribute('aria-label', '快速修复')
-          for (const fix of fixes) {
-            const button = form.appendChild(document.createElement('button'))
-            button.type = 'button'
-            button.className = 'cm-button'
-            button.textContent = fix.title
-            button.onclick = () => {
-              void (async () => {
-                try {
-                  const resolved = fix.edit ? fix : await plugin.client.request<CodeAction, CodeAction>('codeAction/resolve', fix)
-                  if (!resolved.edit) throw new Error('此修复没有可应用的代码修改')
-                  applyWorkspaceEdit(view, resolved.edit, doc)
-                } catch (error) { plugin.reportError('快速修复失败', error) }
-                close()
-              })()
-            }
-          }
-          return form
-        },
-      })
-    } catch (error) { plugin.reportError('快速修复失败', error) }
+      const point = anchor ?? view.coordsAtPos(targetFrom) ?? view.dom.getBoundingClientRect()
+      showQuickFixMenu(view, point, fixes.map((fix) => ({
+        title: fix.title,
+        apply: () => { void (async () => {
+          try {
+            const resolved = fix.edit ? fix : await plugin.client.request<CodeAction, CodeAction>('codeAction/resolve', fix)
+            if (!resolved.edit) throw new Error('此修复没有可应用的代码修改')
+            applyWorkspaceEdit(view, resolved.edit, doc)
+          } catch (error) { plugin.reportError('快速修复失败', error) }
+        })() },
+      })), host?.isConnected ? host : undefined, onDismiss)
+    } catch (error) { onDismiss?.(); plugin.reportError('快速修复失败', error) }
   })()
   return true
 }
