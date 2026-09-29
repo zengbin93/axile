@@ -1,133 +1,33 @@
-import { useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type CSSProperties, type ReactNode, type Ref } from 'react'
+import { useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type CSSProperties, type MouseEvent, type ReactNode, type Ref } from 'react'
 import { createPortal } from 'react-dom'
 import { python } from '@codemirror/lang-python'
-import { foldable, foldGutter, foldedRanges, foldState } from '@codemirror/language'
 import { linter, forceLinting, forEachDiagnostic, type Diagnostic } from '@codemirror/lint'
 import { Compartment, StateEffect } from '@codemirror/state'
 import { undo, redo, isolateHistory } from '@codemirror/commands'
 import { openSearchPanel, gotoLine } from '@codemirror/search'
-import { Decoration, EditorView, ViewPlugin, scrollPastEnd, type ViewUpdate } from '@codemirror/view'
+import { EditorView, scrollPastEnd } from '@codemirror/view'
 import CodeMirror, { type ReactCodeMirrorRef } from '@uiw/react-codemirror'
-import { Check, Clipboard, Play, TriangleAlert } from 'lucide-react'
+import { Check, Clipboard, Play, TriangleAlert, X } from 'lucide-react'
 import { InkRewrite } from '@/components/ui/InkRewrite'
 import { connectPython, type DocumentSymbols, type LanguageStatus } from '@/components/ui/pythonLanguageService'
 import type { PythonEditorKind } from '@/components/ui/pythonEditorContract'
 import { OverflowText } from '@/components/ui/OverflowText'
-import { LSPPlugin } from '@codemirror/lsp-client'
+import { LSPPlugin, type LSPClient } from '@codemirror/lsp-client'
 import type { DocumentSymbol, SymbolInformation, Range } from 'vscode-languageserver-protocol'
 import { editingExtensions, isMac } from '@/components/ui/pythonEditorExtensions'
 import { apiSend } from '@/lib/api/client'
-import { PythonSourcePreview, type SourcePreview } from '@/components/ui/PythonSourcePreview'
+import { PythonSourcePreview, type SourceTab } from '@/components/ui/PythonSourcePreview'
 import { quickFix, renamePythonSymbol } from '@/components/ui/pythonLanguageFeatures'
 import { jumpToDefinition, findReferences } from '@codemirror/lsp-client'
 import { pythonEditorTheme } from '@/components/ui/pythonEditorTheme'
 import { pythonEditorZoomKeys, usePythonEditorFontSize } from '@/components/ui/pythonEditorFontSize'
 import { pythonStickyScroll } from '@/components/ui/pythonStickyScroll'
+import { centeredFoldGutter, foldedLineHighlight } from '@/components/ui/pythonEditorReading'
 import { PythonSymbolTree, symbolPath } from '@/components/ui/PythonSymbolTree'
 
 export interface PythonProblem { line: number; message: string; source: string; severity: string }
 const runtimeChanged = StateEffect.define<null>()
 const basicSetup = { foldGutter: false, highlightActiveLine: true, highlightActiveLineGutter: true, autocompletion: true }
-const foldedLine = Decoration.line({ class: 'cm-python-foldedLine' })
-const foldedLineHighlight = EditorView.decorations.compute([foldState], (state) => {
-  const lines = new Set<number>()
-  foldedRanges(state).between(0, state.doc.length, (from) => { lines.add(state.doc.lineAt(from).from) })
-  return Decoration.set([...lines].sort((a, b) => a - b).map((from) => foldedLine.range(from)))
-})
-const foldGutterHover = ViewPlugin.fromClass(class {
-  private source = -1
-  private revealed: Element[] = []
-
-  constructor(readonly view: EditorView) {
-    view.dom.addEventListener('pointermove', this.onPointerMove)
-    view.dom.addEventListener('pointerleave', this.clear)
-  }
-
-  private clear = () => {
-    for (const element of this.revealed) element.classList.remove('cm-python-revealedFoldLine')
-    this.revealed = []
-    this.source = -1
-  }
-
-  private onPointerMove = (event: PointerEvent) => {
-    const gutter = this.view.dom.querySelector('.cm-foldGutter')
-    if (!gutter?.contains(event.target as Node)) { this.clear(); return }
-
-    const block = this.view.lineBlockAtHeight(event.clientY - this.view.documentTop)
-    if (block.from === this.source) return
-    this.clear()
-    let scopeFrom = block.from
-    let range = foldable(this.view.state, block.from, block.to)
-    for (const line of this.view.viewportLineBlocks) {
-      if (line.from >= scopeFrom) continue
-      const candidate = foldable(this.view.state, line.from, line.to)
-      if (candidate && candidate.to > block.from) { scopeFrom = line.from; range = candidate }
-    }
-    if (!range) return
-    this.source = block.from
-
-    for (const element of gutter.querySelectorAll('.cm-gutterElement')) {
-      const bounds = element.getBoundingClientRect()
-      if (!bounds.height) continue
-      const line = this.view.lineBlockAtHeight((bounds.top + bounds.bottom) / 2 - this.view.documentTop)
-      if (line.from !== scopeFrom && (line.from <= scopeFrom || line.from >= range.to)) continue
-      element.classList.add('cm-python-revealedFoldLine')
-      this.revealed.push(element)
-    }
-  }
-
-  update(update: ViewUpdate) {
-    if (update.docChanged || update.viewportChanged || update.heightChanged) this.clear()
-  }
-
-  destroy() {
-    this.view.dom.removeEventListener('pointermove', this.onPointerMove)
-    this.view.dom.removeEventListener('pointerleave', this.clear)
-    this.clear()
-  }
-})
-const centeredFoldGutter = [
-  foldGutter({
-    markerDOM: (open) => {
-      const marker = document.createElement('span')
-      marker.title = open ? '折叠代码' : '展开代码'
-      if (!open) marker.className = 'cm-python-foldedMarker'
-      const icon = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
-      icon.setAttribute('viewBox', '0 0 16 16')
-      icon.setAttribute('width', '14')
-      icon.setAttribute('height', '14')
-      icon.setAttribute('aria-hidden', 'true')
-      const path = document.createElementNS('http://www.w3.org/2000/svg', 'path')
-      path.setAttribute('d', open ? 'm4 6 4 4 4-4' : 'm6 4 4 4-4 4')
-      path.setAttribute('fill', 'none')
-      path.setAttribute('stroke', 'currentColor')
-      path.setAttribute('stroke-width', '1.5')
-      path.setAttribute('stroke-linecap', 'round')
-      path.setAttribute('stroke-linejoin', 'round')
-      icon.append(path)
-      marker.append(icon)
-      return marker
-    },
-  }),
-  EditorView.theme({
-    '.cm-foldGutter .cm-gutterElement': { display: 'flex', alignItems: 'center', justifyContent: 'center', minWidth: '18px' },
-    '.cm-foldGutter .cm-gutterElement span': { display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0' },
-    '.cm-foldGutter .cm-gutterElement span:not(.cm-python-foldedMarker)': {
-      opacity: '0', transition: 'opacity 140ms cubic-bezier(.4, 0, .2, 1)',
-    },
-    '.cm-foldGutter .cm-gutterElement.cm-python-revealedFoldLine span:not(.cm-python-foldedMarker)': {
-      opacity: '1', transitionDuration: '180ms',
-    },
-    '.cm-foldGutter .cm-python-foldedMarker': { color: 'var(--color-code-fg)' },
-    '@media (hover: none)': {
-      '.cm-foldGutter .cm-gutterElement span:not(.cm-python-foldedMarker)': { opacity: '1' },
-    },
-    '@media (prefers-reduced-motion: reduce)': {
-      '.cm-foldGutter .cm-gutterElement span:not(.cm-python-foldedMarker)': { transition: 'none' },
-    },
-  }),
-  foldGutterHover,
-]
 const toolbarActionClass = 'flex-none rounded px-2 py-1 cursor-pointer transition-colors duration-150 hover:bg-fill hover:text-ink-1 active:bg-ink-1/10 active:text-ink-1 aria-expanded:bg-fill aria-expanded:text-ink-1 focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-1 disabled:pointer-events-none disabled:opacity-40 motion-reduce:transition-none'
 
 export interface PythonValidationState {
@@ -270,13 +170,19 @@ export function PythonFunctionEditor({
   const changeCode = useCallback((value: string) => onChangeRef.current(value), [])
   const [view, setView] = useState<EditorView | null>(null)
   const [languageStatus, setLanguageStatus] = useState<LanguageStatus>('connecting')
+  const [languageClient, setLanguageClient] = useState<LSPClient | null>(null)
   const [position, setPosition] = useState({ line: 1, column: 1 })
   const [symbols, setSymbols] = useState<DocumentSymbols | null>(null)
   const [menu, setMenu] = useState<{ kind: 'actions' | 'symbols'; x: number; y: number } | null>(null)
   const menuRef = useRef<HTMLDivElement>(null)
   const [formatting, setFormatting] = useState(false)
   const [editorMessage, setEditorMessage] = useState('')
-  const [sourcePreview, setSourcePreview] = useState<SourcePreview | null>(null)
+  const [sourceTabs, setSourceTabs] = useState<SourceTab[]>([])
+  const [activeSource, setActiveSource] = useState<string | null>(null)
+  const [sourceSymbols, setSourceSymbols] = useState<Record<string, DocumentSymbols | null>>({})
+  const [sourcePositions, setSourcePositions] = useState<Record<string, { line: number; character: number }>>({})
+  const sourceViews = useRef(new Map<string, EditorView>())
+  const pendingSourceViews = useRef(new Map<string, ((view: EditorView | null) => void)[]>())
   const languageSlot = useMemo(() => new Compartment(), [])
   const runtimeRef = useRef({ result, stale })
   runtimeRef.current = { result, stale }
@@ -289,9 +195,40 @@ export function PythonFunctionEditor({
   useEffect(() => {
     if (!view) return
     return connectPython(view, languageSlot, kind, (status) => { setLanguageStatus(status); if (status !== 'ready') setSymbols(null) }, (uri, code) => new Promise((resolve) => {
-      setSourcePreview({ uri, code, resolve })
-    }), (next) => setSymbols(next))
+      if (uri === LSPPlugin.get(view)?.uri) {
+        setActiveSource(null)
+        resolve(view)
+        return
+      }
+      const existing = sourceViews.current.get(uri)
+      setActiveSource(uri)
+      if (existing) { resolve(existing); return }
+      pendingSourceViews.current.set(uri, [...(pendingSourceViews.current.get(uri) ?? []), resolve])
+      setSourceTabs((tabs) => tabs.some((tab) => tab.uri === uri) ? tabs : [...tabs, { uri, code }])
+    }), (next) => setSymbols(next), setLanguageClient)
   }, [view, languageSlot, kind])
+
+  const closeSource = (uri: string) => {
+    pendingSourceViews.current.get(uri)?.forEach((resolve) => resolve(null))
+    pendingSourceViews.current.delete(uri)
+    sourceViews.current.delete(uri)
+    setSourceSymbols((current) => { const next = { ...current }; delete next[uri]; return next })
+    setSourcePositions((current) => { const next = { ...current }; delete next[uri]; return next })
+    setSourceTabs((tabs) => tabs.filter((tab) => tab.uri !== uri))
+    if (activeSource === uri) {
+      setActiveSource(null)
+      requestAnimationFrame(() => view?.focus())
+    }
+  }
+  const sourceName = (uri: string) => decodeURIComponent(uri.split('/').at(-1) || uri)
+  const sourceTab = sourceTabs.find((tab) => tab.uri === activeSource)
+  const sourcePosition = activeSource ? sourcePositions[activeSource] : undefined
+  const updateSourceCursor = useCallback((uri: string, line: number, character: number) => {
+    setSourcePositions((positions) => ({ ...positions, [uri]: { line, character } }))
+  }, [])
+  const updateSourceSymbols = useCallback((uri: string, next: DocumentSymbols | null) => {
+    setSourceSymbols((current) => ({ ...current, [uri]: next }))
+  }, [])
 
   const replaceCode = useCallback((text: string) => {
     const editor = cmRef.current?.view
@@ -399,20 +336,21 @@ export function PythonFunctionEditor({
 
   const mod = isMac() ? '⌘' : 'Ctrl'
   const shortcuts: Record<string, string> = {
-    '查找 / 替换': `${mod}+F`, '格式化': 'Shift+Alt+F',
+    '查找 / 替换': `${mod}+F`, '查找': `${mod}+F`, '格式化': 'Shift+Alt+F',
     '撤销': `${mod}+Z`, '重做': isMac() ? '⌘+Shift+Z' : 'Ctrl+Y',
     '定义': 'F12', '引用': 'Shift+F12', '重命名': 'F2', '快速修复': `${mod}+.`,
   }
   const shortcutHint = (name: string) => shortcuts[name]
     ? <span aria-hidden="true" className="shrink-0 whitespace-nowrap text-[0.9em] font-normal text-ink-3">{shortcuts[name]}</span>
     : null
-  const editor = view
+  const editor = activeSource ? sourceViews.current.get(activeSource) ?? null : view
   const plugin = editor && LSPPlugin.get(editor)
-  const cursor = plugin && editor ? plugin.toPosition(editor.state.selection.main.head) : null
+  const cursor = activeSource ? sourcePositions[activeSource] ?? null : plugin && editor ? plugin.toPosition(editor.state.selection.main.head) : null
+  const activeSymbols = activeSource ? sourceSymbols[activeSource] ?? null : symbols
   const contains = (range: Range) => cursor && (range.start.line < cursor.line || range.start.line === cursor.line && range.start.character <= cursor.character)
     && (range.end.line > cursor.line || range.end.line === cursor.line && range.end.character >= cursor.character)
-  const flat = symbols?.length && 'location' in symbols[0]
-  const roots = flat ? (symbols as SymbolInformation[]).filter((item) => item.location.uri === plugin?.uri) : (symbols as DocumentSymbol[] | null)
+  const flat = activeSymbols?.length && 'location' in activeSymbols[0]
+  const roots = flat ? (activeSymbols as SymbolInformation[]).filter((item) => item.location.uri === plugin?.uri) : (activeSymbols as DocumentSymbol[] | null)
   const chain: DocumentSymbol[] = []
   if (roots && !flat) {
     let siblings = roots as DocumentSymbol[]
@@ -435,11 +373,21 @@ export function PythonFunctionEditor({
     const rect = target.getBoundingClientRect()
     setMenu({ kind, x: Math.min(rect.left, window.innerWidth - 288), y: Math.min(rect.bottom + 3, window.innerHeight - 350) })
   }
+  const openContextMenu = (event: MouseEvent<HTMLDivElement>, target: EditorView) => {
+    event.preventDefault()
+    const offset = target.posAtCoords({ x: event.clientX, y: event.clientY })
+    const selection = target.state.selection.main
+    if (offset != null && !(selection.from !== selection.to && offset >= selection.from && offset <= selection.to)) {
+      target.dispatch({ selection: { anchor: offset } })
+    }
+    setMenu({ kind: 'actions', x: Math.min(event.clientX, window.innerWidth - 240), y: Math.min(event.clientY, window.innerHeight - 350) })
+  }
   const command = (name: string) => {
     setMenu(null)
     if (!editor) return
     editor.focus()
-    if (name === '查找 / 替换') openSearchPanel(editor)
+    if (name === '查找 / 替换' || name === '查找') openSearchPanel(editor)
+    if (editor.state.readOnly && !['查找', '定义', '引用'].includes(name)) return
     if (name === '格式化') formatRef.current()
     if (name === '粘贴') void paste()
     if (name === '撤销') undo(editor)
@@ -457,9 +405,20 @@ export function PythonFunctionEditor({
     return () => document.removeEventListener('pointerdown', close)
   }, [menu, editor])
   const actions = ['查找 / 替换', '撤销', '重做', '定义', '引用', '重命名', '快速修复']
-  const actionDisabled = (name: string) => name === '格式化' && formatting ? true : name === '开发文档 ↗' ? false : ['定义', '引用', '重命名', '快速修复'].includes(name) ? languageStatus !== 'ready' || (disabled && ['重命名', '快速修复'].includes(name)) : disabled && name !== '查找 / 替换'
+  const sourceActions = ['查找', '定义', '引用']
+  const actionDisabled = (name: string) => sourceTab ? ['定义', '引用'].includes(name) && !plugin?.client.connected
+    : name === '格式化' && formatting ? true : name === '开发文档 ↗' ? false : ['定义', '引用', '重命名', '快速修复'].includes(name) ? languageStatus !== 'ready' || (disabled && ['重命名', '快速修复'].includes(name)) : disabled && name !== '查找 / 替换'
   const workbenchHeader = (
     <div className="@container flex h-8 min-w-0 items-center gap-1 border-b border-line bg-surface px-3 text-[12px] text-ink-2">
+      {sourceTab ? <>
+        <div className="flex min-w-0 flex-1 items-center overflow-hidden whitespace-nowrap">
+          {decodeURIComponent(sourceTab.uri).split('/').filter(Boolean).slice(-3, -1).map((part) => <span key={part} className="hidden shrink-0 items-center gap-1 @min-[520px]:inline-flex"><span aria-hidden>›</span>{part}</span>)}
+          <button type="button" title={decodeURIComponent(sourceTab.uri)} className="min-w-0 truncate pl-1 text-ink-1" aria-haspopup="tree" aria-expanded={menu?.kind === 'symbols'} onClick={(event) => openMenu('symbols', event.currentTarget)}>{sourceName(sourceTab.uri)}</button>
+          {(chain.length > 3 ? [chain[0], null, chain.at(-1)!] : chain).map((item) => <span key={item?.name ?? 'ellipsis'} className="flex min-w-0 items-center gap-1 pl-1"><span aria-hidden>›</span><button type="button" className="min-w-0 max-w-32" aria-haspopup="tree" aria-expanded={menu?.kind === 'symbols'} onClick={(event) => openMenu('symbols', event.currentTarget)}>{item ? <OverflowText text={item.name} /> : '…'}</button></span>)}
+        </div>
+        <span className="shrink-0">只读</span>
+        <button type="button" className={toolbarActionClass} aria-haspopup="menu" aria-expanded={menu?.kind === 'actions'} onClick={(event) => openMenu('actions', event.currentTarget)}>菜单</button>
+      </> : <>
       <div className="flex min-w-0 flex-1 items-center overflow-hidden whitespace-nowrap">
         <button type="button" className="flex-none text-ink-1" aria-haspopup="tree" aria-expanded={menu?.kind === 'symbols'} onClick={(event) => openMenu('symbols', event.currentTarget)}>{workbenchTitle}</button>
         {(chain.length > 3 ? [chain[0], null, chain.at(-1)!] : chain).map((item) => <span key={item?.name ?? 'ellipsis'} className="flex min-w-0 items-center gap-1 pl-1">
@@ -470,6 +429,7 @@ export function PythonFunctionEditor({
       <button type="button" className={`${toolbarActionClass} hidden items-center gap-2 @min-[480px]:inline-flex`} disabled={disabled || formatting} onClick={() => formatRef.current()}>{formatting ? '格式化中…' : '格式化'}{shortcutHint('格式化')}</button>
       <button type="button" className={toolbarActionClass} aria-haspopup="menu" aria-expanded={menu?.kind === 'actions'} onClick={(event) => openMenu('actions', event.currentTarget)}>菜单</button>
       {docHref && <a className={`${toolbarActionClass} hidden @min-[480px]:block`} href={docHref} target="_blank" rel="noopener">开发文档 ↗</a>}
+      </>}
     </div>
   )
   const popup = menu && createPortal(<div ref={menuRef} tabIndex={-1} onKeyDown={(event) => {
@@ -480,7 +440,7 @@ export function PythonFunctionEditor({
       buttons[(buttons.indexOf(document.activeElement as HTMLButtonElement) + buttons.length + (event.key === 'ArrowDown' ? 1 : -1)) % buttons.length]?.focus()
     }
   }} style={{ left: Math.max(8, menu.x), top: Math.max(8, menu.y) }} role={menu.kind === 'actions' ? 'menu' : undefined} className={`fixed z-[100] max-h-[65vh] overflow-auto rounded-md border border-line bg-surface p-1 text-[12px] text-ink-1 shadow-lg ${menu.kind === 'symbols' ? 'w-[min(18rem,calc(100vw-16px))]' : 'w-[min(15rem,calc(100vw-16px))]'}`}>
-    {menu.kind === 'symbols' ? <PythonSymbolTree key={`${menu.x}:${menu.y}`} symbols={roots} activePath={cursor ? symbolPath(symbols, cursor.line, cursor.character) : []} onJump={jumpSymbol} /> : <>{[...actions, '粘贴', '格式化', ...(docHref ? ['开发文档 ↗'] : [])].map((name) => <button key={name} role="menuitem" disabled={actionDisabled(name)} className={`${toolbarActionClass} flex w-full items-center justify-between gap-4 py-1.5 text-left`} onClick={() => name === '开发文档 ↗' ? window.open(docHref!, '_blank', 'noopener') : command(name)}><span>{name}</span>{shortcutHint(name)}</button>)}<div className="border-t border-line px-2 py-1 text-ink-3">Python · 4 空格</div></>}
+    {menu.kind === 'symbols' ? <PythonSymbolTree key={`${menu.x}:${menu.y}`} symbols={roots} activePath={cursor ? symbolPath(activeSymbols, cursor.line, cursor.character) : []} onJump={jumpSymbol} /> : <>{(sourceTab ? sourceActions : [...actions, '粘贴', '格式化', ...(docHref ? ['开发文档 ↗'] : [])]).map((name) => <button key={name} role="menuitem" disabled={actionDisabled(name)} className={`${toolbarActionClass} flex w-full items-center justify-between gap-4 py-1.5 text-left`} onClick={() => name === '开发文档 ↗' ? window.open(docHref!, '_blank', 'noopener') : command(name)}><span>{name}</span>{shortcutHint(name)}</button>)}<div className="border-t border-line px-2 py-1 text-ink-3">Python · 4 空格</div></>}
   </div>, document.body)
   const tools = (
     <div className="flex flex-none flex-wrap items-center gap-1 border-b border-line bg-surface px-3 py-1.5 text-[12px] text-ink-2" aria-label="编辑操作">
@@ -492,30 +452,41 @@ export function PythonFunctionEditor({
   const assistance = (
     <>
       {editorMessage && <p role="status" className="flex-none bg-surface px-3 py-2 text-[12px] text-warn">{editorMessage}</p>}
-      {sourcePreview && <PythonSourcePreview source={sourcePreview} onClose={() => { setSourcePreview(null); requestAnimationFrame(() => view?.focus()) }} />}
     </>
   )
+  const fileTabs = sourceTabs.length > 0 && (
+    <div className="flex flex-none items-stretch overflow-x-auto border-b border-line bg-surface text-[12px]" role="tablist" aria-label="打开的文件">
+      <button type="button" role="tab" aria-selected={activeSource === null} onClick={() => { setActiveSource(null); requestAnimationFrame(() => view?.focus()) }} className={`flex-none border-r border-line px-3 py-1.5 ${activeSource === null ? 'border-b-2 border-b-accent text-ink-1' : 'text-ink-2 hover:bg-fill'}`}>{workbenchTitle}</button>
+      {sourceTabs.map((tab) => <div key={tab.uri} className={`flex flex-none items-center border-r border-line ${activeSource === tab.uri ? 'border-b-2 border-b-accent bg-code-bg text-ink-1' : 'text-ink-2 hover:bg-fill'}`}>
+        <button type="button" role="tab" aria-selected={activeSource === tab.uri} title={decodeURIComponent(tab.uri)} onClick={() => { setActiveSource(tab.uri); requestAnimationFrame(() => sourceViews.current.get(tab.uri)?.focus()) }} className="max-w-48 truncate py-1.5 pl-3 pr-1">{sourceName(tab.uri)}</button>
+        <button type="button" aria-label={`关闭 ${sourceName(tab.uri)}`} onClick={() => closeSource(tab.uri)} className="mr-1 rounded p-1 hover:bg-fill focus-visible:outline-2 focus-visible:outline-accent"><X size={13} /></button>
+      </div>)}
+    </div>
+  )
+  const sourceDocuments = sourceTabs.map((tab) => <div key={tab.uri} className={`${activeSource === tab.uri ? 'flex' : 'hidden'} min-h-0 flex-col overflow-hidden bg-code-bg ${fill ? 'flex-1' : ''}`} style={fill ? undefined : { height, minHeight, maxHeight }} aria-hidden={activeSource !== tab.uri}>
+    <PythonSourcePreview source={tab} client={languageClient} kind={kind} onCursor={updateSourceCursor} onSymbols={updateSourceSymbols} onContextMenu={openContextMenu} onCreateEditor={(sourceView) => {
+      sourceViews.current.set(tab.uri, sourceView)
+      updateSourceCursor(tab.uri, 0, 0)
+      pendingSourceViews.current.get(tab.uri)?.forEach((resolve) => resolve(sourceView))
+      pendingSourceViews.current.delete(tab.uri)
+    }} />
+  </div>)
   const analyzerLabel = languageStatus === 'ready' ? '代码分析器' : languageStatus === 'connecting' ? '代码分析器连接中…' : '代码分析器重连中…'
   const analyzerDescription = languageStatus === 'ready' ? '代码分析器已连接' : languageStatus === 'connecting' ? '代码分析器连接中' : '暂时无法分析代码，可继续编辑'
   const statusBar = (
     <div className="flex flex-none items-center gap-3 border-t border-line bg-surface px-3 py-1 text-[11px] text-ink-3">
+      {sourceTab ? <><button type="button" onClick={() => editor && gotoLine(editor)}>行 {(sourcePosition?.line ?? 0) + 1}，列 {(sourcePosition?.character ?? 0) + 1}</button><span>只读</span><span>Python</span></> : <>
       <button type="button" onClick={() => view && gotoLine(view)}>行 {position.line}，列 {position.column}</button>
       <span>4 空格</span><span>Python</span>
       <span role="status" aria-label="代码分析器" aria-description={analyzerDescription} title={analyzerDescription} data-state={languageStatus} className={`ml-auto ${languageStatus === 'reconnecting' ? 'text-warn' : ''}`}>
         <InkRewrite text={analyzerLabel} tone="label" />
       </span>
+      </>}
     </div>
   )
 
   const codeBlock = (
-    <div onContextMenu={layout === 'workbench' ? (event) => {
-      event.preventDefault()
-      if (view && !(view.state.selection.main.from !== view.state.selection.main.to && view.posAtCoords({ x: event.clientX, y: event.clientY }) != null && view.posAtCoords({ x: event.clientX, y: event.clientY })! >= view.state.selection.main.from && view.posAtCoords({ x: event.clientX, y: event.clientY })! <= view.state.selection.main.to)) {
-        const offset = view.posAtCoords({ x: event.clientX, y: event.clientY })
-        if (offset != null) view.dispatch({ selection: { anchor: offset } })
-      }
-      setMenu({ kind: 'actions', x: Math.min(event.clientX, window.innerWidth - 240), y: Math.min(event.clientY, window.innerHeight - 350) })
-    } : undefined} className={`relative bg-code-bg ${fill ? 'min-h-0 flex-1' : ''}`}>
+    <div aria-hidden={activeSource !== null} onContextMenu={layout === 'workbench' ? (event) => { if (view) openContextMenu(event, view) } : undefined} className={`relative bg-code-bg ${activeSource === null ? '' : 'hidden'} ${fill ? 'min-h-0 flex-1' : ''}`}>
       <CodeMirror
         ref={cmRef}
         style={{ '--python-editor-font-size': `${fontSize}px` } as CSSProperties}
@@ -554,9 +525,9 @@ export function PythonFunctionEditor({
         {headerTarget ? createPortal(workbenchHeader, headerTarget) : null}
         {popup}
         {editorMessage && <p role="status" className="px-3 text-[12px] text-warn">{editorMessage}</p>}
-        {sourcePreview && <PythonSourcePreview source={sourcePreview} onClose={() => { setSourcePreview(null); requestAnimationFrame(() => view?.focus()) }} />}
-        <div className="flex min-h-0 flex-1 flex-col overflow-hidden">{codeBlock}</div>
-        {statusTarget && createPortal(<div className="flex items-center gap-2 whitespace-nowrap text-[11px] text-ink-3"><button type="button" title="跳转到行" onClick={() => view && gotoLine(view)}><span className="max-[480px]:hidden">行 {position.line}，列 {position.column}</span><span className="hidden max-[480px]:inline">{position.line}:{position.column}</span></button><span role="status" aria-label="代码分析器" aria-description={analyzerDescription} title={analyzerDescription} data-state={languageStatus} className={languageStatus === 'reconnecting' ? 'text-warn' : ''}><InkRewrite text={analyzerLabel} tone="label" /></span></div>, statusTarget)}
+        {fileTabs}
+        <div className="flex min-h-0 flex-1 flex-col overflow-hidden">{codeBlock}{sourceDocuments}</div>
+        {statusTarget && createPortal(sourceTab ? <div className="flex items-center gap-2 text-[11px] text-ink-3"><button type="button" title="跳转到行" onClick={() => editor && gotoLine(editor)}>{(sourcePosition?.line ?? 0) + 1}:{(sourcePosition?.character ?? 0) + 1}</button><span>只读 · Python</span></div> : <div className="flex items-center gap-2 whitespace-nowrap text-[11px] text-ink-3"><button type="button" title="跳转到行" onClick={() => view && gotoLine(view)}><span className="max-[480px]:hidden">行 {position.line}，列 {position.column}</span><span className="hidden max-[480px]:inline">{position.line}:{position.column}</span></button><span role="status" aria-label="代码分析器" aria-description={analyzerDescription} title={analyzerDescription} data-state={languageStatus} className={languageStatus === 'reconnecting' ? 'text-warn' : ''}><InkRewrite text={analyzerLabel} tone="label" /></span></div>, statusTarget)}
       </div>
     )
   }
@@ -608,7 +579,7 @@ export function PythonFunctionEditor({
           </div>
         </div>
 
-        {tools}{assistance}{codeBlock}{statusBar}
+        {!sourceTab && tools}{fileTabs}{assistance}{codeBlock}{sourceDocuments}{statusBar}
       </div>
     </div>
   )

@@ -244,3 +244,34 @@ def test_foreign_document_rejected():
             {"method": "textDocument/didOpen", "params": {"textDocument": {"uri": "file:///tmp/other.py"}}},
             "file:///tmp/mine.py",
         )
+
+
+def test_external_source_supports_readonly_definition_navigation(client):
+    source = Path(editor.__file__).resolve().parents[2] / "context.py"
+    source_uri = source.as_uri()
+    text = source.read_text(encoding="utf-8")
+    with client.websocket_connect("/editor/lsp") as socket:
+        session, _ = initialize(socket)
+        open_document(socket, source_uri, text)
+        definition = request(
+            socket,
+            32,
+            "textDocument/definition",
+            {"textDocument": {"uri": source_uri}, "position": {"line": 6, "character": 80}},
+        )
+        assert "unified_account_assets.py" in str(definition), definition
+        with pytest.raises(ValueError, match="当前编辑会话"):
+            editor.validate_message(
+                {"method": "textDocument/didChange", "params": {"textDocument": {"uri": source_uri}}},
+                session["uri"],
+            )
+        with pytest.raises(ValueError, match="当前编辑会话"):
+            editor.validate_message(
+                {"method": "textDocument/rename", "params": {"textDocument": {"uri": source_uri}}},
+                session["uri"],
+            )
+        with pytest.raises(ValueError, match="内容与服务器文件不一致"):
+            editor.validate_message(
+                {"method": "textDocument/didOpen", "params": {"textDocument": {"uri": source_uri, "text": "changed"}}},
+                session["uri"],
+            )

@@ -21,6 +21,7 @@ export function connectPython(
   onStatus: (status: LanguageStatus) => void,
   displaySource: (uri: string, code: string) => Promise<EditorView | null>,
   onSymbols?: (symbols: DocumentSymbols | null, doc: Text) => void,
+  onClient?: (client: LSPClient | null) => void,
 ) {
   let disposed = false
   let socket: WebSocket | null = null
@@ -71,7 +72,7 @@ export function connectPython(
       workspace.displayFile = async (uri) => {
         try {
           const own = workspace.getFile(uri)?.getView()
-          if (own) return own
+          if (own) return displaySource(uri, own.state.doc.toString())
           const file = await workspace.requestFile(uri)
           return file && !disposed ? displaySource(uri, file.doc.toString()) : null
         } catch (error) {
@@ -146,6 +147,7 @@ export function connectPython(
           }),
         ]) })
         forceLinting(view)
+        onClient?.(active)
         onStatus('ready')
       }).catch(() => ws.close())
     }
@@ -155,6 +157,7 @@ export function connectPython(
       client?.disconnect()
       client = null
       if (disposed) return
+      onClient?.(null)
       view.dispatch({ effects: slot.reconfigure([]) })
       forceLinting(view)
       onStatus('reconnecting')
@@ -164,6 +167,7 @@ export function connectPython(
   connect()
   return () => {
     disposed = true
+    onClient?.(null)
     clearTimeout(timer)
     clearTimeout(watchdog)
     client?.disconnect()
@@ -172,7 +176,7 @@ export function connectPython(
 }
 
 /** 文档版本与插件身份共同约束响应，编辑后立即清除旧的可点击位置。 */
-function documentSymbols(onSymbols: (symbols: DocumentSymbols | null, doc: Text) => void) {
+export function documentSymbols(onSymbols: (symbols: DocumentSymbols | null, doc: Text) => void) {
   return ViewPlugin.fromClass(class {
     timer: ReturnType<typeof setTimeout> | undefined
     sequence = 0

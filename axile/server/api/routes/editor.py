@@ -27,6 +27,12 @@ _sessions: set[WebSocket] = set()
 @router.get("/source")
 async def python_source(uri: str) -> dict[str, str]:
     """只读打开 Python 环境与 Axile 包内的源码，禁止访问任意文件."""
+    path = source_path(uri)
+    return {"code": await asyncio.to_thread(path.read_text, encoding="utf-8")}
+
+
+def source_path(uri: str) -> Path:
+    """校验语言服务和源码预览共用的只读文件范围."""
     parsed = urlsplit(uri)
     path = Path(url2pathname(parsed.path)).resolve()
     roots = [
@@ -44,7 +50,7 @@ async def python_source(uri: str) -> dict[str, str]:
         raise HTTPException(404, "源码文件不存在")
     if path.stat().st_size > MAX_MESSAGE:
         raise HTTPException(413, "源码过大，无法预览")
-    return {"code": await asyncio.to_thread(path.read_text, encoding="utf-8")}
+    return path
 
 
 class FormatRequest(BaseModel):
@@ -119,7 +125,7 @@ async def read_message(reader: asyncio.StreamReader) -> str:
 
 
 def validate_message(message: dict, uri: str) -> None:
-    """仅接受当前草稿的文档操作，不允许客户端选择任意服务器文件."""
+    """草稿可编辑；受限源码仅允许只读语言服务请求."""
     method = message.get("method", "")
     allowed = {
         "initialize",
@@ -153,8 +159,33 @@ def validate_message(message: dict, uri: str) -> None:
     if not isinstance(params, dict):
         raise ValueError("无效 LSP 参数")
     document = params.get("textDocument")
-    if document is not None and (not isinstance(document, dict) or document.get("uri") != uri):
+    if document is None:
+        return
+    document_uri = document.get("uri") if isinstance(document, dict) else None
+    if document_uri == uri:
+        return
+    readonly_methods = {
+        "textDocument/didOpen",
+        "textDocument/didClose",
+        "textDocument/completion",
+        "textDocument/hover",
+        "textDocument/signatureHelp",
+        "textDocument/diagnostic",
+        "textDocument/definition",
+        "textDocument/references",
+        "textDocument/semanticTokens/full",
+        "textDocument/inlayHint",
+        "textDocument/foldingRange",
+        "textDocument/documentSymbol",
+    }
+    if not isinstance(document_uri, str) or method not in readonly_methods:
         raise ValueError("文档不属于当前编辑会话")
+    try:
+        path = source_path(document_uri)
+    except HTTPException as exc:
+        raise ValueError("文档不属于当前编辑会话") from exc
+    if method == "textDocument/didOpen" and document.get("text") != path.read_text(encoding="utf-8"):
+        raise ValueError("只读源码内容与服务器文件不一致")
 
 
 async def relay_client(socket: WebSocket, writer: asyncio.StreamWriter, uri: str, root: str) -> None:

@@ -8,7 +8,8 @@ import { indentationMarkers } from '@replit/codemirror-indentation-markers'
 
 export const isMac = () => typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform)
 
-export function editingExtensions(format: () => void, run: () => void) {
+/** 草稿与只读源码共用的阅读、查找及外观设置。 */
+export function readingExtensions() {
   return [
     indentUnit.of('    '),
     EditorState.tabSize.of(4),
@@ -18,14 +19,9 @@ export function editingExtensions(format: () => void, run: () => void) {
       activeLight: 'var(--color-ink-3)', activeDark: 'var(--color-ink-3)',
     } }),
     Prec.high(keymap.of([
-      { key: 'Mod-Enter', run: () => { run(); return true } },
-      { key: 'Shift-Alt-f', run: () => { format(); return true } },
-      { key: 'Mod-/', run: toggleComment },
       { key: 'Mod-d', run: selectNextOccurrence },
       { key: 'Mod-g', run: gotoLine },
       { key: 'Mod-h', mac: 'Mod-Alt-f', run: openSearchPanel },
-      { key: 'Tab', run: (view) => completionStatus(view.state) === 'active' && acceptCompletion(view) },
-      indentWithTab,
     ])),
     EditorState.phrases.of({
       'Find': '查找', 'Replace': '替换', 'next': '下一个', 'previous': '上一个',
@@ -49,5 +45,18 @@ export function editingExtensions(format: () => void, run: () => void) {
       '.cm-tooltip-autocomplete > ul > li[aria-selected]': { backgroundColor: 'var(--color-code-selection)', color: 'var(--color-code-fg)' },
       '.cm-matchingBracket': { backgroundColor: 'var(--color-code-selection)', outline: '1px solid var(--color-ink-3)' },
     }),
+  ]
+}
+
+export function editingExtensions(format: () => void, run: () => void) {
+  return [
+    readingExtensions(),
+    Prec.high(keymap.of([
+      { key: 'Mod-Enter', run: () => { run(); return true } },
+      { key: 'Shift-Alt-f', run: () => { format(); return true } },
+      { key: 'Mod-/', run: toggleComment },
+      { key: 'Tab', run: (view) => completionStatus(view.state) === 'active' && acceptCompletion(view) },
+      indentWithTab,
+    ])),
   ]
 }
