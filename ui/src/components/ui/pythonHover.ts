@@ -121,20 +121,26 @@ function createHover(view: EditorView, html: string, shouldFocus: () => boolean,
   copy.className = 'cm-python-hover-copy'
   copy.title = '复制悬停内容'
   copy.setAttribute('aria-label', '复制悬停内容')
-  copy.innerHTML = '<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><rect x="5" y="5" width="8" height="9" rx="1.5"/><path d="M3 11H2.5A1.5 1.5 0 0 1 1 9.5v-7A1.5 1.5 0 0 1 2.5 1h7A1.5 1.5 0 0 1 11 2.5V3"/></svg>'
+  const copyIcon = '<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><rect x="5" y="5" width="8" height="9" rx="1.5"/><path d="M3 11H2.5A1.5 1.5 0 0 1 1 9.5v-7A1.5 1.5 0 0 1 2.5 1h7A1.5 1.5 0 0 1 11 2.5V3"/></svg>'
+  const successIcon = '<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m3 8 3.5 3.5L13 4.5"/></svg>'
+  const errorIcon = '<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><circle cx="8" cy="8" r="6"/><path d="M8 4.5v4M8 11.5h.01"/></svg>'
+  copy.innerHTML = copyIcon
   let copyTimer: number | undefined
   copy.addEventListener('pointerdown', event => event.preventDefault())
   copy.addEventListener('click', async () => {
     if (copyTimer !== undefined) window.clearTimeout(copyTimer)
     try {
       await navigator.clipboard.writeText(hoverCopyText(content))
+      copy.innerHTML = successIcon
       copy.title = '已复制悬停内容'
       copy.setAttribute('aria-label', '已复制悬停内容')
     } catch {
+      copy.innerHTML = errorIcon
       copy.title = '复制失败'
       copy.setAttribute('aria-label', '复制失败')
     }
     copyTimer = window.setTimeout(() => {
+      copy.innerHTML = copyIcon
       copy.title = '复制悬停内容'
       copy.setAttribute('aria-label', '复制悬停内容')
     }, 1600)
