@@ -40,7 +40,7 @@ export function pythonHover() {
 
   return [hover, hoverTheme, keymap.of([{
     key: 'Mod-Alt-i', run(view) {
-      const existing = view.dom.querySelector<HTMLElement>('.cm-python-hover-doc:not(.cm-python-hover-signature)')
+      const existing = view.dom.querySelector<HTMLElement>('.cm-python-hover-doc')
       if (existing) existing.focus()
       else {
         focusNext = true
@@ -65,22 +65,34 @@ function createHover(view: EditorView, html: string, shouldFocus: () => boolean)
   content.setAttribute('role', 'region')
   content.setAttribute('aria-label', 'Python 文档')
   content.innerHTML = html
-  pinDocumentationContext(dom, content)
   if (content.childElementCount === 1 && content.firstElementChild?.matches('pre:has(> code)')) {
     dom.classList.add('cm-python-hover-code-only')
   }
-  const signature = dom.querySelector<HTMLElement>('.cm-python-hover-signature')
-  // Keep a readable body even when CodeMirror clamps the hover near a viewport edge.
-  const sizeObserver = new ResizeObserver(([entry]) => {
-    if (entry) dom.style.setProperty('--python-hover-height', `${entry.contentRect.height}px`)
-  })
-  signature?.addEventListener('wheel', event => {
-    if (signature.scrollHeight > signature.clientHeight + 1) return
-    const delta = event.deltaMode === 1 ? event.deltaY * 20
-      : event.deltaMode === 2 ? event.deltaY * content.clientHeight : event.deltaY
-    content.scrollTop += delta
-    event.preventDefault()
-  }, { passive: false })
+  arrangeDocumentation(content)
+  const copyTimers: number[] = []
+  for (const pre of content.querySelectorAll<HTMLPreElement>('pre:has(> code)')) {
+    const code = pre.querySelector<HTMLElement>(':scope > code')!
+    const button = pre.appendChild(document.createElement('button'))
+    button.type = 'button'
+    button.className = 'cm-python-hover-copy'
+    button.title = '复制代码'
+    button.setAttribute('aria-label', '复制代码')
+    button.innerHTML = '<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><rect x="5" y="5" width="8" height="9" rx="1.5"/><path d="M3 11H2.5A1.5 1.5 0 0 1 1 9.5v-7A1.5 1.5 0 0 1 2.5 1h7A1.5 1.5 0 0 1 11 2.5V3"/></svg>'
+    button.addEventListener('click', async () => {
+      try {
+        await navigator.clipboard.writeText(code.textContent ?? '')
+        button.title = '已复制'
+        button.setAttribute('aria-label', '已复制')
+        copyTimers.push(window.setTimeout(() => {
+          button.title = '复制代码'
+          button.setAttribute('aria-label', '复制代码')
+        }, 1600))
+      } catch {
+        button.title = '复制失败'
+        button.setAttribute('aria-label', '复制失败')
+      }
+    })
+  }
   const grip = dom.appendChild(document.createElement('div'))
   grip.className = 'cm-python-hover-resize'
   grip.title = '拖动调整文档大小'
@@ -119,30 +131,22 @@ function createHover(view: EditorView, html: string, shouldFocus: () => boolean)
   return {
     dom,
     mount() {
-      sizeObserver.observe(dom)
       if (readingSize) {
         dom.style.width = `${readingSize.width}px`
         dom.style.height = `${readingSize.height}px`
       }
       if (shouldFocus()) content.focus({ preventScroll: true })
     },
-    destroy() { sizeObserver.disconnect() },
+    destroy() { copyTimers.forEach(window.clearTimeout) },
   }
 }
 
-/** Move the leading LSP signature once; section boundaries let CSS push old headings away. */
-function pinDocumentationContext(dom: HTMLElement, content: HTMLElement) {
+/** Keep the signature in the shared scroll area and group documentation sections. */
+function arrangeDocumentation(content: HTMLElement) {
   const first = content.firstElementChild
   if (first?.matches('pre:has(> code.language-python)') && first.nextElementSibling) {
-    const signature = document.createElement('div')
-    signature.className = 'cm-python-hover-doc cm-python-hover-signature quiet-scrollbar'
-    signature.tabIndex = 0
-    signature.setAttribute('role', 'region')
-    signature.setAttribute('aria-label', '函数签名')
-    signature.appendChild(first)
-    dom.insertBefore(signature, content)
-    // The pinned header already separates the signature from the documentation.
-    if (content.firstElementChild?.tagName === 'HR') content.firstElementChild.remove()
+    first.classList.add('cm-python-hover-signature')
+    if (first.nextElementSibling?.tagName === 'HR') first.nextElementSibling.remove()
   }
 
   let section: HTMLElement | undefined
@@ -174,12 +178,6 @@ const hoverTheme = EditorView.theme({
     padding: '8px 10px', fontFamily: 'var(--font-sans)', fontSize: '13px',
     color: 'var(--color-ink-2)', lineHeight: '1.65', whiteSpace: 'normal', overflowWrap: 'anywhere',
   },
-  '.cm-python-hover-signature': {
-    flex: '0 0 auto', boxSizing: 'border-box',
-    maxHeight: 'min(110px, 25vh, max(0px, calc(var(--python-hover-height, 420px) - 24px)))', padding: '0 10px',
-    borderBottom: '1px solid var(--color-line)', backgroundColor: 'var(--color-surface)',
-  },
-  '.cm-python-hover-signature + .cm-python-hover-doc': { minHeight: '24px' },
   '.cm-python-hover-section': { display: 'flow-root', paddingBottom: '4px' },
   '.cm-python-hover-doc .cm-python-hover-section > :first-child': {
     position: 'sticky', top: '-8px', zIndex: '1', margin: '0 -10px 4px', padding: '6px 10px',
@@ -197,15 +195,30 @@ const hoverTheme = EditorView.theme({
     boxDecorationBreak: 'clone',
   },
   '.cm-python-hover-doc pre': {
-    whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', margin: '8px 0', padding: '6px 8px',
+    position: 'relative', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', margin: '8px 0', padding: '6px 38px 6px 8px',
     border: 'none', borderRadius: '4px',
     backgroundColor: 'var(--color-code-bg)', color: 'var(--color-code-fg)', fontFamily: 'var(--font-mono)', lineHeight: '1.6',
   },
-  '.cm-python-hover-signature pre': { margin: '0', padding: '7px 0', border: 'none', backgroundColor: 'transparent' },
+  '.cm-python-hover-doc pre.cm-python-hover-signature': {
+    margin: '-8px -10px 8px', padding: '7px 38px 7px 10px',
+    borderBottom: '1px solid var(--color-line)', backgroundColor: 'transparent',
+  },
   '.cm-python-hover-code-only .cm-python-hover-doc': { padding: '9px 12px' },
   '.cm-python-hover-code-only .cm-python-hover-doc > pre': {
-    margin: '0', padding: '0', borderRadius: '0', backgroundColor: 'transparent',
+    margin: '0', padding: '0 28px 0 0', borderRadius: '0', backgroundColor: 'transparent',
   },
+  '.cm-python-hover-copy': {
+    position: 'absolute', top: '5px', right: '5px', display: 'grid', placeItems: 'center',
+    width: '24px', height: '24px', padding: '0', border: '1px solid var(--color-line)', borderRadius: '4px',
+    backgroundColor: 'var(--color-surface)', color: 'var(--color-ink-2)', cursor: 'pointer',
+    opacity: '0', pointerEvents: 'none',
+  },
+  '.cm-python-hover-code-only .cm-python-hover-copy': { top: '0', right: '0' },
+  '.cm-python-hover-doc pre:hover > .cm-python-hover-copy, .cm-python-hover-doc pre:focus-within > .cm-python-hover-copy, .cm-python-hover:hover .cm-python-hover-signature > .cm-python-hover-copy, .cm-python-hover-code-only:hover .cm-python-hover-copy': {
+    opacity: '1', pointerEvents: 'auto',
+  },
+  '.cm-python-hover-copy:hover': { color: 'var(--color-ink-1)', backgroundColor: 'var(--color-bg-subtle)' },
+  '.cm-python-hover-copy:focus-visible': { outline: '1px solid var(--color-accent)', outlineOffset: '1px' },
   '.cm-python-hover-doc ul, .cm-python-hover-doc ol': { margin: '8px 0', paddingLeft: '22px' },
   '.cm-python-hover-doc ul': { listStyleType: 'disc' },
   '.cm-python-hover-doc ol': { listStyleType: 'decimal' },
