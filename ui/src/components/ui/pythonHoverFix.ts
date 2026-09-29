@@ -2,7 +2,6 @@ export interface HoverFix {
   from: number
   to: number
   message: string
-  source: string
   canFix: boolean
 }
 

@@ -30,7 +30,7 @@ export function pythonHover(kind: PythonEditorKind) {
     const fixes: HoverFix[] = []
     forEachDiagnostic(view.state, (diagnostic, from, to) => {
       fixes.push({
-        from, to, message: diagnostic.message, source: diagnostic.source ?? 'ty',
+        from, to, message: diagnostic.message,
         canFix: !!diagnostic.actions?.some((item) => item.name === '快速修复'),
       })
     })
@@ -96,37 +96,10 @@ function createHover(view: EditorView, html: string, shouldFocus: () => boolean,
     diagnostic.className = 'cm-python-hover-diagnostic'
     const message = diagnostic.appendChild(document.createElement('span'))
     message.textContent = fix.message
-    const source = diagnostic.appendChild(document.createElement('span'))
-    source.className = 'cm-python-hover-diagnostic-source'
-    source.textContent = fix.source
   }
-  const copyTimers: number[] = []
-  for (const pre of content.querySelectorAll<HTMLPreElement>('pre:has(> code)')) {
-    const code = pre.querySelector<HTMLElement>(':scope > code')!
-    const button = pre.appendChild(document.createElement('button'))
-    button.type = 'button'
-    button.className = 'cm-python-hover-copy'
-    button.title = '复制代码'
-    button.setAttribute('aria-label', '复制代码')
-    button.innerHTML = '<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><rect x="5" y="5" width="8" height="9" rx="1.5"/><path d="M3 11H2.5A1.5 1.5 0 0 1 1 9.5v-7A1.5 1.5 0 0 1 2.5 1h7A1.5 1.5 0 0 1 11 2.5V3"/></svg>'
-    button.addEventListener('click', async () => {
-      try {
-        await navigator.clipboard.writeText(code.textContent ?? '')
-        button.title = '已复制'
-        button.setAttribute('aria-label', '已复制')
-        copyTimers.push(window.setTimeout(() => {
-          button.title = '复制代码'
-          button.setAttribute('aria-label', '复制代码')
-        }, 1600))
-      } catch {
-        button.title = '复制失败'
-        button.setAttribute('aria-label', '复制失败')
-      }
-    })
-  }
+  const footer = dom.appendChild(document.createElement('div'))
+  footer.className = 'cm-python-hover-actions'
   if (fix?.canFix) {
-    const footer = dom.appendChild(document.createElement('div'))
-    footer.className = 'cm-python-hover-fix'
     const button = footer.appendChild(document.createElement('button'))
     button.type = 'button'
     button.textContent = '快速修复…'
@@ -143,6 +116,33 @@ function createHover(view: EditorView, html: string, shouldFocus: () => boolean,
       quickFix(view, kind, fix.from, fix.to, anchor, host, () => view.dispatch({ effects: closeHoverTooltips }))
     })
   }
+  const copy = footer.appendChild(document.createElement('button'))
+  copy.type = 'button'
+  copy.className = 'cm-python-hover-copy'
+  copy.title = '复制悬停内容'
+  copy.setAttribute('aria-label', '复制悬停内容')
+  copy.innerHTML = '<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><rect x="5" y="5" width="8" height="9" rx="1.5"/><path d="M3 11H2.5A1.5 1.5 0 0 1 1 9.5v-7A1.5 1.5 0 0 1 2.5 1h7A1.5 1.5 0 0 1 11 2.5V3"/></svg><span>复制</span>'
+  const copyLabel = copy.querySelector('span')!
+  let copyTimer: number | undefined
+  copy.addEventListener('pointerdown', event => event.preventDefault())
+  copy.addEventListener('click', async () => {
+    if (copyTimer !== undefined) window.clearTimeout(copyTimer)
+    try {
+      await navigator.clipboard.writeText(hoverCopyText(content))
+      copyLabel.textContent = '已复制'
+      copy.title = '已复制悬停内容'
+      copy.setAttribute('aria-label', '已复制悬停内容')
+    } catch {
+      copyLabel.textContent = '复制失败'
+      copy.title = '复制失败'
+      copy.setAttribute('aria-label', '复制失败')
+    }
+    copyTimer = window.setTimeout(() => {
+      copyLabel.textContent = '复制'
+      copy.title = '复制悬停内容'
+      copy.setAttribute('aria-label', '复制悬停内容')
+    }, 1600)
+  })
   const grip = dom.appendChild(document.createElement('div'))
   grip.className = 'cm-python-hover-resize'
   grip.title = '拖动调整文档大小'
@@ -179,8 +179,20 @@ function createHover(view: EditorView, html: string, shouldFocus: () => boolean,
     mount() {
       if (shouldFocus()) content.focus({ preventScroll: true })
     },
-    destroy() { copyTimers.forEach(window.clearTimeout) },
+    destroy() { if (copyTimer !== undefined) window.clearTimeout(copyTimer) },
   }
+}
+
+/** 复制可读正文，省略卡片操作控件。 */
+function hoverCopyText(content: HTMLElement): string {
+  const diagnostic = content.querySelector<HTMLElement>(':scope > .cm-python-hover-diagnostic')
+  const message = diagnostic?.firstElementChild?.textContent?.trim()
+  const documentation = Array.from(content.childNodes)
+    .filter(node => node !== diagnostic)
+    .map(node => node instanceof HTMLElement ? node.innerText.trim() : node.textContent?.trim() ?? '')
+    .filter(Boolean)
+    .join('\n\n')
+  return [message, documentation].filter(Boolean).join('\n\n')
 }
 
 /** Keep the signature in the shared scroll area and group documentation sections. */
@@ -215,12 +227,10 @@ const hoverTheme = EditorView.theme({
   },
   '.cm-python-hover:has(.cm-python-hover-diagnostic)': { minWidth: 'min(360px, calc(100vw - 24px))' },
   '.cm-python-hover-diagnostic': {
-    display: 'flex', alignItems: 'baseline', gap: '8px', margin: '-8px -10px 8px', padding: '8px 10px',
+    margin: '-8px -10px 8px', padding: '8px 10px',
     borderBottom: '1px solid var(--color-line)', color: 'var(--color-ink-1)',
     fontFamily: 'var(--font-sans)', fontSize: '13px', lineHeight: '1.5', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere',
   },
-  '.cm-python-hover-diagnostic > :first-child': { minWidth: '0', flex: '1 1 auto' },
-  '.cm-python-hover-diagnostic-source': { flex: 'none', color: 'var(--color-ink-3)', fontSize: '11px' },
   '.cm-python-hover-code-only': { minWidth: 'min(220px, calc(100vw - 24px))' },
   '.cm-python-hover[style*="width"]': { maxWidth: 'calc(100vw - 24px)', maxHeight: 'calc(100vh - 24px)' },
   '.cm-python-hover-doc': {
@@ -228,17 +238,17 @@ const hoverTheme = EditorView.theme({
     padding: '8px 10px', fontFamily: 'var(--font-sans)', fontSize: '13px',
     color: 'var(--color-ink-2)', lineHeight: '1.65', whiteSpace: 'normal', overflowWrap: 'anywhere',
   },
-  '.cm-python-hover-fix': {
-    display: 'flex', alignItems: 'center', gap: '6px', flex: 'none', padding: '6px 10px',
+  '.cm-python-hover-actions': {
+    display: 'flex', alignItems: 'center', gap: '6px', flex: 'none', padding: '6px 22px 6px 10px',
     borderTop: '1px solid var(--color-line)', color: 'var(--color-ink-3)', fontSize: '12px', lineHeight: '1.5',
   },
-  '.cm-python-hover-fix span': { fontSize: '11px' },
-  '.cm-python-hover-fix button': {
+  '.cm-python-hover-actions > span': { fontSize: '11px' },
+  '.cm-python-hover-actions > button:not(.cm-python-hover-copy)': {
     flex: 'none', border: '0', borderRadius: '3px', padding: '2px 4px', marginLeft: '-4px',
     backgroundColor: 'transparent', color: 'var(--color-accent)', cursor: 'pointer', font: 'inherit',
   },
-  '.cm-python-hover-fix button:hover': { textDecoration: 'underline', textUnderlineOffset: '2px' },
-  '.cm-python-hover-fix button:focus-visible': { outline: '2px solid var(--color-accent)', outlineOffset: '1px' },
+  '.cm-python-hover-actions > button:not(.cm-python-hover-copy):hover': { textDecoration: 'underline', textUnderlineOffset: '2px' },
+  '.cm-python-hover-actions button:focus-visible': { outline: '2px solid var(--color-accent)', outlineOffset: '1px' },
   '.cm-python-hover-section': { display: 'flow-root', paddingBottom: '4px' },
   '.cm-python-hover-doc .cm-python-hover-section > :first-child': {
     position: 'sticky', top: '-8px', zIndex: '1', margin: '0 -10px 4px', padding: '6px 10px',
@@ -256,27 +266,22 @@ const hoverTheme = EditorView.theme({
     boxDecorationBreak: 'clone',
   },
   '.cm-python-hover-doc pre': {
-    position: 'relative', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', margin: '8px 0', padding: '6px 38px 6px 8px',
+    whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', margin: '8px 0', padding: '6px 8px',
     border: 'none', borderRadius: '4px',
     backgroundColor: 'var(--color-code-bg)', color: 'var(--color-code-fg)', fontFamily: 'var(--font-mono)', lineHeight: '1.6',
   },
   '.cm-python-hover-doc pre.cm-python-hover-signature': {
-    margin: '-8px -10px 8px', padding: '7px 38px 7px 10px',
+    margin: '-8px -10px 8px', padding: '7px 10px',
     borderBottom: '1px solid var(--color-line)', backgroundColor: 'transparent',
   },
   '.cm-python-hover-code-only .cm-python-hover-doc': { padding: '9px 12px' },
   '.cm-python-hover-code-only .cm-python-hover-doc > pre': {
-    margin: '0', padding: '0 28px 0 0', borderRadius: '0', backgroundColor: 'transparent',
+    margin: '0', padding: '0', borderRadius: '0', backgroundColor: 'transparent',
   },
   '.cm-python-hover-copy': {
-    position: 'absolute', top: '5px', right: '5px', display: 'grid', placeItems: 'center',
-    width: '24px', height: '24px', padding: '0', border: '1px solid var(--color-line)', borderRadius: '4px',
-    backgroundColor: 'var(--color-surface)', color: 'var(--color-ink-2)', cursor: 'pointer',
-    opacity: '0', pointerEvents: 'none',
-  },
-  '.cm-python-hover-code-only .cm-python-hover-copy': { top: '0', right: '0' },
-  '.cm-python-hover-doc pre:hover > .cm-python-hover-copy, .cm-python-hover-doc pre:focus-within > .cm-python-hover-copy, .cm-python-hover:hover .cm-python-hover-signature > .cm-python-hover-copy, .cm-python-hover-code-only:hover .cm-python-hover-copy': {
-    opacity: '1', pointerEvents: 'auto',
+    display: 'inline-flex', alignItems: 'center', gap: '4px', flex: 'none', marginLeft: 'auto',
+    padding: '2px 6px', border: '1px solid var(--color-line)', borderRadius: '4px',
+    backgroundColor: 'var(--color-surface)', color: 'var(--color-ink-2)', cursor: 'pointer', font: 'inherit',
   },
   '.cm-python-hover-copy:hover': { color: 'var(--color-ink-1)', backgroundColor: 'var(--color-bg-subtle)' },
   '.cm-python-hover-copy:focus-visible': { outline: '1px solid var(--color-accent)', outlineOffset: '1px' },
