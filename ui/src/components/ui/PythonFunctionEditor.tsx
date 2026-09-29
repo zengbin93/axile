@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type ReactNode, type Ref } from 'react'
 import { createPortal } from 'react-dom'
 import { python } from '@codemirror/lang-python'
+import { foldGutter } from '@codemirror/language'
 import { lintGutter, linter, forceLinting, forEachDiagnostic, type Diagnostic } from '@codemirror/lint'
 import { Compartment, StateEffect } from '@codemirror/state'
 import { undo, redo, isolateHistory } from '@codemirror/commands'
@@ -23,7 +24,34 @@ import { pythonStickyScroll } from '@/components/ui/pythonStickyScroll'
 
 export interface PythonProblem { line: number; message: string; source: string; severity: string }
 const runtimeChanged = StateEffect.define<null>()
-const basicSetup = { foldGutter: true, highlightActiveLine: true, highlightActiveLineGutter: true, autocompletion: true }
+const basicSetup = { foldGutter: false, highlightActiveLine: true, highlightActiveLineGutter: true, autocompletion: true }
+const centeredFoldGutter = [
+  foldGutter({
+    markerDOM: (open) => {
+      const marker = document.createElement('span')
+      marker.title = open ? '折叠代码' : '展开代码'
+      const icon = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
+      icon.setAttribute('viewBox', '0 0 16 16')
+      icon.setAttribute('width', '14')
+      icon.setAttribute('height', '14')
+      icon.setAttribute('aria-hidden', 'true')
+      const path = document.createElementNS('http://www.w3.org/2000/svg', 'path')
+      path.setAttribute('d', open ? 'm4 6 4 4 4-4' : 'm6 4 4 4-4 4')
+      path.setAttribute('fill', 'none')
+      path.setAttribute('stroke', 'currentColor')
+      path.setAttribute('stroke-width', '1.5')
+      path.setAttribute('stroke-linecap', 'round')
+      path.setAttribute('stroke-linejoin', 'round')
+      icon.append(path)
+      marker.append(icon)
+      return marker
+    },
+  }),
+  EditorView.theme({
+    '.cm-foldGutter .cm-gutterElement': { display: 'flex', alignItems: 'center', justifyContent: 'center', minWidth: '18px' },
+    '.cm-foldGutter .cm-gutterElement span': { display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0' },
+  }),
+]
 const toolbarActionClass = 'flex-none rounded px-2 py-1 cursor-pointer transition-colors duration-150 hover:bg-fill hover:text-ink-1 active:bg-ink-1/10 active:text-ink-1 aria-expanded:bg-fill aria-expanded:text-ink-1 focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-1 disabled:pointer-events-none disabled:opacity-40 motion-reduce:transition-none'
 
 export interface PythonValidationState {
@@ -260,6 +288,7 @@ export function PythonFunctionEditor({
     pythonStickyScroll,
     python(),
     lintGutter(),
+    centeredFoldGutter,
     languageSlot.of([]),
     editingExtensions(() => formatRef.current(), () => onRunRef.current()),
     linter((editor): Diagnostic[] => {
