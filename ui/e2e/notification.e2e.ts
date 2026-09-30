@@ -12,7 +12,7 @@ async function setup(page: Page, status: 'none' | 'default' | 'function', config
   }
   const patches: Record<string, unknown>[] = []
   const trials: Record<string, unknown>[] = []
-  const control = { failTemplate: false, failSave: false, templateDelay: 0, saveDelay: 0, templateReads: 0 }
+  const control = { failTemplate: false, failSave: false, templateDelay: 0, saveDelay: 0, trialDelay: 0, templateReads: 0 }
   await page.route('**/api/v1/**', async (route) => {
     const url = new URL(route.request().url()).pathname
     if (url.endsWith('/notification/default')) {
@@ -21,6 +21,7 @@ async function setup(page: Page, status: 'none' | 'default' | 'function', config
       await route.fulfill({ status: control.failTemplate ? 500 : 200, json: control.failTemplate ? { detail: '模板读取失败' } : { code: template } })
     } else if (url.endsWith('/notification/test') || url.endsWith('/feishu/test')) {
       trials.push(route.request().postDataJSON())
+      if (control.trialDelay) await new Promise((resolve) => setTimeout(resolve, control.trialDelay))
       await route.fulfill({ json: { ok: true, message: '样例函数运行成功' } })
     } else if (route.request().method() === 'PATCH') {
       const patch = route.request().postDataJSON()
@@ -147,4 +148,141 @@ test('编辑页模板失败可重试，重置只修改草稿并使试跑过期',
   await expect(page.getByText(/当前草稿未保存/)).toBeVisible()
   await expect(page.getByText("代码已改 · 结果为上次试跑").last()).toBeVisible()
   expect(patches).toHaveLength(0)
+})
+
+async function editCode(page: Page, code: string) {
+  await page.locator('.cm-content').first().click()
+  await page.keyboard.press('ControlOrMeta+a')
+  await page.keyboard.insertText(code)
+}
+
+test('通知公共保存快捷键、失败重试、还原和保存后继续编辑', async ({ page }) => {
+  const { patches, control } = await setup(page, 'function')
+  await page.goto('/e2e/notification.html?editor=1')
+  await expect(page.getByRole('button', { name: '试跑函数' })).toBeVisible()
+  await editCode(page, 'def notify(context):\n    print("first")\n')
+  control.failSave = true
+  await page.keyboard.press('ControlOrMeta+s')
+  await expect(page.locator('footer').getByText('保存失败', { exact: true }).last()).toBeVisible()
+  control.failSave = false
+  control.saveDelay = 400
+  await page.keyboard.press('ControlOrMeta+s')
+  await page.keyboard.press('ControlOrMeta+s')
+  await expect.poll(() => patches.length).toBe(2)
+  await expect(page.locator('footer').getByText('已保存', { exact: true }).last()).toBeVisible()
+  await expect(page.getByRole('button', { name: '试跑函数' })).toBeVisible()
+  await page.keyboard.press('ControlOrMeta+s')
+  expect(patches).toHaveLength(2)
+  await editCode(page, 'def notify(context):\n    print("second")\n')
+  await page.getByRole('button', { name: '还原', exact: true }).click()
+  await expect(page.locator('.cm-content').first()).toContainText('first')
+  await expect(page.locator('footer').getByText('已保存', { exact: true }).last()).toBeVisible()
+})
+
+test('保存中的新修改保留为未保存，还原到提交版本', async ({ page }) => {
+  const { patches, control } = await setup(page, 'function')
+  control.saveDelay = 500
+  await page.goto('/e2e/notification.html?editor=1')
+  await editCode(page, 'def notify(context):\n    print("submitted")\n')
+  await page.keyboard.press('ControlOrMeta+s')
+  await expect.poll(() => patches.length).toBe(1)
+  await editCode(page, 'def notify(context):\n    print("later edit")\n')
+  await expect(page.locator('footer').getByText('未保存', { exact: true }).last()).toBeVisible()
+  await page.getByRole('button', { name: '还原', exact: true }).click()
+  await expect(page.locator('.cm-content').first()).toContainText('submitted')
+})
+
+test('组合接入公共保存、还原和分栏记忆', async ({ page }) => {
+  let portfolio = { id: 1, name: '测试组合', custom_calc_py_code: 'def calculate_portfolio(context):\n    return {}\n' }
+  const patches: Record<string, unknown>[] = []
+  const trials: Record<string, unknown>[] = []
+  await page.route('**/api/v1/**', async (route) => {
+    const url = new URL(route.request().url()).pathname
+    if (url.endsWith('/validate_custom_calc')) {
+      trials.push(route.request().postDataJSON())
+      await new Promise((resolve) => setTimeout(resolve, 300))
+      await route.fulfill({ json: { valid: true, target: { BTCUSDT: 0.5 }, error: null, error_line: null } })
+    } else if (route.request().method() === 'PATCH') {
+      const patch = route.request().postDataJSON()
+      patches.push(patch)
+      portfolio = { ...portfolio, ...patch }
+      await route.fulfill({ json: portfolio })
+    } else if (url.endsWith('/portfolio/1')) await route.fulfill({ json: portfolio })
+    else if (url.includes('target_snapshot')) await route.fulfill({ json: { weights: {}, calculated_at: null } })
+    else await route.fulfill({ json: [] })
+  })
+  await page.goto('/e2e/notification.html?portfolio=1')
+  await editCode(page, 'def calculate_portfolio(context):\n    return {"BTCUSDT": 0.5}\n')
+  await page.keyboard.press('ControlOrMeta+Enter')
+  await page.keyboard.press('ControlOrMeta+Enter')
+  await expect.poll(() => trials.length).toBe(1)
+  await expect(page.getByText('函数执行成功。', { exact: true })).toBeVisible()
+  expect(patches).toHaveLength(0)
+  await page.keyboard.press('ControlOrMeta+s')
+  await expect.poll(() => patches.length).toBe(1)
+  await expect(page.locator('footer').getByText('已保存', { exact: true }).last()).toBeVisible()
+  await editCode(page, 'def calculate_portfolio(context):\n    return {}\n')
+  await expect(page.getByText('代码已修改，以下为旧结果', { exact: true })).toBeVisible()
+  await page.getByRole('button', { name: '还原', exact: true }).click()
+  await expect(page.locator('.cm-content').first()).toContainText('BTCUSDT')
+  const splitter = page.getByRole('separator', { name: '调整运行检查器宽度' })
+  await splitter.focus()
+  await page.keyboard.press('ArrowRight')
+  await expect(splitter).toHaveAttribute('aria-valuenow', '336')
+  await page.reload()
+  await expect(splitter).toHaveAttribute('aria-valuenow', '336')
+  await splitter.dblclick()
+  await expect(splitter).toHaveAttribute('aria-valuenow', '320')
+})
+
+test('系统通知共用试跑、过期状态、保存快捷键与还原', async ({ page }) => {
+  const trials: Record<string, unknown>[] = []
+  const saves: Record<string, unknown>[] = []
+  await page.route('**/api/v1/**', async (route) => {
+    const url = new URL(route.request().url()).pathname
+    if (url.endsWith('/function/test') || url.endsWith('/init/execution-alert')) {
+      if (url.endsWith('/function/test')) {
+        trials.push(route.request().postDataJSON())
+        await new Promise((resolve) => setTimeout(resolve, 300))
+      } else saves.push(route.request().postDataJSON())
+      await route.fulfill({ json: { ok: true, message: '样例运行成功' } })
+    } else await route.fulfill({ json: [] })
+  })
+  await page.goto('/e2e/notification.html?system=1')
+  await page.getByText('高级通知设置', { exact: true }).click()
+  await editCode(page, 'def notify(context):\n    print("system")\n')
+  await page.keyboard.press('ControlOrMeta+Enter')
+  await page.keyboard.press('ControlOrMeta+Enter')
+  await expect.poll(() => trials.length).toBe(1)
+  await expect(page.getByText('样例运行成功', { exact: true })).toBeVisible()
+  await editCode(page, 'def notify(context):\n    print("changed")\n')
+  await expect(page.getByText('代码已改 · 结果为上次试跑', { exact: true }).last()).toBeVisible()
+  await page.keyboard.press('ControlOrMeta+s')
+  await expect.poll(() => saves.length).toBe(1)
+  expect(saves[0].system_execution_notification_code).toContain('changed')
+  await expect(page.locator('footer').getByText('已保存', { exact: true }).last()).toBeVisible()
+  await editCode(page, 'def notify(context):\n    pass\n')
+  await page.getByRole('button', { name: '还原', exact: true }).click()
+  await expect(page.locator('.cm-content').first()).toContainText('changed')
+})
+
+test('通知试跑按钮和快捷键共用禁用条件，空代码不试跑但允许关闭通知', async ({ page }) => {
+  const { patches, trials, control } = await setup(page, 'function')
+  control.trialDelay = 400
+  await page.goto('/e2e/notification.html?editor=1')
+  await editCode(page, 'def notify(context):\n    print("trial")\n')
+  await page.keyboard.press('ControlOrMeta+Enter')
+  await page.keyboard.press('ControlOrMeta+Enter')
+  await page.keyboard.press('ControlOrMeta+s')
+  await expect.poll(() => trials.length).toBe(1)
+  expect(patches).toHaveLength(0)
+  await expect(page.getByText('样例函数运行成功', { exact: true })).toBeVisible()
+  await page.getByRole('button', { name: '清空函数' }).click()
+  await page.locator('.cm-content').first().focus()
+  await page.keyboard.press('ControlOrMeta+Enter')
+  await expect(page.getByRole('button', { name: '试跑函数' })).toBeDisabled()
+  expect(trials).toHaveLength(1)
+  await page.keyboard.press('ControlOrMeta+s')
+  await expect.poll(() => patches.length).toBe(1)
+  expect(patches[0]).toEqual({ execution_notification_code: null })
 })

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useParams, useViewTransitionState } from 'react-router'
 import { Pencil, Play, RefreshCw, Zap } from 'lucide-react'
 import { Link } from '@/components/ui/nav'
@@ -11,6 +11,8 @@ import { Segmented } from '@/components/ui/Segmented'
 import { Tooltip } from '@/components/ui/Tooltip'
 import { ConfirmModal, type ConfirmSpec } from '@/components/ui/ConfirmModal'
 import type { PythonEditorHandle } from '@/components/ui/PythonFunctionEditor'
+import { PythonWorkbench } from '@/components/ui/PythonWorkbench'
+import { usePythonDraft, usePythonSave } from '@/components/ui/pythonWorkbenchState'
 import { PythonWorkbenchPane } from '@/components/ui/PythonWorkbenchPane'
 import { PythonRunPanel } from '@/components/ui/PythonRunPanel'
 import { WorkbenchPanel } from '@/components/ui/WorkbenchPanel'
@@ -35,22 +37,8 @@ import { useLiveExecStore } from '@/stores/liveExec'
 import { useToastStore } from '@/stores/ui'
 import type { ExecutionTrigger } from '@/types/api'
 
-const DEFAULT_INSPECTOR_WIDTH = 320
-const MIN_INSPECTOR_WIDTH = 260
-const MAX_INSPECTOR_WIDTH = 480
 const INSPECTOR_WIDTH_KEY = 'axon.portfolioWorkbench.inspectorWidth'
 const PANEL_SPLIT_KEY = 'axon.portfolioWorkbench.panelSplit'
-
-function clampInspectorWidth(width: number, containerWidth = Number.POSITIVE_INFINITY) {
-  const available = Math.max(MIN_INSPECTOR_WIDTH, containerWidth - 520)
-  return Math.min(Math.max(width, MIN_INSPECTOR_WIDTH), MAX_INSPECTOR_WIDTH, available)
-}
-
-function initialInspectorWidth() {
-  if (typeof window === 'undefined') return DEFAULT_INSPECTOR_WIDTH
-  const stored = Number(window.localStorage.getItem(INSPECTOR_WIDTH_KEY))
-  return Number.isFinite(stored) && stored > 0 ? clampInspectorWidth(stored) : DEFAULT_INSPECTOR_WIDTH
-}
 
 function initialPanelSplit() {
   if (typeof window === 'undefined') return 0.5
@@ -83,25 +71,24 @@ export function PortfolioEditPage() {
   const lite = portfolios?.find((p) => p.id === portfolioId) ?? null
   const head = pf ?? lite
   const [ready, setReady] = useState(false)
-  const [name, setName] = useState(() => lite?.name ?? '')
-  const [code, setCode] = useState(() => lite?.custom_calc_py_code ?? '')
-  const [original, setOriginal] = useState(() => ({ name: lite?.name ?? '', code: lite?.custom_calc_py_code ?? '' }))
-  const [saving, setSaving] = useState(false)
-  const [saveError, setSaveError] = useState<Error | null>(null)
+  const draftState = usePythonDraft({ name: lite?.name ?? '', code: lite?.custom_calc_py_code ?? '' },
+    (a, b) => a.name.trim() === b.name && a.code === b.code)
+  const { draft: { name, code }, setDraft, baseline: original, setBaseline: setOriginal } = draftState
+  const setName = useCallback((name: string) => setDraft((draft) => ({ ...draft, name })), [setDraft])
+  const setCode = useCallback((code: string) => setDraft((draft) => ({ ...draft, code })), [setDraft])
+  const saveState = usePythonSave()
+  const { saving, error: saveError } = saveState
   const [confirm, setConfirm] = useState<ConfirmSpec | null>(null)
   const [actionError, setActionError] = useState<Error | null>(null)
   // 「目标」面板默认展开生效 tab：这是组合域的「当前事实」，多数进来是为看它或试跑。
   const [resultOpen, setResultOpen] = useState(true)
   const [targetTab, setTargetTab] = useState<'effective' | 'trial'>('effective')
   const [followersOpen, setFollowersOpen] = useState(true)
-  const [inspectorWidth, setInspectorWidth] = useState(initialInspectorWidth)
-  const [resizingInspector, setResizingInspector] = useState(false)
   const [panelSplit, setPanelSplit] = useState(initialPanelSplit)
   const [resizingPanels, setResizingPanels] = useState(false)
   const nameEditorRef = useRef<HTMLDivElement>(null)
   const editorRef = useRef<PythonEditorHandle>(null)
   const [editorStatus, setEditorStatus] = useState<HTMLDivElement | null>(null)
-  const workbenchRef = useRef<HTMLDivElement>(null)
   const inspectorRef = useRef<HTMLDivElement>(null)
   const inspectorControlsRef = useRef<HTMLElement>(null)
 
@@ -118,7 +105,7 @@ export function PortfolioEditPage() {
       setCode(source.custom_calc_py_code)
     }
     if (pf) setReady(true)
-  }, [pf, lite, ready, name, code, original])
+  }, [pf, lite, ready, name, code, original, setOriginal, setName, setCode])
 
   const followers = useMemo(
     () => (accounts ?? []).filter((account) => account.portfolio_id === portfolioId),
@@ -232,22 +219,12 @@ export function PortfolioEditPage() {
     </span>
   )
 
-  const dirty = name.trim() !== original.name || code !== original.code
+  const dirty = draftState.dirty
   // 只让当前代码的语法错误阻止保存；继续编辑后，旧试跑结果已 stale，不应误锁。
   const currentSyntaxError =
     !calc.stale && calc.editorResult?.valid === false && calc.editorResult.errorType === 'SyntaxError'
   const blocked =
     !name.trim() || !code.trim() || accounts == null || Boolean(accountsError) || currentSyntaxError
-
-  const resizeInspector = (clientX: number) => {
-    const bounds = workbenchRef.current?.getBoundingClientRect()
-    if (!bounds) return
-    setInspectorWidth(clampInspectorWidth(clientX - bounds.left, bounds.width))
-  }
-
-  const persistInspectorWidth = (width: number) => {
-    window.localStorage.setItem(INSPECTOR_WIDTH_KEY, String(width))
-  }
 
   // 左列 split：从上顶（控制区底）量指针位置，panelSplit 是返回值占可用高度的份额；
   // 与右列的从底量法互成镜像。
@@ -292,18 +269,12 @@ export function PortfolioEditPage() {
   const publish = async (validated = false) => {
     const saveBlocked = !name.trim() || !code.trim() || accounts == null || Boolean(accountsError)
     if (saveBlocked || (!validated && currentSyntaxError) || saving || !dirty) return
-    setSaving(true)
-    setSaveError(null)
-    try {
+    await saveState.save(true, async () => {
       await updatePortfolio(portfolioId, { name: name.trim(), custom_calc_py_code: code })
       toast('组合已更新')
       setOriginal({ name: name.trim(), code })
       void refreshPortfolios()
-    } catch (error) {
-      setSaveError(error instanceof Error ? error : new Error(String(error)))
-    } finally {
-      setSaving(false)
-    }
+    })
   }
 
   const runAndPublish = async () => {
@@ -312,26 +283,9 @@ export function PortfolioEditPage() {
     if (result?.valid) await publish(true)
   }
 
-  // Ctrl/Cmd+S 保存（工作台肌肉记忆）；编辑器内按键同样冒泡到 window。
-  const publishRef = useRef(publish)
-  useEffect(() => {
-    publishRef.current = publish
-  })
-  useEffect(() => {
-    const onKey = (event: KeyboardEvent) => {
-      if ((event.metaKey || event.ctrlKey) && event.key === 's') {
-        event.preventDefault()
-        void publishRef.current()
-      }
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [])
-
   const restore = () => {
-    setName(original.name)
-    setCode(original.code)
-    setSaveError(null)
+    draftState.restore()
+    saveState.clearError()
     editorRef.current?.focus()
   }
 
@@ -366,14 +320,16 @@ export function PortfolioEditPage() {
   }
 
   return (
-    <section className="flex h-full w-full flex-col bg-canvas">
-      <div
-        ref={workbenchRef}
-        className={`relative grid min-h-0 flex-1 grid-cols-1 md:grid-cols-[var(--portfolio-inspector-width)_minmax(0,1fr)] ${
-          resizingInspector || resizingPanels ? 'select-none' : ''
-        }`}
-        style={{ '--portfolio-inspector-width': `${inspectorWidth}px` } as CSSProperties}
-      >
+    <>
+    <PythonWorkbench
+      storageKey={INSPECTOR_WIDTH_KEY}
+      resizingPanels={resizingPanels}
+      saveAction={{ dirty, saving, error: saveError, blocked, onSave: () => void publish(), onRestore: restore,
+        blockedReason: accountsError ? '绑定关系不可用' : currentSyntaxError ? '有语法错误' : !name.trim() || !code.trim() ? '内容不完整' : undefined,
+        title: followers.length > 0 ? `保存（⌘/Ctrl+S）· ${followers.length} 个账户将在下次调仓使用新函数` : '保存（⌘/Ctrl+S）',
+      }}
+      status={<div ref={setEditorStatus} className="mr-2 flex-none" />}
+      inspector={(
         <div
           ref={inspectorRef}
           className={`grid min-h-0 content-start transition-[grid-template-rows] duration-200 motion-reduce:transition-none ${
@@ -409,7 +365,7 @@ export function PortfolioEditPage() {
                 }}
                 onInput={(event) => {
                   setName(event.currentTarget.textContent ?? '')
-                  setSaveError(null)
+                  saveState.clearError()
                 }}
                 onKeyDown={(event) => {
                   if (event.key !== 'Enter') return
@@ -617,6 +573,8 @@ export function PortfolioEditPage() {
           </WorkbenchPanel>
         </div>
 
+      )}
+    >
         {/* 右列代码工作台：组合页只提供草稿与试跑状态。 */}
         <PythonWorkbenchPane
           kind="portfolio"
@@ -628,7 +586,7 @@ export function PortfolioEditPage() {
           code={code}
           onChange={(value) => {
             setCode(value)
-            setSaveError(null)
+            saveState.clearError()
           }}
           running={calc.validating}
           stale={calc.stale}
@@ -637,133 +595,9 @@ export function PortfolioEditPage() {
           onResizeChange={setResizingPanels}
         />
 
-        <div
-          role="separator"
-          aria-label="调整运行检查器宽度"
-          aria-orientation="vertical"
-          aria-valuemin={MIN_INSPECTOR_WIDTH}
-          aria-valuemax={MAX_INSPECTOR_WIDTH}
-          aria-valuenow={Math.round(inspectorWidth)}
-          tabIndex={0}
-          title="左右拖动调整宽度 · 双击恢复默认"
-          className="group absolute inset-y-0 z-20 hidden w-[7px] -translate-x-1/2 touch-none cursor-col-resize outline-none md:block"
-          style={{ left: `${inspectorWidth}px` }}
-          onDoubleClick={() => {
-            setInspectorWidth(DEFAULT_INSPECTOR_WIDTH)
-            persistInspectorWidth(DEFAULT_INSPECTOR_WIDTH)
-          }}
-          onPointerDown={(event) => {
-            event.preventDefault()
-            event.currentTarget.setPointerCapture(event.pointerId)
-            setResizingInspector(true)
-            resizeInspector(event.clientX)
-          }}
-          onPointerMove={(event) => {
-            if (event.currentTarget.hasPointerCapture(event.pointerId)) resizeInspector(event.clientX)
-          }}
-          onPointerUp={(event) => {
-            const bounds = workbenchRef.current?.getBoundingClientRect()
-            const finalWidth = bounds
-              ? clampInspectorWidth(event.clientX - bounds.left, bounds.width)
-              : inspectorWidth
-            if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-              event.currentTarget.releasePointerCapture(event.pointerId)
-            }
-            setInspectorWidth(finalWidth)
-            setResizingInspector(false)
-            persistInspectorWidth(finalWidth)
-          }}
-          onPointerCancel={() => setResizingInspector(false)}
-          onKeyDown={(event) => {
-            let next = inspectorWidth
-            if (event.key === 'ArrowLeft') next -= 16
-            else if (event.key === 'ArrowRight') next += 16
-            else if (event.key === 'Home') next = MIN_INSPECTOR_WIDTH
-            else if (event.key === 'End') next = MAX_INSPECTOR_WIDTH
-            else return
-            event.preventDefault()
-            const containerWidth = workbenchRef.current?.getBoundingClientRect().width
-            next = clampInspectorWidth(next, containerWidth)
-            setInspectorWidth(next)
-            persistInspectorWidth(next)
-          }}
-        >
-          <span
-            className={`absolute inset-y-0 left-1/2 w-px transition-colors duration-130 ${
-              resizingInspector ? 'bg-accent' : 'bg-line group-hover:bg-accent group-focus:bg-accent'
-            }`}
-          />
-          <span
-            aria-hidden
-            className={`absolute left-1/2 top-1/2 h-7 w-[3px] -translate-x-1/2 -translate-y-1/2 rounded-full ring-2 ring-surface transition-colors duration-130 ${
-              resizingInspector
-                ? 'bg-accent'
-                : 'bg-ink-3 group-hover:bg-accent group-focus:bg-accent'
-            }`}
-          />
-        </div>
-      </div>
-
-      {/* 工作台全局状态栏：固定占位，只承载编辑状态和保存动作。 */}
-      <footer className="flex h-7 flex-none items-center border-t border-line bg-surface px-2 text-[12px]">
-        <div
-          className={`flex min-w-0 flex-1 items-center gap-1.5 truncate ${
-            saveError || blocked ? 'text-warn' : 'text-ink-2'
-          }`}
-          title={saveError?.message}
-        >
-          <span className={saveError || blocked ? 'text-warn' : dirty ? 'text-accent' : 'text-ink-3'} aria-hidden>
-            {saveError || blocked ? '△' : dirty ? '●' : '✓'}
-          </span>
-          <InkRewrite
-            tone="label"
-            text={
-              saveError
-                ? '保存失败'
-                : saving
-                  ? '保存中…'
-                  : accountsError
-                    ? '绑定关系不可用'
-                    : currentSyntaxError
-                      ? '有语法错误'
-                      : !name.trim() || !code.trim()
-                        ? '内容不完整'
-                        : dirty
-                          ? '未保存'
-                          : '已保存'
-            }
-          />
-        </div>
-        <div ref={setEditorStatus} className="mr-2 flex-none" />
-        <div className="flex h-full flex-none items-center">
-          <button
-            type="button"
-            className={`h-full px-2 text-ink-2 transition-opacity duration-200 hover:bg-fill hover:text-ink-1 ${
-              dirty ? 'cursor-pointer opacity-100' : 'pointer-events-none opacity-0'
-            }`}
-            onClick={restore}
-            tabIndex={dirty ? 0 : -1}
-            aria-hidden={!dirty}
-          >
-            还原
-          </button>
-          <button
-            type="button"
-            title={
-              followers.length > 0
-                ? `保存（⌘/Ctrl+S）· ${followers.length} 个账户将在下次调仓使用新函数`
-                : '保存（⌘/Ctrl+S）'
-            }
-            className="h-full px-2 font-[550] text-ink-1 hover:bg-fill disabled:cursor-default disabled:text-ink-3"
-            onClick={() => void publish()}
-            disabled={!dirty || blocked || saving}
-          >
-            保存
-          </button>
-        </div>
-      </footer>
+    </PythonWorkbench>
 
       <ConfirmModal spec={confirm} onClose={() => setConfirm(null)} />
-    </section>
+    </>
   )
 }

@@ -14,6 +14,8 @@ import type { PythonEditorKind } from '@/components/ui/pythonEditorContract'
 import { OverflowText } from '@/components/ui/OverflowText'
 import { LSPPlugin, type LSPClient } from '@codemirror/lsp-client'
 import type { DocumentSymbol, SymbolInformation, Range } from 'vscode-languageserver-protocol'
+import { PythonSaveBar } from '@/components/ui/PythonSaveBar'
+import { usePythonSaveShortcut, type PythonSaveAction } from '@/components/ui/pythonSaveAction'
 import { editingExtensions, isMac } from '@/components/ui/pythonEditorExtensions'
 import { apiSend } from '@/lib/api/client'
 import { PythonSourcePreview, type SourceTab } from '@/components/ui/PythonSourcePreview'
@@ -115,6 +117,8 @@ export function PythonFunctionEditor({
   code,
   onChange,
   running,
+  runDisabled = false,
+  saveAction,
   result,
   onRun,
   controls,
@@ -138,6 +142,10 @@ export function PythonFunctionEditor({
   code: string
   onChange: (code: string) => void
   running: boolean
+  /** 保存等外部操作期间阻止试跑；按钮和 Ctrl/Cmd+Enter 使用同一条件。 */
+  runDisabled?: boolean
+  /** 可选保存契约：嵌入式编辑器也使用工作台的状态栏、还原和快捷键。 */
+  saveAction?: PythonSaveAction
   result: PythonValidationState | null
   onRun: () => void
   controls?: ReactNode
@@ -163,8 +171,11 @@ export function PythonFunctionEditor({
   const cmRef = useRef<ReactCodeMirrorRef>(null)
   const fontSize = usePythonEditorFontSize()
   const hasCode = code.trim().length > 0
-  const onRunRef = useRef(onRun)
-  onRunRef.current = onRun
+  const runAllowed = !running && !disabled && !runDisabled && hasCode
+  const run = () => { if (runAllowed) onRun() }
+  const onRunRef = useRef(run)
+  onRunRef.current = run
+  usePythonSaveShortcut(saveAction)
   const onChangeRef = useRef(onChange)
   onChangeRef.current = onChange
   const changeCode = useCallback((value: string) => onChangeRef.current(value), [])
@@ -518,6 +529,16 @@ export function PythonFunctionEditor({
     </div>
   )
 
+  const saveBar = saveAction && (
+    <PythonSaveBar action={{
+      ...saveAction,
+      onRestore: saveAction.onRestore ? () => {
+        saveAction.onRestore?.()
+        cmRef.current?.view?.focus()
+      } : undefined,
+    }} />
+  )
+
   if (layout === 'workbench') {
     // 工作台：纯代码区，吃满父容器；结果呈现由外部 PythonRunPanel 承担。
     return (
@@ -528,6 +549,7 @@ export function PythonFunctionEditor({
         {fileTabs}
         <div className="flex min-h-0 flex-1 flex-col overflow-hidden">{codeBlock}{sourceDocuments}</div>
         {statusTarget && createPortal(sourceTab ? <div className="flex items-center gap-2 text-[11px] text-ink-3"><button type="button" title="跳转到行" onClick={() => editor && gotoLine(editor)}>{(sourcePosition?.line ?? 0) + 1}:{(sourcePosition?.character ?? 0) + 1}</button><span>只读 · Python</span></div> : <div className="flex items-center gap-2 whitespace-nowrap text-[11px] text-ink-3"><button type="button" title="跳转到行" onClick={() => view && gotoLine(view)}><span className="max-[480px]:hidden">行 {position.line}，列 {position.column}</span><span className="hidden max-[480px]:inline">{position.line}:{position.column}</span></button><span role="status" aria-label="代码分析器" aria-description={analyzerDescription} title={analyzerDescription} data-state={languageStatus} className={languageStatus === 'reconnecting' ? 'text-warn' : ''}><InkRewrite text={analyzerLabel} tone="label" /></span></div>, statusTarget)}
+        {saveBar}
       </div>
     )
   }
@@ -557,7 +579,7 @@ export function PythonFunctionEditor({
           )}
           {docHref && <a className="text-[14px] text-accent" href={docHref} target="_blank" rel="noopener">开发文档 ↗</a>}
           {controls}
-          <button className="inline-flex cursor-pointer items-center gap-1.5 rounded-[8px] border-0 bg-ink-1 px-4 py-1.5 text-[14.5px] font-[550] text-surface disabled:cursor-default disabled:opacity-45" onClick={onRun} disabled={running || disabled || !hasCode}>
+          <button className="inline-flex cursor-pointer items-center gap-1.5 rounded-[8px] border-0 bg-ink-1 px-4 py-1.5 text-[14.5px] font-[550] text-surface disabled:cursor-default disabled:opacity-45" onClick={run} disabled={!runAllowed}>
             <Play size={14} /> {runLabel}
           </button>
         </div>
@@ -581,6 +603,7 @@ export function PythonFunctionEditor({
 
         {!sourceTab && tools}{fileTabs}{assistance}{codeBlock}{sourceDocuments}{statusBar}
       </div>
+      {saveBar}
     </div>
   )
 }

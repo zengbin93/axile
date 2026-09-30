@@ -12,7 +12,7 @@ export function Fixture() {
   const [status, setStatus] = useState<HTMLDivElement | null>(null)
   return <main style={{ height: '90vh', display: 'flex', flexDirection: 'column' }}>
     <div ref={setHeader} style={{ height: 32 }} />
-    <PythonFunctionEditor headerTarget={header} statusTarget={status} code={code} onChange={setCode} running={false} result={result} stale={ranCode !== code} onRun={() => { setRanCode(code); setResult({ valid: false, errorLine: 1, errorMessage: '模拟试跑错误' }) }} layout="workbench" fill onProblems={setProblems} />
+    <PythonFunctionEditor kind="portfolio" headerTarget={header} statusTarget={status} code={code} onChange={setCode} running={false} result={result} stale={ranCode !== code} onRun={() => { setRanCode(code); setResult({ valid: false, errorLine: 1, errorMessage: '模拟试跑错误' }) }} layout="workbench" fill onProblems={setProblems} />
     <div ref={setStatus} />
     <output data-testid="code" hidden>{code}</output>
     <output data-testid="problems">{JSON.stringify(problems)}</output>

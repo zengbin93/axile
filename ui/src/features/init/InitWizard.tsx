@@ -7,6 +7,7 @@ import { Toast } from '@/components/Toast'
 import { ConfirmModal, type ConfirmSpec } from '@/components/ui/ConfirmModal'
 import { DirectoryPicker } from '@/components/ui/DirectoryPicker'
 import { OverflowText } from '@/components/ui/OverflowText'
+import { usePythonDraft, usePythonRun, usePythonSave } from '@/components/ui/pythonWorkbenchState'
 import { PythonFunctionEditor } from '@/components/ui/PythonFunctionEditor'
 import { Select } from '@/components/ui/Select'
 import { SettingsSaveBar } from '@/components/ui/SettingsSaveBar'
@@ -29,6 +30,7 @@ import {
   testFeishu,
   testSystemNotificationFunction,
   type InitValues,
+  type TestResult,
 } from '@/lib/api/init'
 import { useToastStore } from '@/stores/ui'
 
@@ -261,25 +263,24 @@ export function InitWizard({
 
   const toast = useToastStore((s) => s.toast)
   const [step, setStep] = useState(0)
-  const [saving, setSaving] = useState(false)
+  const saveState = usePythonSave()
+  const { saving, error: saveError } = saveState
   const [dbTest, setDbTest] = useState<TestState>(null)
   const [feishuTest, setFeishuTest] = useState<TestState>(null)
   const [confirm, setConfirm] = useState<ConfirmSpec | null>(null)
-  const [saveError, setSaveError] = useState<Error | null>(null)
   const [directoryPickerTarget, setDirectoryPickerTarget] = useState<
     'log' | 'algorithm' | null
   >(null)
-  const [savedAlertKey, setSavedAlertKey] = useState(
-    initial.exe_err_feishu_key ?? '',
-  )
-  const [savedNotification, setSavedNotification] = useState({ mode: initial.system_execution_notification_mode, code: initial.system_execution_notification_code })
-  const [draft, setDraft] = useState<Draft>(() => draftFromInitial(initial, isEdit))
+  const draftState = usePythonDraft(draftFromInitial(initial, isEdit), (a, b) =>
+    a.exe_err_feishu_key === b.exe_err_feishu_key && a.system_execution_notification_mode === b.system_execution_notification_mode && a.system_execution_notification_code === b.system_execution_notification_code)
+  const { draft, setDraft, baseline: savedAlert } = draftState
   const initialDraft = draftFromInitial(initial, isEdit)
   const currentAdvancedValues = advancedValues(draft, initial)
   const advancedChanges = advancedConfigChanges(initial, currentAdvancedValues)
-  const alertDirty = draft.exe_err_feishu_key !== savedAlertKey || draft.system_execution_notification_mode !== savedNotification.mode || draft.system_execution_notification_code !== savedNotification.code
+  const alertDirty = draftState.dirty
+
   const set = (patch: Partial<Draft>) => {
-    setSaveError(null)
+    saveState.clearError()
     if (patch.exe_err_feishu_key !== undefined) setFeishuTest(null)
     setDraft((d) => ({ ...d, ...patch }))
   }
@@ -302,14 +303,18 @@ export function InitWizard({
     }
   }
 
-  const runFunctionTest = async () => {
-    setFeishuTest('busy')
-    try {
-      setFeishuTest(await testSystemNotificationFunction(draft.system_execution_notification_code))
-    } catch (e) {
-      setFeishuTest({ ok: false, message: errText(e) })
-    }
-  }
+  const functionTrial = usePythonRun<TestResult>({
+    code: draft.system_execution_notification_code,
+    enabled: !saving && feishuTest !== 'busy',
+    execute: testSystemNotificationFunction,
+    failed: (cause) => ({ ok: false, message: errText(cause) }),
+    toEditorResult: (result) => ({ valid: result.ok, errorMessage: result.ok ? null : result.message }),
+  })
+  const restoreAlert = () => set({
+    exe_err_feishu_key: savedAlert.exe_err_feishu_key,
+    system_execution_notification_mode: savedAlert.system_execution_notification_mode,
+    system_execution_notification_code: savedAlert.system_execution_notification_code,
+  })
 
   /** 保存后轮询就绪状态，容忍重启期间的请求失败，就绪或超时后刷新。 */
   const waitReadyAndReload = async () => {
@@ -326,31 +331,22 @@ export function InitWizard({
     window.location.reload()
   }
 
-  const doSave = async () => {
-    setSaving(true)
-    setSaveError(null)
-    try {
-      if (isEdit && editSection === 'alert') {
-        const result = await saveExecutionAlert(draft.exe_err_feishu_key.trim() || null, draft.system_execution_notification_mode, draft.system_execution_notification_code)
-        setSavedAlertKey(draft.exe_err_feishu_key)
-        setSavedNotification({ mode: draft.system_execution_notification_mode, code: draft.system_execution_notification_mode === 'function' ? draft.system_execution_notification_code : '' })
-        if (draft.system_execution_notification_mode === 'default') set({ system_execution_notification_code: '' })
-        toast(result.message)
-        setSaving(false)
-        return
-      }
-      await saveInit(initSavePayload({
-        ...draft,
-        algorithm_modules: splitLines(draft.algorithm_modules),
-        algorithm_directories: splitLines(draft.algorithm_directories),
-      }, isEdit))
-      toast(copy.savedToast)
-      await waitReadyAndReload()
-    } catch (e) {
-      setSaving(false)
-      setSaveError(e instanceof Error ? e : new Error(errText(e)))
+  const doSave = () => saveState.save(!functionTrial.running && feishuTest !== 'busy', async () => {
+    if (isEdit && editSection === 'alert') {
+      const result = await saveExecutionAlert(draft.exe_err_feishu_key.trim() || null, draft.system_execution_notification_mode, draft.system_execution_notification_code)
+      draftState.setBaseline({ ...draft, system_execution_notification_code: draft.system_execution_notification_mode === 'function' ? draft.system_execution_notification_code : '' })
+      if (draft.system_execution_notification_mode === 'default') set({ system_execution_notification_code: '' })
+      toast(result.message)
+      return
     }
-  }
+    await saveInit(initSavePayload({
+      ...draft,
+      algorithm_modules: splitLines(draft.algorithm_modules),
+      algorithm_directories: splitLines(draft.algorithm_directories),
+    }, isEdit))
+    toast(copy.savedToast)
+    await waitReadyAndReload()
+  })
 
   /** 执行告警直接热保存；高级设置保存前确认重启；首启态直接保存。 */
   const onSave = () => {
@@ -376,7 +372,7 @@ export function InitWizard({
   const resetAdvancedDraft = () => {
     setDraft(initialDraft)
     setDbTest(null)
-    setSaveError(null)
+    saveState.clearError()
   }
 
   // edit 态是设置页而非向导：kicker 去掉「n / N」序号，只留分节标签。
@@ -444,9 +440,13 @@ export function InitWizard({
                             kind="system_notification"
                             code={draft.system_execution_notification_code}
                             onChange={(value) => set({ system_execution_notification_code: value })}
-                            running={feishuTest === 'busy'}
-                            result={null}
-                            onRun={() => void runFunctionTest()}
+                            running={functionTrial.running}
+                            runDisabled={saving || feishuTest === 'busy'}
+                            result={functionTrial.editorResult}
+                            resultContent={functionTrial.result ? <p className="text-[14px] text-ink-2">{functionTrial.result.message}</p> : undefined}
+                            stale={functionTrial.stale}
+                            onRun={() => void functionTrial.run()}
+                            saveAction={isEdit ? { dirty: alertDirty, saving, error: saveError, disabled: functionTrial.running || feishuTest === 'busy', onSave, onRestore: restoreAlert } : undefined}
                             workbenchTitle="系统执行通知函数"
                             height="260px"
                           />
@@ -463,21 +463,23 @@ export function InitWizard({
                           onClick={runFeishuTest}
                           disabled={
                             !draft.exe_err_feishu_key.trim() ||
-                            saving ||
+                            functionTrial.running || saving ||
                             feishuTest === 'busy'
                           }
                         >
                           {feishuTest === 'busy' ? '测试中…' : '测试推送'}
                         </button>
-                        <button
-                          className="cursor-pointer rounded-[11px] border border-ink-1 bg-ink-1 px-[22px] py-2.5 text-[15px] font-[550] text-surface disabled:opacity-45"
-                          onClick={onSave}
-                          disabled={
-                            !alertDirty || saving || feishuTest === 'busy'
-                          }
-                        >
-                          {saving ? '保存中…' : '保存'}
-                        </button>
+                        {draft.system_execution_notification_mode === 'default' && (
+                          <button
+                            className="cursor-pointer rounded-[11px] border border-ink-1 bg-ink-1 px-[22px] py-2.5 text-[15px] font-[550] text-surface disabled:opacity-45"
+                            onClick={onSave}
+                            disabled={
+                              !alertDirty || saving || functionTrial.running || feishuTest === 'busy'
+                            }
+                          >
+                            {saving ? '保存中…' : '保存'}
+                          </button>
+                        )}
                         {feishuTest && feishuTest !== 'busy' && (
                           <span
                             className={`text-[14px] ${feishuTest.ok ? 'text-accent' : 'text-warn'}`}

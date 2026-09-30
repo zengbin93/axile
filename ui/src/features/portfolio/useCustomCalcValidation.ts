@@ -1,4 +1,5 @@
-import { useMemo, useState } from 'react'
+import { useState } from 'react'
+import { usePythonRun } from '@/components/ui/pythonWorkbenchState'
 import type { PythonValidationState } from '@/components/ui/PythonFunctionEditor'
 import type { SelectOption } from '@/components/ui/Select'
 import { channelLabel } from '@/features/dashboard/display'
@@ -27,49 +28,20 @@ export interface CustomCalcValidation {
  * 工作台编辑页与初始化向导（console 布局）共用这一份逻辑。
  */
 export function useCustomCalcValidation(code: string): CustomCalcValidation {
-  const [validating, setValidating] = useState(false)
-  const [result, setResult] = useState<ValidateCustomCalcResult | null>(null)
-  const [ranCode, setRanCode] = useState<string | null>(null)
   const [accountId, setAccountId] = useState<number | null>(null)
   const accounts = useDomainStore((state) => state.accounts) ?? []
-  const stale = result != null && ranCode !== code
-  // 面板自动展开监听对象身份；只有真正的新试跑结果才生成新视图，避免手动收起后被普通重渲染顶开。
-  const editorResult = useMemo<PythonValidationState | null>(
-    () =>
-      result && {
-        valid: result.valid,
-        errorLine: result.error_line,
-        errorType: result.error_type,
-        errorMessage: result.error_message,
-        traceback: result.traceback,
-      },
-    [result],
-  )
-
-  const run = async () => {
-    if (!code.trim() || validating) return null
-    setValidating(true)
-    let nextResult: ValidateCustomCalcResult
-    try {
-      nextResult = await validateCustomCalc({ custom_calc_py_code: code, account_id: accountId })
-    } catch (error) {
+  const trial = usePythonRun<ValidateCustomCalcResult>({
+    code, contextKey: String(accountId),
+    execute: (draft) => validateCustomCalc({ custom_calc_py_code: draft, account_id: accountId }),
+    failed: (error) => {
       const message = error instanceof Error ? error.message : String(error)
-      nextResult = {
-        valid: false,
-        target: null,
-        error: message,
-        traceback: null,
-        error_line: null,
-        error_offset: null,
-        error_type: null,
-        error_message: message,
-      }
-    }
-    setResult(nextResult)
-    setRanCode(code)
-    setValidating(false)
-    return nextResult
-  }
+      return { valid: false, target: null, error: message, traceback: null, error_line: null,
+        error_offset: null, error_type: null, error_message: message }
+    },
+    toEditorResult: (result) => ({ valid: result.valid, errorLine: result.error_line,
+      errorType: result.error_type, errorMessage: result.error_message, traceback: result.traceback }),
+  })
+  const { running: validating, result, editorResult, stale, run } = trial
 
   // 选项自带说明：样例 = 安全沙箱（假数据、不连渠道）；账户 = 真实数据 + 真实副作用风险。
   // 控件只说「样例上下文」会把这两级语义全吞掉。
@@ -91,7 +63,7 @@ export function useCustomCalcValidation(code: string): CustomCalcValidation {
     accountId,
     setAccountId,
     contextOptions,
-    canRun: Boolean(code.trim()) && !validating,
+    canRun: trial.canRun,
     run,
   }
 }

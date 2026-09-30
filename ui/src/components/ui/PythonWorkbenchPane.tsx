@@ -17,13 +17,14 @@ function storedSplit(storageKey: string): number | null {
 /** 工作台的代码区、静态问题与试跑结果；业务页提供代码、执行行为和状态栏槽位。 */
 export function PythonWorkbenchPane({
   kind,
-  code, onChange, running, stale, result, onRun, editorRef, statusTarget, storageKey,
+  code, onChange, running, runDisabled = false, stale, result, onRun, editorRef, statusTarget, storageKey,
   title, docHref, onResizeChange,
 }: {
   kind: PythonEditorKind
   code: string
   onChange: (code: string) => void
   running: boolean
+  runDisabled?: boolean
   stale: boolean
   result: PythonValidationState | null
   onRun: () => void
@@ -99,6 +100,7 @@ export function PythonWorkbenchPane({
       : `minmax(0, ${1 - split}fr) 5px 36px minmax(0, ${split}fr)`
     : 'minmax(0, 1fr) 0px 36px minmax(0, 0fr)'
   const run = () => {
+    if (running || runDisabled || !code.trim()) return
     setActiveTab('result')
     setProblemsOpen(true)
     onRun()
@@ -123,6 +125,7 @@ export function PythonWorkbenchPane({
           code={code}
           onChange={onChange}
           running={running}
+          runDisabled={runDisabled}
           stale={stale}
           result={result}
           onRun={run}
