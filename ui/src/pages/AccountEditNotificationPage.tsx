@@ -2,16 +2,17 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { useParams } from 'react-router'
-import { Check, Circle, Eye, EyeOff, Play, TriangleAlert } from 'lucide-react'
+import { Check, Circle, Play, TriangleAlert } from 'lucide-react'
 import { Link, useNavigate } from '@/components/ui/nav'
+import { ErrorNotice } from '@/components/ui/ErrorNotice'
 import { InkRewrite } from '@/components/ui/InkRewrite'
 import { PYTHON_RUN_STYLE, pythonRunStatus, type PythonEditorHandle, type PythonValidationState } from '@/components/ui/PythonFunctionEditor'
 import { PythonWorkbenchPane } from '@/components/ui/PythonWorkbenchPane'
 import { WorkbenchPanel } from '@/components/ui/WorkbenchPanel'
 import { AccountPageTitle } from '@/features/account/pageHead'
 import { EditError, EditLoading } from '@/features/account/editUi'
-import { extractFeishuKey, feishuKeyPatch } from '@/features/account/feishuUpdate'
 import { notificationDraft } from '@/features/account/notificationDraft'
+import { NOTIFICATION_STATUS_LABEL } from '@/features/account/notificationStatus'
 import { getAccount, getDefaultAccountNotification, testAccountNotificationFunction, updateAccount, type AccountFeishuTestResult } from '@/lib/api/accounts'
 import { usePolling } from '@/lib/hooks/usePolling'
 import { useDomainStore } from '@/stores/domain'
@@ -46,12 +47,8 @@ export function AccountEditNotificationPage() {
   const [code, setCode] = useState<string | null>(null)
   const [savedCode, setSavedCode] = useState('')
   const [defaultCode, setDefaultCode] = useState<string | null>(null)
-  const [webhookInput, setWebhookInput] = useState('')
-  const [clearWebhook, setClearWebhook] = useState(false)
-  const [keyRevealed, setKeyRevealed] = useState(false)
   const [test, setTest] = useState<AccountFeishuTestResult | null>(null)
   const [testedCode, setTestedCode] = useState<string | null>(null)
-  const [testedWebhook, setTestedWebhook] = useState<string | null | undefined>(undefined)
   const [resultOpen, setResultOpen] = useState(true)
   const [busy, setBusy] = useState<'test' | 'save' | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -70,32 +67,37 @@ export function AccountEditNotificationPage() {
     }
   }, [account.data, code, defaultCode])
 
-  useEffect(() => {
-    void getDefaultAccountNotification(accountId).then(setDefaultCode).catch((cause: unknown) => {
-      setError(cause instanceof Error ? cause.message : String(cause))
-      setDefaultCode('')
-    })
+  const [templateError, setTemplateError] = useState<Error | null>(null)
+  const [templateLoading, setTemplateLoading] = useState(false)
+  const loadTemplate = useCallback(async () => {
+    setTemplateLoading(true)
+    setTemplateError(null)
+    try {
+      setDefaultCode(await getDefaultAccountNotification(accountId))
+    } catch (cause) {
+      setTemplateError(cause instanceof Error ? cause : new Error(String(cause)))
+    } finally {
+      setTemplateLoading(false)
+    }
   }, [accountId])
+  useEffect(() => { void loadTemplate() }, [loadTemplate])
 
   const result = useMemo<PythonValidationState | null>(() => test && ({
     valid: test.ok,
     errorMessage: test.ok ? null : test.message,
   }), [test])
-  const currentWebhook = clearWebhook ? null : extractFeishuKey(webhookInput) || undefined
-  const stale = test !== null && (testedCode !== code || testedWebhook !== currentWebhook)
+  const stale = test !== null && testedCode !== code
   const status = pythonRunStatus(busy === 'test', result, stale)
   const style = PYTHON_RUN_STYLE[status]
 
   if (account.error && !account.data) return <EditError error={account.error} onRetry={account.refresh} />
+  if (templateError && code === null) return <section><ErrorNotice title="默认模板读取失败" error={templateError} onRetry={() => void loadTemplate()} /></section>
   if (!account.data || code === null) return <EditLoading />
 
   const acc = account.data
   const empty = !code.trim()
-  const webhookKey = extractFeishuKey(webhookInput)
-  const dirty = code !== savedCode || Boolean(webhookKey) || clearWebhook
-  const savedNotificationStatus = !savedCode
-    ? '未配置通知函数'
-    : savedCode === defaultCode ? '与当前默认模板一致' : '已配置通知函数'
+  const dirty = code !== savedCode
+  const savedNotificationStatus = NOTIFICATION_STATUS_LABEL[acc.execution_notification_status]
   const inspectorRows = resultOpen
     ? 'auto minmax(0,0fr) 36px minmax(0,1fr)'
     : 'auto minmax(0,1fr) 36px minmax(0,0fr)'
@@ -112,12 +114,11 @@ export function AccountEditNotificationPage() {
     setBusy('test')
     setError(null)
     try {
-      setTest(await testAccountNotificationFunction(accountId, draft, currentWebhook))
+      setTest(await testAccountNotificationFunction(accountId, draft))
     } catch (cause) {
       setTest({ ok: false, message: cause instanceof Error ? cause.message : String(cause) })
     } finally {
       setTestedCode(draft)
-      setTestedWebhook(currentWebhook)
       setBusy(null)
       setResultOpen(true)
     }
@@ -129,7 +130,6 @@ export function AccountEditNotificationPage() {
     try {
       await updateAccount(accountId, {
         execution_notification_code: code.trim() ? code : null,
-        ...feishuKeyPatch(webhookKey, clearWebhook),
       })
       toast(code.trim() ? '执行通知函数已保存' : '执行通知已关闭')
       void refreshAccounts()
@@ -157,44 +157,16 @@ export function AccountEditNotificationPage() {
               返回基本信息
             </Link>
             <div className="flex flex-wrap items-baseline gap-2">
-              <AccountPageTitle accountId={accountId} page="自定义执行通知" name={acc.name} channel={acc.trade_channel} market={acc.market} />
+              <AccountPageTitle accountId={accountId} page="执行通知函数" name={acc.name} channel={acc.trade_channel} market={acc.market} />
             </div>
             <p className="mt-2 text-[13px] text-ink-3">
               {savedNotificationStatus}
               {code !== savedCode ? ' · 当前草稿未保存' : ''}
-              {code === defaultCode && !acc.feishu_configured ? ' · 请配置 Webhook' : ''}
             </p>
             <div className="mt-2 flex gap-3 text-[13px]">
-              <button type="button" className="cursor-pointer text-accent disabled:opacity-45" disabled={!defaultCode || busy !== null} onClick={() => { setCode(defaultCode); setError(null) }}>恢复默认飞书函数</button>
+              <button type="button" className="cursor-pointer text-accent disabled:opacity-45" disabled={defaultCode === null || templateLoading || busy !== null} onClick={() => { setCode(defaultCode); setError(null) }}>重置为默认</button>
               <button type="button" className="cursor-pointer text-ink-2 disabled:opacity-45" disabled={empty || busy !== null} onClick={() => { setCode(''); setError(null) }}>清空函数</button>
             </div>
-            {code === defaultCode && (
-              <div className="mt-4">
-                <label htmlFor="notification-webhook" className="text-[13px] text-ink-2">飞书 Webhook</label>
-                <div className="mt-1 flex items-center gap-1">
-                  <input
-                    id="notification-webhook"
-                    type={keyRevealed ? 'text' : 'password'}
-                    className="min-w-0 flex-1 rounded-[6px] border border-line bg-surface px-2 py-1.5 text-[13px] text-ink-1"
-                    value={webhookInput}
-                    placeholder={acc.feishu_configured && !clearWebhook ? '已配置 · 留空保持不变' : '粘贴 Webhook 链接或 Key'}
-                    spellCheck={false}
-                    autoComplete="off"
-                    onChange={(event) => { setWebhookInput(event.target.value); setClearWebhook(false) }}
-                    onBlur={() => setWebhookInput((value) => extractFeishuKey(value))}
-                  />
-                  <button type="button" className="cursor-pointer text-ink-3" aria-label={keyRevealed ? '隐藏 Key' : '显示 Key'} onClick={() => setKeyRevealed((value) => !value)}>
-                    {keyRevealed ? <EyeOff size={15} /> : <Eye size={15} />}
-                  </button>
-                </div>
-                {(acc.feishu_configured || clearWebhook) && (
-                  <button type="button" className="mt-1 cursor-pointer text-[12px] text-ink-3 hover:text-accent" onClick={() => { setClearWebhook((value) => !value); setWebhookInput('') }}>
-                    {clearWebhook ? '撤销清除 Webhook' : '清除 Webhook'}
-                  </button>
-                )}
-                <p className="mt-1 text-[12px] text-ink-3">试跑使用当前输入；保存时与函数一起更新。</p>
-              </div>
-            )}
             <button
               type="button"
               title="试跑会执行代码，可能向外发送消息"

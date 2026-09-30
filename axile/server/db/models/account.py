@@ -1,9 +1,9 @@
 """账户与组合绑定数据库模型."""
 
 import math
-from typing import TYPE_CHECKING, Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Literal, Optional
 
-from pydantic import field_validator
+from pydantic import computed_field, field_validator
 from sqlalchemy import JSON as SA_JSON
 from sqlalchemy import Boolean, Column, Connection, Float, ForeignKey, Integer, Text, event
 from sqlalchemy.ext.asyncio import AsyncAttrs
@@ -11,6 +11,7 @@ from sqlalchemy.orm import Mapper, relationship
 from sqlmodel import Field, Relationship, SQLModel
 from sqlmodel._compat import SQLModelConfig
 
+from axile.common.default_account_notification import DEFAULT_ACCOUNT_NOTIFICATION_CODE
 from axile.common.trade_channel import TradeChannel
 from axile.executor.account_control.models import AccountControlOverride
 from axile.executor.models.unified_input import DEFAULT_EXECUTION_TIMEOUT_SECONDS
@@ -430,6 +431,17 @@ class AccountPublic(SQLModel):
     updated_at: str
     created_at: str
     runtime_sync: AccountRuntimeSyncPublic | None = None
+
+    @computed_field
+    @property
+    def execution_notification_status(self) -> Literal["none", "default", "function"]:
+        """按已保存源码区分通知方式；Webhook 配置不改变通知状态。"""
+        code = (self.execution_notification_code or "").strip()
+        if not code:
+            return "none"
+        if code == DEFAULT_ACCOUNT_NOTIFICATION_CODE.strip():
+            return "default"
+        return "function"
 
 
 class AccountListPublic(SQLModel):

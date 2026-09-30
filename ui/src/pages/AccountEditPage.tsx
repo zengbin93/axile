@@ -5,7 +5,9 @@
  * 仍由各自的完整编辑器承载。保存保持最小 PATCH + 底栏变更摘要；保存与取消都不离开本页。
  */
 
-import { extractFeishuKey, feishuKeyPatch } from '@/features/account/feishuUpdate'
+import { extractFeishuKey } from '@/features/account/feishuUpdate'
+import { basicNotificationPatch, basicNotificationStatus } from '@/features/account/basicNotification'
+import { NOTIFICATION_STATUS_LABEL } from '@/features/account/notificationStatus'
 import { InkRewrite } from '@/components/ui/InkRewrite'
 import { Link } from '@/components/ui/nav'
 import { useCallback, useEffect, useState, type CSSProperties } from 'react'
@@ -29,7 +31,7 @@ import {
   readAccountConfigSummary,
   writeAccountConfigSummary,
 } from '@/features/account/configSummary'
-import { getAccount, testAccountFeishu, updateAccount, type AccountFeishuTestResult, type AccountUpdatePayload } from '@/lib/api/accounts'
+import { getAccount, getDefaultAccountNotification, testAccountFeishu, updateAccount, type AccountFeishuTestResult, type AccountUpdatePayload } from '@/lib/api/accounts'
 import { usePolling } from '@/lib/hooks/usePolling'
 import { useDomainStore } from '@/stores/domain'
 import { useChannelCatalogStore, useChannelDescriptor } from '@/stores/channels'
@@ -50,6 +52,7 @@ import type { Account, PortfolioLite } from '@/types/api'
 interface Draft {
   name: string
   remark: string
+  notificationCode: string | null
   clearFeishu: boolean
   feishu: string
   longLev: string
@@ -70,6 +73,7 @@ function draftOf(acc: Account): Draft {
   return {
     name: acc.name,
     remark: acc.remark ?? '',
+    notificationCode: acc.execution_notification_code,
     clearFeishu: false,
     feishu: '',
     longLev: String(acc.long_leverage ?? ''),
@@ -83,13 +87,12 @@ function draftOf(acc: Account): Draft {
   }
 }
 
-function buildPatch(draft: Draft, acc: Account, showShortLeverage: boolean): AccountUpdatePayload {
+function buildPatch(draft: Draft, acc: Account, showShortLeverage: boolean, defaultCode: string | null): AccountUpdatePayload {
   const patch: AccountUpdatePayload = {}
   const name = draft.name.trim()
   if (name && name !== acc.name) patch.name = name
   if (draft.remark !== (acc.remark ?? '')) patch.remark = draft.remark || null
-  const feishuKey = extractFeishuKey(draft.feishu)
-  Object.assign(patch, feishuKeyPatch(feishuKey, draft.clearFeishu))
+  Object.assign(patch, basicNotificationPatch(acc.execution_notification_code, draft.notificationCode, draft.feishu, draft.clearFeishu, defaultCode))
 
   const nl = Number(draft.longLev) || 0
   if (nl !== (acc.long_leverage ?? 0)) patch.long_leverage = nl
@@ -144,6 +147,7 @@ function summarize(patch: Partial<Account>, acc: Account, portfolios: PortfolioL
     else if (k === 'portfolio_id') out.push(`组合 ${pname(acc.portfolio_id)}→${pname(patch.portfolio_id)}`)
     else if (k === 'write_empty_record')
       out.push(`空仓记录 ${acc.write_empty_record ? '开' : '关'}→${patch.write_empty_record ? '开' : '关'}`)
+    else if (k === 'execution_notification_code') continue
     else out.push(`${FIELD_LABEL[k] ?? k} 已改`)
   }
   return out
@@ -196,6 +200,10 @@ export function AccountEditPage({ section = 'basic' }: { section?: EditSection }
       ? { viewTransitionName: accountConfigVtName(accountId, kind) }
       : undefined
 
+  const [defaultCode, setDefaultCode] = useState<string | null>(null)
+  const [resetting, setResetting] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [templateError, setTemplateError] = useState<Error | null>(null)
   const [ready, setReady] = useState(false)
   const [draft, setDraft] = useState<Draft | null>(null)
   const [feishuTest, setFeishuTest] = useState<AccountFeishuTestResult | 'busy' | null>(null)
@@ -207,6 +215,8 @@ export function AccountEditPage({ section = 'basic' }: { section?: EditSection }
     if (!acc) return false
     setDraft(draftOf(acc))
     setSaveError(null)
+    setTemplateError(null)
+    setFeishuTest(null)
     return true
   }, [acc])
 
@@ -317,21 +327,49 @@ export function AccountEditPage({ section = 'basic' }: { section?: EditSection }
   const weightPrecisionErr = weightPrecisionError(d.weightPrecision, { allowEmpty: true })
   const levErr = longLevErr ?? shortLevErr
 
-  const patch = buildPatch(d, acc, showShortLeverage)
+  const notificationStatus = basicNotificationStatus(acc, d.notificationCode, d.clearFeishu, defaultCode)
+  const resetNotification = async () => {
+    if (resetting || saving) return
+    setResetting(true)
+    setTemplateError(null)
+    try {
+      const template = await getDefaultAccountNotification(accountId)
+      setDefaultCode(template)
+      set({ notificationCode: template })
+    } catch (cause) {
+      setTemplateError(cause instanceof Error ? cause : new Error(String(cause)))
+    } finally {
+      setResetting(false)
+    }
+  }
+  const patch = buildPatch(d, acc, showShortLeverage, defaultCode)
   const changes = summarize(patch, acc, portfolios)
+  const nextStatus = feishuKey && notificationStatus === 'none' && !d.clearFeishu ? 'default' : notificationStatus
+  if ('execution_notification_code' in patch || nextStatus !== acc.execution_notification_status) {
+    changes.push(`执行通知：${NOTIFICATION_STATUS_LABEL[acc.execution_notification_status]} → ${NOTIFICATION_STATUS_LABEL[nextStatus]}`)
+  }
   const dirty = changes.length > 0
   const blocked = Boolean(
     levErr || timeoutErr || weightPrecisionErr || portfolios == null || portfoliosError || channelCatalogError,
   )
 
   const save = async () => {
+    if (saving || resetting) return
     if (levErr) return toast(`杠杆有误：${levErr}`)
     if (timeoutErr) return toast(`执行超时有误：${timeoutErr}`)
     if (weightPrecisionErr) return toast(`权重精度有误：${weightPrecisionErr}`)
     if (!dirty) return toast('没有改动')
     setSaveError(null)
+    setSaving(true)
     try {
-      const updated = await updateAccount(accountId, patch)
+      let template = defaultCode
+      if (feishuKey && !d.notificationCode?.trim() && !d.clearFeishu && template === null) {
+        template = await getDefaultAccountNotification(accountId)
+        setDefaultCode(template)
+      }
+      const updated = await updateAccount(accountId, buildPatch(d, acc, showShortLeverage, template))
+      setDraft(draftOf(updated))
+      setFeishuTest(null)
       // 保存响应直接写摘要缓存：返回详情时 hero 配置带首帧即新值，FLIP 落地同文。
       writeAccountConfigSummary(accountId, updated, { showShortLeverage })
       toast('账户已更新')
@@ -339,11 +377,14 @@ export function AccountEditPage({ section = 'basic' }: { section?: EditSection }
       account.refresh()
     } catch (e) {
       setSaveError(e instanceof Error ? e : new Error(String(e)))
+    } finally {
+      setSaving(false)
     }
   }
 
   return (
     <section>
+      <fieldset disabled={saving}>
       {pageChrome}
 
       {section === 'basic' && (
@@ -359,12 +400,18 @@ export function AccountEditPage({ section = 'basic' }: { section?: EditSection }
         <Section label="执行通知">
           <Row label="通知方式" span top>
             <div className="flex flex-wrap items-center gap-3 pt-1 text-[14px]">
-              <span className="text-ink-1">{acc.execution_notification_code ? '已配置通知函数' : '未配置通知函数'}</span>
+              <InkRewrite text={NOTIFICATION_STATUS_LABEL[notificationStatus]} tone="label" />
+              {notificationStatus === 'function' && <>
               <Link className="inline-flex items-center gap-1 text-accent hover:underline" to={`/accounts/${accountId}/edit/notification`}>
                 编辑与测试 <ExternalLink size={13} aria-hidden />
               </Link>
+              <button type="button" disabled={saving || resetting} className="cursor-pointer text-accent disabled:opacity-45" onClick={() => void resetNotification()}>{resetting ? '读取中…' : '重置为默认'}</button>
+              </>}
             </div>
           </Row>
+          <ErrorNotice title="默认模板读取失败" error={templateError} variant="compact" onRetry={() => void resetNotification()} />
+          <div inert={notificationStatus === 'function'} className={`md:col-span-2 grid transition-[grid-template-rows] duration-200 motion-reduce:transition-none ${notificationStatus === 'function' ? 'grid-rows-[0fr]' : 'grid-rows-[1fr]'}`}>
+          <div className="min-h-0 overflow-hidden">
             <Row label="Webhook" hint={d.clearFeishu ? '保存后关闭' : (feishuKey || acc.feishu_configured ? '已配置' : '未配置')} top span>
             <div className="flex items-center gap-2">
               <div className="relative min-w-0 flex-1">
@@ -427,6 +474,8 @@ export function AccountEditPage({ section = 'basic' }: { section?: EditSection }
               高级设置 · 自定义执行通知函数 <ExternalLink size={13} aria-hidden />
             </Link>
             </Row>
+          </div>
+          </div>
         </Section>
         </>
       )}
@@ -566,10 +615,12 @@ export function AccountEditPage({ section = 'basic' }: { section?: EditSection }
         </Section>
       )}
 
+      </fieldset>
       <EditSaveBar
         changes={changes}
-        blocked={blocked}
-        onCancel={resetDraft}
+        blocked={blocked || resetting}
+        saving={saving}
+        onCancel={() => { if (!saving && !resetting) resetDraft() }}
         onSave={() => void save()}
         error={saveError}
       />

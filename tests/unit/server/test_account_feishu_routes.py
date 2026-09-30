@@ -140,3 +140,51 @@ async def notify(context):
     )
     assert result.ok is True
     assert output.read_text() == "draft-key"
+
+
+def test_default_notification_without_key_points_to_basic_page(monkeypatch) -> None:
+    """默认源码比较忽略首尾空白，缺少凭证时引导回基本信息页。"""
+    account = build_account()
+    account.feishu_key = None
+    monkeypatch.setattr(account_feishu, "_get_account_or_404", AsyncMock(return_value=account))
+    monkeypatch.setattr(account_feishu, "_build_sample_output", AsyncMock(return_value=object()))
+    monkeypatch.setattr(account_feishu, "build_execution_notification_context", lambda *args, **kwargs: {})
+    result = asyncio.run(
+        account_feishu.test_account_notification_function(
+            SimpleNamespace(),
+            1,
+            account_feishu.AccountNotificationFunctionTestRequest(
+                code=f"\n{account_feishu.DEFAULT_ACCOUNT_NOTIFICATION_CODE}\n"
+            ),
+        )
+    )
+    assert result.ok is False
+    assert result.message == "请返回基本信息页配置飞书 Webhook"
+    assert account.execution_notification_code is None
+
+
+def test_custom_notification_uses_saved_key_without_saving(monkeypatch) -> None:
+    """通用函数无需飞书凭证；省略凭证字段时继续使用账户保存值。"""
+    account = build_account()
+    captured = []
+    monkeypatch.setattr(account_feishu, "_get_account_or_404", AsyncMock(return_value=account))
+    monkeypatch.setattr(account_feishu, "_build_sample_output", AsyncMock(return_value=object()))
+    monkeypatch.setattr(account_feishu, "build_execution_notification_context", lambda *args, **kwargs: {})
+    monkeypatch.setattr(
+        account_feishu,
+        "run_notification_function",
+        lambda code, context, **kwargs: captured.append(kwargs) or SimpleNamespace(ok=True),
+    )
+    for key in (None, "saved-key"):
+        account.feishu_key = key
+        result = asyncio.run(
+            account_feishu.test_account_notification_function(
+                SimpleNamespace(),
+                1,
+                account_feishu.AccountNotificationFunctionTestRequest(code="def notify(context): pass"),
+            )
+        )
+        assert result.ok is True
+        assert captured[-1]["feishu_key"] == key
+        assert account.feishu_key == key
+        assert account.execution_notification_code is None

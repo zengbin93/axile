@@ -303,8 +303,8 @@ async def test_account_notification_function(
     output = await _build_sample_output(session, account, UnifiedAccountAssets.unavailable())
     context = build_execution_notification_context(_TestNotificationSource(account.name), output, is_test=True)
     key = payload.feishu_key if "feishu_key" in payload.model_fields_set else account.feishu_key
-    if payload.code == DEFAULT_ACCOUNT_NOTIFICATION_CODE and not key:
-        return AccountFeishuTestResult(ok=False, message="请先配置飞书 Webhook")
+    if payload.code.strip() == DEFAULT_ACCOUNT_NOTIFICATION_CODE.strip() and not key:
+        return AccountFeishuTestResult(ok=False, message="请返回基本信息页配置飞书 Webhook")
     result = await asyncio.to_thread(run_notification_function, payload.code, context, feishu_key=key)
     return AccountFeishuTestResult(
         ok=result.ok, message="样例函数运行成功" if result.ok else result.error or "运行失败"

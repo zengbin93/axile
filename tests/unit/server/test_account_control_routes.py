@@ -182,6 +182,31 @@ def test_account_public_does_not_serialize_credentials() -> None:
     assert '"feishu_configured":true' in payload
 
 
+@pytest.mark.parametrize("feishu_key", [None, "configured-key"])
+@pytest.mark.parametrize(
+    ("code", "expected"),
+    [
+        (None, "none"),
+        ("", "none"),
+        (" \n ", "none"),
+        (DEFAULT_ACCOUNT_NOTIFICATION_CODE, "default"),
+        ("\n" + DEFAULT_ACCOUNT_NOTIFICATION_CODE + "\n", "default"),
+        (DEFAULT_ACCOUNT_NOTIFICATION_CODE + "\n# 自定义内容", "function"),
+        ("def notify(context):\n    pass\n", "function"),
+    ],
+)
+def test_account_public_notification_status(code: str | None, expected: str, feishu_key: str | None) -> None:
+    """通知状态只有三种，且不受 Webhook 是否配置影响。"""
+    account = _build_account()
+    account.execution_notification_code = code
+    account.feishu_key = feishu_key
+
+    payload = account_crud_routes._account_public(account).model_dump()
+
+    assert payload["execution_notification_status"] == expected
+    assert payload["feishu_configured"] == bool(feishu_key)
+
+
 def test_account_update_credential_contract_is_explicit() -> None:
     """未提交凭证保持原值；提交值替换；显式 null 清除 webhook。"""
     assert account_crud_routes._build_account_update_data(AccountUpdate()) == {}
@@ -649,3 +674,69 @@ def test_update_same_channel_preserves_omitted_credentials(monkeypatch: pytest.M
     assert session.account is not None
     assert session.account.account_config["td_front"] == "tcp://new:1"
     assert session.account.account_config["password"] == "test"
+
+
+@pytest.mark.parametrize(
+    ("saved_code", "saved_key", "patch", "expected_code", "expected_key", "expected_status"),
+    [
+        (
+            None,
+            "old",
+            {"feishu_key": "new", "execution_notification_code": DEFAULT_ACCOUNT_NOTIFICATION_CODE},
+            DEFAULT_ACCOUNT_NOTIFICATION_CODE,
+            "new",
+            "default",
+        ),
+        (
+            DEFAULT_ACCOUNT_NOTIFICATION_CODE,
+            "old",
+            {"feishu_key": "new"},
+            DEFAULT_ACCOUNT_NOTIFICATION_CODE,
+            "new",
+            "default",
+        ),
+        (
+            "def notify(context): pass",
+            "old",
+            {"execution_notification_code": DEFAULT_ACCOUNT_NOTIFICATION_CODE},
+            DEFAULT_ACCOUNT_NOTIFICATION_CODE,
+            "old",
+            "default",
+        ),
+        (
+            "def notify(context): pass",
+            None,
+            {"execution_notification_code": DEFAULT_ACCOUNT_NOTIFICATION_CODE},
+            DEFAULT_ACCOUNT_NOTIFICATION_CODE,
+            None,
+            "default",
+        ),
+        (
+            DEFAULT_ACCOUNT_NOTIFICATION_CODE,
+            "old",
+            {"feishu_key": None, "execution_notification_code": None},
+            None,
+            None,
+            "none",
+        ),
+        ("def notify(context): pass", "old", {"execution_notification_code": None}, None, "old", "none"),
+        ("def notify(context): pass", "old", {"remark": "changed"}, "def notify(context): pass", "old", "function"),
+        (None, "old", {"remark": "changed"}, None, "old", "none"),
+    ],
+)
+def test_notification_patch_preserves_omitted_fields_and_reports_saved_status(
+    monkeypatch, saved_code, saved_key, patch, expected_code, expected_key, expected_status
+) -> None:
+    """三态切换保留省略的凭证和源码，响应状态只依据最终保存源码。"""
+    monkeypatch.setattr(account_crud_routes, "enqueue_account_runtime_sync", _noop_async)
+    monkeypatch.setattr(account_crud_routes, "reconcile_account_runtime", _synchronized_runtime_sync)
+    account = _build_account()
+    account.execution_notification_code = saved_code
+    account.feishu_key = saved_key
+    session = _RouteSession(account)
+    response = TestClient(_build_app(session)).patch("/account/1", json=patch)
+    assert response.status_code == 200
+    assert account.execution_notification_code == expected_code
+    assert account.feishu_key == expected_key
+    assert response.json()["execution_notification_status"] == expected_status
+    assert "feishu_key" not in response.json()
