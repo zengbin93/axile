@@ -93,6 +93,9 @@ export function AccountEditNotificationPage() {
   const empty = !code.trim()
   const webhookKey = extractFeishuKey(webhookInput)
   const dirty = code !== savedCode || Boolean(webhookKey) || clearWebhook
+  const savedNotificationStatus = !savedCode
+    ? '未配置通知函数'
+    : savedCode === defaultCode ? '与当前默认模板一致' : '已配置通知函数'
   const inspectorRows = resultOpen
     ? 'auto minmax(0,0fr) 36px minmax(0,1fr)'
     : 'auto minmax(0,1fr) 36px minmax(0,0fr)'
@@ -157,8 +160,8 @@ export function AccountEditNotificationPage() {
               <AccountPageTitle accountId={accountId} page="自定义执行通知" name={acc.name} channel={acc.trade_channel} market={acc.market} />
             </div>
             <p className="mt-2 text-[13px] text-ink-3">
-              {code.trim() ? code === defaultCode ? '默认飞书函数' : '自定义函数' : '未配置通知函数'}
-              {code === defaultCode && !savedCode ? ' · 尚未保存' : ''}
+              {savedNotificationStatus}
+              {code !== savedCode ? ' · 当前草稿未保存' : ''}
               {code === defaultCode && !acc.feishu_configured ? ' · 请配置 Webhook' : ''}
             </p>
             <div className="mt-2 flex gap-3 text-[13px]">
