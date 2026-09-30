@@ -41,7 +41,8 @@ describe('saveExecutionAlert', () => {
     expect(requests[1]?.input).toBe('/api/v1/init/execution-alert')
     expect(requests[1]?.init?.method).toBe('PATCH')
     expect(requests[1]?.init?.body).toBe(JSON.stringify({ exe_err_feishu_key: 'new-key', system_execution_notification_mode: 'default', system_execution_notification_code: '' }))
-    expect(peekInitValues()?.exe_err_feishu_key).toBe('new-key')
+    expect(peekInitValues()?.exe_err_feishu_key).toBe('')
+    expect(peekInitValues()?.exe_err_feishu_configured).toBeTrue()
   })
 })
 
@@ -55,4 +56,17 @@ test('仅修改高级配置不提交隐藏凭证或默认数据库', () => {
 test('新数据库地址可以替换，首启仍提交完整配置', () => {
   expect(initSavePayload({ ...values, sqlalchemy_database_uri: 'sqlite+aiosqlite:///new.db' }, true).sqlalchemy_database_uri).toBe('sqlite+aiosqlite:///new.db')
   expect(initSavePayload(values, false).exe_err_feishu_key).toBe('')
+})
+
+test('保存默认模式仍保留自定义源码，缓存不留存 Key', async () => {
+  globalThis.fetch = (async () => Response.json({ ok: true, message: 'saved' })) as unknown as typeof fetch
+  await saveExecutionAlert('secret', 'default', 'def notify(context): pass')
+  expect(peekInitValues()?.system_execution_notification_code).toBe('def notify(context): pass')
+  expect(peekInitValues()?.exe_err_feishu_key).toBe('')
+})
+test('高级设置不提交系统告警或凭据状态字段', () => {
+  const payload = JSON.parse(JSON.stringify(initSavePayload(values, true)))
+  expect(payload).not.toHaveProperty('system_execution_notification_mode')
+  expect(payload).not.toHaveProperty('system_execution_notification_code')
+  expect(payload).not.toHaveProperty('exe_err_feishu_configured')
 })

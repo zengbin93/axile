@@ -183,7 +183,7 @@ def test_notification_result_preserves_success_and_ignores_older_results(monkeyp
 
 def test_notification_result_migration_preserves_legacy_success():
     engine = sa.create_engine("sqlite://")
-    migrations = [load_migration(path) for path in sorted(MIGRATIONS.glob("[0-9]*.py"))]
+    migrations = [load_migration(path) for path in sorted(MIGRATIONS.glob("[0-9]*.py")) if path.name[:4] <= "0021"]
     with engine.begin() as connection:
         with Operations.context(MigrationContext.configure(connection)):
             for migration in migrations[:-1]:

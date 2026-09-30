@@ -19,6 +19,7 @@ export interface InitValues {
   sqlalchemy_database_uri: string
   /** 执行错误告警飞书机器人 key（系统级，区别于账户各自的 `feishu_key`）；空串表示不推送。 */
   exe_err_feishu_key: string
+  exe_err_feishu_configured?: boolean
   system_execution_notification_mode: 'default' | 'function'
   system_execution_notification_code: string
   environment: string
@@ -54,6 +55,7 @@ export function initValuesFromStatus(values: InitStatusValues): InitValues {
   return {
     sqlalchemy_database_uri: '',
     exe_err_feishu_key: '',
+    exe_err_feishu_configured: values.exe_err_feishu_configured,
     system_execution_notification_mode: values.system_execution_notification_mode ?? 'default',
     system_execution_notification_code: values.system_execution_notification_code ?? '',
     environment: values.environment,
@@ -83,7 +85,7 @@ export function testDb(uri: string): Promise<TestResult> {
 }
 
 /** 测试执行告警飞书机器人连通性（向其推送一张联通测试卡片）。 */
-export function testFeishu(key: string): Promise<TestResult> {
+export function testFeishu(key: string | null): Promise<TestResult> {
   return apiSend<TestResult>('POST', '/init/test-feishu', { key })
 }
 
@@ -95,27 +97,48 @@ export function saveExecutionAlert(exeErrFeishuKey: string | null, mode: 'defaul
     system_execution_notification_code: code,
   }).then((result) => {
     if (result.ok && cachedInitValues) {
-      cachedInitValues = { ...cachedInitValues, exe_err_feishu_key: exeErrFeishuKey ?? cachedInitValues.exe_err_feishu_key, system_execution_notification_mode: mode, system_execution_notification_code: mode === 'function' ? code : '' }
+      cachedInitValues = { ...cachedInitValues, exe_err_feishu_key: '', exe_err_feishu_configured: exeErrFeishuKey === null ? cachedInitValues.exe_err_feishu_configured : Boolean(exeErrFeishuKey), system_execution_notification_mode: mode, system_execution_notification_code: code }
     }
     return result
   })
 }
 
 /** 用样例异常运行系统通知函数草稿。 */
-export function testSystemNotificationFunction(code: string): Promise<TestResult> {
-  return apiSend<TestResult>('POST', '/init/execution-alert/function/test', { code })
+export function testSystemNotificationFunction(code: string, key: string | null = null, eventType: SystemNotificationEvent = 'execution_error'): Promise<SystemNotificationTestResult> {
+  return apiSend<SystemNotificationTestResult>('POST', '/init/execution-alert/function/test', { code, key, event_type: eventType })
 }
 
 /** 保存初始化配置；成功后后端将自退出并由 supervisor 拉起重启。 */
-export function saveInit(values: Omit<InitValues, 'sqlalchemy_database_uri' | 'exe_err_feishu_key'> & Partial<Pick<InitValues, 'sqlalchemy_database_uri' | 'exe_err_feishu_key'>>): Promise<TestResult> {
+export function saveInit(values: ReturnType<typeof initSavePayload>): Promise<TestResult> {
   return apiSend<TestResult>('POST', '/init/save', values)
 }
 
 /** 高级设置只提交新输入的数据库地址，告警由独立表单维护。 */
 export function initSavePayload(values: InitValues, isEdit: boolean) {
+  const { exe_err_feishu_configured: _configured, ...editable } = values
   return {
-    ...values,
+    ...editable,
     sqlalchemy_database_uri: isEdit ? (values.sqlalchemy_database_uri.trim() || undefined) : values.sqlalchemy_database_uri,
     exe_err_feishu_key: isEdit ? undefined : values.exe_err_feishu_key,
+    system_execution_notification_mode: isEdit ? undefined : values.system_execution_notification_mode,
+    system_execution_notification_code: isEdit ? undefined : values.system_execution_notification_code,
   }
+}
+
+export type SystemNotificationEvent = 'execution_error' | 'execution_timeout'
+export interface SystemNotificationTestResult extends TestResult { error_line?: number | null }
+export interface SystemNotificationResult {
+  finished_at: string | null
+  mode: 'default' | 'function' | null
+  event_type: string | null
+  execution_id: string | null
+  account_id: number | null
+  ok: boolean | null
+  error: string | null
+}
+export function getDefaultSystemNotification(): Promise<string> {
+  return apiGet<{ code: string }>('/init/execution-alert/function/default').then((result) => result.code)
+}
+export function getSystemNotificationResult(signal?: AbortSignal): Promise<SystemNotificationResult> {
+  return apiGet<SystemNotificationResult>('/init/execution-alert/result', signal)
 }

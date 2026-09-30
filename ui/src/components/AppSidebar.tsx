@@ -111,7 +111,7 @@ function GlobalSettingsNav({ phase, dense }: { phase: SettingsMovePhase; dense: 
   const exact = (to: string) => (pathname: string) => pathname === to
   const hidden = phase === 'leaving' || phase === 'placed'
   const items: NavItemSpec[] = [
-    { label: '飞书告警', icon: BellRing, to: '/settings', active: exact('/settings') },
+    { label: '系统告警', icon: BellRing, to: '/settings', active: (pathname) => pathname === '/settings' || pathname === '/settings/notification' },
     { label: '高级设置', icon: Settings2, to: '/settings/advanced', active: exact('/settings/advanced') },
   ]
 

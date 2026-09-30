@@ -16,7 +16,9 @@ from axile.server.app import validation_exception_handler
 
 
 @pytest.fixture
-def client() -> TestClient:
+def client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
+    for name in ("exe_err_feishu_key", "system_execution_notification_mode", "system_execution_notification_code"):
+        monkeypatch.setattr(cfg.settings, name, getattr(cfg.settings, name))
     app = FastAPI()
     app.include_router(init_module.router, prefix="/api/v1")
     return TestClient(app)
@@ -108,7 +110,9 @@ def test_system_notification_function_sample_run(client: TestClient, monkeypatch
     monkeypatch.setattr(
         init_module,
         "run_notification_function",
-        lambda _code, context: captured.append(context) or type("Result", (), {"ok": True})(),
+        lambda _code, context, **_kwargs: (
+            captured.append(context) or type("Result", (), {"ok": True, "error_line": None})()
+        ),
     )
     response = client.post("/api/v1/init/execution-alert/function/test", json={"code": "def notify(context): pass"})
     assert response.json()["ok"] is True

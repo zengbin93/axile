@@ -8,6 +8,7 @@ from sqlmodel import col
 
 from axile.common.config import settings
 from axile.server.db.models.account_notification import AccountNotificationState
+from axile.server.db.models.system_notification import SystemNotificationState, SystemNotificationStatePublic
 
 
 @lru_cache(maxsize=1)
@@ -41,6 +42,33 @@ def record_notification_success(account_id: int, execution_id: str | None, succe
     )
     with _notification_engine().begin() as connection:
         connection.execute(statement)
+
+
+def record_system_notification_result(result: SystemNotificationStatePublic) -> None:
+    """保存最近完成的真实告警；试跑由调用方隔离，不进入此函数。"""
+    if result.finished_at is None:
+        raise ValueError("真实告警结果必须包含完成时间")
+    values = result.model_dump()
+    statement = insert(SystemNotificationState).values(id=1, **values)
+    statement = statement.on_conflict_do_update(
+        index_elements=["id"],
+        set_=values,
+        where=col(SystemNotificationState.finished_at).is_(None)
+        | (col(SystemNotificationState.finished_at) < result.finished_at),
+    )
+    with _notification_engine().begin() as connection:
+        connection.execute(statement)
+
+
+def get_system_notification_result() -> SystemNotificationStatePublic:
+    """读取持久化摘要；从未发送时返回空结果。"""
+    with _notification_engine().connect() as connection:
+        row = (
+            connection.execute(select(SystemNotificationState).where(col(SystemNotificationState.id) == 1))
+            .mappings()
+            .first()
+        )
+    return SystemNotificationStatePublic.model_validate(dict(row)) if row else SystemNotificationStatePublic()
 
 
 def record_notification_result(

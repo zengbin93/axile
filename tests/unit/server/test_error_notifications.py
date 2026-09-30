@@ -7,6 +7,11 @@ import pytest
 from axile.server import error_notifications
 
 
+@pytest.fixture(autouse=True)
+def isolate_notification_state(monkeypatch):
+    monkeypatch.setattr(error_notifications, "record_system_notification_result", lambda _state: None)
+
+
 def test_send_feishu_error_uses_internal_card_sender(monkeypatch: pytest.MonkeyPatch) -> None:
     """错误通知应通过内部发送器发送构造后的卡片."""
     pushed: list[tuple[dict[str, object], str]] = []

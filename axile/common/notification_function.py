@@ -54,7 +54,11 @@ def validate_notification_function(code: str) -> None:
 
 
 def run_notification_function(
-    code: str, context: dict[str, object], *, feishu_key: str | None = None
+    code: str,
+    context: dict[str, object],
+    *,
+    feishu_key: str | None = None,
+    system_feishu_key: str | None = None,
 ) -> NotificationFunctionResult:
     """运行通知函数并强制限制墙钟时间。"""
     try:
@@ -66,7 +70,11 @@ def run_notification_function(
             capture_output=True,
             timeout=NOTIFICATION_FUNCTION_TIMEOUT_SECONDS,
             check=False,
-            env={**os.environ, "AXILE_ACCOUNT_FEISHU_KEY": feishu_key or ""},
+            env={
+                **os.environ,
+                "AXILE_ACCOUNT_FEISHU_KEY": feishu_key or "",
+                "AXILE_SYSTEM_FEISHU_KEY": system_feishu_key or "",
+            },
         )
         response = json.loads(process.stdout)
         return NotificationFunctionResult(

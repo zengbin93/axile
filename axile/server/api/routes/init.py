@@ -3,7 +3,7 @@
 Notes
 -----
 本模块提供「未完成配置」时初始化向导所需的接口：查询就绪状态、测试数据库
-连通性、写入 ``config.toml`` 并触发重启。所有接口**均不触达业务数据库**，
+连通性、写入 ``config.toml`` 并触发重启。初始化接口不触达业务数据库，
 因此在服务端处于初始化向导模式（数据库尚未迁移）时也能正常工作。
 """
 
@@ -27,10 +27,13 @@ from axile.common.config import (
     update_config_toml_values,
     write_config_toml,
 )
+from axile.common.default_system_notification import DEFAULT_SYSTEM_NOTIFICATION_CODE
 from axile.common.notification_config import validate_notification_config
 from axile.common.notification_function import run_notification_function
 from axile.executor.algorithms.utils.clock import get_default_clock
-from axile.server.error_notifications import build_test_card
+from axile.server.db.models.system_notification import SystemNotificationStatePublic
+from axile.server.error_notifications import build_system_notification_context, build_test_card
+from axile.server.execution.notification_state import get_system_notification_result
 
 router = APIRouter(prefix="/init", tags=["init"])
 
@@ -68,13 +71,15 @@ class DbTestRequest(BaseModel):
 class FeishuTestRequest(BaseModel):
     """执行告警飞书机器人连通性测试载荷."""
 
-    key: str
+    key: str | None = None
 
 
 class NotificationFunctionTestRequest(BaseModel):
     """系统通知函数试跑请求。"""
 
     code: str
+    key: str | None = None
+    event_type: Literal["execution_error", "execution_timeout"] = "execution_error"
 
 
 class ExecutionAlertUpdateRequest(BaseModel):
@@ -84,7 +89,7 @@ class ExecutionAlertUpdateRequest(BaseModel):
 
     exe_err_feishu_key: str | None = None
     system_execution_notification_mode: Literal["default", "function"] = "default"
-    system_execution_notification_code: str = ""
+    system_execution_notification_code: str | None = None
 
 
 class TestResult(BaseModel):
@@ -102,6 +107,12 @@ class TestResult(BaseModel):
     message: str
 
 
+class NotificationFunctionTestResult(TestResult):
+    """函数试跑的源码错误位置，与账户通知编辑器使用同一反馈契约。"""
+
+    error_line: int | None = None
+
+
 class InitSaveRequest(BaseModel):
     """初始化向导保存载荷；凭证省略或为 None 时保留现值，告警空串则清除。"""
 
@@ -109,8 +120,8 @@ class InitSaveRequest(BaseModel):
 
     sqlalchemy_database_uri: str | None = None
     exe_err_feishu_key: str | None = None
-    system_execution_notification_mode: Literal["default", "function"] = "default"
-    system_execution_notification_code: str = ""
+    system_execution_notification_mode: Literal["default", "function"] | None = None
+    system_execution_notification_code: str | None = None
     environment: Literal["local", "staging", "production"] = "local"
     app_log_dir: str = "./logs"
     axile_log_rotation: str = "1 day"
@@ -189,7 +200,7 @@ async def test_feishu(payload: FeishuTestRequest) -> TestResult:
     故以响应体 ``code == 0`` 或 ``StatusMessage == "success"`` 判定成功；测试失败以
     ``ok=False`` 返回（HTTP 200），便于前端统一展示 ✓/✗。
     """
-    key = payload.key.strip()
+    key = (settings.exe_err_feishu_key if payload.key is None else payload.key).strip()
     if not key:
         return TestResult(ok=False, message="请先填写飞书机器人 key")
 
@@ -242,10 +253,13 @@ def update_execution_alert(payload: ExecutionAlertUpdateRequest) -> TestResult:
             detail="系统尚未完成初始化，请先完成初始化配置",
         )
 
+    code = (
+        settings.system_execution_notification_code
+        if payload.system_execution_notification_code is None
+        else payload.system_execution_notification_code
+    )
     try:
-        validate_notification_config(
-            payload.system_execution_notification_mode, payload.system_execution_notification_code
-        )
+        validate_notification_config(payload.system_execution_notification_mode, code)
         next_feishu_key = (
             settings.exe_err_feishu_key if payload.exe_err_feishu_key is None else payload.exe_err_feishu_key
         )
@@ -253,9 +267,7 @@ def update_execution_alert(payload: ExecutionAlertUpdateRequest) -> TestResult:
             {
                 "exe_err_feishu_key": next_feishu_key,
                 "system_execution_notification_mode": payload.system_execution_notification_mode,
-                "system_execution_notification_code": payload.system_execution_notification_code
-                if payload.system_execution_notification_mode == "function"
-                else "",
+                "system_execution_notification_code": code,
             }
         )
     except ValueError as exc:
@@ -268,27 +280,38 @@ def update_execution_alert(payload: ExecutionAlertUpdateRequest) -> TestResult:
 
     settings.exe_err_feishu_key = next_feishu_key
     settings.system_execution_notification_mode = payload.system_execution_notification_mode
-    settings.system_execution_notification_code = (
-        payload.system_execution_notification_code if payload.system_execution_notification_mode == "function" else ""
-    )
+    settings.system_execution_notification_code = code
     logger.info("执行错误告警配置已更新并立即生效。")
     return TestResult(ok=True, message="执行告警配置已保存并立即生效。")
 
 
+@router.get("/execution-alert/function/default")
+def default_system_notification_function() -> dict[str, str]:
+    """返回不含凭据的系统告警示例源码。"""
+    return {"code": DEFAULT_SYSTEM_NOTIFICATION_CODE}
+
+
+@router.get("/execution-alert/result")
+async def system_notification_result() -> SystemNotificationStatePublic:
+    """仅已初始化服务读取真实结果，首启向导无需连接业务数据库。"""
+    if not is_configured():
+        raise HTTPException(status_code=409, detail="系统尚未完成初始化")
+    return await asyncio.to_thread(get_system_notification_result)
+
+
 @router.post("/execution-alert/function/test")
-async def test_system_notification_function(payload: NotificationFunctionTestRequest) -> TestResult:
-    """以明确标记的样例异常运行系统通知函数。"""
-    context: dict[str, object] = {
-        "event_id": "system:sample",
-        "event_type": "execution_error",
-        "execution_id": None,
-        "occurred_at": "sample",
-        "account": {"id": 0, "name": "样例账户"},
-        "error": {"type": "RuntimeError", "message": "样例执行异常", "traceback": "样例堆栈"},
-        "is_test": True,
-    }
-    result = await asyncio.to_thread(run_notification_function, payload.code, context)
-    return TestResult(ok=result.ok, message="样例函数运行成功" if result.ok else result.error or "运行失败")
+async def test_system_notification_function(payload: NotificationFunctionTestRequest) -> NotificationFunctionTestResult:
+    """运行当前草稿，使用当前凭据选择；不会保存配置或覆盖真实告警摘要。"""
+    error = RuntimeError("样例执行超时" if payload.event_type == "execution_timeout" else "样例执行异常")
+    context = build_system_notification_context(error, None, event_type=payload.event_type, is_test=True)
+    context["account"] = {"id": 0, "name": "样例账户"}
+    key = settings.exe_err_feishu_key if payload.key is None else payload.key
+    result = await asyncio.to_thread(run_notification_function, payload.code, context, system_feishu_key=key)
+    return NotificationFunctionTestResult(
+        ok=result.ok,
+        message="样例函数运行成功" if result.ok else result.error or "运行失败",
+        error_line=result.error_line,
+    )
 
 
 def _restart_process() -> None:
@@ -322,10 +345,14 @@ def init_save(payload: InitSaveRequest, background_tasks: BackgroundTasks) -> Te
     HTTPException
         数据库地址不合法时返回 422；写入文件失败时返回 500。
     """
+    mode = payload.system_execution_notification_mode or settings.system_execution_notification_mode
+    code = (
+        settings.system_execution_notification_code
+        if payload.system_execution_notification_code is None
+        else payload.system_execution_notification_code
+    )
     try:
-        validate_notification_config(
-            payload.system_execution_notification_mode, payload.system_execution_notification_code
-        )
+        validate_notification_config(mode, code)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     database_uri = (
@@ -345,10 +372,8 @@ def init_save(payload: InitSaveRequest, background_tasks: BackgroundTasks) -> Te
     values: dict[str, Any] = {
         "sqlalchemy_database_uri": database_uri,
         "exe_err_feishu_key": feishu_key,
-        "system_execution_notification_mode": payload.system_execution_notification_mode,
-        "system_execution_notification_code": payload.system_execution_notification_code
-        if payload.system_execution_notification_mode == "function"
-        else "",
+        "system_execution_notification_mode": mode,
+        "system_execution_notification_code": code,
         "environment": payload.environment,
         "app_log_dir": payload.app_log_dir,
         "axile_log_rotation": payload.axile_log_rotation,

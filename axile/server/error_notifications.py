@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import asyncio
+import traceback
 import uuid
 
 import aiohttp
@@ -14,9 +15,11 @@ import loguru
 
 from axile.common.config import settings
 from axile.common.feishu import push_feishu_card
-from axile.common.notification_function import run_notification_function
+from axile.common.notification_function import NotificationFunctionResult, run_notification_function
 from axile.executor.algorithms.utils.clock import clock_now
 from axile.server.db.models.account import AccountContext
+from axile.server.db.models.system_notification import SystemNotificationStatePublic
+from axile.server.execution.notification_state import record_system_notification_result
 
 
 def build_error_card(
@@ -180,41 +183,76 @@ async def send_feishu_error(
     feishu_key : str
         飞书机器人 webhook key。
     """
-    if settings.system_execution_notification_mode == "function":
-        import traceback
-
-        context: dict[str, object] = {
-            "event_id": f"system:{execution_id}:{event_type}" if execution_id else f"system:{uuid.uuid4().hex}",
-            "event_type": event_type,
-            "execution_id": execution_id,
-            "occurred_at": clock_now().isoformat(),
-            "account": {"id": account.id, "name": account.name} if account else None,
-            "error": {
-                "type": type(error).__name__,
-                "message": str(error),
-                "traceback": "".join(traceback.format_exception(error)),
-            },
-            "is_test": False,
-        }
-        result = await asyncio.to_thread(
-            run_notification_function, settings.system_execution_notification_code, context
-        )
-        if not result.ok:
-            loguru.logger.error(f"自定义系统执行通知失败: {result.error}")
-        loguru.logger.info("系统执行通知完成 execution_id={} mode=function ok={}", execution_id, result.ok)
+    mode = settings.system_execution_notification_mode
+    if mode == "default" and not feishu_key:
         return
-    if feishu_key == "":
-        return
-
+    context = build_system_notification_context(error, account, event_type=event_type, execution_id=execution_id)
+    result = await _send_system_notification(mode, context, error, account, feishu_key)
+    state = SystemNotificationStatePublic(
+        finished_at=clock_now().isoformat(),
+        mode=mode,
+        event_type=event_type,
+        execution_id=execution_id,
+        account_id=account.id if account else None,
+        ok=result.ok,
+        error=result.error,
+    )
     try:
-        import traceback
+        await asyncio.to_thread(record_system_notification_result, state)
+    except Exception as exc:
+        # 摘要写入失败不能反过来改变交易或发送结果。
+        loguru.logger.warning("保存系统告警结果失败: {}", exc)
+    loguru.logger.info("系统执行通知完成 execution_id={} mode={} ok={}", execution_id, mode, result.ok)
 
-        error_msg = f"{str(error)}\n\n堆栈跟踪:\n{traceback.format_exc()}"
-        account_name = None if account is None else account.name
+
+def build_system_notification_context(
+    error: Exception,
+    account: AccountContext | None,
+    *,
+    event_type: str = "execution_error",
+    execution_id: str | None = None,
+    is_test: bool = False,
+) -> dict[str, object]:
+    """真实告警与试跑共用事件结构；堆栈来自异常对象而非当前 except 栈。"""
+    return {
+        "event_id": f"system:{execution_id}:{event_type}" if execution_id else f"system:{uuid.uuid4().hex}",
+        "event_type": event_type,
+        "execution_id": execution_id,
+        "occurred_at": clock_now().isoformat(),
+        "account": {"id": account.id, "name": account.name} if account else None,
+        "error": {
+            "type": type(error).__name__,
+            "message": str(error),
+            "traceback": "".join(traceback.format_exception(error)),
+        },
+        "is_test": is_test,
+    }
+
+
+async def _send_system_notification(
+    mode: str,
+    context: dict[str, object],
+    error: Exception,
+    account: AccountContext | None,
+    feishu_key: str,
+) -> NotificationFunctionResult:
+    """两种发送路径返回相同结果；失败只记通知错误，不补发另一模式。"""
+    try:
+        if mode == "function":
+            result = await asyncio.to_thread(
+                run_notification_function,
+                settings.system_execution_notification_code,
+                context,
+                system_feishu_key=feishu_key,
+            )
+            if not result.ok:
+                loguru.logger.error(f"自定义系统执行通知失败: {result.error}")
+            return result
+        error_msg = f"{error}\n\n堆栈跟踪:\n{''.join(traceback.format_exception(error))}"
         external_ip = await get_external_ip()
-        card_dict = build_error_card(error_msg, account_name, external_ip)
-        await asyncio.to_thread(push_feishu_card, card_dict, feishu_key)
-        loguru.logger.info("系统执行通知完成 execution_id={} mode=default ok=true", execution_id)
-    except Exception as feishu_error:
-        loguru.logger.error(f"发送飞书错误通知失败: {feishu_error}")
-        loguru.logger.info("系统执行通知完成 execution_id={} mode=default ok=false", execution_id)
+        card = build_error_card(error_msg, account.name if account else None, external_ip)
+        await asyncio.to_thread(push_feishu_card, card, feishu_key)
+        return NotificationFunctionResult(True)
+    except Exception as exc:
+        loguru.logger.error(f"发送飞书错误通知失败: {exc}")
+        return NotificationFunctionResult(False, str(exc)[:1000])

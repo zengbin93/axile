@@ -1,17 +1,15 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from '@/components/ui/nav'
+import { SystemAlertPage } from '@/pages/SystemAlertPage'
 import { InitWizard } from '@/features/init/InitWizard'
 import { initStatus, initValuesFromStatus, peekInitValues, type InitValues } from '@/lib/api/init'
 
-/**
- * 系统配置页（常驻应用导航内）。
- *
- * 已配置用户从顶栏齿轮进入，以「编辑」模式复用 :func:`InitWizard`。预填值优先
- * 取启动时已拉取的缓存（:func:`peekInitValues`），从而首帧即渲染向导、与 `/setup`
- * 一样无加载闪屏；仅当缓存缺失（启动探测失败）时才回退到即时拉取。执行告警保存后
- * 立即热生效；高级系统设置仍由后端写入 config.toml 并重启。
- */
+/** 告警使用独立配置页；高级系统设置沿用需要重启的配置向导。 */
 export function SystemConfigPage({ section = 'alert' }: { section?: 'alert' | 'advanced' }) {
+  return section === 'alert' ? <SystemAlertPage /> : <AdvancedSystemConfigPage />
+}
+
+function AdvancedSystemConfigPage() {
   const navigate = useNavigate()
   const [values, setValues] = useState<InitValues | null>(() => peekInitValues())
 
@@ -39,5 +37,5 @@ export function SystemConfigPage({ section = 'alert' }: { section?: 'alert' | 'a
     )
   }
 
-  return <InitWizard initial={values} mode="edit" editSection={section} />
+  return <InitWizard initial={values} mode="edit" editSection="advanced" />
 }

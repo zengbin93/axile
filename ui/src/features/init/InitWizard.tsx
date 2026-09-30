@@ -18,6 +18,8 @@ import {
 } from '@/components/ui/stringList'
 import { ErrorNotice } from '@/components/ui/ErrorNotice'
 import { Row, Section, TEXT } from '@/features/account/editUi'
+import { SystemAlertFields } from '@/features/system/SystemAlertFields'
+import { extractFeishuKey } from '@/features/account/feishuUpdate'
 import { advancedConfigChanges } from '@/features/init/advancedConfig'
 import { WizardPage } from '@/features/setup/WizardNav'
 import { ApiError } from '@/lib/api/client'
@@ -30,7 +32,7 @@ import {
   testFeishu,
   testSystemNotificationFunction,
   type InitValues,
-  type TestResult,
+  type SystemNotificationTestResult,
 } from '@/lib/api/init'
 import { useToastStore } from '@/stores/ui'
 
@@ -266,6 +268,7 @@ export function InitWizard({
   const saveState = usePythonSave()
   const { saving, error: saveError } = saveState
   const [dbTest, setDbTest] = useState<TestState>(null)
+  const [clearAlertKey, setClearAlertKey] = useState(false)
   const [feishuTest, setFeishuTest] = useState<TestState>(null)
   const [confirm, setConfirm] = useState<ConfirmSpec | null>(null)
   const [directoryPickerTarget, setDirectoryPickerTarget] = useState<
@@ -277,7 +280,7 @@ export function InitWizard({
   const initialDraft = draftFromInitial(initial, isEdit)
   const currentAdvancedValues = advancedValues(draft, initial)
   const advancedChanges = advancedConfigChanges(initial, currentAdvancedValues)
-  const alertDirty = draftState.dirty
+  const alertDirty = draftState.dirty || clearAlertKey
 
   const set = (patch: Partial<Draft>) => {
     saveState.clearError()
@@ -297,24 +300,25 @@ export function InitWizard({
   const runFeishuTest = async () => {
     setFeishuTest('busy')
     try {
-      setFeishuTest(await testFeishu(draft.exe_err_feishu_key))
+      setFeishuTest(await testFeishu(clearAlertKey ? '' : extractFeishuKey(draft.exe_err_feishu_key) || (isEdit ? null : '')))
     } catch (e) {
       setFeishuTest({ ok: false, message: errText(e) })
     }
   }
 
-  const functionTrial = usePythonRun<TestResult>({
+  const functionTrial = usePythonRun<SystemNotificationTestResult>({
     code: draft.system_execution_notification_code,
+    contextKey: JSON.stringify([draft.exe_err_feishu_key, clearAlertKey, draft.system_execution_notification_mode]),
     enabled: !saving && feishuTest !== 'busy',
-    execute: testSystemNotificationFunction,
+    execute: (code) => testSystemNotificationFunction(code, clearAlertKey ? '' : extractFeishuKey(draft.exe_err_feishu_key) || (isEdit ? null : '')),
     failed: (cause) => ({ ok: false, message: errText(cause) }),
-    toEditorResult: (result) => ({ valid: result.ok, errorMessage: result.ok ? null : result.message }),
+    toEditorResult: (result) => ({ valid: result.ok, errorMessage: result.ok ? null : result.message, errorLine: result.error_line }),
   })
-  const restoreAlert = () => set({
+  const restoreAlert = () => { setClearAlertKey(false); set({
     exe_err_feishu_key: savedAlert.exe_err_feishu_key,
     system_execution_notification_mode: savedAlert.system_execution_notification_mode,
     system_execution_notification_code: savedAlert.system_execution_notification_code,
-  })
+  }) }
 
   /** 保存后轮询就绪状态，容忍重启期间的请求失败，就绪或超时后刷新。 */
   const waitReadyAndReload = async () => {
@@ -333,9 +337,9 @@ export function InitWizard({
 
   const doSave = () => saveState.save(!functionTrial.running && feishuTest !== 'busy', async () => {
     if (isEdit && editSection === 'alert') {
-      const result = await saveExecutionAlert(draft.exe_err_feishu_key.trim() || null, draft.system_execution_notification_mode, draft.system_execution_notification_code)
-      draftState.setBaseline({ ...draft, system_execution_notification_code: draft.system_execution_notification_mode === 'function' ? draft.system_execution_notification_code : '' })
-      if (draft.system_execution_notification_mode === 'default') set({ system_execution_notification_code: '' })
+      const result = await saveExecutionAlert(clearAlertKey ? '' : extractFeishuKey(draft.exe_err_feishu_key) || null, draft.system_execution_notification_mode, draft.system_execution_notification_code)
+      draftState.setBaseline(draft)
+      setClearAlertKey(false)
       toast(result.message)
       return
     }
@@ -408,102 +412,27 @@ export function InitWizard({
             {step === alertStep && (!isEdit || editSection === 'alert') && (
               <WizardPage
                 kicker={kickerOf(1)}
-                title="执行错误告警（选填）"
-                lead="任一账户执行异常时，axile 会把错误卡片推送到此飞书机器人；系统级，区别于各账户自己的「飞书通知」。留空则不推送。保存后立即生效；「测试推送」使用当前输入，不会保存配置。"
+                title="系统告警（选填）"
+                lead="账户执行异常或总超时时发送系统告警。默认模式使用飞书卡片，自定义模式运行通知函数；测试只验证当前草稿，不会保存配置。"
               >
-                <div className="max-w-[560px]">
-                  <label className={labelCls}>飞书机器人 key</label>
-                  <input
-                    className={inputCls}
-                    value={draft.exe_err_feishu_key}
-                    onChange={(e) =>
-                      set({ exe_err_feishu_key: e.target.value })
-                    }
-                    placeholder="留空则不推送"
+                <div className="max-w-[760px]">
+                  <SystemAlertFields
+                    draft={{ mode: draft.system_execution_notification_mode, code: draft.system_execution_notification_code, keyInput: draft.exe_err_feishu_key, clearKey: clearAlertKey }}
+                    configured={Boolean(initial.exe_err_feishu_configured)}
+                    disabled={saving || functionTrial.running || feishuTest === 'busy'}
+                    onChange={(patch) => {
+                      if (patch.clearKey !== undefined) { setClearAlertKey(patch.clearKey); setFeishuTest(null) }
+                      set({ ...(patch.mode !== undefined ? { system_execution_notification_mode: patch.mode } : {}), ...(patch.keyInput !== undefined ? { exe_err_feishu_key: patch.keyInput } : {}) })
+                    }}
+                    keyActions={<button type="button" className="cursor-pointer rounded-[9px] border border-line px-4 py-2 text-[14px] disabled:opacity-45" onClick={() => void runFeishuTest()} disabled={clearAlertKey || (!draft.exe_err_feishu_key.trim() && !initial.exe_err_feishu_configured) || saving || functionTrial.running || feishuTest === 'busy'}>{feishuTest === 'busy' ? '测试中…' : '测试推送'}</button>}
+                    custom={<div className="mt-3">
+                      <p className="mb-2 text-[13px] text-ink-3">同步或异步 notify(context) 接收系统执行异常；试跑不会保存配置。</p>
+                      <PythonFunctionEditor kind="system_notification" code={draft.system_execution_notification_code} onChange={(code) => set({ system_execution_notification_code: code })} running={functionTrial.running} runDisabled={saving || feishuTest === 'busy'} result={functionTrial.editorResult} resultContent={functionTrial.result ? <p className="text-[14px] text-ink-2">{functionTrial.result.message}</p> : undefined} stale={functionTrial.stale} onRun={() => void functionTrial.run()} saveAction={isEdit ? { dirty: alertDirty, saving, error: saveError, disabled: functionTrial.running || feishuTest === 'busy', onSave, onRestore: restoreAlert } : undefined} workbenchTitle="系统告警函数" docHref="/docs/system-notification" height="320px" />
+                    </div>}
                   />
-                  <details className="mt-4 border-t border-line pt-3">
-                    <summary className="cursor-pointer text-[14px] text-ink-2">高级通知设置</summary>
-                    <label className={labelCls}>通知方式</label>
-                    <select
-                      className={inputCls}
-                      value={draft.system_execution_notification_mode}
-                      onChange={(e) => set({ system_execution_notification_mode: e.target.value as 'default' | 'function' })}
-                    >
-                      <option value="default">默认飞书卡片</option>
-                      <option value="function">自定义函数</option>
-                    </select>
-                    {draft.system_execution_notification_mode === 'function' && (
-                      <div className="mt-3">
-                        <p className="text-[13px] text-ink-3">定义同步或异步函数 notify(context)。context 包含 event_type、occurred_at、account、error 和 is_test；函数自行发送通知。</p>
-                        <div className="mt-2">
-                          <PythonFunctionEditor
-                            kind="system_notification"
-                            code={draft.system_execution_notification_code}
-                            onChange={(value) => set({ system_execution_notification_code: value })}
-                            running={functionTrial.running}
-                            runDisabled={saving || feishuTest === 'busy'}
-                            result={functionTrial.editorResult}
-                            resultContent={functionTrial.result ? <p className="text-[14px] text-ink-2">{functionTrial.result.message}</p> : undefined}
-                            stale={functionTrial.stale}
-                            onRun={() => void functionTrial.run()}
-                            saveAction={isEdit ? { dirty: alertDirty, saving, error: saveError, disabled: functionTrial.running || feishuTest === 'busy', onSave, onRestore: restoreAlert } : undefined}
-                            workbenchTitle="系统执行通知函数"
-                            height="260px"
-                          />
-                        </div>
-                        <p className="mt-1 text-[12px] text-ink-3">试跑会实际执行函数，可能向外发送消息。样例事件中 is_test 为 true。</p>
-                      </div>
-                    )}
-                  </details>
-                  {isEdit ? (
-                    <>
-                      <div className="mt-4 flex flex-wrap items-center gap-3">
-                        <button
-                          className="cursor-pointer rounded-[11px] border border-line bg-surface px-4 py-2.5 text-[15px] text-ink-2 disabled:opacity-45"
-                          onClick={runFeishuTest}
-                          disabled={
-                            !draft.exe_err_feishu_key.trim() ||
-                            functionTrial.running || saving ||
-                            feishuTest === 'busy'
-                          }
-                        >
-                          {feishuTest === 'busy' ? '测试中…' : '测试推送'}
-                        </button>
-                        {draft.system_execution_notification_mode === 'default' && (
-                          <button
-                            className="cursor-pointer rounded-[11px] border border-ink-1 bg-ink-1 px-[22px] py-2.5 text-[15px] font-[550] text-surface disabled:opacity-45"
-                            onClick={onSave}
-                            disabled={
-                              !alertDirty || saving || functionTrial.running || feishuTest === 'busy'
-                            }
-                          >
-                            {saving ? '保存中…' : '保存'}
-                          </button>
-                        )}
-                        {feishuTest && feishuTest !== 'busy' && (
-                          <span
-                            className={`text-[14px] ${feishuTest.ok ? 'text-accent' : 'text-warn'}`}
-                          >
-                            {feishuTest.ok ? '✓ ' : '✗ '}
-                            {feishuTest.message}
-                          </span>
-                        )}
-                      </div>
-                      <ErrorNotice
-                        title="保存执行告警失败"
-                        error={saveError}
-                        variant="mutation"
-                        onRetry={doSave}
-                      />
-                    </>
-                  ) : (
-                    <TestRow
-                      state={feishuTest}
-                      onTest={runFeishuTest}
-                      idleLabel="测试推送"
-                      disabled={!draft.exe_err_feishu_key.trim()}
-                    />
-                  )}
+                  {feishuTest && feishuTest !== 'busy' && <p className={`mt-3 text-[13px] ${feishuTest.ok ? 'text-ink-2' : 'text-warn'}`} role="status">{feishuTest.message}</p>}
+                  {isEdit && draft.system_execution_notification_mode === 'default' && <button type="button" className="mt-4 cursor-pointer rounded-[9px] bg-ink-1 px-5 py-2 text-surface disabled:opacity-45" onClick={onSave} disabled={!alertDirty || saving || functionTrial.running || feishuTest === 'busy'}>{saving ? '保存中…' : '保存'}</button>}
+                  <ErrorNotice title="保存执行告警失败" error={saveError} variant="mutation" onRetry={doSave} />
                 </div>
               </WizardPage>
             )}
@@ -519,9 +448,7 @@ export function InitWizard({
                     {[
                       [
                         '执行告警',
-                        draft.exe_err_feishu_key
-                          ? '已配置飞书推送'
-                          : '（未配置 · 不推送）',
+                        draft.system_execution_notification_mode === 'function' ? '自定义函数' : draft.exe_err_feishu_key ? '已配置飞书推送' : '（未配置 · 不推送）',
                       ],
                     ].map(([k, v]) => (
                       <div

@@ -87,6 +87,7 @@ from axile.server.db.models.schedule import (
     ScheduleSkip,
     ScheduleSkipActivity,
 )
+from axile.server.db.models.system_notification import SystemNotificationState, SystemNotificationStatePublic
 from axile.server.db.models.target_weight_snapshot import (
     TargetSizingAvailability,
     TargetSizingPublic,
@@ -103,6 +104,8 @@ PortfolioAccount.model_rebuild()
 ExecuteRecord.model_rebuild()
 
 __all__ = [
+    "SystemNotificationState",
+    "SystemNotificationStatePublic",
     "AccountSettings",
     "AccountSnapshot",
     "AccountNotificationState",

@@ -246,10 +246,12 @@ test('系统通知共用试跑、过期状态、保存快捷键与还原', async
         await new Promise((resolve) => setTimeout(resolve, 300))
       } else saves.push(route.request().postDataJSON())
       await route.fulfill({ json: { ok: true, message: '样例运行成功' } })
-    } else await route.fulfill({ json: [] })
+    } else if (url.endsWith('/init/status')) await route.fulfill({ json: { configured: true, values: { exe_err_feishu_configured: true, system_execution_notification_mode: 'function', system_execution_notification_code: 'def notify(context):\n    pass\n', environment: 'local', app_log_dir: './logs', axile_log_rotation: '1 day', algorithm_modules: [], algorithm_directories: [] } } })
+    else if (url.endsWith('/function/default')) await route.fulfill({ json: { code: template } })
+    else await route.fulfill({ json: [] })
   })
   await page.goto('/e2e/notification.html?system=1')
-  await page.getByText('高级通知设置', { exact: true }).click()
+  await expect(page.getByRole('button', { name: '试跑函数' })).toBeVisible()
   await editCode(page, 'def notify(context):\n    print("system")\n')
   await page.keyboard.press('ControlOrMeta+Enter')
   await page.keyboard.press('ControlOrMeta+Enter')
@@ -285,4 +287,95 @@ test('通知试跑按钮和快捷键共用禁用条件，空代码不试跑但�
   await page.keyboard.press('ControlOrMeta+s')
   await expect.poll(() => patches.length).toBe(1)
   expect(patches[0]).toEqual({ execution_notification_code: null })
+})
+
+async function setupSystem(page: Page) {
+  let values = { exe_err_feishu_configured: true, system_execution_notification_mode: 'default', system_execution_notification_code: 'def notify(context):\n    print("custom")\n', environment: 'local', app_log_dir: './logs', axile_log_rotation: '1 day', algorithm_modules: [], algorithm_directories: [] }
+  const patches: Record<string, unknown>[] = []
+  const trials: Record<string, unknown>[] = []
+  const result = { finished_at: '2026-09-30T10:01:00+08:00', mode: 'function', event_type: 'execution_timeout', execution_id: 'real-exec', account_id: 1, ok: false, error: 'real failure' }
+  const control = { failSave: false, delaySave: 0 }
+  await page.route('**/api/v1/**', async (route) => {
+    const url = new URL(route.request().url()).pathname
+    if (url.endsWith('/init/status')) await route.fulfill({ json: { configured: true, values } })
+    else if (url.endsWith('/function/default')) await route.fulfill({ json: { code: template } })
+    else if (url.endsWith('/execution-alert/result')) await route.fulfill({ json: result })
+    else if (url.endsWith('/function/test')) {
+      trials.push(route.request().postDataJSON())
+      await route.fulfill({ json: { ok: false, message: 'trial failed', error_line: 2 } })
+    } else if (url.endsWith('/init/test-feishu')) {
+      trials.push(route.request().postDataJSON())
+      await route.fulfill({ json: { ok: true, message: 'default test succeeded' } })
+    } else if (url.endsWith('/init/execution-alert')) {
+      const patch = route.request().postDataJSON()
+      patches.push(patch)
+      await new Promise((resolve) => setTimeout(resolve, control.delaySave))
+      if (control.failSave) await route.fulfill({ status: 500, json: { detail: 'disk full' } })
+      else {
+        values = { ...values, ...patch, exe_err_feishu_configured: patch.exe_err_feishu_key === null ? values.exe_err_feishu_configured : Boolean(patch.exe_err_feishu_key) }
+        await route.fulfill({ json: { ok: true, message: 'saved' } })
+      }
+    } else await route.fulfill({ json: [] })
+  })
+  return { patches, trials, control }
+}
+
+test('系统配置使用已保存凭据测试；跨页保留草稿、切换模式保留源码', async ({ page }) => {
+  const { patches, trials } = await setupSystem(page)
+  await page.goto('/e2e/notification.html?system-settings=1')
+  await expect(page.getByText('real failure')).toBeVisible()
+  await page.getByRole('button', { name: '测试推送', exact: true }).click()
+  await expect.poll(() => trials.length).toBe(1)
+  expect(trials[0]).toEqual({ key: null })
+  expect(patches).toHaveLength(0)
+  await page.getByRole('textbox', { name: '系统飞书 Webhook' }).fill('draft-key')
+  await expect(page.getByRole('button', { name: '默认', exact: true })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: '自定义', exact: true })).toHaveCount(0)
+  await page.getByRole('link', { name: '高级设置 · 自定义执行通知函数' }).click()
+  await page.getByRole('button', { name: '自定义', exact: true }).click()
+  await expect(page.getByRole('textbox', { name: '系统飞书 Webhook' })).toHaveValue('draft-key')
+  await expect(page.locator('.cm-content').first()).toContainText('custom')
+  await page.getByRole('button', { name: '执行超时', exact: true }).click()
+  await page.getByRole('button', { name: '试跑函数', exact: true }).click()
+  await expect.poll(() => trials.length).toBe(2)
+  expect(trials[1]).toMatchObject({ key: 'draft-key', event_type: 'execution_timeout' })
+  await expect(page.getByRole('button', { name: '定位到第 2 行' })).toBeVisible()
+  await page.getByRole('button', { name: '执行异常', exact: true }).click()
+  await expect(page.getByText('代码已改 · 结果为上次试跑').last()).toBeVisible()
+  await page.getByRole('button', { name: '保存', exact: true }).click()
+  await expect.poll(() => patches.length).toBe(1)
+  expect(patches[0]).toMatchObject({ exe_err_feishu_key: 'draft-key', system_execution_notification_mode: 'function' })
+  await expect(page.locator('footer').getByText('已保存', { exact: true }).last()).toBeVisible()
+  await page.getByRole('button', { name: '默认', exact: true }).click()
+  await page.getByRole('button', { name: '保存', exact: true }).click()
+  await expect.poll(() => patches.length).toBe(2)
+  expect(patches[1]).toMatchObject({ exe_err_feishu_key: null, system_execution_notification_mode: 'default' })
+  expect(patches[1].system_execution_notification_code).toBe(patches[0].system_execution_notification_code)
+  await page.getByRole('link', { name: '返回系统告警' }).click()
+  await expect(page.getByText('real failure')).toBeVisible()
+})
+
+test('系统凭据明确清除可还原，保存失败保留草稿，空自定义不保存', async ({ page }) => {
+  const { patches, control } = await setupSystem(page)
+  await page.goto('/e2e/notification.html?system=1')
+  await expect(page.getByRole('button', { name: '试跑函数' })).toBeVisible()
+  await page.getByRole('button', { name: '清除 Webhook', exact: true }).click()
+  await page.getByRole('button', { name: '还原', exact: true }).click()
+  await expect(page.getByRole('button', { name: '撤销清除' })).toHaveCount(0)
+  await page.getByRole('button', { name: '清除 Webhook', exact: true }).click()
+  control.failSave = true
+  await page.getByRole('button', { name: '保存', exact: true }).click()
+  await expect(page.locator('footer').getByText('保存失败', { exact: true }).last()).toBeVisible()
+  expect(patches[0].exe_err_feishu_key).toBe('')
+  await expect(page.getByRole('button', { name: '撤销清除' })).toBeVisible()
+  control.failSave = false
+  await page.getByRole('button', { name: '保存', exact: true }).click()
+  await expect(page.locator('footer').getByText('已保存', { exact: true }).last()).toBeVisible()
+  await page.getByRole('button', { name: '自定义', exact: true }).click()
+  await page.getByRole('button', { name: '清空函数' }).click()
+  await expect(page.getByRole('button', { name: '保存', exact: true })).toBeDisabled()
+  await expect(page.getByRole('button', { name: '试跑函数' })).toBeDisabled()
+  await page.locator('.cm-content').first().focus()
+  await page.keyboard.press('ControlOrMeta+s')
+  expect(patches).toHaveLength(2)
 })

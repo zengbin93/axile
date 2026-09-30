@@ -175,3 +175,11 @@ def notify(context):
     assert asyncio.run(work()) == 42
 """
     assert run_notification_function(code, {}).ok is True
+
+
+def test_system_and_account_keys_are_isolated(monkeypatch):
+    monkeypatch.setenv("AXILE_SYSTEM_FEISHU_KEY", "inherited-system")
+    monkeypatch.setenv("AXILE_ACCOUNT_FEISHU_KEY", "inherited-account")
+    code = "import os\ndef notify(context):\n    assert os.environ['AXILE_SYSTEM_FEISHU_KEY'] == context['system']\n    assert os.environ['AXILE_ACCOUNT_FEISHU_KEY'] == context['account']"
+    assert run_notification_function(code, {"system": "system", "account": ""}, system_feishu_key="system").ok
+    assert run_notification_function(code, {"system": "", "account": "account"}, feishu_key="account").ok
