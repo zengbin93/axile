@@ -96,7 +96,7 @@ def test_contract_reports_entry_and_annotation_fix(client, kind, name, type_name
 
 
 def test_contract_rejects_uncallable_signatures(client):
-    for code in ("def notify(*, context):\n    pass\n", "async def notify(context):\n    pass\n"):
+    for code in ("def notify(*, context):\n    pass\n", "async def notify(*, context):\n    pass\n"):
         report = client.post("/editor/contract", json={"kind": "account_notification", "code": code}).json()
         assert report["diagnostics"][0]["severity"] == 1
     code = "from __future__ import annotations\ndef calculate_portfolio(context):\n    return {}\n"
@@ -275,3 +275,47 @@ def test_external_source_supports_readonly_definition_navigation(client):
                 {"method": "textDocument/didOpen", "params": {"textDocument": {"uri": source_uri, "text": "changed"}}},
                 session["uri"],
             )
+
+
+@pytest.mark.parametrize("kind", ["account_notification", "system_notification"])
+def test_notification_editor_accepts_async_and_rejects_generators(client, kind):
+    report = client.post("/editor/contract", json={"kind": kind, "code": "async def notify(context):\n    pass"}).json()
+    assert not any(item["severity"] == 1 for item in report["diagnostics"])
+    for code in ("def notify(context):\n    yield 1", "async def notify(context):\n    yield 1"):
+        report = client.post("/editor/contract", json={"kind": kind, "code": code}).json()
+        assert any("生成器" in item["message"] and item["severity"] == 1 for item in report["diagnostics"])
+    code = "def notify(context):\n    def items():\n        yield 1\n    list(items())"
+    report = client.post("/editor/contract", json={"kind": kind, "code": code}).json()
+    assert not any(item["severity"] == 1 for item in report["diagnostics"])
+
+
+def test_portfolio_editor_still_rejects_async(client):
+    report = client.post(
+        "/editor/contract", json={"kind": "portfolio", "code": "async def calculate_portfolio(context):\n    return {}"}
+    ).json()
+    assert any("同步函数" in item["message"] and item["severity"] == 1 for item in report["diagnostics"])
+
+
+@pytest.mark.parametrize("wrong_type", [False, True])
+def test_notification_execution_fields_are_checked_by_ty(client, wrong_type):
+    code = (
+        "from axile.common.notification_context import AccountNotificationContext\n"
+        "async def notify(context: AccountNotificationContext) -> None:\n"
+        '    kind: str | None = context["execution"]["kind"]\n'
+        '    trigger: str | None = context["execution"]["trigger_source"]\n'
+        '    notified: str = context["execution"]["notified_at"]\n'
+        '    elapsed: float = context["execution"]["execution_time"]\n'
+        '    reason: str | None = context["execution"]["outcome_reason"]\n'
+        '    channel: str = context["execution"]["channel_type"]\n'
+        "    print(kind, trigger, notified, elapsed, reason, channel)\n"
+    )
+    if wrong_type:
+        code = code.replace("elapsed: float", "elapsed: str")
+    with client.websocket_connect("/editor/lsp") as socket:
+        session, _ = initialize(socket)
+        open_document(socket, session["uri"], code)
+        report = request(socket, 31, "textDocument/diagnostic", {"textDocument": {"uri": session["uri"]}})
+        if wrong_type:
+            assert any("float" in item["message"] and "str" in item["message"] for item in report["items"]), report
+        else:
+            assert not report["items"], report

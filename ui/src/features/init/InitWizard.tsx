@@ -438,7 +438,7 @@ export function InitWizard({
                     </select>
                     {draft.system_execution_notification_mode === 'function' && (
                       <div className="mt-3">
-                        <p className="text-[13px] text-ink-3">定义同步函数 notify(context)。context 包含 event_type、occurred_at、account、error 和 is_test；函数自行发送通知。</p>
+                        <p className="text-[13px] text-ink-3">定义同步或异步函数 notify(context)。context 包含 event_type、occurred_at、account、error 和 is_test；函数自行发送通知。</p>
                         <div className="mt-2">
                           <PythonFunctionEditor
                             kind="system_notification"

@@ -6,6 +6,8 @@ import ast
 from dataclasses import dataclass
 from typing import Literal
 
+from axile.common.function_contract import has_generator_yield
+
 type EditorKind = Literal["portfolio", "account_notification", "system_notification"]
 
 
@@ -102,10 +104,19 @@ def check_editor_contract(code: str, kind: EditorKind) -> dict[str, list[dict[st
         return {"diagnostics": diagnostics, "fixes": fixes}
     function = functions[-1]
     line = function.lineno - 1
-    if isinstance(function, ast.AsyncFunctionDef):
+    if kind == "portfolio" and isinstance(function, ast.AsyncFunctionDef):
         diagnostics.append(
             _diagnostic(
                 f"{contract.name} 必须是同步函数", line, function.col_offset, function.col_offset + len("async def")
+            )
+        )
+    if kind != "portfolio" and has_generator_yield(function):
+        diagnostics.append(
+            _diagnostic(
+                "notify 不支持生成器或异步生成器函数",
+                line,
+                function.col_offset,
+                function.col_offset + len(function.name),
             )
         )
     args = function.args

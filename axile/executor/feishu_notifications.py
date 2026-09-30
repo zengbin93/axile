@@ -9,6 +9,7 @@ from typing import Protocol, TypedDict
 import loguru
 from pydantic_core import to_jsonable_python
 
+from axile.common.notification_context import AccountNotificationExecution
 from axile.common.notification_function import run_notification_function
 from axile.executor.algorithms.utils import clock_now
 from axile.executor.models.unified_account_assets import Position, UnifiedAccountAssets, is_degraded_snapshot_source
@@ -229,24 +230,28 @@ def _structured_template_variables(
     account = dict(inputs.feishu_account) if inputs else {}
     account["mark"] = source._get_account_mark()
     status = str(output.status)
+    execution_id = audit.get("execution_id")
+    kind = audit.get("execution_kind")
+    trigger_source = audit.get("trigger_source")
+    execution: AccountNotificationExecution = {
+        "id": execution_id if isinstance(execution_id, str) else None,
+        "kind": kind if isinstance(kind, str) else None,
+        "trigger_source": trigger_source if isinstance(trigger_source, str) else None,
+        "notified_at": str(legacy["dt"]),
+        "execution_time": output.execution_time,
+        "status": status,
+        "success": output.success,
+        "error": output.error,
+        "outcome": str(output.outcome),
+        "outcome_reason": output.outcome_reason,
+        "reason_code": output.reason_code,
+        "channel_type": str(output.channel_type),
+        "is_test": bool(audit.get("is_test", False)),
+    }
     structured = {
         "schema_version": 1,
         "account": account,
-        "execution": {
-            "id": audit.get("execution_id"),
-            "kind": audit.get("execution_kind"),
-            "trigger_source": audit.get("trigger_source"),
-            "notified_at": legacy["dt"],
-            "execution_time": output.execution_time,
-            "status": status,
-            "success": output.success,
-            "error": output.error,
-            "outcome": str(output.outcome),
-            "outcome_reason": output.outcome_reason,
-            "reason_code": output.reason_code,
-            "channel_type": str(output.channel_type),
-            "is_test": bool(audit.get("is_test", False)),
-        },
+        "execution": execution,
         "strategy": {
             "algorithm": _redact_sensitive(to_jsonable_python(inputs.algorithm)) if inputs else {},
             "symbol_algorithms": _redact_sensitive(to_jsonable_python(inputs.symbol_algorithms)) if inputs else {},

@@ -1,5 +1,5 @@
 import { CodeBlock, DeveloperDoc, DocTable, InlineCode, RuleList, SectionTitle } from './DeveloperDoc'
-import { buildNotificationMarkdown, CONTRACT_RULES, EXECUTION_FIELDS, FAILURE_RULES, NOTIFICATION_FIELDS, NOTIFY_CODE, TEST_RULES, type NotificationField } from './notificationMarkdown'
+import { ASYNC_NOTIFY_CODE, buildNotificationMarkdown, CONTRACT_RULES, EXECUTION_FIELDS, FAILURE_RULES, NOTIFICATION_FIELDS, NOTIFY_CODE, TEST_RULES, type NotificationField } from './notificationMarkdown'
 
 const SECTIONS = [['contract', '函数契约'], ['example', '可复制示例'], ['context', '账户执行 context'], ['test', '试跑与真实执行'], ['errors', '常见错误']] as const
 
@@ -12,7 +12,7 @@ export function NotificationDocPage() {
     <DeveloperDoc
       category="账户 / 通知"
       title="账户执行通知函数"
-      intro={<>用同步 <InlineCode>notify(context)</InlineCode> 接收执行结束时的脱敏快照，自行发送账户执行通知。</>}
+      intro={<>用同步或异步 <InlineCode>notify(context)</InlineCode> 接收执行结束时的脱敏快照，自行发送账户执行通知。</>}
       sections={SECTIONS}
       markdown={buildNotificationMarkdown}
     >
@@ -22,6 +22,9 @@ export function NotificationDocPage() {
       <SectionTitle id="example">可复制示例</SectionTitle>
       <p className="mt-2 text-[15px] leading-7 text-ink-2">示例从部署进程的环境变量读取通知地址。它会在试跑时跳过发送；要测试真实渠道，可按需调整此判断。</p>
       <div className="mt-4"><CodeBlock code={NOTIFY_CODE} /></div>
+      <h3 className="mt-7 text-[16px] font-[600]">异步示例</h3>
+      <p className="mt-2 text-[15px] leading-7 text-ink-2">入口会等待异步请求完成，再报告运行成功；总时限仍为 15 秒。</p>
+      <div className="mt-4"><CodeBlock code={ASYNC_NOTIFY_CODE} /></div>
 
       <SectionTitle id="context">账户执行 context</SectionTitle>
       <p className="mt-2 text-[15px] leading-7 text-ink-2">这是执行结束时的 JSON 可序列化快照。字段来自本次执行及账户公开配置。</p>

@@ -3,13 +3,16 @@
 from __future__ import annotations
 
 import ast
+import asyncio
+import inspect
 import json
 import os
 import subprocess
 import sys
+from collections.abc import Awaitable
 from dataclasses import dataclass
 
-from axile.common.function_contract import accepts_context
+from axile.common.function_contract import accepts_context, has_generator_yield
 
 NOTIFICATION_FUNCTION_TIMEOUT_SECONDS = 15
 
@@ -38,8 +41,8 @@ def validate_notification_function(code: str) -> None:
     ]
     if not functions:
         raise ValueError("脚本必须定义 notify(context) 函数")
-    if isinstance(functions[-1], ast.AsyncFunctionDef):
-        raise ValueError("notify 必须是同步函数")
+    if has_generator_yield(functions[-1]):
+        raise ValueError("notify 不支持生成器或异步生成器函数")
     parameters = functions[-1].args
     if (
         len(parameters.posonlyargs) + len(parameters.args) != 1
@@ -79,10 +82,33 @@ def run_notification_function(
         return NotificationFunctionResult(False, f"通知函数进程失败: {exc}")
 
 
+async def _await_notification(result: Awaitable[object]) -> object:
+    """在独立事件循环中等待任意 awaitable，而不只接受协程对象。"""
+    return await result
+
+
+def _invoke_notification(function: object, context: dict[str, object]) -> None:
+    """等待通知入口完成；生成器不属于通知执行契约。
+
+    Notes
+    -----
+    同步入口在事件循环外调用，保留其自行使用 asyncio.run 的能力。
+    异步入口必须自行等待后台任务；事件循环退出时会取消未完成任务。
+    """
+    if not callable(function) or not accepts_context(function, allow_async=True):
+        raise TypeError("notify 必须且只能接收一个位置参数 context")
+    if inspect.isgeneratorfunction(function) or inspect.isasyncgenfunction(function):
+        raise TypeError("notify 不支持生成器或异步生成器函数")
+    result = function(context)
+    if inspect.isawaitable(result):
+        result = asyncio.run(_await_notification(result))
+    if inspect.isgenerator(result) or inspect.isasyncgen(result):
+        raise TypeError("notify 不支持返回生成器或异步生成器")
+
+
 def _run_child() -> None:
     """从标准输入读取事件，在子进程内执行用户函数。"""
     import contextlib
-    import inspect
     import traceback
 
     try:
@@ -91,11 +117,7 @@ def _run_child() -> None:
         with contextlib.redirect_stdout(sys.stderr):
             exec(compile(request["code"], "<notification>", "exec"), namespace)  # noqa: S102
             function = namespace["notify"]
-            if not callable(function) or not accepts_context(function):
-                raise TypeError("notify 必须是同步函数，且只能接收一个位置参数 context")
-            result = function(request["context"])
-            if inspect.isawaitable(result):
-                raise TypeError("notify 必须是同步函数")
+            _invoke_notification(function, request["context"])
         payload: dict[str, object] = {"ok": True}
     except BaseException as exc:  # noqa: BLE001 - 子进程边界将用户错误返回给父进程
         line = next(

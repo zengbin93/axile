@@ -46,3 +46,19 @@ def test_send_feishu_error_logs_sender_failure(monkeypatch: pytest.MonkeyPatch) 
     asyncio.run(error_notifications.send_feishu_error(RuntimeError("boom"), None, "hook-error"))
 
     assert errors == ["发送飞书错误通知失败: webhook unavailable"]
+
+
+def test_system_notification_runs_async_entry(monkeypatch, tmp_path) -> None:
+    output = tmp_path / "system-notification.txt"
+    code = f"""import asyncio
+from pathlib import Path
+async def notify(context):
+    await asyncio.sleep(0)
+    assert context['event_type'] == 'execution_error'
+    assert context['execution_id'] == 'run-1'
+    Path({str(output)!r}).write_text(context['error']['message'])
+"""
+    monkeypatch.setattr(error_notifications.settings, "system_execution_notification_mode", "function")
+    monkeypatch.setattr(error_notifications.settings, "system_execution_notification_code", code)
+    asyncio.run(error_notifications.send_feishu_error(RuntimeError("boom"), None, "", execution_id="run-1"))
+    assert output.read_text() == "boom"

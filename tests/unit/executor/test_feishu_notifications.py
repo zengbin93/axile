@@ -665,3 +665,15 @@ def test_notification_asset_selection_and_evidence_boundary() -> None:
     ]
     assert variables["total_assets"] == "0.00"
     assert variables["positions"] == []
+
+
+def test_notification_execution_matches_public_contract() -> None:
+    from axile.common.notification_context import AccountNotificationExecution
+
+    output = _minimal_output()
+    context = feishu_module.build_execution_notification_context(_NotificationSource(), output)
+    assert set(context["execution"]) == set(AccountNotificationExecution.__required_keys__)
+    assert context["execution"]["kind"] is None
+    assert context["execution"]["trigger_source"] is None
+    assert isinstance(context["execution"]["notified_at"], str)
+    assert isinstance(context["execution"]["execution_time"], float)

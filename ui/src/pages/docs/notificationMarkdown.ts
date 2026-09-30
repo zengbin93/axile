@@ -17,6 +17,11 @@ export const NOTIFICATION_FIELDS: NotificationField[] = [
 export const EXECUTION_FIELDS: NotificationField[] = [
   { name: 'execution.is_test', type: 'bool', desc: '试跑为 True；真实执行通知为 False。' },
   { name: 'execution.id', type: 'str | None', desc: '本次 execution ID；样例可能没有。' },
+  { name: 'execution.kind / trigger_source', type: 'str | None', desc: '执行类型和触发来源；样例或缺少审计信息时可能为空。' },
+  { name: 'execution.notified_at', type: 'str', desc: '通知上下文构造时间，格式为 YYYY-MM-DD HH:MM:SS。' },
+  { name: 'execution.execution_time', type: 'float', desc: '本次交易执行耗时，单位为秒。' },
+  { name: 'execution.outcome_reason', type: 'str | None', desc: '执行结论的具体说明。' },
+  { name: 'execution.channel_type', type: 'str', desc: '本次执行的交易渠道。' },
   { name: 'execution.status / success', type: 'str / bool', desc: '执行状态和成功标记。' },
   { name: 'execution.outcome / reason_code', type: 'str / str | None', desc: '执行结论和机器可读原因码。' },
   { name: 'execution.error', type: 'str | None', desc: '执行错误；没有错误时为空。' },
@@ -45,8 +50,27 @@ def notify(context: AccountNotificationContext) -> None:
     with request.urlopen(req, timeout=5) as response:
         response.read()`
 
+export const ASYNC_NOTIFY_CODE = `import os
+
+import aiohttp
+from axile.common.notification_context import AccountNotificationContext
+
+
+async def notify(context: AccountNotificationContext) -> None:
+    if context["execution"]["is_test"]:
+        return
+
+    webhook = os.environ["AXILE_NOTIFY_WEBHOOK"]
+    message = {"account": context["account"].get("name"), "status": context["execution"]["status"]}
+    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=5)) as session:
+        async with session.post(webhook, json=message) as response:
+            response.raise_for_status()
+            await response.read()`
+
 export const CONTRACT_RULES = [
-  '入口是同步 `notify(context)`，必须且只能接收一个参数；返回值被忽略。',
+  '入口支持同步 `def notify(context)` 和异步 `async def notify(context)`，必须且只能接收一个位置参数。',
+  '调用结果是 awaitable 时等待其完成；普通返回值被忽略。不支持生成器或异步生成器。',
+  '异步入口必须自行 await 后台任务；入口结束后，未完成任务会被取消。',
   '每个账户最多保存一个通知函数；源码为空时不通知。默认飞书通知也是一个可编辑函数。',
   '函数可自行选择通知渠道；已配置的账户飞书 Key 通过子进程环境变量 AXILE_ACCOUNT_FEISHU_KEY 提供。',
   '函数在独立进程中运行，最长 15 秒。失败只记录通知错误，不改变交易结果，也不会自动补发默认飞书卡片。',
@@ -74,7 +98,7 @@ function bullets(items: string[]): string { return items.map((item) => `- ${item
 export function buildNotificationMarkdown(): string {
   return `# 账户执行通知函数
 
-用同步 notify(context) 接收执行结束时的脱敏快照，自行发送账户执行通知。
+用同步或异步 notify(context) 接收执行结束时的脱敏快照，自行发送账户执行通知。
 
 ## 函数契约
 
@@ -87,6 +111,14 @@ ${NOTIFY_CODE}
 \`\`\`
 
 示例通过部署进程的 AXILE_NOTIFY_WEBHOOK 环境变量读取目标地址。试跑时会跳过发送。
+
+### 异步示例
+
+\`\`\`python
+${ASYNC_NOTIFY_CODE}
+\`\`\`
+
+入口会等待异步请求完成，再报告运行成功；总时限仍为 15 秒。
 
 ## 账户执行 context
 

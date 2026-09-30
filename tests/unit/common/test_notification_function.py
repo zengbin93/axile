@@ -1,5 +1,9 @@
 """自定义通知函数的运行边界。"""
 
+import pytest
+
+from axile.common import notification_function
+from axile.common.function_contract import accepts_context
 from axile.common.notification_config import validate_notification_config
 from axile.common.notification_function import run_notification_function
 
@@ -32,9 +36,9 @@ def test_notification_function_reports_source_line() -> None:
     assert "boom" in str(result.error)
 
 
-def test_notification_function_rejects_keyword_only_or_async_entry() -> None:
+def test_notification_function_rejects_keyword_only_entry() -> None:
     """编辑器与运行时都要求同步且可按位置传入上下文。"""
-    for code in ("def notify(*, context):\n    pass", "async def notify(context):\n    pass"):
+    for code in ("def notify(*, context):\n    pass", "async def notify(*, context):\n    pass"):
         result = run_notification_function(code, {})
         assert result.ok is False
 
@@ -48,3 +52,126 @@ def test_notification_config_requires_function_only_in_function_mode() -> None:
         assert "notify(context)" in str(exc)
     else:
         raise AssertionError("缺少 notify 函数应被拒绝")
+
+
+@pytest.mark.parametrize(
+    "entry",
+    ["async def notify(context):", "def notify(context):\n    return work(context)\n\nasync def work(context):"],
+)
+def test_notification_waits_for_awaitable_completion(entry, tmp_path) -> None:
+    code = (
+        "import asyncio\nfrom pathlib import Path\n"
+        + entry
+        + "\n    await asyncio.sleep(0)\n    Path(context['path']).write_text('completed')"
+    )
+    output = tmp_path / "completed.txt"
+    result = run_notification_function(code, {"path": str(output)})
+    assert result.ok is True
+    assert output.read_text() == "completed"
+
+
+def test_notification_waits_for_custom_awaitable(tmp_path) -> None:
+    code = """import asyncio
+from pathlib import Path
+class Completion:
+    def __init__(self, context):
+        self.context = context
+    def __await__(self):
+        async def work():
+            await asyncio.sleep(0)
+            Path(self.context['path']).write_text('completed')
+        return work().__await__()
+def notify(context):
+    return Completion(context)
+"""
+    output = tmp_path / "completed.txt"
+    assert run_notification_function(code, {"path": str(output)}).ok
+    assert output.read_text() == "completed"
+
+
+def test_async_notification_reports_source_line() -> None:
+    code = "async def notify(context):\n    import asyncio\n    await asyncio.sleep(0)\n    raise RuntimeError('async boom')"
+    result = run_notification_function(code, {})
+    assert result.ok is False
+    assert result.error_line == 4
+    assert "async boom" in result.error
+
+
+@pytest.mark.parametrize(
+    "code",
+    [
+        "def notify(context):\n    yield 1",
+        "def notify(context):\n    yield from []",
+        "async def notify(context):\n    yield 1",
+    ],
+)
+def test_notification_rejects_generator_entry(code) -> None:
+    with pytest.raises(ValueError, match="生成器"):
+        notification_function.validate_notification_function(code)
+    assert run_notification_function(code, {}).ok is False
+
+
+@pytest.mark.parametrize(
+    "code",
+    [
+        "def notify(context):\n    return (x for x in [])",
+        "async def stream():\n    yield 1\ndef notify(context):\n    return stream()",
+        "async def notify(context):\n    return (x for x in [])",
+        "def notify(context):\n    pass\ndef stream(context):\n    yield 1\nnotify = stream",
+    ],
+)
+def test_notification_rejects_runtime_generators(code) -> None:
+    result = run_notification_function(code, {})
+    assert result.ok is False
+    assert "生成器" in result.error
+
+
+def test_notification_allows_nested_generators() -> None:
+    code = """def notify(context):
+    def items():
+        yield 1
+    async def stream():
+        yield 2
+    class Helper:
+        def items(self):
+            yield 3
+    helper = lambda: (yield 4)
+    assert list(items()) == [1]
+    assert list(Helper().items()) == [3]
+    assert list(helper()) == [4]
+"""
+    assert run_notification_function(code, {}).ok is True
+
+
+@pytest.mark.parametrize(
+    "code",
+    [
+        "def notify(context):\n    import time\n    time.sleep(60)",
+        "async def notify(context):\n    import asyncio\n    await asyncio.sleep(60)",
+        "async def notify(context):\n    import time\n    time.sleep(60)",
+    ],
+)
+def test_notification_timeout_covers_sync_async_and_blocking_async(monkeypatch, code) -> None:
+    monkeypatch.setattr(notification_function, "NOTIFICATION_FUNCTION_TIMEOUT_SECONDS", 2)
+    result = run_notification_function(code, {})
+    assert result.ok is False
+    assert "超时" in result.error
+
+
+def test_context_contract_preserves_sync_default() -> None:
+    async def entry(context):
+        pass
+
+    assert accepts_context(entry) is False
+    assert accepts_context(entry, allow_async=True) is True
+
+
+def test_sync_notification_can_manage_its_own_event_loop() -> None:
+    code = """import asyncio
+async def work():
+    await asyncio.sleep(0)
+    return 42
+def notify(context):
+    assert asyncio.run(work()) == 42
+"""
+    assert run_notification_function(code, {}).ok is True

@@ -115,3 +115,28 @@ def test_default_card_test_push_carries_sample_trades(monkeypatch) -> None:
     # 首腿加仓一倍、次腿减半：目标量与真实执行同口径聚合自 symbol_results。
     assert positions["rb2610"]["target_volume"] == "20.0000"
     assert positions["au2506"]["target_volume"] == "1.0000"
+
+
+def test_account_notification_test_runs_async_draft(monkeypatch, tmp_path) -> None:
+    account = build_account()
+    monkeypatch.setattr(account_feishu, "_get_account_or_404", AsyncMock(return_value=account))
+    monkeypatch.setattr(account_feishu, "get_latest_account_target_snapshot", AsyncMock(return_value=None))
+    output = tmp_path / "account-notification.txt"
+    code = f"""import asyncio
+import os
+from pathlib import Path
+async def notify(context):
+    await asyncio.sleep(0)
+    assert context['execution']['is_test'] is True
+    assert context['execution']['kind'] == 'test'
+    Path({str(output)!r}).write_text(os.environ['AXILE_ACCOUNT_FEISHU_KEY'])
+"""
+    result = asyncio.run(
+        account_feishu.test_account_notification_function(
+            SimpleNamespace(close=AsyncMock(), get=AsyncMock()),
+            1,
+            account_feishu.AccountNotificationFunctionTestRequest(code=code, feishu_key="draft-key"),
+        )
+    )
+    assert result.ok is True
+    assert output.read_text() == "draft-key"

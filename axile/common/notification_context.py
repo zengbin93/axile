@@ -7,6 +7,12 @@ class AccountNotificationExecution(TypedDict):
     """账户执行通知中的执行摘要。"""
 
     id: str | None
+    kind: str | None
+    trigger_source: str | None
+    notified_at: str
+    execution_time: float
+    outcome_reason: str | None
+    channel_type: str
     status: str
     success: bool
     outcome: str | None
