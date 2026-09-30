@@ -4,7 +4,8 @@ from axile.domain.execution import ExecutionEventStatus, ExecutionKind
 from axile.executor.models.execution_result import ExecutionStatus, outcome_from_status
 from axile.executor.models.unified_input import UnifiedStandardInput
 from axile.executor.models.unified_output import UnifiedStandardOutput
-from axile.server.db.models import Account, ExecuteRecord
+from axile.server.db.models import ExecuteRecord
+from axile.server.db.models.account import AccountContext
 from axile.server.execution.records import append_error_execute_record, append_success_execute_record
 
 
@@ -54,7 +55,7 @@ def resolve_completion_event_status(output_status: ExecutionStatus) -> Execution
 
 async def append_execute_record_from_output(
     *,
-    account: Account,
+    account: AccountContext,
     raw_input: dict[str, object],
     result: dict[str, object],
     output: UnifiedStandardOutput,

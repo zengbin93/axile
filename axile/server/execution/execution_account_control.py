@@ -11,11 +11,11 @@ from axile.executor.account_control.snapshot import (
 )
 from axile.server.account_control.store import AccountControlStore
 from axile.server.core.db import SessionLocal
-from axile.server.db.models import Account
+from axile.server.db.models.account import AccountContext
 
 
 async def build_account_control_guard(
-    account: Account,
+    account: AccountContext,
     execution_id: str | None,
 ) -> AccountControlGuard:
     """

@@ -17,7 +17,7 @@ from axile.domain.execution import (
 )
 from axile.executor.models.unified_input import UnifiedStandardInput
 from axile.executor.models.unified_output import UnifiedStandardOutput
-from axile.server.db.models import Account
+from axile.server.db.models.account import AccountContext
 from axile.server.execution.execution_records_output import resolve_completion_event_status
 from axile.server.execution.execution_summaries import (
     build_execution_outcome_details,
@@ -79,7 +79,7 @@ def _append_before_snapshot_artifact_sync(
 
 def _append_trade_pre_execute_audit(
     *,
-    account: Account,
+    account: AccountContext,
     execution_id: str | None,
     algorithm_name: str,
     trigger_source: str,
@@ -168,7 +168,7 @@ def _append_trade_pre_execute_audit(
 
 def _append_empty_positions_pre_execute_audit(
     *,
-    account: Account,
+    account: AccountContext,
     execution_id: str | None,
     algorithm_name: str,
     executor: object,
@@ -200,7 +200,7 @@ def _append_empty_positions_pre_execute_audit(
 
 def _append_success_audit(
     *,
-    account: Account,
+    account: AccountContext,
     execution_id: str | None,
     algorithm_name: str,
     output: UnifiedStandardOutput,
@@ -273,7 +273,7 @@ def _append_success_audit(
 
 def _append_failed_audit(
     *,
-    account: Account,
+    account: AccountContext,
     execution_id: str | None,
     algorithm_name: str,
     executor: object | None,

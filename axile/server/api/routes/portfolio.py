@@ -21,6 +21,7 @@ from axile.server.db.models import (
     ValidateCustomCalcRequest,
     ValidateCustomCalcResponse,
 )
+from axile.server.db.models.account import AccountContext
 from axile.server.execution.rebalance import _normalize_rebalance_target
 from axile.server.execution.registry import clear_target_refresh, try_register_target_refresh
 from axile.server.portfolio_runner import calculate_sample_portfolio
@@ -113,7 +114,7 @@ async def update_portfolio(session: SessionDep, portfolio_id: int, portfolio: Po
     return await _portfolio_public(session, db_portfolio)
 
 
-async def resolve_portfolio_target(portfolio: Portfolio, account: Account | None) -> dict[str, float]:
+async def resolve_portfolio_target(portfolio: Portfolio, account: AccountContext | None) -> dict[str, float]:
     """执行组合函数并返回未经账户杠杆和精度处理的目标权重."""
     if account is None:
         result = await asyncio.to_thread(calculate_sample_portfolio, portfolio.custom_calc_py_code)
@@ -174,7 +175,7 @@ async def refresh_portfolio_target_snapshot(session: SessionDep, portfolio_id: i
 
 
 async def _run_custom_calc_validation(
-    account: Account | None,
+    account: AccountContext | None,
     custom_calc_py_code: str,
 ) -> ValidateCustomCalcResponse:
     """在给定上下文中试跑自定义组合函数并返回结构化结果."""

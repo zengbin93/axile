@@ -12,6 +12,7 @@ from axile.executor.models.unified_account_assets import UnifiedAccountAssets
 from axile.server import account_assets as assets_service
 from axile.server.api.routes import account_assets, account_crud, account_execution, account_feishu, portfolio
 from axile.server.db.models import Account, AccountUpdate, Portfolio, PortfolioAccount
+from axile.server.db.models.account import AccountSnapshot
 from axile.server.db.models.portfolio import ValidateCustomCalcRequest
 from axile.server.execution import account_runtime_sync as runtime
 from axile.server.execution import ctp_channels
@@ -41,7 +42,7 @@ def test_routes_release_transactions_before_worker(
 
             async def write_from_worker(account: Account) -> None:
                 nonlocal called
-                assert inspect(account).session is None
+                assert isinstance(account, AccountSnapshot) or inspect(account).session is None
                 assert all(not session.in_transaction() for session in sessions)
                 async with factory() as session, session.begin():
                     await session.execute(text("UPDATE account SET remark='worker wrote' WHERE id=2"))

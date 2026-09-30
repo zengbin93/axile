@@ -362,6 +362,13 @@ def dispatch_execution_notification(
     if not result.ok:
         source.logger.error(f"执行通知失败: {result.error}")
     loguru.logger.info("执行通知完成 execution_id={} ok={} error={}", execution_id, result.ok, result.error)
+    if result.ok:
+        callback = getattr(source, "_notification_success_callback", None)
+        if callable(callback):
+            try:
+                callback(execution_id, clock_now().isoformat())
+            except Exception:  # noqa: BLE001 - 状态落库失败不得改变通知或交易结果
+                loguru.logger.exception("保存通知成功状态失败 execution_id={}", execution_id)
 
 
 # ---- 有界后台通知派发器 ----

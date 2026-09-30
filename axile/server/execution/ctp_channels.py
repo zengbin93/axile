@@ -12,6 +12,8 @@ from axile.common.trade_channel import TradeChannel
 from axile.server.core.db import SessionLocal
 from axile.server.core.scheduler import Scheduler
 from axile.server.db.models import Account
+from axile.server.db.models.account import AccountContext
+from axile.server.db.models.account_settings import AccountSettings
 from axile.server.execution.worker_backend.manager import get_worker_backend_manager
 
 CHINA_NIGHT_PREPARE_JOB_ID = "china-night-session-prepare"
@@ -23,7 +25,7 @@ async def _started_china_channel_accounts() -> list[Account]:
     """返回已启用的 CTP 与天勤常驻账户."""
     async with SessionLocal() as session:
         statement = select(Account).where(
-            col(Account.is_started).is_(True),
+            Account.settings.has(AccountSettings.schedule["is_started"].as_boolean().is_(True)),
             col(Account.trade_channel).in_([TradeChannel.CTP, TradeChannel.TQ]),
         )
         return list((await session.execute(statement)).scalars().all())
@@ -40,7 +42,7 @@ async def _prepare_accounts(
 
     semaphore = asyncio.Semaphore(_MAX_PREPARE_CONCURRENCY)
 
-    async def prepare(account: Account) -> None:
+    async def prepare(account: AccountContext) -> None:
         async with semaphore:
             try:
                 if account.id is None:
@@ -61,7 +63,7 @@ async def prepare_china_channel_accounts(
     await _prepare_accounts(await _started_china_channel_accounts(), mode)
 
 
-async def reconcile_china_channel_account(account: Account, *, reset: bool = False) -> None:
+async def reconcile_china_channel_account(account: AccountContext, *, reset: bool = False) -> None:
     """对齐 CTP 或天勤账户的常驻 worker."""
     if account.id is None:
         return

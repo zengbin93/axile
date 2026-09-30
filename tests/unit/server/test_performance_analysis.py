@@ -99,6 +99,8 @@ async def database(tmp_path, count=3):
     async with engine.begin() as conn:
         await conn.run_sync(SQLModel.metadata.create_all)
         await conn.run_sync(migration.install_triggers)
+        settings_migration = _load_migration(_MIGRATIONS_DIR / "0020_account_settings.py")
+        await conn.run_sync(settings_migration.install_settings_trigger)
     async with sessions() as session:
         session.add(build_account(id=2, account_control_preset="default"))
         await session.commit()
@@ -126,7 +128,8 @@ def test_legacy_performance_waits_for_current_settings(tmp_path):
             await queue(sessions)
             await manager.run_once()
             async with sessions() as session:
-                await session.execute(sa.update(Account).where(Account.id == 2).values(backtest_fee_rate=0.001))
+                account = await session.get(Account, 2)
+                account.backtest_fee_rate = 0.001
                 await session.commit()
             request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(analysis_manager=manager)))
             async with sessions() as session:
@@ -249,7 +252,8 @@ def test_account_only_performance_ignores_unavailable_backtest(tmp_path, monkeyp
                 await queue(sessions)
                 await manager.run_once()
             async with sessions() as session:
-                await session.execute(sa.update(Account).where(Account.id == 2).values(backtest_fee_rate=0.001))
+                account = await session.get(Account, 2)
+                account.backtest_fee_rate = 0.001
                 session.add(PortfolioAccount(account_id=2, portfolio_id=None, created_at="2026-01-02T09:00:00"))
                 await session.commit()
 
@@ -375,7 +379,8 @@ def test_failed_batch_keeps_results_and_limits_retries_then_new_data_recovers(tm
                         await session.commit()
                 assert not await manager.run_once()
             async with sessions() as session:
-                await session.execute(sa.update(Account).where(Account.id == 2).values(backtest_fee_rate=0.001))
+                account = await session.get(Account, 2)
+                account.backtest_fee_rate = 0.001
                 await session.commit()
             assert await manager.run_once()
             assert (await snapshot(sessions))["settings"]["backtest_fee_rate"] == 0.001

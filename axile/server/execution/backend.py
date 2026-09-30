@@ -17,7 +17,8 @@ from axile.executor.abstract_executor.base import AbstractExecutor
 from axile.executor.models.unified_input import UnifiedStandardInput
 from axile.executor.models.unified_output import UnifiedStandardOutput
 from axile.executor.termination import ExecutionTerminated
-from axile.server.db.models import Account, ExecuteRecord
+from axile.server.db.models import ExecuteRecord
+from axile.server.db.models.account import AccountContext
 from axile.server.execution import lifecycle as execution_lifecycle
 from axile.server.execution.dispatch import ExecutionBackendKind, resolve_execution_backend_kind
 from axile.server.execution.execution_records_output import (
@@ -33,7 +34,7 @@ from axile.server.execution_audit import append_execution_artifact, append_execu
 class RebalanceBackendRequest:
     """调仓后端执行所需的完整上下文。"""
 
-    account: Account
+    account: AccountContext
     standard_input: UnifiedStandardInput
     standard_input_dict: dict[str, object]
     audit_input: dict[str, object]
@@ -50,7 +51,7 @@ class RebalanceBackendRequest:
 class ClearPositionsBackendRequest:
     """清仓后端执行所需的完整上下文。"""
 
-    account: Account
+    account: AccountContext
     resolved_algorithm: dict[str, object]
     empty_kwargs: dict[str, object]
     audit_input: dict[str, object]
@@ -91,7 +92,7 @@ def _dump_output_result(output: UnifiedStandardOutput | None) -> dict[str, objec
 
 async def _append_output_record(
     *,
-    account: Account,
+    account: AccountContext,
     raw_input: dict[str, object],
     output: UnifiedStandardOutput | None,
     execution_id: str | None,

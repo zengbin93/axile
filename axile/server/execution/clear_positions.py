@@ -12,6 +12,7 @@ from axile.server.db.models import (
     ExecuteRecord,
     new_execution_id,
 )
+from axile.server.db.models.account import AccountContext
 from axile.server.execution import backend as execution_backend
 from axile.server.execution import lifecycle as execution_lifecycle
 from axile.server.execution.execution_algorithms import (
@@ -25,7 +26,7 @@ from axile.server.utils import trade_channel_check
 
 
 async def empty_positions(
-    account: Account,
+    account: AccountContext,
     algorithm: dict[str, object] | None = None,
     logger: "loguru.Logger | None" = None,
     *,
@@ -57,6 +58,8 @@ async def empty_positions(
     if logger is None:
         logger = loguru.logger
 
+    if isinstance(account, Account):
+        account = account.snapshot()
     resolved_algorithm = resolve_empty_positions_algorithm(account, algorithm)
     if lock_acquired:
         tracked_execution_id = cast("str", execution_id)
@@ -117,7 +120,7 @@ async def empty_positions(
 
 
 async def __empty_positions(
-    account: Account,
+    account: AccountContext,
     algorithm: dict[str, object] | None = None,
     execution_id: str | None = None,
     logger: "loguru.Logger | None" = None,
@@ -158,13 +161,15 @@ async def __empty_positions(
 
 def _build_clear_positions_backend_request(
     *,
-    account: Account,
+    account: AccountContext,
     algorithm: dict[str, object] | None,
     execution_id: str,
     logger: "loguru.Logger",
     notification_snapshot: dict[str, object] | None = None,
 ) -> execution_backend.ClearPositionsBackendRequest:
     """组装后端执行清仓所需的请求对象。"""
+    if isinstance(account, Account):
+        account = account.snapshot()
     resolved_algorithm = resolve_empty_positions_algorithm(account, algorithm)
     empty_kwargs = {
         "algorithm": resolved_algorithm,

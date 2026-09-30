@@ -19,6 +19,7 @@ from axile.executor.termination import ExecutionTerminated
 from axile.server.core.db import SessionLocal
 from axile.server.core.log_config import execution_log_context
 from axile.server.db.models import Account, ExecuteRecord, Portfolio
+from axile.server.db.models.account import AccountContext, AccountSnapshot
 from axile.server.execution import backend as execution_backend
 from axile.server.execution import lifecycle as execution_lifecycle
 from axile.server.execution.execution_algorithms import (
@@ -51,7 +52,7 @@ class _ResolvedRebalanceRequest:
 
 
 async def _load_bound_portfolio(
-    account: Account,
+    account: AccountContext,
     account_id: int,
     execution_id: str | None,
 ) -> Portfolio:
@@ -103,7 +104,7 @@ async def _load_bound_portfolio(
 
 
 async def _execute_portfolio_function(
-    account: Account,
+    account: AccountContext,
     portfolio: Portfolio,
     execution_id: str | None,
     logger: "loguru.Logger",
@@ -159,19 +160,19 @@ async def _execute_portfolio_function(
 async def _load_rebalance_account(
     account_id: int,
     logger: "loguru.Logger",
-) -> Account:
-    """加载待执行的账户对象."""
+) -> AccountSnapshot:
+    """在 session 内加载配置并复制为独立执行快照。"""
     async with SessionLocal() as session:
         account = await session.get(Account, account_id)
         if not account:
             msg = f"无法执行任务 账户id: {account_id} 不存在"
             logger.error("{}", msg)
             raise ValueError(msg)
-    return account
+        return account.snapshot()
 
 
 async def _resolve_rebalance_request(
-    account: Account,
+    account: AccountContext,
     execution_id: str | None,
     logger: "loguru.Logger",
 ) -> _ResolvedRebalanceRequest:
@@ -182,7 +183,7 @@ async def _resolve_rebalance_request(
 
 
 def _normalize_rebalance_target(
-    account: Account,
+    account: AccountContext,
     curr_target: dict[str, float],
 ) -> dict[str, float]:
     """
@@ -215,7 +216,7 @@ def _normalize_rebalance_target(
     return {symbol: _normalize_weight(weight) for symbol, weight in curr_target.items()}
 
 
-async def _load_last_target_snapshot(account: Account) -> dict[str, object]:
+async def _load_last_target_snapshot(account: AccountContext) -> dict[str, object]:
     """加载上一次成功调仓记录中的目标快照."""
     try:
         async with SessionLocal() as session:
@@ -231,7 +232,7 @@ async def _load_last_target_snapshot(account: Account) -> dict[str, object]:
 
 def _build_rebalance_standard_input(
     *,
-    account: Account,
+    account: AccountContext,
     curr_target: dict[str, float],
     last_target: dict[str, object],
     execution_id: str | None,
@@ -303,7 +304,7 @@ def _build_rebalance_standard_input(
 
 async def _build_rebalance_backend_request(
     *,
-    account: Account,
+    account: AccountContext,
     curr_target: dict[str, float],
     execution_id: str | None,
     trigger_source: str,
@@ -334,6 +335,8 @@ async def _build_rebalance_backend_request(
     execution_backend.RebalanceBackendRequest
         可直接交给 backend 执行层的请求对象。
     """
+    if isinstance(account, Account):
+        account = account.snapshot()
     if normalized_target is None:
         normalized_target = _normalize_rebalance_target(account, curr_target)
     last_target = await _load_last_target_snapshot(account)
@@ -426,7 +429,7 @@ async def _run_account_rebalance(
 
 
 async def trade(
-    account: Account,
+    account: AccountContext,
     curr_target: dict[str, float],
     execution_id: str | None = None,
     trigger_source: str = "scheduler",
@@ -498,7 +501,7 @@ async def execute_trade(
     ExecuteRecord
         本次调仓对应的执行记录。
     """
-    account: Account | None = None
+    account: AccountContext | None = None
     tracked_execution_id = execution_id
     if not lock_acquired:
         async with SessionLocal() as session:

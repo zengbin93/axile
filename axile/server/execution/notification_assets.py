@@ -7,11 +7,11 @@ from typing import cast
 import loguru
 
 from axile.server.core.db import SessionLocal
-from axile.server.db.models import Account
+from axile.server.db.models.account import AccountContext
 from axile.server.repositories import get_recent_account_asset_snapshots_for_accounts
 
 
-async def load_notification_snapshot(account: Account) -> dict[str, object] | None:
+async def load_notification_snapshot(account: AccountContext) -> dict[str, object] | None:
     """仅为配置了执行通知的账户读取备用快照，查询失败不影响执行。"""
     if not account.execution_notification_code or account.id is None:
         return None

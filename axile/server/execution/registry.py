@@ -20,11 +20,11 @@ from axile.domain.execution import (
 from axile.executor.termination import ExecutionTerminationController
 from axile.server.core.db import SessionLocal
 from axile.server.db.models import (
-    Account,
     ExecuteRecord,
     new_execution_id,
     now_str,
 )
+from axile.server.db.models.account import AccountContext
 from axile.server.execution.execution_summaries import build_execution_outcome_details
 from axile.server.execution.legacy_compat import normalize_legacy_result
 from axile.server.execution.records import append_terminated_execute_record
@@ -860,7 +860,7 @@ def transition_execution_task_to_running(execution_id: str) -> ExecutionTaskStat
 
 def register_inline_execution(
     *,
-    account: Account,
+    account: AccountContext,
     execution_kind: ExecutionKind,
     execution_id: str | None,
     algorithm_name: str,

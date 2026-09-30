@@ -20,7 +20,7 @@ from axile.executor.models.unified_account_assets import UnifiedAccountAssets
 from axile.executor.models.unified_input import UnifiedStandardInput
 from axile.executor.models.unified_output import UnifiedStandardOutput
 from axile.executor.termination import ExecutionTerminated, ExecutionTerminationController
-from axile.server.db.models import Account
+from axile.server.db.models.account import AccountContext
 from axile.server.execution.worker_backend.catalog import CatalogSession
 from axile.server.execution.worker_backend.protocol import (
     WorkerBackendErrorPayload,
@@ -93,7 +93,7 @@ _TERMINATION_GRACE_SECONDS = 5.0
 _worker_backend_manager: "WorkerBackendManager | None" = None
 
 
-def _require_account_id(account: Account) -> int:
+def _require_account_id(account: AccountContext) -> int:
     if account.id is None:
         raise WorkerBackendExecutionError("worker backend 需要持久化后的 account.id")
     return int(account.id)
@@ -548,7 +548,7 @@ class WorkerBackendManager:
 
     async def prepare_account(
         self,
-        account: Account,
+        account: AccountContext,
         expected_trading_day: str | None = None,
         *,
         execution_id: str | None = None,
@@ -585,7 +585,7 @@ class WorkerBackendManager:
         """关闭并移除指定账户的常驻 Worker。"""
         await asyncio.to_thread(self._drop_account_blocking, account_id)
 
-    async def get_account_assets(self, account: Account) -> UnifiedAccountAssets:
+    async def get_account_assets(self, account: AccountContext) -> UnifiedAccountAssets:
         """通过账户常驻 worker 查询最新资产快照."""
         request = WorkerBackendRequest(
             request_id=uuid4().hex,
@@ -607,7 +607,7 @@ class WorkerBackendManager:
 
     async def calculate_portfolio(
         self,
-        account: Account,
+        account: AccountContext,
         code: str,
         *,
         execution_id: str | None = None,
@@ -645,7 +645,7 @@ class WorkerBackendManager:
     async def execute_trade(
         self,
         *,
-        account: Account,
+        account: AccountContext,
         standard_input: UnifiedStandardInput,
         standard_input_dict: dict[str, object],
         audit_input: dict[str, object],
@@ -713,7 +713,7 @@ class WorkerBackendManager:
     async def empty_positions(
         self,
         *,
-        account: Account,
+        account: AccountContext,
         empty_kwargs: dict[str, object],
         audit_input: dict[str, object],
         execution_id: str,

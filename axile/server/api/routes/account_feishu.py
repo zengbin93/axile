@@ -27,7 +27,7 @@ from axile.executor.models.unified_output import UnifiedStandardOutput
 from axile.server.account_assets import query_account_assets
 from axile.server.api.deps import SessionDep
 from axile.server.api.routes.account_support import _get_account_or_404
-from axile.server.db.models import Account
+from axile.server.db.models.account import AccountContext
 from axile.server.execution.registry import clear_account_asset_refresh, try_register_account_asset_refresh
 from axile.server.target_weight_snapshots import get_latest_account_target_snapshot
 
@@ -87,7 +87,7 @@ class _TestLogger:
 
 
 def _test_input(
-    account: Account,
+    account: AccountContext,
     curr_target: dict[str, float],
     last_target: dict[str, float],
 ) -> UnifiedStandardInput:
@@ -215,7 +215,7 @@ def _leg_target_weights(legs: list[_SampleLeg], assets: UnifiedAccountAssets) ->
     return {leg.symbol: leg.target_volume * leg.price / total for leg in legs}
 
 
-async def _load_sample_target_weights(session: AsyncSession, account: Account) -> dict[str, float]:
+async def _load_sample_target_weights(session: AsyncSession, account: AccountContext) -> dict[str, float]:
     """读取账户当前组合最近的归一化目标权重作为样例目标；无快照则返回空。"""
     if account.id is None or account.portfolio_id is None:
         return {}
@@ -227,7 +227,7 @@ async def _load_sample_target_weights(session: AsyncSession, account: Account) -
 
 async def _build_sample_output(
     session: AsyncSession,
-    account: Account,
+    account: AccountContext,
     assets: UnifiedAccountAssets,
 ) -> UnifiedStandardOutput:
     """用真实资产叠加样例成交，构造接近真实执行版面的输出。"""
@@ -247,7 +247,7 @@ async def _build_sample_output(
 
 async def _build_test_card(
     session: AsyncSession,
-    account: Account,
+    account: AccountContext,
 ) -> dict[str, object]:
     """读取当前账户资产并构造默认样例卡片。"""
     source = _TestNotificationSource(account.name)

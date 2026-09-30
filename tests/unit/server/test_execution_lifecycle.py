@@ -575,7 +575,20 @@ def test_timeout_termination_sends_alert(monkeypatch) -> None:
             return None
 
         async def get(self, _model: object, _pk: object) -> object:
-            return Account.model_construct(id=1, name="acc-1")
+            return Account(
+                id=1,
+                name="acc-1",
+                market="期货",
+                trade_channel="ctp",
+                brokerage="test",
+                account_config={},
+                account_control_preset="default",
+                is_started=False,
+                cron_expr="",
+                weight_precision=0.01,
+                algorithm={"method": "SINGLE-MAKER"},
+                feishu_key=None,
+            )
 
     monkeypatch.setattr(execution_lifecycle, "append_terminated_execute_record", fake_append_terminated_execute_record)
     monkeypatch.setattr(execution_lifecycle, "append_execution_event", fake_append_execution_event)

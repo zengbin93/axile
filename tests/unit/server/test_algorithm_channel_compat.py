@@ -8,7 +8,7 @@ from fastapi.testclient import TestClient
 from axile.common.order_param_model import OrderParamModel
 from axile.common.trade_channel import TradeChannel
 from axile.executor.algorithms.core.base import ALL_ORDER_PARAM_MODELS, register_algorithm
-from axile.server.db.models.account import _check_algorithm_channel_compat
+from axile.server.db.models.account_validation import _check_algorithm_channel_compat
 
 
 @register_algorithm(

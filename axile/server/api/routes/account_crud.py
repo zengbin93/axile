@@ -38,7 +38,7 @@ from axile.server.db.models import (
     PortfolioAccountListPublic,
     PortfolioAccountPublic,
 )
-from axile.server.db.models.account import _check_algorithm_channel_compat
+from axile.server.db.models.account_validation import _check_algorithm_channel_compat
 from axile.server.db.models.performance import PerformanceSummary
 from axile.server.execution.account_runtime_sync import enqueue_account_runtime_sync, reconcile_account_runtime
 from axile.server.execution.ctp_channels import drop_account_worker
@@ -80,7 +80,18 @@ def _account_public(account: Account) -> AccountPublic:
     # ``AccountPublic`` 有从凭证派生的摘要字段，并不属于 ORM 模型；先补全输入
     # 再校验，避免 Pydantic 在响应构造阶段把已提交的更新误报为 500。
     return AccountPublic.model_validate(
-        account.model_dump()
+        {
+            name: getattr(account, name)
+            for name in AccountPublic.model_fields
+            if name
+            not in {
+                "account_configured",
+                "connection_values",
+                "feishu_configured",
+                "runtime_sync",
+                "notification_state",
+            }
+        }
         | {
             "account_configured": bool(account.account_config),
             "connection_values": {
@@ -89,6 +100,7 @@ def _account_public(account: Account) -> AccountPublic:
                 if field.kind != "secret" and field.name in account.account_config
             },
             "feishu_configured": bool(account.feishu_key),
+            "notification_state": account.notification_state,
         }
     )
 

@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from typing import cast
 
 from axile.executor.models.unified_input import UnifiedStandardInput
-from axile.server.db.models import Account
+from axile.server.db.models.account import AccountSnapshot
 from axile.server.execution.worker_backend.protocol import WorkerBackendRequest
 
 
@@ -24,7 +24,7 @@ class _ExecuteTradeRequestContext:
     传递到后续执行链路中。
     """
 
-    account: Account
+    account: AccountSnapshot
     algorithm_name: str
     trigger_source: str
     standard_input: UnifiedStandardInput
@@ -44,7 +44,7 @@ class _EmptyPositionsRequestContext:
     `empty_kwargs` 供执行器直接消费。
     """
 
-    account: Account
+    account: AccountSnapshot
     empty_kwargs: dict[str, object]
     algorithm_name: str
     audit_context: dict[str, object]
@@ -66,7 +66,7 @@ def _parse_execute_trade_request(request: WorkerBackendRequest) -> _ExecuteTrade
     _ExecuteTradeRequestContext
         已转为强类型字段的请求上下文。
     """
-    account = Account.model_validate(request.account_payload)
+    account = AccountSnapshot.model_validate(request.account_payload)
     # 同一份 payload 在不同交易渠道下会走不同字段归一化逻辑，这里必须显式带上账户渠道。
     standard_input = UnifiedStandardInput.from_dict(
         cast(dict[str, object], request.payload["standard_input"]),
@@ -101,7 +101,7 @@ def _parse_empty_positions_request(request: WorkerBackendRequest) -> _EmptyPosit
     _EmptyPositionsRequestContext
         已转为强类型字段的请求上下文。
     """
-    account = Account.model_validate(request.account_payload)
+    account = AccountSnapshot.model_validate(request.account_payload)
     empty_kwargs = cast(dict[str, object], request.payload["empty_kwargs"])
     resolved_algorithm = cast(dict[str, object], empty_kwargs["algorithm"])
     # 清仓输入不是完整 UnifiedStandardInput，而是入口临时拼出来的 kwargs，

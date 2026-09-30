@@ -16,6 +16,7 @@ from axile.server.api.routes.account_support import _apply_account_job
 from axile.server.core.db import SessionLocal
 from axile.server.core.scheduler import Scheduler
 from axile.server.db.models import Account
+from axile.server.db.models.account import AccountSnapshot
 from axile.server.db.models.account_runtime_sync import AccountRuntimeSync, AccountRuntimeSyncAttempt
 from axile.server.db.models.base import now_str
 from axile.server.execution.ctp_channels import reconcile_china_channel_account
@@ -32,7 +33,7 @@ class _ScheduledAccountSkipped(Exception):
 class _RuntimeTarget:
     """一次对齐使用的独立快照，不携带数据库会话或懒加载关系。"""
 
-    account: Account
+    account: AccountSnapshot
     revision: int
     reset_worker: bool
     portfolio_id: int | None
@@ -110,7 +111,7 @@ async def _begin_attempt(
         )
         assert sync is not None
         portfolio_id = await get_latest_portfolio_id_by_account_id(session, account_id)
-        return _RuntimeTarget(Account(**account.model_dump()), sync.revision, sync.reset_worker, portfolio_id)
+        return _RuntimeTarget(account.snapshot(), sync.revision, sync.reset_worker, portfolio_id)
 
 
 async def _finish_attempt(

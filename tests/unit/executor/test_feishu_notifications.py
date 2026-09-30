@@ -5,6 +5,8 @@ from __future__ import annotations
 import queue
 import threading
 
+import pytest
+
 from axile.common.default_account_notification import DEFAULT_ACCOUNT_NOTIFICATION_CODE
 from axile.common.notification_function import run_notification_function
 from axile.common.trade_channel import TradeChannel
@@ -677,3 +679,57 @@ def test_notification_execution_matches_public_contract() -> None:
     assert context["execution"]["trigger_source"] is None
     assert isinstance(context["execution"]["notified_at"], str)
     assert isinstance(context["execution"]["execution_time"], float)
+
+
+@pytest.mark.parametrize("ok", [True, False])
+def test_notification_success_callback_only_runs_after_success(monkeypatch, ok):
+    """默认与自定义通知共用结果回调；失败不覆盖成功摘要。"""
+    from axile.common.notification_function import NotificationFunctionResult
+    from axile.executor import feishu_notifications as notifications
+
+    calls = []
+    source = _NotificationSource()
+    source._notification_success_callback = lambda execution_id, succeeded_at: calls.append(
+        (execution_id, succeeded_at)
+    )
+    monkeypatch.setattr(notifications, "build_execution_notification_context", lambda *_args: {})
+    monkeypatch.setattr(
+        notifications,
+        "run_notification_function",
+        lambda *_args, **_kwargs: NotificationFunctionResult(ok, None if ok else "failed"),
+    )
+    output = UnifiedStandardOutput(
+        account_assets=UnifiedAccountAssets(available_cash=0, total_asset=0, market_value=0, positions=[]),
+        symbol_results={},
+        status=ExecutionStatus.NOOP,
+        channel_type=TradeChannel.CTP,
+    )
+    output.inputs = UnifiedStandardInput.model_construct(extra={"audit": {"execution_id": "exec-1"}})
+    notifications.dispatch_execution_notification(source, output, None, "def notify(context): pass", None)
+    if ok:
+        assert calls[0][0] == "exec-1"
+    assert len(calls) == int(ok)
+
+
+def test_notification_success_callback_failure_does_not_escape(monkeypatch):
+    """状态存储不可用时仍保留通知自身结果。"""
+    from axile.common.notification_function import NotificationFunctionResult
+    from axile.executor import feishu_notifications as notifications
+
+    source = _NotificationSource()
+
+    def unavailable(*_args):
+        raise RuntimeError("database unavailable")
+
+    source._notification_success_callback = unavailable
+    monkeypatch.setattr(notifications, "build_execution_notification_context", lambda *_args: {})
+    monkeypatch.setattr(
+        notifications, "run_notification_function", lambda *_args, **_kwargs: NotificationFunctionResult(True)
+    )
+    output = UnifiedStandardOutput(
+        account_assets=UnifiedAccountAssets(available_cash=0, total_asset=0, market_value=0, positions=[]),
+        symbol_results={},
+        status=ExecutionStatus.NOOP,
+        channel_type=TradeChannel.CTP,
+    )
+    notifications.dispatch_execution_notification(source, output, None, "def notify(context): pass", None)

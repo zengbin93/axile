@@ -14,13 +14,14 @@ from typing import cast
 
 from loguru import logger
 
+from axile.executor.abstract_executor.base import AbstractExecutor
 from axile.executor.algorithms.utils.clock import get_default_clock
 from axile.executor.models.unified_account_assets import UnifiedAccountAssets
 from axile.executor.models.unified_input import UnifiedStandardInput
 from axile.executor.models.unified_output import UnifiedStandardOutput
 from axile.executor.termination import ExecutionTerminated
 from axile.server.context import Context, PortfolioExecutor
-from axile.server.db.models import Account
+from axile.server.db.models.account import AccountSnapshot
 from axile.server.execution.execution_records_output import sanitize_standard_input_for_audit
 from axile.server.execution.worker_backend.catalog import RemoteCatalogProvider
 from axile.server.execution.worker_backend.protocol import (
@@ -71,7 +72,7 @@ _SYMBOL_FIELDS = (
 
 def _handle_prepare(request: WorkerBackendRequest, state: _WorkerBackendState) -> WorkerBackendResponse:
     """创建或复用账户执行器，并返回通道准备结果。"""
-    account = Account.model_validate(request.account_payload)
+    account = AccountSnapshot.model_validate(request.account_payload)
     expected = str(request.payload.get("expected_trading_day", "") or "") or None
     executor = None
     termination_controller = _activate_worker_termination(state, request.execution_id)
@@ -143,7 +144,7 @@ def _handle_get_account_assets(
     state: _WorkerBackendState,
 ) -> WorkerBackendResponse:
     """查询并返回账户当前资产，不进入交易执行生命周期."""
-    account = Account.model_validate(request.account_payload)
+    account = AccountSnapshot.model_validate(request.account_payload)
     executor = None
     try:
         executor = _resolve_prepared_executor(
@@ -152,7 +153,7 @@ def _handle_get_account_assets(
             execution_id=request.execution_id or request.request_id,
             audit_context={"request_id": request.request_id, "trigger_source": "account_assets"},
         )
-        assets = cast(UnifiedAccountAssets, executor.get_account_assets())
+        assets = cast(AbstractExecutor, executor).get_account_assets()
         return WorkerBackendResponse(
             request_id=request.request_id,
             kind="result",
@@ -179,7 +180,7 @@ def _handle_calculate_portfolio(
     正常成功后保留完整 executor 及进程状态；失败结果由 manager 关闭并重建
     worker，超时则由 watchdog 直接终止当前进程。
     """
-    account = Account.model_validate(request.account_payload)
+    account = AccountSnapshot.model_validate(request.account_payload)
     executor = None
     calculation_finished = threading.Event()
     try:

@@ -15,6 +15,7 @@ from axile.common.trade_channel import TradeChannel
 from axile.domain.execution import ExecutionKind, ExecutionTaskStatus, ExecutionTerminateMode
 from axile.server.core.db import SessionLocal
 from axile.server.db.models import Account, now_str
+from axile.server.db.models.account import AccountContext
 from axile.server.db.models.execution_intent import ExecutionIntent
 from axile.server.execution.execution_algorithms import resolve_execution_algorithm_name
 from axile.server.execution.live import live_hub
@@ -285,7 +286,7 @@ def ensure_memory_from_intent(
     return state
 
 
-def _ensure_memory_queued(account: Account, intent: IntentSnapshot) -> None:
+def _ensure_memory_queued(account: AccountContext, intent: IntentSnapshot) -> None:
     ensure_memory_from_intent(
         intent,
         status=ExecutionTaskStatus.QUEUED,
@@ -330,7 +331,7 @@ def _sync_live(account_id: int) -> None:
 
 async def _insert_intent(
     *,
-    account: Account,
+    account: AccountContext,
     kind: ExecutionKind,
     trigger_source: str,
     payload: dict[str, object],
@@ -359,7 +360,7 @@ async def _insert_intent(
 
 
 async def _supersede_queued_with_clear(
-    account: Account,
+    account: AccountContext,
     queued: IntentSnapshot,
     trigger_source: str,
     payload: dict[str, object],

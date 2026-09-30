@@ -12,6 +12,7 @@ from axile.server.core.log_config import execution_log_context
 from axile.server.core.scheduler import Scheduler
 from axile.server.cron import SCHEDULER_TIMEZONE, combine_cron_triggers, is_blank_cron_expr
 from axile.server.db.models import Account, ScheduleSkip
+from axile.server.db.models.account import AccountContext
 from axile.server.repositories import get_latest_portfolio_id_by_account_id
 from axile.server.trading_calendar import (
     CalendarDecisionStatus,
@@ -104,7 +105,7 @@ async def execute_scheduled_rebalance(account_id: int) -> None:
 
 async def create_job(
     sched: Scheduler,
-    account: Account,
+    account: AccountContext,
     triggers: list[CronTrigger],
     logger: "loguru.Logger | None" = None,
     *,

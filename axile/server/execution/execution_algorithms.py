@@ -2,10 +2,10 @@
 
 from axile.channels import get_channel
 from axile.domain.execution import ExecutionKind
-from axile.server.db.models import Account
+from axile.server.db.models.account import AccountContext
 
 
-def resolve_account_leverages(account: Account) -> tuple[float, float]:
+def resolve_account_leverages(account: AccountContext) -> tuple[float, float]:
     """
     解析账户执行时使用的多空杠杆.
 
@@ -29,7 +29,7 @@ def resolve_account_leverages(account: Account) -> tuple[float, float]:
 
 
 def resolve_execution_algorithm_name(
-    account: Account,
+    account: AccountContext,
     execution_kind: ExecutionKind,
     algorithm_override: dict[str, object] | None = None,
 ) -> str:
@@ -59,7 +59,7 @@ def resolve_execution_algorithm_name(
 
 
 def resolve_empty_positions_algorithm(
-    account: Account,
+    account: AccountContext,
     algorithm_override: dict[str, object] | None = None,
 ) -> dict[str, object]:
     """

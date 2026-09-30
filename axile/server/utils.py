@@ -5,7 +5,7 @@ from __future__ import annotations
 from axile.common.trade_channel import TradeChannel
 from axile.server.channel_capabilities import missing_packages
 from axile.server.cron import is_blank_cron_expr, parse_cron_expr
-from axile.server.db.models import Account
+from axile.server.db.models.account import AccountContext
 from axile.server.error_notifications import (
     build_error_card,
     build_test_card,
@@ -25,7 +25,7 @@ __all__ = [
 ]
 
 
-async def trade_channel_check(account: Account, execution_id: str | None = None) -> None:
+async def trade_channel_check(account: AccountContext, execution_id: str | None = None) -> None:
     """
     实盘执行前的渠道依赖预检.
 

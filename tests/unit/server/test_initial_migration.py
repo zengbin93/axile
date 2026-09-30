@@ -47,6 +47,7 @@ def test_migration_history_is_linear() -> None:
         "0017_notification_functions.py",
         "0018_single_account_notification.py",
         "0019_default_notification_card_type.py",
+        "0020_account_settings.py",
     ]
     initial = _load_migration(migration_paths[0])
     calendar = _load_migration(migration_paths[1])

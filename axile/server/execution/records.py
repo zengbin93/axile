@@ -18,7 +18,8 @@ from axile.executor.models.execution_result import ExecutionStatus
 from axile.executor.termination import TERMINATION_TRIGGER_OPERATOR
 from axile.server.asset_observations import is_asset_observation
 from axile.server.core.db import SessionLocal
-from axile.server.db.models import Account, AccountAssetSnapshot, ExecuteRecord
+from axile.server.db.models import AccountAssetSnapshot, ExecuteRecord
+from axile.server.db.models.account import AccountContext
 
 
 class _WriteSessionProtocol(Protocol):
@@ -163,7 +164,7 @@ async def append_error_execute_record(
 
 
 async def append_success_execute_record(
-    account: Account,
+    account: AccountContext,
     raw_input: dict[str, object],
     result: dict[str, object],
     execution_id: str | None = None,

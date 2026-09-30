@@ -17,6 +17,7 @@ from axile.server.cron import (
     parse_cron_expr,
 )
 from axile.server.db.models import Account
+from axile.server.db.models.account import AccountContext
 from axile.server.execution.scheduler import create_job, delete_job
 from axile.server.repositories import get_latest_portfolio_id_by_account_id
 
@@ -87,7 +88,7 @@ def _build_empty_positions_algorithm(
 async def _reconcile_account_job(
     session: SessionDep,
     sched: SchedDep,
-    account: Account,
+    account: AccountContext,
 ) -> None:
     """
     对齐账户的调度任务状态.
@@ -106,7 +107,7 @@ async def _reconcile_account_job(
     await _apply_account_job(sched, account, latest_portfolio_id)
 
 
-async def _apply_account_job(sched: SchedDep, account: Account, latest_portfolio_id: int | None) -> None:
+async def _apply_account_job(sched: SchedDep, account: AccountContext, latest_portfolio_id: int | None) -> None:
     """使用已提交的账户及绑定快照对齐 scheduler，不访问数据库。"""
     account_id = cast("int", account.id)
     # 关「自动调仓」→ 空 cron：合法，表示仅手动；与 is_started / 组合绑定一并决定是否建 job。

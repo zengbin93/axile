@@ -4,7 +4,7 @@ const template = 'def notify(context):\n    pass\n'
 const custom = 'def notify(context):\n    print(context)\n'
 async function setup(page: Page, status: 'none' | 'default' | 'function', configured = true) {
   let account = {
-    id: 1, name: '测试账户', remark: '', trade_channel: 'binance', market: '数字货币', portfolio_id: null,
+    id: 1, name: '测试账户', remark: '', trade_channel: 'ctp', market: '期货', portfolio_id: null,
     forbidden_symbols: null, risk_symbols: null, weight_precision: 0.01, execution_timeout: 60,
     long_leverage: 1, short_leverage: 1, write_empty_record: 0,
     execution_notification_status: status, execution_notification_code: status === 'none' ? null : status === 'default' ? template : custom,
@@ -201,7 +201,7 @@ test('组合接入公共保存、还原和分栏记忆', async ({ page }) => {
     if (url.endsWith('/validate_custom_calc')) {
       trials.push(route.request().postDataJSON())
       await new Promise((resolve) => setTimeout(resolve, 300))
-      await route.fulfill({ json: { valid: true, target: { BTCUSDT: 0.5 }, error: null, error_line: null } })
+      await route.fulfill({ json: { valid: true, target: { rb2610: 0.5 }, error: null, error_line: null } })
     } else if (route.request().method() === 'PATCH') {
       const patch = route.request().postDataJSON()
       patches.push(patch)
@@ -212,7 +212,7 @@ test('组合接入公共保存、还原和分栏记忆', async ({ page }) => {
     else await route.fulfill({ json: [] })
   })
   await page.goto('/e2e/notification.html?portfolio=1')
-  await editCode(page, 'def calculate_portfolio(context):\n    return {"BTCUSDT": 0.5}\n')
+  await editCode(page, 'def calculate_portfolio(context):\n    return {"rb2610": 0.5}\n')
   await page.keyboard.press('ControlOrMeta+Enter')
   await page.keyboard.press('ControlOrMeta+Enter')
   await expect.poll(() => trials.length).toBe(1)
@@ -224,7 +224,7 @@ test('组合接入公共保存、还原和分栏记忆', async ({ page }) => {
   await editCode(page, 'def calculate_portfolio(context):\n    return {}\n')
   await expect(page.getByText('代码已修改，以下为旧结果', { exact: true })).toBeVisible()
   await page.getByRole('button', { name: '还原', exact: true }).click()
-  await expect(page.locator('.cm-content').first()).toContainText('BTCUSDT')
+  await expect(page.locator('.cm-content').first()).toContainText('rb2610')
   const splitter = page.getByRole('separator', { name: '调整运行检查器宽度' })
   await splitter.focus()
   await page.keyboard.press('ArrowRight')

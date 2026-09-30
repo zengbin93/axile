@@ -14,7 +14,7 @@ from loguru import logger
 
 from axile.executor.models.unified_output import UnifiedStandardOutput
 from axile.executor.termination import ExecutionTerminated
-from axile.server.db.models import Account
+from axile.server.db.models.account import AccountContext
 from axile.server.execution.worker_backend.protocol import (
     WorkerBackendErrorPayload,
     WorkerBackendRequest,
@@ -63,7 +63,7 @@ def _build_error_payload(exc: Exception) -> WorkerBackendErrorPayload:
 def _build_terminated_response(
     *,
     request_id: str,
-    account: Account,
+    account: AccountContext,
     exc: ExecutionTerminated,
 ) -> WorkerBackendResponse:
     """
@@ -152,7 +152,7 @@ def _build_result_response(
 def _handle_worker_command_failure(
     *,
     request: WorkerBackendRequest,
-    account: Account,
+    account: AccountContext,
     algorithm_name: str,
     executor: object | None,
     trigger_source: str,

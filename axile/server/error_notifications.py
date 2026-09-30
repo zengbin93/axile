@@ -16,7 +16,7 @@ from axile.common.config import settings
 from axile.common.feishu import push_feishu_card
 from axile.common.notification_function import run_notification_function
 from axile.executor.algorithms.utils.clock import clock_now
-from axile.server.db.models import Account
+from axile.server.db.models.account import AccountContext
 
 
 def build_error_card(
@@ -162,7 +162,7 @@ async def get_external_ip() -> str:
 
 async def send_feishu_error(
     error: Exception,
-    account: Account | None,
+    account: AccountContext | None,
     feishu_key: str,
     *,
     event_type: str = "execution_error",

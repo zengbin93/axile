@@ -27,6 +27,7 @@ from axile.server.db.models import (
     ExecuteRecord,
     now_str,
 )
+from axile.server.db.models.account import AccountContext, AccountSnapshot
 from axile.server.error_notifications import send_feishu_error
 from axile.server.execution.audit_sink import build_server_execution_audit_sink
 from axile.server.execution.execution_account_control import (
@@ -133,7 +134,7 @@ def _resolve_termination_snapshot(
     )
 
 
-async def _load_account(account_id: int) -> Account | None:
+async def _load_account(account_id: int) -> AccountSnapshot | None:
     """
     按 ID 读取账户；不存在时返回 ``None``.
 
@@ -148,10 +149,11 @@ async def _load_account(account_id: int) -> Account | None:
         命中时返回账户对象；否则返回 ``None``。
     """
     async with SessionLocal() as session:
-        return await session.get(Account, account_id)
+        account = await session.get(Account, account_id)
+        return account.snapshot() if account is not None else None
 
 
-async def _require_account(account_id: int) -> Account:
+async def _require_account(account_id: int) -> AccountSnapshot:
     """
     按 ID 读取账户；不存在时直接拒绝本次执行.
 
@@ -369,7 +371,7 @@ async def _record_terminated_execution(
 
 
 async def prepare_executor_runtime(
-    account: Account,
+    account: AccountContext,
     *,
     execution_id: str | None,
     audit_context: dict[str, object],
@@ -634,7 +636,7 @@ async def handle_inline_execution_terminated(
 
 async def handle_inline_execution_failure(
     *,
-    account: Account | None,
+    account: AccountContext | None,
     execution_id: str,
     error: Exception,
 ) -> None:

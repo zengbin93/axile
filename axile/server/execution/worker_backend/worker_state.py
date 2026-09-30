@@ -18,7 +18,7 @@ from loguru import logger
 from axile.common.trade_channel import TradeChannel
 from axile.executor.abstract_executor.base import AbstractExecutor
 from axile.executor.termination import ExecutionTerminationController
-from axile.server.db.models import Account
+from axile.server.db.models.account import AccountSnapshot
 from axile.server.execution.audit_sink import build_server_execution_audit_sink
 from axile.server.execution.execution_account_control import (
     build_account_control_guard,
@@ -142,7 +142,7 @@ def _close_state_executor(state: _WorkerBackendState) -> None:
         raise
 
 
-def _config_signature(account: Account) -> str:
+def _config_signature(account: AccountSnapshot) -> str:
     """生成账户配置的稳定签名，用于判定执行器是否可复用.
 
     Parameters
@@ -160,7 +160,7 @@ def _config_signature(account: Account) -> str:
 
 def _resolve_executor(
     state: _WorkerBackendState,
-    account: Account,
+    account: AccountSnapshot,
     expected_trading_day: str | None = None,
     *,
     initialize: bool = True,
@@ -216,7 +216,7 @@ def _resolve_executor(
 def _prepare_executor(
     *,
     executor: object,
-    account: Account,
+    account: AccountSnapshot,
     execution_id: str | None,
     audit_context: dict[str, object],
     termination_controller: ExecutionTerminationController | None = None,
@@ -266,7 +266,7 @@ def _prepare_executor(
 def _resolve_prepared_executor(
     *,
     state: _WorkerBackendState,
-    account: Account,
+    account: AccountSnapshot,
     execution_id: str | None,
     audit_context: dict[str, object],
     termination_controller: ExecutionTerminationController | None = None,
