@@ -188,7 +188,14 @@ export interface Account {
   feishu_configured: boolean
   execution_notification_code: string | null
   execution_notification_status: 'none' | 'default' | 'function'
-  notification_state: { last_success_at: string; execution_id: string | null } | null
+  notification_state: {
+    last_success_at: string | null
+    execution_id: string | null
+    last_attempt_at?: string | null
+    last_attempt_execution_id?: string | null
+    last_attempt_ok?: boolean | null
+    last_attempt_error?: string | null
+  } | null
   portfolio_id: number | null
   write_empty_record: number | null
   /** 执行层总超时（秒）。一次执行跑满该额度即硬中断（不撤单），与算法级 `max_wait_seconds` 不同层。 */

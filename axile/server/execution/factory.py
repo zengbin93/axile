@@ -4,7 +4,7 @@ from axile.channels import get_channel
 from axile.executor.abstract_executor.base import AbstractExecutor
 from axile.executor.trading_calendar import ShinnyTradingCalendar
 from axile.server.db.models.account import AccountContext
-from axile.server.execution.notification_state import record_notification_success
+from axile.server.execution.notification_state import record_notification_result
 
 
 def create_executor_instance(account: AccountContext, *, initialize: bool = True) -> AbstractExecutor:
@@ -37,10 +37,10 @@ def create_executor_instance(account: AccountContext, *, initialize: bool = True
     account_id = getattr(account, "id", None)
     if account_id is not None:
 
-        def notification_success(execution_id: str | None, succeeded_at: str) -> None:
-            record_notification_success(account_id, execution_id, succeeded_at)
+        def notification_result(execution_id: str | None, finished_at: str, ok: bool, error: str | None) -> None:
+            record_notification_result(account_id, execution_id, finished_at, ok, error)
 
-        setattr(executor, "_notification_success_callback", notification_success)
+        setattr(executor, "_notification_result_callback", notification_result)
     setattr(executor, "_requires_connection_initialization", plugin.requires_pre_connect_guard and not initialize)
     set_trading_calendar = getattr(executor, "set_trading_calendar", None)
     if callable(set_trading_calendar):

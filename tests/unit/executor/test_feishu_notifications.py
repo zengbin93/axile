@@ -733,3 +733,40 @@ def test_notification_success_callback_failure_does_not_escape(monkeypatch):
         channel_type=TradeChannel.CTP,
     )
     notifications.dispatch_execution_notification(source, output, None, "def notify(context): pass", None)
+
+
+@pytest.mark.parametrize("ok", [True, False])
+def test_notification_result_callback_records_both_outcomes(monkeypatch, ok):
+    from axile.common.notification_function import NotificationFunctionResult
+    from axile.executor import feishu_notifications as notifications
+
+    source = _NotificationSource()
+    calls = []
+    source._notification_result_callback = lambda *args: calls.append(args)
+    monkeypatch.setattr(notifications, "build_execution_notification_context", lambda *_args: {})
+    monkeypatch.setattr(
+        notifications,
+        "run_notification_function",
+        lambda *_args, **_kwargs: NotificationFunctionResult(ok, None if ok else "timeout"),
+    )
+    output = _minimal_output()
+    output.inputs = UnifiedStandardInput.model_construct(extra={"audit": {"execution_id": "exec-result"}})
+    notifications.dispatch_execution_notification(source, output, None, "def notify(context): pass", None)
+    assert len(calls) == 1
+    assert calls[0][0] == "exec-result"
+    assert calls[0][2:] == (ok, None if ok else "timeout")
+
+
+def test_default_notification_without_key_records_failure(monkeypatch):
+    from axile.common.default_account_notification import DEFAULT_ACCOUNT_NOTIFICATION_CODE
+    from axile.executor import feishu_notifications as notifications
+
+    source = _NotificationSource()
+    calls = []
+    source._notification_result_callback = lambda *args: calls.append(args)
+    monkeypatch.setattr(notifications, "build_execution_notification_context", lambda *_args: {})
+    notifications.dispatch_execution_notification(
+        source, _minimal_output(), None, DEFAULT_ACCOUNT_NOTIFICATION_CODE, None
+    )
+    assert calls[0][2] is False
+    assert "Webhook" in calls[0][3]

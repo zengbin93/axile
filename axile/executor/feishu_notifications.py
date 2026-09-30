@@ -9,8 +9,9 @@ from typing import Protocol, TypedDict
 import loguru
 from pydantic_core import to_jsonable_python
 
+from axile.common.default_account_notification import DEFAULT_ACCOUNT_NOTIFICATION_CODE
 from axile.common.notification_context import AccountNotificationExecution
-from axile.common.notification_function import run_notification_function
+from axile.common.notification_function import NotificationFunctionResult, run_notification_function
 from axile.executor.algorithms.utils import clock_now
 from axile.executor.models.unified_account_assets import Position, UnifiedAccountAssets, is_degraded_snapshot_source
 from axile.executor.models.unified_order import TradeRecord, UnifiedOrder
@@ -345,6 +346,21 @@ def build_execution_notification_context(
     return to_jsonable_python(context)
 
 
+def _record_notification_result(
+    source: FeishuNotificationSource, output: UnifiedStandardOutput, ok: bool, error: str | None
+) -> None:
+    """记录后台通知结果，存储失败不影响执行器。"""
+    callback = getattr(source, "_notification_result_callback", None)
+    if not callable(callback):
+        return
+    audit = output.inputs.extra.get("audit", {}) if output.inputs else {}
+    execution_id = audit.get("execution_id") if isinstance(audit, dict) else None
+    try:
+        callback(execution_id, clock_now().isoformat(), ok, error)
+    except Exception:  # noqa: BLE001 - 状态落库不影响通知结果
+        loguru.logger.exception("保存通知结果失败 execution_id={}", execution_id)
+
+
 def dispatch_execution_notification(
     source: FeishuNotificationSource,
     output: UnifiedStandardOutput,
@@ -358,10 +374,15 @@ def dispatch_execution_notification(
     audit = output.inputs.extra.get("audit", {}) if output.inputs else {}
     execution_id = audit.get("execution_id") if isinstance(audit, dict) else None
     context = build_execution_notification_context(source, output, notification_snapshot)
-    result = run_notification_function(code, context, feishu_key=feishu_key)
+    result = (
+        NotificationFunctionResult(False, "未配置飞书 Webhook，无法发送通知")
+        if code.strip() == DEFAULT_ACCOUNT_NOTIFICATION_CODE.strip() and not feishu_key
+        else run_notification_function(code, context, feishu_key=feishu_key)
+    )
     if not result.ok:
         source.logger.error(f"执行通知失败: {result.error}")
     loguru.logger.info("执行通知完成 execution_id={} ok={} error={}", execution_id, result.ok, result.error)
+    _record_notification_result(source, output, result.ok, result.error)
     if result.ok:
         callback = getattr(source, "_notification_success_callback", None)
         if callable(callback):
@@ -399,6 +420,7 @@ def _feishu_notify_worker_loop() -> None:
             dispatch_execution_notification(source, output, feishu_key, code, notification_snapshot)
         except Exception as exc:  # noqa: BLE001 - 通知任务异常不得拖垮 worker
             loguru.logger.error(f"执行通知任务异常: {exc}")
+            _record_notification_result(source, output, False, f"执行通知任务异常: {exc}")
         finally:
             _notify_queue.task_done()
 
@@ -456,4 +478,5 @@ def enqueue_execute_results_to_feishu(
     try:
         _notify_queue.put_nowait((source, output, feishu_key, code, notification_snapshot))
     except queue.Full:
+        _record_notification_result(source, output, False, "通知队列已满，本次通知未发送")
         loguru.logger.warning(f"执行通知队列已满（maxsize={_FEISHU_NOTIFY_QUEUE_MAXSIZE}），丢弃本次通知以避免无界堆积")

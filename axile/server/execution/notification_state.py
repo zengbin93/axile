@@ -36,7 +36,37 @@ def record_notification_success(account_id: int, execution_id: str | None, succe
     statement = statement.on_conflict_do_update(
         index_elements=["account_id"],
         set_={"last_success_at": succeeded_at, "execution_id": execution_id},
-        where=col(AccountNotificationState.last_success_at) < succeeded_at,
+        where=col(AccountNotificationState.last_success_at).is_(None)
+        | (col(AccountNotificationState.last_success_at) < succeeded_at),
+    )
+    with _notification_engine().begin() as connection:
+        connection.execute(statement)
+
+
+def record_notification_result(
+    account_id: int, execution_id: str | None, finished_at: str, ok: bool, error: str | None
+) -> None:
+    """保存最近完成的通知结果；失败保留此前成功摘要。"""
+    from axile.server.db.models import Account
+
+    values = {
+        "last_attempt_at": finished_at,
+        "last_attempt_execution_id": execution_id,
+        "last_attempt_ok": ok,
+        "last_attempt_error": error,
+    }
+    if ok:
+        values.update(last_success_at=finished_at, execution_id=execution_id)
+    columns = ["account_id", *values]
+    statement = insert(AccountNotificationState).from_select(
+        columns,
+        select(col(Account.id), *(literal(value) for value in values.values())).where(col(Account.id) == account_id),
+    )
+    statement = statement.on_conflict_do_update(
+        index_elements=["account_id"],
+        set_=values,
+        where=(col(AccountNotificationState.last_attempt_at).is_(None))
+        | (col(AccountNotificationState.last_attempt_at) < finished_at),
     )
     with _notification_engine().begin() as connection:
         connection.execute(statement)

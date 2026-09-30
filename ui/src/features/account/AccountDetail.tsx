@@ -1,3 +1,4 @@
+import { NotificationIndicator } from '@/features/account/NotificationIndicator'
 import { executionOutcome } from '@/features/account/executionOutcome'
 import { formatRecentExecution } from '@/lib/scheduleTime'
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type CSSProperties } from 'react'
@@ -511,13 +512,16 @@ export function AccountDetail({
             </span>
           )}
         </div>
-        {latestRecord && latestOutcome ? (
-          <div className="mt-1.5 text-[14px] text-ink-3">
-            上次 {formatRecentExecution(latestRecord.created_at, Date.now())}
-            {latestOutcome.symbolCount > 0 ? ` · 涉及 ${latestOutcome.symbolCount} 个品种` : ''}
-            {latestOutcome.tradeCount > 0 ? ` · ${latestOutcome.tradeCount} 笔成交` : ' · 未记录成交'}
-          </div>
-        ) : <ScheduleSummary lastExecutedAt={null} nextRunAt={nextRun.data?.next_execution_times[0] ?? null} />}
+        <div className="mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-1">
+          {latestRecord && latestOutcome ? (
+            <div className="text-[14px] text-ink-3">
+              上次 {formatRecentExecution(latestRecord.created_at, Date.now())}
+              {latestOutcome.symbolCount > 0 ? ` · 涉及 ${latestOutcome.symbolCount} 个品种` : ''}
+              {latestOutcome.tradeCount > 0 ? ` · ${latestOutcome.tradeCount} 笔成交` : ' · 未记录成交'}
+            </div>
+          ) : <ScheduleSummary lastExecutedAt={null} nextRunAt={nextRun.data?.next_execution_times[0] ?? null} />}
+          {acc && <NotificationIndicator account={acc} executionId={latestRecord?.execution_id ?? null} />}
+        </div>
         <div className={`grid transition-[grid-template-rows] duration-200 ${!isBusy && latestOutcome && ['BLOCKED', 'PARTIAL', 'FAILED'].includes(latestOutcome.state) && latestOutcome.reason ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'}`}>
           <div className="min-h-0 overflow-hidden"><p className="mt-1 text-[14px] text-warn">{latestOutcome?.reason}</p></div>
         </div>

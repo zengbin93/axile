@@ -80,7 +80,7 @@ def test_settings_persist_patch_and_snapshot_are_independent():
 
 def test_migration_preserves_all_settings_and_binding_rows():
     engine = sa.create_engine("sqlite://")
-    migrations = [load_migration(path) for path in sorted(MIGRATIONS.glob("[0-9]*.py"))]
+    migrations = [load_migration(path) for path in sorted(MIGRATIONS.glob("[0-9]*.py")) if path.name[:4] <= "0020"]
     with engine.begin() as connection:
         context = MigrationContext.configure(connection)
         with Operations.context(context):
@@ -141,7 +141,9 @@ def test_public_response_exposes_success_summary_without_credentials():
         account_id=1, execution_id="exec-1", last_success_at="2026-09-30T10:00:00"
     )
     public = _account_public(account).model_dump(mode="json")
-    assert public["notification_state"] == {"execution_id": "exec-1", "last_success_at": "2026-09-30T10:00:00"}
+    assert public["notification_state"]["execution_id"] == "exec-1"
+    assert public["notification_state"]["last_success_at"] == "2026-09-30T10:00:00"
+    assert public["notification_state"]["last_attempt_ok"] is None
     assert "account_config" not in public
     assert "feishu_key" not in public
     assert "test-only" not in str(public)
@@ -152,3 +154,61 @@ def test_public_response_exposes_success_summary_without_credentials():
     with pytest.raises(ValueError):
         account.sqlmodel_update({"long_leverage": 3, "account_config": None})
     assert account.settings.execution is before
+
+
+def test_notification_result_preserves_success_and_ignores_older_results(monkeypatch):
+    engine = sa.create_engine("sqlite://")
+    SQLModel.metadata.create_all(engine)
+    monkeypatch.setattr(notification_state, "_notification_engine", lambda: engine)
+    with Session(engine) as session:
+        session.add(Account(**account_data()))
+        session.commit()
+    notification_state.record_notification_result(1, "first-fail", "2026-09-30T09:00:00", False, "timeout")
+    with Session(engine) as session:
+        state = session.get(AccountNotificationState, 1)
+        assert state.last_success_at is None
+        assert state.last_attempt_ok is False
+    notification_state.record_notification_result(1, "success", "2026-09-30T10:00:00", True, None)
+    notification_state.record_notification_result(1, "failure", "2026-09-30T11:00:00", False, "timeout")
+    notification_state.record_notification_result(1, "old", "2026-09-30T09:30:00", True, None)
+    with Session(engine) as session:
+        state = session.get(AccountNotificationState, 1)
+        assert state.execution_id == "success"
+        assert state.last_attempt_execution_id == "failure"
+        assert state.last_attempt_ok is False
+        assert state.last_attempt_error == "timeout"
+    notification_state.record_notification_result(999, "missing", "2026-09-30T12:00:00", True, None)
+    engine.dispose()
+
+
+def test_notification_result_migration_preserves_legacy_success():
+    engine = sa.create_engine("sqlite://")
+    migrations = [load_migration(path) for path in sorted(MIGRATIONS.glob("[0-9]*.py"))]
+    with engine.begin() as connection:
+        with Operations.context(MigrationContext.configure(connection)):
+            for migration in migrations[:-1]:
+                migration.upgrade()
+            connection.execute(
+                sa.text(
+                    "INSERT INTO account (id, name, market, trade_channel, brokerage, created_at, updated_at) VALUES (1, 'test', '期货', 'ctp', 0, 'now', 'now')"
+                )
+            )
+            connection.execute(
+                sa.text("INSERT INTO account_notification_state VALUES (1, '2026-09-30T10:00:00', 'old')")
+            )
+            migrations[-1].upgrade()
+            connection.execute(
+                sa.text(
+                    "INSERT INTO account (id, name, market, trade_channel, brokerage, created_at, updated_at) VALUES (2, 'test2', '期货', 'ctp', 0, 'now', 'now')"
+                )
+            )
+            connection.execute(
+                sa.text("INSERT INTO account_notification_state (account_id, last_attempt_ok) VALUES (2, 0)")
+            )
+            assert (
+                connection.scalar(sa.text("SELECT execution_id FROM account_notification_state WHERE account_id = 1"))
+                == "old"
+            )
+            migrations[-1].downgrade()
+            assert connection.scalar(sa.text("SELECT count(*) FROM account_notification_state")) == 1
+    engine.dispose()
