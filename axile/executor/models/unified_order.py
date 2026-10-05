@@ -44,6 +44,7 @@ from axile.common.trade_channel import TradeChannel  # noqa: E402
 
 # 导入订单状态常量
 from axile.executor.constants.order_status import OrderStatus  # noqa: E402
+from axile.executor.models.value_conversion import PriceValueConversion  # noqa: E402
 
 # 定义extra字段类型
 ExtraData = dict[str, object]
@@ -97,6 +98,7 @@ class TradeRecord(BaseModel):
     trade_volume: float = Field(..., description="成交数量")
     trade_price: float = Field(..., description="成交价格")
     trade_value: float = Field(..., description="成交金额")
+    value_conversion: PriceValueConversion | None = Field(default=None, description="原生成交金额的审计换算依据")
 
     # 渠道特有数据
     extra: ExtraData = Field(
@@ -228,6 +230,7 @@ class UnifiedOrder(BaseModel):
     # === 成交相关信息 ===
     filled_volume: float = Field(default=0.0, description="成交数量")
     avg_price: float = Field(default=0.0, description="成交均价")
+    value_conversion: PriceValueConversion | None = Field(default=None, description="原生成交金额的审计换算依据")
 
     # === 时间信息 ===
     create_time: str = Field(

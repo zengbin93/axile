@@ -51,6 +51,54 @@ def _order(direction: str, filled: float, avg_price: float = 0.0) -> dict[str, o
     return {"direction": direction, "filled_volume": filled, "avg_price": avg_price}
 
 
+@pytest.mark.parametrize("direction,sign", [("BUY", 1), ("SELL", -1)])
+def test_foreign_quote_fill_value_uses_frozen_account_rate_and_tca_keeps_native_price(
+    direction: str, sign: int
+) -> None:
+    conversion = {"price_currency": "HKD", "value_currency": "CNY", "rate": 1.02}
+    order = {**_order(direction, 3.9, 1.5164), "order_id": "o1", "volume": 3.9, "value_conversion": conversion}
+    result = {
+        "account_assets": {"currency": "CNY", "positions": [], "extra": {"asset_indices": {"HKD": {"index": 3}}}},
+        "symbol_results": {
+            "00700.HK": {
+                "orders": [order],
+                "sizing": {"value_conversion": conversion},
+                "first_tick": {"bid_price": 1.5163, "ask_price": 1.5165},
+                "trades": [{"order_id": "o1", "trade_value": 5.91396, "value_conversion": conversion}],
+            }
+        },
+    }
+    row = build_symbol_reconciliation(result, {"positions": []})["symbols"][0]
+    assert row["filled_value"] == pytest.approx(sign * 5.91396 * 1.02)
+    assert row["filled_native_value"] == pytest.approx(sign * 5.91396)
+    assert row["value_currency"] == "CNY" and row["native_currency"] == "HKD"
+    assert row["avg_price"] == pytest.approx(1.5164)
+    assert row["tca"]["slippage_bps"] == pytest.approx(0, abs=1e-9)
+    trade = row["orders"][0]["trades"][0]
+    assert trade["value"] == pytest.approx(5.91396 * 1.02)
+    assert trade["native_value"] == pytest.approx(5.91396)
+
+
+def test_two_phase_fill_values_keep_each_orders_planning_rate() -> None:
+    conversions = [
+        {"price_currency": "HKD", "value_currency": "CNY", "rate": 1.01},
+        {"price_currency": "HKD", "value_currency": "CNY", "rate": 1.03},
+    ]
+    result = {
+        "account_assets": {"currency": "CNY", "positions": []},
+        "symbol_results": {
+            "00700.HK": {
+                "orders": [{**_order("SELL", 1, 2), "value_conversion": conversion} for conversion in conversions],
+                "sizing": {"value_conversion": conversions[-1]},
+            }
+        },
+    }
+    row = build_symbol_reconciliation(result, {"positions": []})["symbols"][0]
+    assert row["filled_value"] == pytest.approx(-2 * 1.01 - 2 * 1.03)
+    assert row["filled_native_value"] == -4
+    assert row["avg_price"] == 2
+
+
 def test_reconciliation_reached_target_exactly() -> None:
     """买入到位：after≈target 且 drift≈0，reached 为真、attained≈1。"""
     result = {

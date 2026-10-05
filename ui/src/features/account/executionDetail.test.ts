@@ -83,6 +83,21 @@ function baseFixture(): { events: ExecutionEvent[]; artifacts: ExecutionArtifact
   return { events, artifacts }
 }
 
+it('HKD 成交价与 CNY 审计金额保留各自币种', () => {
+  const artifacts = [art('execution_summary', {
+    reconciliation: {
+      account: {},
+      symbols: [{ symbol: '00700.HK', status: 'SUCCEEDED', filled: 3.9, filled_value: 5.915,
+        value_currency: 'CNY', native_currency: 'HKD', avg_price: 1.5164 }],
+    },
+  })]
+  const model = buildExecutionDetail([], artifacts)
+  expect(model.symbols[0].filledValue).toBe(5.915)
+  expect(model.symbols[0].valueCurrency).toBe('CNY')
+  expect(model.symbols[0].avgPrice).toBe(1.5164)
+  expect(model.symbols[0].priceCurrency).toBe('HKD')
+})
+
 describe('buildExecutionDetail · 头条', () => {
   function task(patch: Partial<ExecutionStatus>): ExecutionStatus {
     return {

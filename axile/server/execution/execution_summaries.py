@@ -2,7 +2,7 @@
 
 from collections.abc import Mapping
 from math import isfinite
-from typing import Any
+from typing import Any, cast
 
 from axile.executor.models.execution_result import ExecutionStatus
 from axile.executor.models.unified_account_assets import is_degraded_snapshot_source
@@ -16,7 +16,7 @@ _ATTAINED_TOLERANCE = 0.01
 
 def build_execution_outcome_details(result: Mapping[str, object]) -> dict[str, object]:
     """转发状态/错误契约与展示结论及未到位品种；旧记录先经读时归一，不猜测。"""
-    normalized = normalize_legacy_result(dict(result))
+    normalized = cast("dict[str, object]", normalize_legacy_result(dict(result)))
     symbols = normalized.get("symbol_results")
     forwarded: dict[str, object] = {
         key: normalized[key]
@@ -163,8 +163,18 @@ def _positions_by_symbol(account_assets: Mapping[str, Any] | None) -> dict[str, 
     return result
 
 
-def _signed_filled(orders: object) -> tuple[float, float, float | None]:
-    """汇总一只品种所有订单的带符号成交量、成交金额与加权均价.
+def _converted_value(native_value: float | None, conversion: object) -> float | None:
+    """使用逐笔冻结的汇率换算金额；缺少换算契约的渠道保留原生口径。"""
+    if native_value is None or not isinstance(conversion, dict):
+        return native_value
+    rate = _to_float(conversion.get("rate"))
+    if rate is None or not isfinite(rate) or rate <= 0:
+        return None
+    return native_value * rate
+
+
+def _signed_filled(orders: object) -> tuple[float, float | None, float, float | None]:
+    """汇总带符号成交量、账户币种金额、原生金额及原生加权均价.
 
     Parameters
     ----------
@@ -173,14 +183,15 @@ def _signed_filled(orders: object) -> tuple[float, float, float | None]:
 
     Returns
     -------
-    tuple[float, float, float | None]
-        ``(带符号成交量, 带符号成交金额, 加权均价)``。买入为正、卖出为负；金额按
-        ``|filled| * avg_price`` 累加再定号；均价 = ``|金额| / |量|``，无成交时为 ``None``。
+    tuple[float, float | None, float, float | None]
+        买入为正、卖出为负；账户币种金额逐笔换算。均价由原生金额和数量求得，
+        保持与交易所价格及 TCA 基准同币种；换算契约无效时账户币种金额为 ``None``。
     """
     if not isinstance(orders, list):
-        return 0.0, 0.0, None
+        return 0.0, 0.0, 0.0, None
     qty = 0.0
-    value = 0.0
+    value: float | None = 0.0
+    native_value = 0.0
     for order in orders:
         if not isinstance(order, dict):
             continue
@@ -189,9 +200,12 @@ def _signed_filled(orders: object) -> tuple[float, float, float | None]:
         direction = str(order.get("direction") or "")
         sign = -1.0 if ("SELL" in direction.upper() or "卖" in direction) else 1.0
         qty += sign * filled
-        value += sign * filled * price
-    avg_price = abs(value) / abs(qty) if abs(qty) > _QTY_EPS else None
-    return qty, value, avg_price
+        native = sign * filled * price
+        native_value += native
+        converted = _converted_value(native, order.get("value_conversion"))
+        value = value + converted if value is not None and converted is not None else None
+    avg_price = abs(native_value) / abs(qty) if abs(qty) > _QTY_EPS else None
+    return qty, value, native_value, avg_price
 
 
 def _as_dict(value: object) -> dict[str, Any] | None:
@@ -273,11 +287,16 @@ def _build_orders_tree(symbol_result: Mapping[str, Any]) -> list[dict[str, Any]]
         if not isinstance(t, dict):
             continue
         fee, fee_asset = _trade_fee(t)
+        conversion = _as_dict(t.get("value_conversion")) or {}
+        native_value = _to_float(t.get("trade_value"))
         by_order.setdefault(str(t.get("order_id") or ""), []).append(
             {
                 "price": _to_float(t.get("trade_price")),
                 "volume": _to_float(t.get("trade_volume")),
-                "value": _to_float(t.get("trade_value")),
+                "value": _converted_value(native_value, t.get("value_conversion")),
+                "native_value": native_value,
+                "price_currency": conversion.get("price_currency"),
+                "value_currency": conversion.get("value_currency"),
                 "time": t.get("trade_time"),
                 "fee": fee,
                 "fee_asset": fee_asset,
@@ -298,6 +317,7 @@ def _build_orders_tree(symbol_result: Mapping[str, Any]) -> list[dict[str, Any]]
                 "order_type": _enum_tail(o.get("order_type")),
                 "price": _to_float(o.get("price")),
                 "avg_price": _to_float(o.get("avg_price")),
+                "value_conversion": o.get("value_conversion"),
                 "volume": _to_float(o.get("volume")),
                 "filled_volume": _to_float(o.get("filled_volume")),
                 "status": str(o.get("status") or ""),
@@ -365,10 +385,11 @@ def _build_symbol_row(
     symbol_result: Mapping[str, Any],
     before_qty: float | None,
     after_qty: float | None,
+    account_currency: str | None = None,
 ) -> dict[str, Any]:
     """构造单只对账行：意图/成交/前后持仓/到位度/漂移."""
     target = _to_float(symbol_result.get("target_volume"))
-    filled, filled_value, avg_price = _signed_filled(symbol_result.get("orders"))
+    filled, filled_value, native_value, avg_price = _signed_filled(symbol_result.get("orders"))
     moved = after_qty - before_qty if after_qty is not None and before_qty is not None else None
     drift = moved - filled if moved is not None else None
 
@@ -383,6 +404,8 @@ def _build_symbol_row(
             reached = abs(after_qty - target) <= abs(target) * _ATTAINED_TOLERANCE
 
     sizing = symbol_result.get("sizing")
+    conversion = _as_dict(sizing.get("value_conversion")) if isinstance(sizing, dict) else None
+    conversion = conversion or {}
     return {
         "symbol": symbol,
         "status": symbol_result.get("status"),
@@ -393,6 +416,9 @@ def _build_symbol_row(
         "target": target,
         "filled": filled,
         "filled_value": filled_value,
+        "value_currency": conversion.get("value_currency") or account_currency,
+        "filled_native_value": native_value,
+        "native_currency": conversion.get("price_currency") or account_currency,
         "avg_price": avg_price,
         "before": before_qty,
         "after": after_qty,
@@ -475,6 +501,7 @@ def build_symbol_reconciliation(
                 symbol_result,
                 before_qty,
                 after_qty,
+                after_assets_dict.get("currency") if after_assets_dict else None,
             )
         )
 

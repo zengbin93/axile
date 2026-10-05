@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field, computed_field, model_validator
 from axile.executor.models.unified_account_assets import UnifiedAccountAssets
 from axile.executor.models.unified_order import TradeRecord, UnifiedOrder
 from axile.executor.models.unified_price import UnifiedPriceData
+from axile.executor.models.value_conversion import PriceValueConversion
 
 
 class ExecutionStatus(StrEnum):
@@ -105,6 +106,7 @@ class TargetSizingDecision(BaseModel):
     quantity_step: float | None = Field(default=None, description="数量步长或整手单位")
     min_quantity: float | None = Field(default=None, description="最小可交易数量")
     min_notional: float | None = Field(default=None, description="最小可交易名义价值")
+    value_conversion: PriceValueConversion | None = Field(default=None, description="规划时冻结的金额换算依据")
 
 
 def is_success_status(status: ExecutionStatus) -> bool:

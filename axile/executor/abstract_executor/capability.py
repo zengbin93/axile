@@ -21,6 +21,7 @@ from axile.executor.models.unified_account_assets import Position, PositionDirec
 from axile.executor.models.unified_input import UnifiedStandardInput
 from axile.executor.models.unified_output import UnifiedStandardOutput
 from axile.executor.models.unified_price import UnifiedPriceData
+from axile.executor.models.value_conversion import PriceValueConversion
 from axile.executor.session_closed import COMMON_SESSION_CLOSED, SESSION_CLOSED_MESSAGE
 
 if TYPE_CHECKING:
@@ -550,7 +551,7 @@ class AbstractExecutorCapabilityMixin:
     ) -> dict[str, TargetSizingDecision]:
         """返回目标数量与换算证据；供执行规划与审计共用."""
         executor = _executor(self)
-        return executor._calculate_target_sizing_base(
+        decisions = executor._calculate_target_sizing_base(
             curr_target,
             account_assets,
             market_data,
@@ -558,6 +559,16 @@ class AbstractExecutorCapabilityMixin:
             last_target,
             forbidden_symbols,
         )
+        for symbol, decision in decisions.items():
+            if decision.status == TargetSizingStatus.SIZED:
+                decision.value_conversion = executor._get_execution_value_conversion(symbol, account_assets)
+        return decisions
+
+    def _get_execution_value_conversion(
+        self, symbol: str, account_assets: UnifiedAccountAssets
+    ) -> PriceValueConversion | None:
+        """返回规划快照的金额换算依据；默认渠道保持原有原生金额口径。"""
+        return None
 
     def _calculate_last_target_unified(self, positions: list[Position]) -> dict[str, float]:
         """
