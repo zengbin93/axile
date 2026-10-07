@@ -293,6 +293,7 @@ class UnifiedStandardInput(BaseModel):
 
         # 创建实例
         feishu_key_obj = data.get("feishu_key")
+        notification_code_obj = data.get("execution_notification_code")
         execution_timeout_obj = data.get("execution_timeout", DEFAULT_EXECUTION_TIMEOUT_SECONDS)
         extra = _collect_unified_input_extra(data)
 
@@ -307,9 +308,7 @@ class UnifiedStandardInput(BaseModel):
             forbidden_symbols=_as_str_list(data.get("forbidden_symbols", [])),
             risk_symbols=_as_str_list(data.get("risk_symbols", [])),
             feishu_key=feishu_key_obj if isinstance(feishu_key_obj, str) else None,
-            execution_notification_code=data.get("execution_notification_code")
-            if isinstance(data.get("execution_notification_code"), str)
-            else None,
+            execution_notification_code=notification_code_obj if isinstance(notification_code_obj, str) else None,
             feishu_account=_as_dict(data.get("feishu_account", {})),
             execution_timeout=as_timeout_int(execution_timeout_obj, DEFAULT_EXECUTION_TIMEOUT_SECONDS),
             extra=extra,
