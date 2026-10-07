@@ -9,6 +9,7 @@ from sqlalchemy import Column, ForeignKey, Index, Integer, Text
 from sqlalchemy.ext.asyncio import AsyncAttrs
 from sqlmodel import Field, SQLModel
 
+from axile.executor.models.value_conversion import PriceValueConversion
 from axile.server.db.models.base import now_str
 
 TargetWeightSnapshotSource = Literal["manual", "execution"]
@@ -37,6 +38,7 @@ class TargetSizingRowPublic(SQLModel):
     quantity_step: Optional[float] = None
     min_quantity: Optional[float] = None
     min_notional: Optional[float] = None
+    value_conversion: Optional[PriceValueConversion] = None
 
 
 class TargetSizingPublic(SQLModel):

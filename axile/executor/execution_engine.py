@@ -383,6 +383,11 @@ class ExecutionEngine:
         try:
             result = runner()
             result.sizing = task.sizing
+            conversion = task.sizing.value_conversion if task.sizing is not None else None
+            if conversion is not None:
+                # 前后阶段可使用不同规划快照，换算依据必须逐笔保留，不能在合并后补填。
+                for record in [*result.orders, *result.trades]:
+                    record.value_conversion = conversion.model_copy(deep=True)
             return result
         except ExecutionTerminated:
             # 协作式终止不是失败：必须穿透 symbol 级错误捕获，交给上层 lifecycle

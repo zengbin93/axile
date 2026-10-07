@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import Any
 
 import pytest
@@ -11,12 +12,13 @@ from axile.executor.abstract_executor.base import AbstractExecutor
 from axile.executor.algorithms.core.base import AlgorithmInput
 from axile.executor.ctp.ctp_execute import CtpSessionRecoveryRequired
 from axile.executor.execution_engine import ExecutionEngine, _PreparedSymbolAlgorithm
-from axile.executor.models.execution_result import ExecutionStatus
+from axile.executor.models.execution_result import AlgorithmResult, ExecutionStatus, TargetSizingDecision
 from axile.executor.models.unified_account_assets import UnifiedAccountAssets
 from axile.executor.models.unified_input import CTPAccountConfig, UnifiedStandardInput
 from axile.executor.models.unified_order import OrderDirection, OrderType, TradeRecord, UnifiedOrder
 from axile.executor.models.unified_output import UnifiedStandardOutput
 from axile.executor.models.unified_price import UnifiedPriceData
+from axile.executor.models.value_conversion import PriceValueConversion
 from axile.executor.termination import ExecutionTerminated
 
 
@@ -283,6 +285,35 @@ def _prepared_task(symbol: str = "rb2610") -> _PreparedSymbolAlgorithm:
         algorithm_name="TEST",
         algorithm_input=AlgorithmInput(symbol=symbol, target_volume=1.0, trade_rule={}),
     )
+
+
+def test_symbol_dispatch_freezes_conversion_on_each_phase_order_and_trade() -> None:
+    engine = ExecutionEngine(_LifecycleRecorderExecutor())
+    phase_results = []
+    for rate in (1.01, 1.03):
+        conversion = PriceValueConversion(price_currency="HKD", value_currency="CNY", rate=rate)
+        task = replace(
+            _prepared_task("00700.HK"), sizing=TargetSizingDecision(symbol="00700.HK", value_conversion=conversion)
+        )
+        order = UnifiedOrder(
+            order_id=str(rate),
+            symbol="00700.HK",
+            direction=OrderDirection.SELL,
+            order_type=OrderType.LIMIT,
+            volume=1,
+            price=2,
+            status="已成交",
+            filled_volume=1,
+            avg_price=2,
+        )
+        trade = TradeRecord.create(trade_id=str(rate), symbol="00700.HK", trade_volume=1, trade_price=2)
+        result = AlgorithmResult(symbol="00700.HK", algorithm="TEST", orders=[order], trades=[trade])
+        phase_results.append(engine._run_symbol_algorithm_with_error_capture(task, runner=lambda: result))
+    merged = engine._merge_symbol_algorithm_results(phase_results)[0]
+    assert [order.value_conversion.rate for order in merged.orders] == [1.01, 1.03]
+    assert [trade.value_conversion.rate for trade in merged.trades] == [1.01, 1.03]
+    assert [order.avg_price for order in merged.orders] == [2, 2]
+    assert [trade.trade_value for trade in merged.trades] == [2, 2]
 
 
 def test_symbol_error_capture_propagates_termination_instead_of_marking_failed() -> None:

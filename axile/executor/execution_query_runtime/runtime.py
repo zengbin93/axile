@@ -11,8 +11,10 @@ from __future__ import annotations
 import threading
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from math import isfinite
 from typing import Generic, TypeVar, cast
 
+from axile.executor.algorithms.utils.clock import Clock, clock_monotonic, get_default_clock
 from axile.executor.models.unified_order import TradeRecord, UnifiedOrder
 
 type SharedQueryKey = tuple[str, ...]
@@ -66,6 +68,8 @@ class ExecutionQueryRuntime:
         fetch_pending_orders_by_symbol: PendingOrdersBySymbolFetcher | None = None,
         fetch_trades_snapshot: TradesSnapshotFetcher | None = None,
         fetch_trades_by_order: TradesByOrderFetcher | None = None,
+        clock: Clock | None = None,
+        pending_orders_max_age: float = 1.0,
     ) -> None:
         """
         初始化 execution 查询运行时.
@@ -80,13 +84,22 @@ class ExecutionQueryRuntime:
             账户级成交快照抓取函数。
         fetch_trades_by_order : TradesByOrderFetcher | None, default=None
             按订单抓取成交明细的窄查询函数。
+        clock : Clock | None, default=None
+            快照有效期使用的时钟；为空时采用默认交易时钟。
+        pending_orders_max_age : float, default=1.0
+            挂单快照最多复用的秒数；到期后重新查询，0 表示仅合并在途请求。
         """
+        if not isfinite(pending_orders_max_age) or pending_orders_max_age < 0:
+            raise ValueError("pending_orders_max_age must be finite and non-negative")
+        self._clock = clock if clock is not None else get_default_clock()
+        self._pending_orders_max_age = pending_orders_max_age
         self._fetch_pending_orders_snapshot = fetch_pending_orders_snapshot
         self._fetch_pending_orders_by_symbol = fetch_pending_orders_by_symbol
         self._fetch_trades_snapshot = fetch_trades_snapshot
         self._fetch_trades_by_order = fetch_trades_by_order
         self._lock = threading.Lock()
         self._snapshot_cache: dict[SharedQueryKey, list[object]] = {}
+        self._snapshot_cached_at: dict[SharedQueryKey, float] = {}
         self._inflight_queries: dict[SharedQueryKey, _InFlightQuery[object]] = {}
         self._invalidated_order_symbols: set[str] = set()
         self._invalidated_trade_symbols: set[str] = set()
@@ -179,6 +192,7 @@ class ExecutionQueryRuntime:
             self._orders_invalidation_version += 1
             if symbol is None:
                 self._snapshot_cache.pop(("pending_orders_snapshot",), None)
+                self._snapshot_cached_at.pop(("pending_orders_snapshot",), None)
                 self._invalidated_order_symbols.clear()
                 return
 
@@ -204,6 +218,7 @@ class ExecutionQueryRuntime:
             self._trades_invalidation_version += 1
             if symbol is None:
                 self._snapshot_cache.pop(("trades_snapshot",), None)
+                self._snapshot_cached_at.pop(("trades_snapshot",), None)
                 self._invalidated_trade_symbols.clear()
                 self._invalidated_trade_orders.clear()
                 return
@@ -220,6 +235,7 @@ class ExecutionQueryRuntime:
             self._orders_invalidation_version += 1
             self._trades_invalidation_version += 1
             self._snapshot_cache.clear()
+            self._snapshot_cached_at.clear()
             self._invalidated_order_symbols.clear()
             self._invalidated_trade_symbols.clear()
             self._invalidated_trade_orders.clear()
@@ -234,6 +250,7 @@ class ExecutionQueryRuntime:
             最新订单对象。
         """
         with self._lock:
+            self._orders_invalidation_version += 1
             cached_snapshot = self._snapshot_cache.get(("pending_orders_snapshot",))
             if cached_snapshot is None:
                 return
@@ -266,6 +283,7 @@ class ExecutionQueryRuntime:
             订单标识。
         """
         with self._lock:
+            self._orders_invalidation_version += 1
             cached_snapshot = self._snapshot_cache.get(("pending_orders_snapshot",))
             if cached_snapshot is not None:
                 pending_orders = cast("list[UnifiedOrder]", cached_snapshot)
@@ -305,6 +323,7 @@ class ExecutionQueryRuntime:
         *,
         cache_result: bool,
         force_refresh: bool = False,
+        max_age: float | None = None,
     ) -> list[_QueryResultT]:
         """
         以 singleflight 方式执行共享查询.
@@ -319,6 +338,8 @@ class ExecutionQueryRuntime:
             是否将结果写入快照缓存。
         force_refresh : bool, default=False
             是否绕过已有缓存强制刷新。
+        max_age : float | None, default=None
+            快照最多复用的秒数；为空时仅依赖显式失效。
 
         Returns
         -------
@@ -333,8 +354,13 @@ class ExecutionQueryRuntime:
         leader_query: _InFlightQuery[object] | None = None
 
         with self._lock:
-            if cache_result and not force_refresh and key in self._snapshot_cache:
+            started_at = clock_monotonic(self._clock)
+            cache_age = started_at - self._snapshot_cached_at.get(key, float("-inf"))
+            cache_fresh = max_age is None or 0 <= cache_age < max_age
+            if cache_result and not force_refresh and cache_fresh and key in self._snapshot_cache:
                 return cast("list[_QueryResultT]", list(self._snapshot_cache[key]))
+
+            orders_version = self._orders_invalidation_version
 
             inflight_query = self._inflight_queries.get(key)
             if inflight_query is None:
@@ -358,8 +384,13 @@ class ExecutionQueryRuntime:
             raise
 
         with self._lock:
-            if cache_result:
+            # 查询期间可能已收到更新的订单回报或失效信号，旧响应不能覆盖它们。
+            orders_unchanged = key != ("pending_orders_snapshot",) or (
+                self._orders_invalidation_version == orders_version
+            )
+            if cache_result and orders_unchanged:
                 self._snapshot_cache[key] = list(result)
+                self._snapshot_cached_at[key] = started_at
             self._inflight_queries.pop(key, None)
             leader_query.result = cast("list[object]", list(result))
             leader_query.event.set()
@@ -399,6 +430,7 @@ class ExecutionQueryRuntime:
             fetch_pending_orders_snapshot,
             cache_result=True,
             force_refresh=refresh_required,
+            max_age=self._pending_orders_max_age,
         )
 
         if refresh_required:

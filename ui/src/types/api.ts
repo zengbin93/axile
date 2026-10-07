@@ -466,6 +466,14 @@ export type LatestWeights = Record<string, number>
 
 export type TargetSizingAvailability = 'available' | 'pending_execution' | 'legacy' | 'unavailable'
 
+/** 规划时冻结的原生价格到审计金额的换算依据。 */
+export interface PriceValueConversion {
+  price_currency: string
+  value_currency: string
+  rate: number
+  reference: Record<string, unknown>
+}
+
 /** 单品种从策略目标到可执行数量的完整换算证据。 */
 export interface TargetSizingRow {
   symbol: string
@@ -487,6 +495,7 @@ export interface TargetSizingRow {
   quantity_step: number | null
   min_quantity: number | null
   min_notional: number | null
+  value_conversion?: PriceValueConversion | null
 }
 
 export interface TargetSizing {
@@ -708,6 +717,9 @@ export interface ExecTrade {
   price: number | null
   volume: number | null
   value: number | null
+  native_value?: number | null
+  price_currency?: string | null
+  value_currency?: string | null
   time: string | null
   /** 手续费（取自成交 extra.commission）。 */
   fee: number
@@ -721,6 +733,7 @@ export interface ExecOrder {
   order_type: string
   price: number | null
   avg_price: number | null
+  value_conversion?: PriceValueConversion | null
   volume: number | null
   filled_volume: number | null
   status: string
@@ -755,9 +768,12 @@ export interface SymbolReconciliation {
   target: number | null
   /** 本次带号成交量（买正卖负）。 */
   filled: number
-  /** 本次带号成交金额（买正卖负）。 */
-  filled_value: number
-  /** 本次成交加权均价；无成交时为 `null`。 */
+  /** 本次账户币种带号成交金额（买正卖负）；换算不可读时为空。 */
+  filled_value: number | null
+  value_currency?: string | null
+  filled_native_value?: number
+  native_currency?: string | null
+  /** 本次原生币种成交加权均价；无成交时为 `null`。 */
   avg_price: number | null
   /** 执行前带号持仓。 */
   before: number | null

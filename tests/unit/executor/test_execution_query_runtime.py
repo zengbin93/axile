@@ -4,9 +4,114 @@ from __future__ import annotations
 
 import threading
 
+import pytest
+
 from axile.executor.constants.order_status import OrderStatus
 from axile.executor.execution_query_runtime import ExecutionQueryRuntime
 from axile.executor.models.unified_order import OrderDirection, OrderType, TradeRecord, UnifiedOrder
+
+
+class _Clock:
+    def __init__(self) -> None:
+        self.now = 0.0
+
+    def time(self) -> float:
+        return self.now
+
+    def sleep(self, seconds: float) -> None:
+        self.now += seconds
+
+    def event_wait(self, event: threading.Event, timeout: float) -> bool:
+        return event.wait(timeout)
+
+
+def test_pending_snapshot_expires_without_callbacks_and_remains_shared() -> None:
+    """REST 无回报时仍能读到已成交订单消失，同时同轮不同品种共享快照。"""
+    clock = _Clock()
+    open_orders = [_build_pending_order("rb2610", "rb-order")]
+    calls: list[int] = []
+
+    def fetch() -> list[UnifiedOrder]:
+        calls.append(1)
+        return list(open_orders)
+
+    runtime = ExecutionQueryRuntime(fetch_pending_orders_snapshot=fetch, clock=clock)
+    assert len(runtime.get_pending_orders_for_symbol("rb2610")) == 1
+    open_orders.clear()
+    clock.sleep(0.9)
+    assert len(runtime.get_pending_orders_for_symbol("rb2610")) == 1
+    clock.sleep(0.1)
+    assert runtime.get_pending_orders_for_symbol("rb2610") == []
+    assert runtime.get_pending_orders_for_symbol("ag2612") == []
+    assert calls == [1, 1]
+
+
+def test_expired_pending_snapshot_singleflights_concurrent_symbols() -> None:
+    clock = _Clock()
+    started = threading.Event()
+    release = threading.Event()
+    calls: list[int] = []
+
+    def fetch() -> list[UnifiedOrder]:
+        calls.append(1)
+        if len(calls) == 2:
+            started.set()
+            assert release.wait(1)
+        return [_build_pending_order("rb2610", "rb-order")]
+
+    runtime = ExecutionQueryRuntime(fetch_pending_orders_snapshot=fetch, clock=clock)
+    runtime.get_pending_orders_for_symbol("rb2610")
+    clock.sleep(1)
+    results: dict[str, list[UnifiedOrder]] = {}
+    first = threading.Thread(target=lambda: results.update(rb=runtime.get_pending_orders_for_symbol("rb2610")))
+    second = threading.Thread(target=lambda: results.update(ag=runtime.get_pending_orders_for_symbol("ag2612")))
+    first.start()
+    assert started.wait(1)
+    second.start()
+    release.set()
+    first.join(1)
+    second.join(1)
+    assert not first.is_alive() and not second.is_alive()
+    assert len(results["rb"]) == 1 and results["ag"] == []
+    assert calls == [1, 1]
+
+
+@pytest.mark.parametrize("update", ["patch", "invalidate"])
+def test_late_pending_response_cannot_overwrite_callback_or_invalidation(update: str) -> None:
+    clock = _Clock()
+    pending = _build_pending_order("rb2610", "rb-order")
+    calls: list[int] = []
+    runtime: ExecutionQueryRuntime
+
+    def fetch() -> list[UnifiedOrder]:
+        calls.append(1)
+        if len(calls) == 2:
+            if update == "patch":
+                runtime.apply_pending_order_update(pending.model_copy(update={"status": OrderStatus.FILLED}))
+            else:
+                runtime.invalidate_orders()
+            return [pending]
+        return [pending] if len(calls) == 1 else []
+
+    runtime = ExecutionQueryRuntime(fetch_pending_orders_snapshot=fetch, clock=clock)
+    runtime.get_pending_orders_for_symbol("rb2610")
+    clock.sleep(1)
+    runtime.get_pending_orders_for_symbol("rb2610")
+    assert runtime.get_pending_orders_for_symbol("rb2610") == []
+    assert calls == [1, 1, 1]
+
+
+def test_narrow_pending_query_is_fresh_without_clock_advance() -> None:
+    calls: list[str] = []
+
+    def fetch(symbol: str) -> list[UnifiedOrder]:
+        calls.append(symbol)
+        return [_build_pending_order(symbol, "rb-order")] if len(calls) == 1 else []
+
+    runtime = ExecutionQueryRuntime(fetch_pending_orders_by_symbol=fetch, clock=_Clock())
+    assert len(runtime.get_pending_orders_for_symbol("rb2610")) == 1
+    assert runtime.get_pending_orders_for_symbol("rb2610") == []
+    assert calls == ["rb2610", "rb2610"]
 
 
 def _build_pending_order(symbol: str, order_id: str) -> UnifiedOrder:

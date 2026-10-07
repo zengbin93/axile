@@ -44,7 +44,9 @@ export interface SymbolChain {
   /** 带号成交量（买正卖负）。 */
   filled: number
   /** 带号成交金额。 */
-  filledValue: number
+  filledValue: number | null
+  valueCurrency?: string | null
+  priceCurrency?: string | null
   avgPrice: number | null
   filledRatio: number | null
   /** 订单终态文案（已成交/已撤销/…）。 */
@@ -369,7 +371,9 @@ function buildSymbolChain(
     ordersCount: decision?.ordersCount ?? null,
     side: order?.side ?? 'none',
     filled: asNum(recon.filled) ?? 0,
-    filledValue: asNum(recon.filled_value) ?? 0,
+    filledValue: asNum(recon.filled_value),
+    valueCurrency: asStr(recon.value_currency) || null,
+    priceCurrency: asStr(recon.native_currency) || null,
     avgPrice: asNum(recon.avg_price),
     filledRatio: order?.filledRatio ?? null,
     terminalStatus,

@@ -304,6 +304,7 @@ function SymbolChainRow({
   const showPnlDelta = s.filled !== 0 && s.pnlBefore != null && s.pnlAfter != null
   const tca = s.tca
   const hasQuality = tca != null && (tca.n_trades > 0 || tca.slippage_bps != null)
+  const priceUnits = s.priceCurrency ? { ...units, price_label: s.priceCurrency } : units
 
   return (
     <div className={`border-t border-line py-3 first:border-t-0 ${s.broken ? 'bg-warn-soft/50 -mx-6 px-6' : ''}`}>
@@ -334,9 +335,9 @@ function SymbolChainRow({
         <div className="num mt-0.5 text-[13.5px] text-ink-3">
           {s.algorithm && <span>{s.algorithm} · </span>}
           {sideText} {fmtQty(s.filled, units)}
-          {s.avgPrice != null && <span> @{fmtPrice(s.avgPrice, units, currency)}</span>}
+          {s.avgPrice != null && <span> @{fmtPrice(s.avgPrice, priceUnits, currency)}</span>}
           <span className="text-ink-2">
-            {' '}（≈{withCurrency(fmtMoney(s.filledValue), units.notional_label || currency)}）
+            {' '}（≈{s.filledValue == null ? '—' : withCurrency(fmtMoney(s.filledValue), s.valueCurrency || units.notional_label || currency)}）
           </span>
           {s.terminalStatus && <span className={s.broken ? 'text-warn' : ''}> · {s.terminalStatus}</span>}
           {s.legSeconds != null && <span> · 用时 {Math.round(s.legSeconds)}s</span>}
@@ -378,7 +379,7 @@ function SymbolChainRow({
       )}
 
       {/* 下钻：因果动作流（主）→ 订单成交（取证） */}
-      <SymbolActionStream lines={lines} orders={s.orders} currency={currency} units={units} />
+      <SymbolActionStream lines={lines} orders={s.orders} currency={currency} units={priceUnits} />
     </div>
   )
 }
