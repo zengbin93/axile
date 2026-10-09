@@ -7,7 +7,7 @@
 
 import { useEffect, useState } from 'react'
 import { Link } from '@/components/ui/nav'
-import { Select } from '@/components/ui/Select'
+import { SupplementControls } from '@/features/setup/SupplementControls'
 import { ErrorNotice } from '@/components/ui/ErrorNotice'
 import { MOTION_LAYOUT, useRemountFade } from '@/lib/viewTransition'
 import {
@@ -293,23 +293,12 @@ function TimerQuickModalReady({
                         </div>
                       )}
 
-                      <div className="flex flex-wrap items-center gap-2 text-sm">
-                        <span className="text-ink-3">到点后补发</span>
-                        <Select<number>
-                          ariaLabel="补发次数"
-                          value={state.supN}
-                          onChange={(supN) => patch({ supN })}
-                          options={[0, 1, 2, 3, 4].map((n) => ({ value: n, label: String(n) }))}
-                        />
-                        <span className="text-ink-3">次 · 每隔</span>
-                        <Select<number>
-                          ariaLabel="补发间隔分钟"
-                          value={state.supM}
-                          onChange={(supM) => patch({ supM })}
-                          options={[1, 2, 3, 5].map((n) => ({ value: n, label: String(n) }))}
-                        />
-                        <span className="text-ink-3">分</span>
-                      </div>
+                      <SupplementControls
+                        supN={state.supN}
+                        supM={state.supM}
+                        onN={(supN) => patch({ supN })}
+                        onM={(supM) => patch({ supM })}
+                      />
 
                       <div>
                         <div className="mb-1 text-sm font-[640]">

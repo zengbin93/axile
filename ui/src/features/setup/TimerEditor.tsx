@@ -10,7 +10,7 @@
 
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { Segmented } from '@/components/ui/Segmented'
-import { Select } from '@/components/ui/Select'
+import { SupplementControls } from '@/features/setup/SupplementControls'
 import { ScheduleTimeRow } from '@/components/ui/ScheduleTimeRow'
 import { MOTION_LAYOUT, useRemountFade } from '@/lib/viewTransition'
 import { executionReasonText } from '@/features/account/executionReason'
@@ -71,39 +71,6 @@ function Switch({ on, ariaLabel, onClick }: { on: boolean; ariaLabel: string; on
         }`}
       />
     </button>
-  )
-}
-
-/** 补发行（快捷 / 高级共用）。 */
-function SupRow({
-  supN,
-  supM,
-  onN,
-  onM,
-}: {
-  supN: number
-  supM: number
-  onN: (n: number) => void
-  onM: (m: number) => void
-}) {
-  return (
-    <div className="flex flex-wrap items-center gap-2 text-sm">
-      <span className="text-ink-3">{supN === 0 ? '未设置补发' : '到点后补发'}</span>
-      <Select<number>
-        ariaLabel="补发次数"
-        value={supN}
-        onChange={onN}
-        options={[0, 1, 2, 3, 4].map((n) => ({ value: n, label: String(n) }))}
-      />
-      <span className="text-ink-3">次 · 每隔</span>
-      <Select<number>
-        ariaLabel="补发间隔分钟"
-        value={supM}
-        onChange={onM}
-        options={[1, 2, 3, 5].map((n) => ({ value: n, label: String(n) }))}
-      />
-      <span className="text-ink-3">分</span>
-    </div>
   )
 }
 
@@ -520,7 +487,7 @@ export function TimerEditor({ tradeChannel, scheduleKind, nightSchedule, value, 
         }`}
       >
         <div className="min-h-0 overflow-hidden">
-          <SupRow
+          <SupplementControls
             supN={v.supN}
             supM={v.supM}
             onN={(supN) => patch({ supN })}
