@@ -109,6 +109,9 @@ class SchedulePreviewRequest(BaseModel):
     trade_channel: TradeChannel
     cron_expr: str
     supplement: SupplementSettings | None = None
+    scheduled_ats: list[AwareDatetime] | None = Field(
+        default=None, min_length=1, max_length=100, description="仅重算指定基础触发的补发摘要，不推进预览游标"
+    )
     after: AwareDatetime | None = None
     limit: int = Field(default=5, ge=1, le=100)
 
@@ -204,6 +207,29 @@ def _calendar_summary(channel: TradeChannel, current: datetime) -> SchedulePrevi
     )
 
 
+def _selected_base_preview(payload: SchedulePreviewRequest, base: datetime) -> SchedulePreviewItem:
+    """只重算已有基础触发的补发摘要，保持原时间点及日历动作。"""
+    local_time = base.astimezone(SCHEDULER_TIMEZONE)
+    decision = evaluate_channel_calendar_moment(payload.trade_channel, local_time)
+    skipped = decision.status in {CalendarDecisionStatus.AVAILABLE_CLOSED, CalendarDecisionStatus.UNAVAILABLE}
+    points = [local_time]
+    if payload.supplement is not None and not skipped:
+        points, _ = plan_supplements(payload.trade_channel, payload.cron_expr, payload.supplement, local_time)
+    return SchedulePreviewItem(
+        scheduled_at=local_time,
+        base_scheduled_at=local_time,
+        effective_count=len(points) - 1,
+        is_last=len(points) == 1,
+        calendar_day=decision.day,
+        calendar_status=decision.status,
+        action="skip" if skipped else "execute",
+        unavailable_reason=decision.unavailable_reason,
+        calendar_id=decision.calendar_id,
+        label=decision.label,
+        reason_code=decision.reason_code,
+    )
+
+
 @router.post("/schedule-preview", response_model=SchedulePreviewResponse)
 async def schedule_preview(payload: SchedulePreviewRequest) -> SchedulePreviewResponse:
     """按时间游标只读预览未来 Cron 触发点及其交易日历动作。"""
@@ -220,6 +246,14 @@ async def schedule_preview(payload: SchedulePreviewRequest) -> SchedulePreviewRe
         triggers = parse_cron_expr(payload.cron_expr)
     except ValueError as exc:
         raise _field_error("cron_expr", str(exc)) from exc
+
+    if payload.scheduled_ats is not None:
+        bases = sorted({value.astimezone(SCHEDULER_TIMEZONE) for value in payload.scheduled_ats})
+        return SchedulePreviewResponse(
+            evaluated_at=evaluated_at,
+            calendar=calendar,
+            items=[_selected_base_preview(payload, base) for base in bases],
+        )
 
     start = payload.after.astimezone(SCHEDULER_TIMEZONE) if payload.after is not None else evaluated_at
     scheduled = _next_schedule_times(

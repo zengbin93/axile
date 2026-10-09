@@ -190,13 +190,14 @@ export function getNextRun(id: number, signal?: AbortSignal): Promise<AccountNex
 export function previewSchedule(
   tradeChannel: string,
   cronExpr: string,
-  params: { after?: string | null; limit?: number; supplement?: { count: number; interval_minutes: number } | null } = {},
+  params: { after?: string | null; limit?: number; scheduled_ats?: string[]; supplement?: { count: number; interval_minutes: number } | null } = {},
   signal?: AbortSignal,
 ): Promise<SchedulePreview> {
   return apiSend<SchedulePreview>('POST', '/account/schedule-preview', {
     trade_channel: tradeChannel,
     cron_expr: cronExpr,
     supplement: params.supplement ?? null,
+    ...(params.scheduled_ats ? { scheduled_ats: params.scheduled_ats } : {}),
     after: params.after ?? null,
     limit: params.limit ?? 5,
   }, signal)

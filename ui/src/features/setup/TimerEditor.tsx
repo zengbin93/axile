@@ -11,6 +11,7 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { Segmented } from '@/components/ui/Segmented'
 import { SupplementControls } from '@/features/setup/SupplementControls'
+import { SupplementPreviewSummary, type SupplementPreviewValue } from '@/features/setup/SupplementPreviewSummary'
 import { ScheduleTimeRow } from '@/components/ui/ScheduleTimeRow'
 import { MOTION_LAYOUT, useRemountFade } from '@/lib/viewTransition'
 import { executionReasonText } from '@/features/account/executionReason'
@@ -35,7 +36,6 @@ import {
   PREVIEW_PREFETCH_ROWS,
   PREVIEW_ROW_PITCH,
   previewLimitForHeight,
-  previewRequestLimit,
   schedulePreviewItemPresentation,
   schedulePreviewNextCursor,
   schedulePreviewRowKey,
@@ -128,6 +128,10 @@ export function TimerEditor({ tradeChannel, scheduleKind, nightSchedule, value, 
   const [previewLoadingMore, setPreviewLoadingMore] = useState(false)
   const [previewError, setPreviewError] = useState<string | null>(null)
   const [previewMoreError, setPreviewMoreError] = useState<string | null>(null)
+  const [supplementSummaries, setSupplementSummaries] = useState<Map<number, SupplementPreviewValue>>(new Map())
+  const [supplementPreviewError, setSupplementPreviewError] = useState(false)
+  const [supplementPreviewRetry, setSupplementPreviewRetry] = useState(0)
+  const supplementCache = useRef({ key: '', values: new Map<number, SupplementPreviewValue>() })
   const [previewWide, setPreviewWide] = useState(false)
   const [previewLimit, setPreviewLimit] = useState(PREVIEW_MIN_ITEMS)
   const [previewCascade, setPreviewCascade] = useState({ generation: 0, active: false })
@@ -169,7 +173,7 @@ export function TimerEditor({ tradeChannel, scheduleKind, nightSchedule, value, 
   const rawErr = v.timerTab === 'custom' && !customEmpty ? cronError(v.rawCron) : null
   const cronList = v.autoOn ? resolveCronList(scheduleKind, { ...v, supN: 0 }, nightSchedule) : []
   const cronExpr = rawErr ? '' : cronToExpr(cronList)
-  const previewKey = tradeChannel && cronExpr ? `${tradeChannel}\u0000${cronExpr}\u0000${v.supN}:${v.supM}` : ''
+  const previewKey = tradeChannel && cronExpr ? `${tradeChannel}\u0000${cronExpr}` : ''
   // 是否会发起预览请求（与下方 effect 的提前返回条件一致）：首帧据此直接上骨架，
   // 避免「占位文案 → 骨架 → 列表」三段跳闪。
   const expectPreview = Boolean(tradeChannel) && v.autoOn && !rawErr && Boolean(cronExpr)
@@ -235,6 +239,9 @@ export function TimerEditor({ tradeChannel, scheduleKind, nightSchedule, value, 
     previewAppendController.current = null
     setPreviewLoadingMore(false)
     setPreviewMoreError(null)
+    setSupplementSummaries(new Map())
+    supplementCache.current = { key: '', values: new Map() }
+    setSupplementPreviewError(false)
 
     if (!tradeChannel || !v.autoOn || rawErr || !cronExpr || !previewKey) {
       previewResultKey.current = null
@@ -253,8 +260,8 @@ export function TimerEditor({ tradeChannel, scheduleKind, nightSchedule, value, 
 
     const controller = new AbortController()
     const timer = window.setTimeout(() => {
-      const limit = previewRequestLimit(layout === 'page' ? previewLimitRef.current : PREVIEW_MIN_ITEMS, v.supN)
-      void previewSchedule(tradeChannel, cronExpr, { limit, supplement: v.supN > 0 ? { count: v.supN, interval_minutes: v.supM } : null }, controller.signal)
+      const limit = layout === 'page' ? previewLimitRef.current : PREVIEW_MIN_ITEMS
+      void previewSchedule(tradeChannel, cronExpr, { limit }, controller.signal)
         .then((next) => {
           if (requestId !== previewRequestId.current) return
           previewResultKey.current = previewKey
@@ -274,7 +281,47 @@ export function TimerEditor({ tradeChannel, scheduleKind, nightSchedule, value, 
       window.clearTimeout(timer)
       controller.abort()
     }
-  }, [tradeChannel, v.autoOn, v.supN, v.supM, rawErr, cronExpr, layout, previewKey])
+  }, [tradeChannel, v.autoOn, rawErr, cronExpr, layout, previewKey])
+
+  // 基础时间线独立于补发配置。仅为已显示的有效基础触发补算摘要，保留旧值直至结果就绪。
+  useEffect(() => {
+    if (!schedulePreview || previewResultKey.current !== previewKey || !expectPreview) return
+    const key = `${previewKey}\u0000${v.supN}:${v.supM}`
+    if (supplementCache.current.key !== key) supplementCache.current = { key, values: new Map() }
+    const cache = supplementCache.current
+    const bases = schedulePreviewRows(schedulePreview.items).filter((item) => item.action === 'execute' && item.calendar_status !== 'unavailable')
+    setSupplementPreviewError(false)
+    if (v.supN === 0) {
+      const values = new Map(bases.map((item) => [Date.parse(item.scheduled_at), { enabled: false, count: 0, interval: v.supM }]))
+      cache.values = values
+      setSupplementSummaries(values)
+      return
+    }
+    const missing = bases.filter((item) => !cache.values.has(Date.parse(item.scheduled_at)))
+    if (!missing.length) return
+    const controller = new AbortController()
+    const timer = window.setTimeout(() => {
+      void (async () => {
+        try {
+          for (let start = 0; start < missing.length; start += 100) {
+            const response = await previewSchedule(tradeChannel, cronExpr, {
+              scheduled_ats: missing.slice(start, start + 100).map((item) => item.scheduled_at),
+              supplement: { count: v.supN, interval_minutes: v.supM },
+            }, controller.signal)
+            if (controller.signal.aborted || supplementCache.current !== cache) return
+            const updates = response.items.map((item) => [Date.parse(item.scheduled_at), {
+              enabled: true, count: item.effective_count ?? 0, interval: v.supM,
+            }] as const)
+            for (const [time, summary] of updates) cache.values.set(time, summary)
+            setSupplementSummaries((current) => new Map([...current, ...updates]))
+          }
+        } catch {
+          if (!controller.signal.aborted && supplementCache.current === cache) setSupplementPreviewError(true)
+        }
+      })()
+    }, 250)
+    return () => { window.clearTimeout(timer); controller.abort() }
+  }, [schedulePreview, previewKey, expectPreview, tradeChannel, cronExpr, v.supN, v.supM, supplementPreviewRetry])
 
   const loadMore = useCallback(() => {
     const cursor = previewCursor
@@ -299,7 +346,7 @@ export function TimerEditor({ tradeChannel, scheduleKind, nightSchedule, value, 
     void previewSchedule(
       tradeChannel,
       cronExpr,
-      { after: cursor, limit: previewRequestLimit(previewTargetRows, v.supN), supplement: v.supN > 0 ? { count: v.supN, interval_minutes: v.supM } : null },
+      { after: cursor, limit: previewTargetRows },
       controller.signal,
     )
       .then((next) => {
@@ -319,8 +366,6 @@ export function TimerEditor({ tradeChannel, scheduleKind, nightSchedule, value, 
   }, [
     tradeChannel,
     v.autoOn,
-    v.supN,
-    v.supM,
     rawErr,
     cronExpr,
     previewKey,
@@ -533,7 +578,9 @@ export function TimerEditor({ tradeChannel, scheduleKind, nightSchedule, value, 
             key={schedulePreviewRowKey(item)}
             scheduledAt={item.scheduled_at}
             dateOnly={isClosedPreviewDay(item)}
-            trailing={presentation.text}
+            trailing={item.action === 'execute' && item.calendar_status !== 'unavailable'
+              ? <SupplementPreviewSummary value={supplementSummaries.get(Date.parse(item.scheduled_at))} fallback={presentation.text} />
+              : presentation.text}
             now={Date.parse(schedulePreview.evaluated_at)}
             tone={presentation.tone}
             className={cascadeRows ? 'schedule-preview-row-in' : ''}
@@ -543,6 +590,12 @@ export function TimerEditor({ tradeChannel, scheduleKind, nightSchedule, value, 
           />
         )
       })}
+      {supplementPreviewError && (
+        <div className="flex items-center justify-between gap-2 border-l-2 border-warn px-2 text-[13px] text-warn">
+          <span>补发预览未更新</span>
+          <button type="button" className="shrink-0 font-semibold hover:underline" onClick={() => setSupplementPreviewRetry((value) => value + 1)}>重试</button>
+        </div>
+      )}
       {schedulePreview.has_more && ((layout === 'page' && previewWide) || previewRows.length < previewTargetRows) && (
         <div ref={previewSentinelRef} className="pt-1">
           {previewLoadingMore ? (

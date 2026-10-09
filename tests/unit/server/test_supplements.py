@@ -315,6 +315,31 @@ def test_terminate_between_executions_uses_existing_route(monkeypatch):
     asyncio.run(run())
 
 
+@pytest.mark.parametrize(("interval", "expected_count"), [(1, 2), (8, 1)])
+def test_preview_recalculates_selected_bases_without_moving_timeline(monkeypatch, interval, expected_count):
+    import axile.server.supplement_plan as planner
+    from axile.server.api.routes import account_schedule
+
+    monkeypatch.setattr(account_schedule, "evaluate_channel_calendar_moment", open_moment)
+    monkeypatch.setattr(planner, "evaluate_channel_calendar_moment", open_moment)
+    monkeypatch.setattr(planner, "session_end", lambda *_args: None)
+    monkeypatch.setattr(account_schedule, "clock_now", lambda **_kwargs: BASE + timedelta(days=1))
+    bases = [BASE, BASE + timedelta(minutes=15)]
+    payload = account_schedule.SchedulePreviewRequest(
+        trade_channel="ctp",
+        cron_expr="*/15 * * * *",
+        supplement=SupplementSettings(count=2, interval_minutes=interval),
+        scheduled_ats=bases,
+        limit=1,
+    )
+    response = asyncio.run(account_schedule.schedule_preview(payload))
+    assert [item.scheduled_at for item in response.items] == bases
+    assert [item.base_scheduled_at for item in response.items] == bases
+    assert all(item.index == 0 and item.effective_count == expected_count for item in response.items)
+    assert response.next_cursor is None
+    assert not response.has_more
+
+
 def test_preview_paginates_supplements_from_same_base(monkeypatch):
     import axile.server.supplement_plan as planner
     from axile.server.api.routes import account_schedule
