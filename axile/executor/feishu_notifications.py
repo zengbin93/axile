@@ -339,6 +339,8 @@ def build_execution_notification_context(
         if key not in {"positions", "trades"}:
             context.pop(key, None)
     context["default_feishu_variables"] = legacy
+    context["event_type"] = "execution.finished"
+    context["is_test"] = is_test
     execution = context.get("execution")
     if isinstance(execution, dict):
         execution["is_test"] = is_test

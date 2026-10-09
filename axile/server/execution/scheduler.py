@@ -20,9 +20,11 @@ from axile.server.trading_calendar import (
 )
 
 
-async def execute_scheduled_rebalance(account_id: int) -> None:
+async def execute_scheduled_rebalance(account_id: int, scheduled_at: str | None = None) -> None:
     """在进入执行链路前按北京时间和渠道日历判断 Cron 触发。"""
-    triggered_at = clock_now(tz=SCHEDULER_TIMEZONE)
+    from datetime import datetime
+
+    triggered_at = datetime.fromisoformat(scheduled_at) if scheduled_at else clock_now(tz=SCHEDULER_TIMEZONE)
     async with SessionLocal() as session:
         account = await session.get(Account, account_id)
         if account is None or not account.is_started or is_blank_cron_expr(account.cron_expr):
@@ -73,6 +75,12 @@ async def execute_scheduled_rebalance(account_id: int) -> None:
         account_logger.info("排程跳过", reason_code=reason_code)
         return
 
+    if getattr(account, "supplement", None) is not None:
+        from axile.server.execution.supplements import create_group
+
+        await create_group(account_id, triggered_at)
+        return
+
     from axile.domain.execution import ExecutionKind
     from axile.server.execution.intents import submit_intent
 
@@ -101,6 +109,10 @@ async def execute_scheduled_rebalance(account_id: int) -> None:
             account_logger.exception("BUSY 跳过记录写入失败")
         account_logger.info("排程因已有执行在途跳过")
         return
+
+
+async def _scheduled_signal(account_id: int) -> None:
+    """补发账户的 APScheduler 唤醒信号；计划时间由提交事件提供。"""
 
 
 async def create_job(
@@ -155,10 +167,12 @@ async def create_job(
                 return
 
     try:
+        if getattr(account, "supplement", None):
+            _install_supplement_listener(sched)
         trigger = combine_cron_triggers(triggers)
         next_run_time = trigger.get_next_fire_time(None, clock_now(tz=SCHEDULER_TIMEZONE))  # type: ignore[no-untyped-call]
         sched.add_job(  # type: ignore[no-untyped-call]
-            func=execute_scheduled_rebalance,
+            func=_scheduled_signal if getattr(account, "supplement", None) else execute_scheduled_rebalance,
             args=[account.id],
             trigger=trigger,
             id=str(account.id),
@@ -205,3 +219,25 @@ def delete_job(
     if job is not None:
         job.remove()  # type: ignore[no-untyped-call]
         logger.bind(**execution_log_context(account_id=account_id)).info("定时任务删除成功")
+
+
+def _install_supplement_listener(sched: Scheduler) -> None:
+    """APScheduler 提交事件携带真实计划时间，不用回调墙钟推导基础触发。"""
+    import asyncio
+
+    from apscheduler.events import EVENT_JOB_SUBMITTED
+
+    if getattr(sched, "_supplement_listener_installed", False):
+        return
+
+    def submitted(event) -> None:
+        job = sched.get_job(event.job_id)
+        if job is None or job.func != _scheduled_signal:
+            return
+        now = clock_now(tz=SCHEDULER_TIMEZONE)
+        for planned in event.scheduled_run_times:
+            if (now - planned).total_seconds() < 1:
+                asyncio.create_task(execute_scheduled_rebalance(int(event.job_id), planned.isoformat()))
+
+    sched.add_listener(submitted, EVENT_JOB_SUBMITTED)
+    sched._supplement_listener_installed = True

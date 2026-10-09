@@ -301,6 +301,7 @@ def test_notification_execution_fields_are_checked_by_ty(client, wrong_type):
     code = (
         "from axile.common.notification_context import AccountNotificationContext\n"
         "async def notify(context: AccountNotificationContext) -> None:\n"
+        '    if context["execution"] is None:\n        return\n'
         '    kind: str | None = context["execution"]["kind"]\n'
         '    trigger: str | None = context["execution"]["trigger_source"]\n'
         '    notified: str = context["execution"]["notified_at"]\n'

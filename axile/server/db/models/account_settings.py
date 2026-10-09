@@ -52,11 +52,19 @@ class ExecutionSettings(SettingsModel):
     _leverage = field_validator("long_leverage", "short_leverage")(_validate_leverage)
 
 
+class SupplementSettings(SettingsModel):
+    """基础触发后的独立补发配置。"""
+
+    count: int = Field(ge=1, le=10)
+    interval_minutes: int = Field(ge=1, le=60)
+
+
 class ScheduleSettings(SettingsModel):
     """账户期望的调度配置，不表示当前执行状态。"""
 
     is_started: bool = False
     cron_expr: str = ""
+    supplement: SupplementSettings | None = None
 
     _cron = field_validator("cron_expr")(_validate_cron_expr)
 

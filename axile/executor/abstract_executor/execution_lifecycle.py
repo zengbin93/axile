@@ -15,7 +15,11 @@ from axile.executor.abstract_executor.execution_runtime_facade import (
 from axile.executor.abstract_executor.execution_runtime_host import _executor
 from axile.executor.execution_engine import ExecutionEngine
 from axile.executor.execution_query_runtime import ExecutionQueryRuntime
-from axile.executor.feishu_notifications import FeishuNotificationSource, enqueue_execute_results_to_feishu
+from axile.executor.feishu_notifications import (
+    FeishuNotificationSource,
+    build_execution_notification_context,
+    enqueue_execute_results_to_feishu,
+)
 from axile.executor.models.unified_input import UnifiedStandardInput
 from axile.executor.termination import ExecutionTerminated
 
@@ -100,7 +104,14 @@ class AbstractExecutorExecutionLifecycleMixin(AbstractExecutorExecutionRuntimeFa
 
             # 通知是尾部副作用，不影响主执行结果的返回；投递到有界后台队列，
             # 统一经有界后台队列发送，隔离飞书网络延迟且避免线程随执行次数增长。
-            if standard_input.execution_notification_code:
+            if standard_input.extra.get("server_notification"):
+                try:
+                    output.extra["server_notification_context"] = build_execution_notification_context(
+                        cast("FeishuNotificationSource", executor), output, notification_snapshot
+                    )
+                except Exception as exc:
+                    executor.logger.error(f"保存服务端通知快照失败: {exc}")
+            elif standard_input.execution_notification_code:
                 executor.logger.info("异步处理执行通知")
                 enqueue_execute_results_to_feishu(
                     cast("FeishuNotificationSource", executor),

@@ -175,6 +175,8 @@ export interface Account {
   connection_values?: Record<string, unknown>
   is_started: boolean
   cron_expr: string
+  supplement?: { count: number; interval_minutes: number } | null
+  has_pending_supplement?: boolean
   remark: string | null
   brokerage: string
   weight_precision: number
@@ -191,6 +193,7 @@ export interface Account {
   notification_state: {
     last_success_at: string | null
     execution_id: string | null
+    last_attempt_event_type?: string | null
     last_attempt_at?: string | null
     last_attempt_execution_id?: string | null
     last_attempt_ok?: boolean | null
@@ -663,8 +666,8 @@ export interface ExecutionStatus {
 export interface ExecutionTerminate {
   message: string
   account_id: number
-  execution_id: string
-  status: ExecutionTaskStatus
+  execution_id: string | null
+  status: ExecutionTaskStatus | null
 }
 
 /** 执行事件，对应 `ExecutionEventPublic`（保留常用字段，其余容错）。 */

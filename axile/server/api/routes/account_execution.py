@@ -499,11 +499,28 @@ async def terminate_account_execution(
     response: Response,
 ) -> ExecutionTerminateResponse:
     """终止账户当前正在运行的执行任务."""
+    from axile.server.execution.supplements import account_lock
+
+    async with account_lock(account_id):
+        return await _terminate_account_execution(session, account_id, payload, response)
+
+
+async def _terminate_account_execution(
+    session: SessionDep,
+    account_id: int,
+    payload: ExecutionTerminateRequest,
+    response: Response,
+) -> ExecutionTerminateResponse:
+    """终止账户当前正在运行的执行任务."""
     await _get_account_or_404(session, account_id)
 
     running_execution_id = get_running_execution_id(account_id) or get_queued_execution_id(account_id)
     current_status = None if running_execution_id is None else await get_execution_status(running_execution_id)
     current_task_status = None if current_status is None else cast("ExecutionTaskStatus", current_status["status"])
+
+    from axile.server.execution.supplements import cancel_groups_locked
+
+    cancelled_supplement = await cancel_groups_locked(account_id, payload.reason or "terminated")
 
     state = await terminate_running_account_execution(
         account_id,
@@ -511,6 +528,9 @@ async def terminate_account_execution(
         mode=payload.mode,
     )
     if state is None:
+        if cancelled_supplement:
+            response.status_code = status.HTTP_200_OK
+            return ExecutionTerminateResponse(message="已取消剩余补发", account_id=account_id)
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="账户当前没有活跃执行")
 
     response_status = status.HTTP_200_OK
@@ -615,6 +635,9 @@ async def empty_all_positions(
         ) from exc
 
     # 先停调度，再入队一次性清仓，避免 CRON 在人工清仓期间再次拉起执行。
+    from axile.server.execution.supplements import cancel_groups_in_session
+
+    await cancel_groups_in_session(session, account_id, "account_stopped")
     db_account.sqlmodel_update({"is_started": False})
     session.add(db_account)
     await session.commit()

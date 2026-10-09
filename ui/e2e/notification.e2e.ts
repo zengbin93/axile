@@ -101,7 +101,7 @@ test('重置后清除及撤销保留通知草稿，明确清除关闭通知', as
 })
 
 for (const status of ['none', 'default', 'function'] as const) {
-  test(`函数编辑页 ${status} 无 Webhook，试跑和保存只提交源码`, async ({ page }) => {
+  test(`函数编辑页 ${status} 无 Webhook，试跑提交源码和事件类型、保存只提交源码`, async ({ page }) => {
     const { patches, trials } = await setup(page, status)
     await page.goto('/e2e/notification.html?editor=1')
     await expect(page.getByRole('button', { name: '试跑函数' })).toBeVisible()
@@ -109,7 +109,8 @@ for (const status of ['none', 'default', 'function'] as const) {
     await expect(page.getByPlaceholder(/Webhook|webhook|Key/)).toHaveCount(0)
     await page.getByRole('button', { name: '试跑函数' }).click()
     await expect.poll(() => trials.length).toBe(1)
-    expect(Object.keys(trials[0])).toEqual(['code'])
+    expect(Object.keys(trials[0]).sort()).toEqual(['code', 'event_type'])
+    expect(trials[0].event_type).toBe('execution.finished')
     expect(patches).toHaveLength(0)
     if (status !== 'none') await page.getByRole('button', { name: '清空函数' }).click()
     await page.getByRole('button', { name: '保存', exact: true }).click()

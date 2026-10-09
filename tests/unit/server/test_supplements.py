@@ -1,0 +1,516 @@
+"""独立补发：时钟、交易和通知全用替身，不访问真实渠道。"""
+
+import asyncio
+from contextlib import asynccontextmanager
+from datetime import datetime, timedelta
+from tempfile import TemporaryDirectory
+
+import pytest
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+from sqlmodel import SQLModel, select
+
+from axile.domain.execution import ExecutionKind, ExecutionTaskStatus
+from axile.server.cron import SCHEDULER_TIMEZONE
+from axile.server.db.models import Account
+from axile.server.db.models.account_settings import ScheduleSettings, SupplementSettings
+from axile.server.db.models.execution_intent import ExecutionIntent
+from axile.server.db.models.supplement import NotificationEvent, SupplementGroup, SupplementStep
+from axile.server.execution import intents, notification_outbox, supplement_notifications, supplements
+from axile.server.execution.registry import clear_queued_execution, clear_running_execution
+from axile.server.supplement_plan import plan_supplements
+from axile.server.trading_calendar import CalendarDayDecision, CalendarDecisionStatus
+
+BASE = datetime(2026, 10, 9, 9, 30, tzinfo=SCHEDULER_TIMEZONE)
+
+
+def open_moment(channel, moment):
+    return CalendarDayDecision(channel=str(channel), day=moment.date(), status=CalendarDecisionStatus.NOT_REQUIRED)
+
+
+@asynccontextmanager
+async def database(monkeypatch, *, enabled=True):
+    temporary = TemporaryDirectory()
+    engine = create_async_engine(f"sqlite+aiosqlite:///{temporary.name}/supplement.db")
+    async with engine.begin() as conn:
+        await conn.run_sync(SQLModel.metadata.create_all)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    for module in (intents, supplements, supplement_notifications, notification_outbox):
+        monkeypatch.setattr(module, "SessionLocal", factory)
+    monkeypatch.setattr(intents, "_wake", lambda _id: None)
+    monkeypatch.setattr(notification_outbox, "wake_notifications", lambda _id: None)
+    monkeypatch.setattr(supplements, "schedule_step", lambda _step: None)
+    monkeypatch.setattr(supplements, "schedule_expiration", lambda _group: None)
+    monkeypatch.setattr(supplements, "evaluate_channel_calendar_moment", open_moment)
+    now = [BASE]
+    monkeypatch.setattr(supplements, "clock_now", lambda **_kwargs: now[0])
+    async with factory() as session:
+        session.add(
+            Account(
+                id=1,
+                name="test",
+                market="期货",
+                trade_channel="ctp",
+                brokerage="ctp",
+                is_started=True,
+                cron_expr="*/15 * * * *",
+                portfolio_id=1,
+                algorithm={"method": "SINGLE-MAKER"},
+                supplement={"count": 2, "interval_minutes": 1} if enabled else None,
+            )
+        )
+        await session.commit()
+    try:
+        yield factory, now
+    finally:
+        clear_queued_execution(1, "")
+        clear_running_execution(1, "")
+        # Remove only test slots; production registry remains the same API.
+        from axile.server.execution.registry import get_queued_execution_id, get_running_execution_id
+
+        clear_queued_execution(1, get_queued_execution_id(1) or "")
+        clear_running_execution(1, get_running_execution_id(1) or "")
+        await engine.dispose()
+        temporary.cleanup()
+
+
+async def seed(factory, *, count=2):
+    async with factory() as session:
+        group = SupplementGroup(
+            account_id=1,
+            fingerprint=supplements.fingerprint(await session.get(Account, 1)),
+            base_scheduled_at=BASE.isoformat(),
+            expires_at=(BASE + timedelta(minutes=15)).isoformat(),
+            configured_count=count,
+            effective_count=count,
+        )
+        session.add(group)
+        await session.flush()
+        steps = [
+            SupplementStep(group_id=group.id, index=index, scheduled_at=(BASE + timedelta(minutes=index)).isoformat())
+            for index in range(count + 1)
+        ]
+        session.add_all(steps)
+        await session.commit()
+        return group, steps
+
+
+def test_old_settings_remain_null():
+    assert ScheduleSettings.model_validate({"is_started": True, "cron_expr": "0,1,2 * * * *"}).supplement is None
+    with pytest.raises(ValueError):
+        SupplementSettings(count=0, interval_minutes=1)
+
+
+def test_plan_cuts_next_base_and_session(monkeypatch):
+    import axile.server.supplement_plan as planner
+
+    monkeypatch.setattr(planner, "evaluate_channel_calendar_moment", open_moment)
+    monkeypatch.setattr(planner, "session_end", lambda _channel, _base: BASE + timedelta(minutes=2))
+    points, expires = plan_supplements("ctp", "*/15 * * * *", SupplementSettings(count=4, interval_minutes=1), BASE)
+    assert points == [BASE, BASE + timedelta(minutes=1)]
+    assert expires == BASE + timedelta(minutes=2)
+    monkeypatch.setattr(planner, "session_end", lambda *_args: None)
+    points, _ = plan_supplements("ctp", "*/2 * * * *", SupplementSettings(count=4, interval_minutes=1), BASE)
+    assert points == [BASE, BASE + timedelta(minutes=1)]
+
+
+def test_coalescing_preserves_all_steps_and_last_marker(monkeypatch):
+    async def run():
+        async with database(monkeypatch) as (factory, now):
+            group, steps = await seed(factory)
+            for index, step in enumerate(steps):
+                now[0] = BASE + timedelta(minutes=index)
+                await supplements.fire_step(step.id)
+            async with factory() as session:
+                rows = list((await session.scalars(select(SupplementStep))).all())
+                assert len({step.execution_id for step in rows}) == 1
+                assert all(step.status == "queued" for step in rows)
+                assert [supplements.supplement_context(group, step)["is_last"] for step in rows] == [False, False, True]
+
+    asyncio.run(run())
+
+
+def test_cancel_pending_is_idempotent_and_blocks_stale_trigger(monkeypatch):
+    async def run():
+        async with database(monkeypatch) as (factory, _now):
+            group, steps = await seed(factory)
+            assert await supplements.cancel_groups(1, "terminated")
+            assert not await supplements.cancel_groups(1, "terminated")
+            await supplements.fire_step(steps[-1].id)
+            async with factory() as session:
+                assert (await session.get(SupplementGroup, group.id)).status == "cancelled"
+                assert len(list((await session.scalars(select(NotificationEvent))).all())) == 1
+                assert not list((await session.scalars(select(ExecutionIntent))).all())
+
+    asyncio.run(run())
+
+
+def test_cancel_preserves_shared_manual_request(monkeypatch):
+    async def run():
+        async with database(monkeypatch) as (factory, _now):
+            _group, steps = await seed(factory)
+            await supplements.fire_step(steps[0].id)
+            result = await intents.submit_intent(1, ExecutionKind.REBALANCE, "manual")
+            await supplements.cancel_groups(1, "configuration_changed")
+            assert await supplement_notifications.validate_execution_requests(result.execution_id)
+
+    asyncio.run(run())
+
+
+def test_cancel_revokes_pure_supplement_queue(monkeypatch):
+    async def run():
+        async with database(monkeypatch) as (factory, _now):
+            _group, steps = await seed(factory)
+            await supplements.fire_step(steps[0].id)
+            async with factory() as session:
+                execution = (await session.scalars(select(ExecutionIntent))).one()
+            await supplements.cancel_groups(1, "account_stopped")
+            assert not await supplement_notifications.validate_execution_requests(execution.execution_id)
+
+    asyncio.run(run())
+
+
+def test_running_cancel_waits_then_orders_execution_before_cancel(monkeypatch):
+    async def run():
+        async with database(monkeypatch) as (factory, _now):
+            group, steps = await seed(factory)
+            await supplements.fire_step(steps[0].id)
+            async with factory() as session:
+                execution = (await session.scalars(select(ExecutionIntent))).one()
+                execution.status = ExecutionTaskStatus.RUNNING
+                execution.started_at = BASE.isoformat()
+                session.add(execution)
+                await session.commit()
+            await supplements.cancel_groups(1, "terminated")
+            async with factory() as session:
+                assert (await session.get(SupplementGroup, group.id)).status == "cancelling"
+                assert not list((await session.scalars(select(NotificationEvent))).all())
+            await intents.mark_intent_finished(execution.execution_id, ExecutionTaskStatus.TERMINATED)
+            await intents.mark_intent_finished(execution.execution_id, ExecutionTaskStatus.TERMINATED)
+            async with factory() as session:
+                events = list(
+                    (await session.scalars(select(NotificationEvent).order_by(NotificationEvent.sequence))).all()
+                )
+                assert [event.event_type for event in events] == ["execution.finished", "supplement.cancelled"]
+                assert events[0].context["execution"]["supplements"][0]["group_status"] == "cancelling"
+                assert events[1].context["execution"] is None
+                assert events[1].context["last_execution"]["execution"]["id"] == execution.execution_id
+
+    asyncio.run(run())
+
+
+def test_expiration_cancels_missed_last_step(monkeypatch):
+    async def run():
+        async with database(monkeypatch) as (factory, now):
+            group, _steps = await seed(factory)
+            now[0] = BASE + timedelta(minutes=16)
+            await supplements.expire_group(group.id)
+            async with factory() as session:
+                event = (await session.scalars(select(NotificationEvent))).one()
+                assert event.context["supplement"]["reason"] == "schedule_interrupted"
+
+    asyncio.run(run())
+
+
+def test_old_account_creates_no_group_or_cancel_event(monkeypatch):
+    async def run():
+        async with database(monkeypatch, enabled=False) as (factory, _now):
+            await supplements.create_group(1, BASE)
+            assert not await supplements.cancel_groups(1, "terminated")
+            async with factory() as session:
+                assert not list((await session.scalars(select(SupplementGroup))).all())
+                assert not list((await session.scalars(select(NotificationEvent))).all())
+
+    asyncio.run(run())
+
+
+def test_failed_execution_keeps_future_supplements(monkeypatch):
+    async def run():
+        async with database(monkeypatch) as (factory, _now):
+            group, steps = await seed(factory)
+            await supplements.fire_step(steps[0].id)
+            async with factory() as session:
+                execution = (await session.scalars(select(ExecutionIntent))).one()
+            await intents.mark_intent_finished(
+                execution.execution_id, ExecutionTaskStatus.FAILED, error="target calculation failed"
+            )
+            async with factory() as session:
+                assert (await session.get(SupplementGroup, group.id)).status == "active"
+                assert (await session.get(SupplementStep, steps[-1].id)).status == "pending"
+                event = (await session.scalars(select(NotificationEvent))).one()
+                assert event.context["execution"]["status"] == "FAILED"
+                assert not event.context["execution"]["supplements"][0]["is_last"]
+
+    asyncio.run(run())
+
+
+def test_recovery_only_restores_future_steps(monkeypatch):
+    async def run():
+        async with database(monkeypatch) as (factory, now):
+            group, steps = await seed(factory)
+            async with factory() as session:
+                step = await session.get(SupplementStep, steps[0].id)
+                step.status = "finished"
+                session.add(step)
+                await session.commit()
+            now[0] = BASE + timedelta(seconds=30)
+            scheduled = []
+            monkeypatch.setattr(supplements, "schedule_step", lambda step: scheduled.append(step.id))
+            await supplements.recover_supplements()
+            assert scheduled == [steps[1].id, steps[2].id]
+            now[0] = BASE + timedelta(minutes=3)
+            scheduled.clear()
+            await supplements.recover_supplements()
+            assert scheduled == []
+            async with factory() as session:
+                assert (await session.get(SupplementGroup, group.id)).status == "cancelled"
+
+    asyncio.run(run())
+
+
+def test_cancel_races_with_trigger_without_starting_invalid_request(monkeypatch):
+    async def run():
+        async with database(monkeypatch) as (factory, _now):
+            _group, steps = await seed(factory)
+            await asyncio.gather(supplements.fire_step(steps[0].id), supplements.cancel_groups(1, "terminated"))
+            async with factory() as session:
+                queued = list(
+                    (
+                        await session.scalars(
+                            select(ExecutionIntent).where(ExecutionIntent.status == ExecutionTaskStatus.QUEUED)
+                        )
+                    ).all()
+                )
+                assert queued == []
+                assert len(list((await session.scalars(select(NotificationEvent))).all())) == 1
+
+    asyncio.run(run())
+
+
+def test_terminate_between_executions_uses_existing_route(monkeypatch):
+    from fastapi import HTTPException, Response
+
+    from axile.server.api.routes import account_execution
+    from axile.server.db.models.execution import ExecutionTerminateRequest
+
+    async def run():
+        async with database(monkeypatch) as (factory, _now):
+            await seed(factory)
+            async with factory() as session:
+                response = Response()
+                result = await account_execution.terminate_account_execution(
+                    session, 1, ExecutionTerminateRequest(), response
+                )
+                assert response.status_code == 200
+                assert result.execution_id is None
+                assert result.status is None
+                assert result.message == "已取消剩余补发"
+        async with database(monkeypatch, enabled=False) as (factory, _now):
+            async with factory() as session:
+                with pytest.raises(HTTPException) as caught:
+                    await account_execution.terminate_account_execution(
+                        session, 1, ExecutionTerminateRequest(), Response()
+                    )
+                assert caught.value.status_code == 409
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize(("interval", "expected_count"), [(1, 2), (8, 1)])
+def test_preview_recalculates_selected_bases_without_moving_timeline(monkeypatch, interval, expected_count):
+    import axile.server.supplement_plan as planner
+    from axile.server.api.routes import account_schedule
+
+    monkeypatch.setattr(account_schedule, "evaluate_channel_calendar_moment", open_moment)
+    monkeypatch.setattr(planner, "evaluate_channel_calendar_moment", open_moment)
+    monkeypatch.setattr(planner, "session_end", lambda *_args: None)
+    monkeypatch.setattr(account_schedule, "clock_now", lambda **_kwargs: BASE + timedelta(days=1))
+    bases = [BASE, BASE + timedelta(minutes=15)]
+    payload = account_schedule.SchedulePreviewRequest(
+        trade_channel="ctp",
+        cron_expr="*/15 * * * *",
+        supplement=SupplementSettings(count=2, interval_minutes=interval),
+        scheduled_ats=bases,
+        limit=1,
+    )
+    response = asyncio.run(account_schedule.schedule_preview(payload))
+    assert [item.scheduled_at for item in response.items] == bases
+    assert [item.base_scheduled_at for item in response.items] == bases
+    assert all(item.index == 0 and item.effective_count == expected_count for item in response.items)
+    assert response.next_cursor is None
+    assert not response.has_more
+
+
+def test_preview_paginates_supplements_from_same_base(monkeypatch):
+    import axile.server.supplement_plan as planner
+    from axile.server.api.routes import account_schedule
+
+    monkeypatch.setattr(account_schedule, "evaluate_channel_calendar_moment", open_moment)
+    monkeypatch.setattr(planner, "evaluate_channel_calendar_moment", open_moment)
+    monkeypatch.setattr(planner, "session_end", lambda *_args: None)
+    monkeypatch.setattr(
+        account_schedule,
+        "_calendar_summary",
+        lambda *_args: account_schedule.SchedulePreviewCalendar(
+            requirement="not_required", availability="not_required"
+        ),
+    )
+
+    async def run():
+        payload = account_schedule.SchedulePreviewRequest(
+            trade_channel="ctp",
+            cron_expr="*/15 * * * *",
+            supplement=SupplementSettings(count=2, interval_minutes=1),
+            after=BASE + timedelta(seconds=30),
+            limit=1,
+        )
+        first = await account_schedule.schedule_preview(payload)
+        assert first.items[0].scheduled_at == BASE + timedelta(minutes=1)
+        assert first.items[0].base_scheduled_at == BASE
+        assert not first.items[0].is_last
+        second = await account_schedule.schedule_preview(payload.model_copy(update={"after": first.next_cursor}))
+        assert second.items[0].scheduled_at == BASE + timedelta(minutes=2)
+        assert second.items[0].is_last
+
+    asyncio.run(run())
+
+
+def test_outbox_silent_success_failure_and_unknown_are_not_retried(monkeypatch):
+    from axile.common.notification_function import NotificationFunctionResult
+
+    async def run():
+        async with database(monkeypatch) as (factory, _now):
+            async with factory() as session:
+                account = await session.get(Account, 1)
+                account.execution_notification_code = "def notify(context):\n    pass"
+                session.add(account)
+                for index, status in enumerate(["pending", "pending", "calling"]):
+                    session.add(
+                        NotificationEvent(
+                            id=f"test:{index}",
+                            account_id=1,
+                            event_type="supplement.cancelled",
+                            status=status,
+                            context={"execution": None},
+                        )
+                    )
+                await session.commit()
+            calls = []
+
+            def invoke(_code, context, **_kwargs):
+                calls.append(context)
+                return NotificationFunctionResult(len(calls) == 1, None if len(calls) == 1 else "test failure")
+
+            monkeypatch.setattr(notification_outbox, "run_notification_function", invoke)
+            monkeypatch.setattr(notification_outbox, "record_notification_result", lambda *_args: None)
+            await notification_outbox.recover_notifications()
+            await notification_outbox._dispatch(1)
+            await notification_outbox._dispatch(1)
+            assert len(calls) == 2
+            async with factory() as session:
+                rows = list((await session.scalars(select(NotificationEvent).order_by(NotificationEvent.id))).all())
+                assert [row.status for row in rows] == ["succeeded", "failed", "unknown"]
+
+    asyncio.run(run())
+
+
+def test_recovery_skips_intermediate_miss_but_keeps_future_last(monkeypatch):
+    async def run():
+        async with database(monkeypatch) as (factory, now):
+            group, steps = await seed(factory)
+            async with factory() as session:
+                base = await session.get(SupplementStep, steps[0].id)
+                base.status = "finished"
+                session.add(base)
+                await session.commit()
+            now[0] = BASE + timedelta(minutes=1, seconds=30)
+            scheduled = []
+            monkeypatch.setattr(supplements, "schedule_step", lambda step: scheduled.append(step.id))
+            await supplements.recover_supplements()
+            assert scheduled == [steps[2].id]
+            async with factory() as session:
+                assert (await session.get(SupplementGroup, group.id)).status == "active"
+                assert (await session.get(SupplementStep, steps[1].id)).status == "cancelled"
+                assert not list((await session.scalars(select(NotificationEvent))).all())
+
+    asyncio.run(run())
+
+
+def test_default_cancel_card_accepts_null_execution(monkeypatch):
+    from axile.common import feishu
+    from axile.common.default_account_notification import DEFAULT_ACCOUNT_NOTIFICATION_CODE
+
+    sent = []
+    monkeypatch.setenv("AXILE_ACCOUNT_FEISHU_KEY", "test-only")
+    monkeypatch.setattr(feishu, "push_feishu_card", lambda card, _key, **_kwargs: sent.append(card))
+    namespace = {}
+    exec(DEFAULT_ACCOUNT_NOTIFICATION_CODE, namespace)
+    namespace["notify"](
+        {
+            "event_type": "supplement.cancelled",
+            "execution": None,
+            "account": {"name": "test"},
+            "supplement": {"reason": "terminated", "cancel_requested_at": BASE.isoformat()},
+        }
+    )
+    assert len(sent) == 1
+    assert sent[0]["header"]["title"]["content"] == "剩余补发已取消"
+
+
+def test_migration_only_upgrades_exact_old_default():
+    import importlib.util
+    import json
+    from pathlib import Path
+
+    import sqlalchemy as sa
+    from alembic.migration import MigrationContext
+    from alembic.operations import Operations
+
+    from axile.common.default_account_notification import DEFAULT_ACCOUNT_NOTIFICATION_CODE
+
+    path = Path(__file__).parents[3] / "axile/server/alembic/versions/0023_supplements.py"
+    spec = importlib.util.spec_from_file_location("supplement_migration", path)
+    migration = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(migration)
+    engine = sa.create_engine("sqlite://")
+    with engine.begin() as connection:
+        connection.exec_driver_sql("CREATE TABLE account (id INTEGER PRIMARY KEY)")
+        connection.exec_driver_sql(
+            "CREATE TABLE account_settings (account_id INTEGER PRIMARY KEY, notification JSON, schedule JSON)"
+        )
+        connection.exec_driver_sql("CREATE TABLE account_notification_state (account_id INTEGER PRIMARY KEY)")
+        for index, code in enumerate([migration.OLD_DEFAULT, migration.OLD_DEFAULT + "# custom\n"], start=1):
+            connection.execute(sa.text("INSERT INTO account VALUES (:id)"), {"id": index})
+            connection.execute(
+                sa.text("INSERT INTO account_settings VALUES (:id, :notification, :schedule)"),
+                {
+                    "id": index,
+                    "notification": json.dumps({"execution_notification_code": code, "feishu_key": "unchanged"}),
+                    "schedule": json.dumps({"cron_expr": "0,1,2 * * * *", "is_started": False}),
+                },
+            )
+        with Operations.context(MigrationContext.configure(connection)):
+            migration.upgrade()
+            rows = list(
+                connection.execute(sa.text("SELECT notification, schedule FROM account_settings ORDER BY account_id"))
+            )
+            assert json.loads(rows[0][0])["execution_notification_code"] == DEFAULT_ACCOUNT_NOTIFICATION_CODE
+            assert json.loads(rows[1][0])["execution_notification_code"] == migration.OLD_DEFAULT + "# custom\n"
+            assert all(json.loads(row[0])["feishu_key"] == "unchanged" for row in rows)
+            assert all("supplement" not in json.loads(row[1]) for row in rows)
+            migration.downgrade()
+    engine.dispose()
+
+
+def test_stale_base_callback_cannot_use_changed_cron(monkeypatch):
+    async def run():
+        async with database(monkeypatch) as (factory, _now):
+            async with factory() as session:
+                account = await session.get(Account, 1)
+                account.cron_expr = "45 9 * * *"
+                session.add(account)
+                await session.commit()
+            await supplements.create_group(1, BASE)
+            async with factory() as session:
+                assert not list((await session.scalars(select(SupplementGroup))).all())
+
+    asyncio.run(run())

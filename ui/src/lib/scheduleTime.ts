@@ -61,17 +61,33 @@ export function formatRecentExecution(iso: string, now = Date.now()): string {
   return `${year}${target.month} 月 ${target.day} 日 ${time}`
 }
 
+function plannedDate(target: DateParts, current: DateParts): string {
+  const daysAfter = dayNumber(target) - dayNumber(current)
+  if (daysAfter === 0) return '今天'
+  if (daysAfter === 1) return '明天'
+  const year = target.year === current.year ? '' : `${target.year} 年 `
+  return `${year}${target.month} 月 ${target.day} 日`
+}
+
+/** 休市日的自然日期，省略没有执行意义的时刻。 */
+export function formatPlannedDate(iso: string, now = Date.now()): string {
+  const target = dateParts(iso)
+  const current = dateParts(now)
+  return target && current ? plannedDate(target, current) : '—'
+}
+
 /** 未来计划的自然日期，如「今天 10:00」「明天 15:00」。 */
 export function formatPlannedAt(iso: string, now = Date.now()): string {
   const target = dateParts(iso)
   const current = dateParts(now)
   if (!target || !current) return '—'
-  const time = `${pad(target.hour)}:${pad(target.minute)}`
-  const daysAfter = dayNumber(target) - dayNumber(current)
-  if (daysAfter === 0) return `今天 ${time}`
-  if (daysAfter === 1) return `明天 ${time}`
-  const year = target.year === current.year ? '' : `${target.year} 年 `
-  return `${year}${target.month} 月 ${target.day} 日 ${time}`
+  return `${plannedDate(target, current)} ${pad(target.hour)}:${pad(target.minute)}`
+}
+
+/** 北京时间日期，用作日期行的机器可读值。 */
+export function formatBeijingDate(iso: string): string {
+  const parts = dateParts(iso)
+  return parts ? `${parts.year}-${pad(parts.month)}-${pad(parts.day)}` : iso
 }
 
 /** 未来计划距现在多久；轮询窗口内已到点的任务显示「即将执行」。 */

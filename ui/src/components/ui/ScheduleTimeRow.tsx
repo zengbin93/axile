@@ -1,12 +1,13 @@
 import type { CSSProperties, ReactNode } from 'react'
 
-import { formatBeijingTimestamp, formatPlannedAt } from '@/lib/scheduleTime'
+import { formatBeijingDate, formatBeijingTimestamp, formatPlannedAt, formatPlannedDate } from '@/lib/scheduleTime'
 
 export type ScheduleTimeRowTone = 'default' | 'muted' | 'warning'
 export type ScheduleTimeRowSize = 'sm' | 'md'
 
 export interface ScheduleTimeRowProps {
   scheduledAt: string
+  dateOnly?: boolean
   trailing: ReactNode
   now?: number
   tone?: ScheduleTimeRowTone
@@ -29,6 +30,7 @@ const SIZE_CLASS: Record<ScheduleTimeRowSize, string> = {
 /** 通用排程行：自然时间在左，场景化状态或相对时间在右。 */
 export function ScheduleTimeRow({
   scheduledAt,
+  dateOnly = false,
   trailing,
   now = Date.now(),
   tone = 'default',
@@ -36,7 +38,8 @@ export function ScheduleTimeRow({
   className = '',
   style,
 }: ScheduleTimeRowProps) {
-  const exactTime = formatBeijingTimestamp(scheduledAt)
+  const dateTime = dateOnly ? formatBeijingDate(scheduledAt) : scheduledAt
+  const exactTime = dateOnly ? `${dateTime}（北京时间）` : formatBeijingTimestamp(scheduledAt)
   return (
     <div
       role="listitem"
@@ -44,11 +47,11 @@ export function ScheduleTimeRow({
       style={style}
     >
       <time
-        dateTime={scheduledAt}
+        dateTime={dateTime}
         title={exactTime}
         className="num min-w-0 truncate font-medium text-ink-1"
       >
-        {formatPlannedAt(scheduledAt, now)}
+        {dateOnly ? formatPlannedDate(scheduledAt, now) : formatPlannedAt(scheduledAt, now)}
       </time>
       <span title={typeof trailing === 'string' ? trailing : undefined} className={`min-w-0 truncate text-right ${TONE_CLASS[tone]}`}>
         {trailing}

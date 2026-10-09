@@ -15,7 +15,8 @@ import { AccountPageTitle } from '@/features/account/pageHead'
 import {
   cronExprEqual,
   describeCron,
-  parseTimerIntent,
+  parseSavedTimer,
+  timerSupplement,
   timerStateToCronExpr,
   type TimerEditorState,
 } from '@/features/setup/cron'
@@ -62,7 +63,7 @@ export function AccountEditTimerPage() {
   /** 草稿重置为服务端当前节奏；数据未就绪时返回 false（供首帧初始化门控）。 */
   const resetTimer = useCallback(() => {
     if (!acc || !descriptor) return false
-    setTimer(parseTimerIntent(descriptor.schedule.kind, acc.cron_expr ?? '', descriptor.schedule.night))
+    setTimer(parseSavedTimer(descriptor.schedule.kind, acc.cron_expr ?? '', descriptor.schedule.night, acc.supplement))
     setSaveError(null)
     return true
   }, [acc, descriptor])
@@ -85,7 +86,8 @@ export function AccountEditTimerPage() {
   const scheduleKind = descriptor.schedule.kind
   const cronNext = timerStateToCronExpr(scheduleKind, timer, descriptor.schedule.night)
   const cronPrev = acc.cron_expr ?? ''
-  const dirty = !cronExprEqual(cronNext, cronPrev)
+  const supplement = timerSupplement(timer)
+  const dirty = !cronExprEqual(cronNext, cronPrev) || JSON.stringify(supplement) !== JSON.stringify(acc.supplement ?? null)
   const err = timerEditorError(timer)
   const changes = dirty ? [cronNext ? '定时任务已改' : '关闭自动调仓节奏'] : []
 
@@ -100,7 +102,7 @@ export function AccountEditTimerPage() {
     setSaving(true)
     setSaveError(null)
     try {
-      await updateAccount(accountId, { cron_expr: cronNext })
+      await updateAccount(accountId, { cron_expr: cronNext, supplement })
       toast(cronNext ? '节奏已更新' : '已关闭自动调仓节奏')
       void refreshAccounts()
       account.refresh()

@@ -10,7 +10,8 @@
 
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { Segmented } from '@/components/ui/Segmented'
-import { Select } from '@/components/ui/Select'
+import { SupplementControls } from '@/features/setup/SupplementControls'
+import { SupplementPreviewSummary, type SupplementPreviewValue } from '@/features/setup/SupplementPreviewSummary'
 import { ScheduleTimeRow } from '@/components/ui/ScheduleTimeRow'
 import { MOTION_LAYOUT, useRemountFade } from '@/lib/viewTransition'
 import { executionReasonText } from '@/features/account/executionReason'
@@ -30,11 +31,15 @@ import {
 import { TimerAdvanced, TimerCustom } from '@/features/setup/TimerAdvanced'
 import {
   appendSchedulePreview,
+  isClosedPreviewDay,
   PREVIEW_MIN_ITEMS,
   PREVIEW_PREFETCH_ROWS,
   PREVIEW_ROW_PITCH,
   previewLimitForHeight,
   schedulePreviewItemPresentation,
+  schedulePreviewNextCursor,
+  schedulePreviewRowKey,
+  schedulePreviewRows,
 } from '@/features/setup/previewTimeline'
 import { previewSchedule, type SchedulePreview } from '@/lib/api/accounts'
 import type { TradeChannel } from '@/types/api'
@@ -66,39 +71,6 @@ function Switch({ on, ariaLabel, onClick }: { on: boolean; ariaLabel: string; on
         }`}
       />
     </button>
-  )
-}
-
-/** 补发行（快捷 / 高级共用）。 */
-function SupRow({
-  supN,
-  supM,
-  onN,
-  onM,
-}: {
-  supN: number
-  supM: number
-  onN: (n: number) => void
-  onM: (m: number) => void
-}) {
-  return (
-    <div className="flex flex-wrap items-center gap-2 text-sm">
-      <span className="text-ink-3">到点后补发</span>
-      <Select<number>
-        ariaLabel="补发次数"
-        value={supN}
-        onChange={onN}
-        options={[0, 1, 2, 3, 4].map((n) => ({ value: n, label: String(n) }))}
-      />
-      <span className="text-ink-3">次 · 每隔</span>
-      <Select<number>
-        ariaLabel="补发间隔分钟"
-        value={supM}
-        onChange={onM}
-        options={[1, 2, 3, 5].map((n) => ({ value: n, label: String(n) }))}
-      />
-      <span className="text-ink-3">分</span>
-    </div>
   )
 }
 
@@ -156,6 +128,10 @@ export function TimerEditor({ tradeChannel, scheduleKind, nightSchedule, value, 
   const [previewLoadingMore, setPreviewLoadingMore] = useState(false)
   const [previewError, setPreviewError] = useState<string | null>(null)
   const [previewMoreError, setPreviewMoreError] = useState<string | null>(null)
+  const [supplementSummaries, setSupplementSummaries] = useState<Map<number, SupplementPreviewValue>>(new Map())
+  const [supplementPreviewError, setSupplementPreviewError] = useState(false)
+  const [supplementPreviewRetry, setSupplementPreviewRetry] = useState(0)
+  const supplementCache = useRef({ key: '', values: new Map<number, SupplementPreviewValue>() })
   const [previewWide, setPreviewWide] = useState(false)
   const [previewLimit, setPreviewLimit] = useState(PREVIEW_MIN_ITEMS)
   const [previewCascade, setPreviewCascade] = useState({ generation: 0, active: false })
@@ -195,12 +171,15 @@ export function TimerEditor({ tradeChannel, scheduleKind, nightSchedule, value, 
 
   const customEmpty = v.timerTab === 'custom' && !v.rawCron.trim()
   const rawErr = v.timerTab === 'custom' && !customEmpty ? cronError(v.rawCron) : null
-  const cronList = v.autoOn ? resolveCronList(scheduleKind, v, nightSchedule) : []
+  const cronList = v.autoOn ? resolveCronList(scheduleKind, { ...v, supN: 0 }, nightSchedule) : []
   const cronExpr = rawErr ? '' : cronToExpr(cronList)
   const previewKey = tradeChannel && cronExpr ? `${tradeChannel}\u0000${cronExpr}` : ''
   // 是否会发起预览请求（与下方 effect 的提前返回条件一致）：首帧据此直接上骨架，
   // 避免「占位文案 → 骨架 → 列表」三段跳闪。
   const expectPreview = Boolean(tradeChannel) && v.autoOn && !rawErr && Boolean(cronExpr)
+  const previewRows = schedulePreviewRows(schedulePreview?.items ?? [])
+  const previewTargetRows = layout === 'page' && previewWide ? previewLimit : PREVIEW_MIN_ITEMS
+  const previewCursor = schedulePreview ? schedulePreviewNextCursor(schedulePreview) : null
 
   // 右栏列表区是真实可视槽：直接量它的高度换算请求条数，窗口尺寸变化由
   // ResizeObserver 驱动；窄视口退回 5 条，避免自然高度布局形成测量反馈环。
@@ -260,6 +239,9 @@ export function TimerEditor({ tradeChannel, scheduleKind, nightSchedule, value, 
     previewAppendController.current = null
     setPreviewLoadingMore(false)
     setPreviewMoreError(null)
+    setSupplementSummaries(new Map())
+    supplementCache.current = { key: '', values: new Map() }
+    setSupplementPreviewError(false)
 
     if (!tradeChannel || !v.autoOn || rawErr || !cronExpr || !previewKey) {
       previewResultKey.current = null
@@ -301,18 +283,57 @@ export function TimerEditor({ tradeChannel, scheduleKind, nightSchedule, value, 
     }
   }, [tradeChannel, v.autoOn, rawErr, cronExpr, layout, previewKey])
 
+  // 基础时间线独立于补发配置。仅为已显示的有效基础触发补算摘要，保留旧值直至结果就绪。
+  useEffect(() => {
+    if (!schedulePreview || previewResultKey.current !== previewKey || !expectPreview) return
+    const key = `${previewKey}\u0000${v.supN}:${v.supM}`
+    if (supplementCache.current.key !== key) supplementCache.current = { key, values: new Map() }
+    const cache = supplementCache.current
+    const bases = schedulePreviewRows(schedulePreview.items).filter((item) => item.action === 'execute' && item.calendar_status !== 'unavailable')
+    setSupplementPreviewError(false)
+    if (v.supN === 0) {
+      const values = new Map(bases.map((item) => [Date.parse(item.scheduled_at), { count: 0, configuredCount: 0 }]))
+      cache.values = values
+      setSupplementSummaries(values)
+      return
+    }
+    const missing = bases.filter((item) => !cache.values.has(Date.parse(item.scheduled_at)))
+    if (!missing.length) return
+    const controller = new AbortController()
+    const timer = window.setTimeout(() => {
+      void (async () => {
+        try {
+          for (let start = 0; start < missing.length; start += 100) {
+            const response = await previewSchedule(tradeChannel, cronExpr, {
+              scheduled_ats: missing.slice(start, start + 100).map((item) => item.scheduled_at),
+              supplement: { count: v.supN, interval_minutes: v.supM },
+            }, controller.signal)
+            if (controller.signal.aborted || supplementCache.current !== cache) return
+            const updates = response.items.map((item) => [Date.parse(item.scheduled_at), {
+              count: item.effective_count ?? 0, configuredCount: v.supN,
+            }] as const)
+            for (const [time, summary] of updates) cache.values.set(time, summary)
+            setSupplementSummaries((current) => new Map([...current, ...updates]))
+          }
+        } catch {
+          if (!controller.signal.aborted && supplementCache.current === cache) setSupplementPreviewError(true)
+        }
+      })()
+    }, 250)
+    return () => { window.clearTimeout(timer); controller.abort() }
+  }, [schedulePreview, previewKey, expectPreview, tradeChannel, cronExpr, v.supN, v.supM, supplementPreviewRetry])
+
   const loadMore = useCallback(() => {
-    const cursor = schedulePreview?.next_cursor
+    const cursor = previewCursor
     if (
-      layout !== 'page'
-      || !previewWide
-      || !tradeChannel
+      !tradeChannel
       || !v.autoOn
       || rawErr
       || !cronExpr
       || !previewKey
+      || previewResultKey.current !== previewKey
       || !cursor
-      || !schedulePreview.has_more
+      || !schedulePreview?.has_more
       || previewLoadingMore
       || previewAppendController.current != null
     ) return
@@ -325,7 +346,7 @@ export function TimerEditor({ tradeChannel, scheduleKind, nightSchedule, value, 
     void previewSchedule(
       tradeChannel,
       cronExpr,
-      { after: cursor, limit: previewLimit },
+      { after: cursor, limit: previewTargetRows },
       controller.signal,
     )
       .then((next) => {
@@ -343,18 +364,21 @@ export function TimerEditor({ tradeChannel, scheduleKind, nightSchedule, value, 
         if (previewAppendController.current === controller) previewAppendController.current = null
       })
   }, [
-    layout,
-    previewWide,
     tradeChannel,
     v.autoOn,
     rawErr,
     cronExpr,
     previewKey,
-    previewLimit,
+    previewTargetRows,
+    previewCursor,
     previewLoadingMore,
     schedulePreview?.has_more,
-    schedulePreview?.next_cursor,
   ])
+
+  // 休市触发合并后，宽窄布局都续取到所需行数；规则切换和失败由现有请求门控处理。
+  useEffect(() => {
+    if (previewRows.length < previewTargetRows && !previewMoreError) loadMore()
+  }, [previewRows.length, previewTargetRows, previewMoreError, loadMore])
 
   // 底部哨兵提前两行触发；续取失败时停住自动重试，交给底部「重试」命令。
   useEffect(() => {
@@ -397,7 +421,7 @@ export function TimerEditor({ tradeChannel, scheduleKind, nightSchedule, value, 
     if (tab === 'custom') {
       const rawCron = v.rawCron.trim()
         ? v.rawCron
-        : cronToExpr(resolveCronList(scheduleKind, v, nightSchedule))
+        : cronToExpr(resolveCronList(scheduleKind, { ...v, supN: 0 }, nightSchedule))
       patch({ timerTab: 'custom', rawCron })
       return
     }
@@ -428,6 +452,7 @@ export function TimerEditor({ tradeChannel, scheduleKind, nightSchedule, value, 
   const presetCardT =
     'transition-[border-color,background-color,box-shadow] duration-200 ease-[cubic-bezier(0.4,0,0.2,1)] motion-reduce:transition-none'
   const summary = calendarSummary(schedulePreview)
+  const visiblePreviewRows = layout === 'page' && previewWide ? previewRows : previewRows.slice(0, PREVIEW_MIN_ITEMS)
 
   /** 编辑区列：tabs + 当前 tab 内容 + 补发。 */
   const editorColumn = (
@@ -502,13 +527,12 @@ export function TimerEditor({ tradeChannel, scheduleKind, nightSchedule, value, 
       </div>
 
       <div
-        inert={v.timerTab === 'custom'}
         className={`grid transition-[grid-template-rows] ${MOTION_LAYOUT} ${
-          v.timerTab === 'custom' ? 'grid-rows-[0fr]' : 'grid-rows-[1fr]'
+          'grid-rows-[1fr]'
         }`}
       >
         <div className="min-h-0 overflow-hidden">
-          <SupRow
+          <SupplementControls
             supN={v.supN}
             supM={v.supM}
             onN={(supN) => patch({ supN })}
@@ -547,13 +571,16 @@ export function TimerEditor({ tradeChannel, scheduleKind, nightSchedule, value, 
     <div className="space-y-2" aria-label="正在加载排程预览">{Array.from({ length: 4 }, (_, index) => <div key={index} className="h-4 w-full animate-pulse rounded bg-fill motion-reduce:animate-none" />)}</div>
   ) : schedulePreview?.items.length ? (
     <div key={previewCascade.generation} role="list" aria-label="未来排程预览" className="space-y-1.5">
-      {schedulePreview.items.map((item, index) => {
-        const presentation = schedulePreviewItemPresentation(item, executionReasonText)
+      {visiblePreviewRows.map((item, index) => {
+        const presentation = schedulePreviewItemPresentation(item, executionReasonText, v.supN > 0 ? v.supM : undefined)
         return (
           <ScheduleTimeRow
-            key={item.scheduled_at}
+            key={schedulePreviewRowKey(item)}
             scheduledAt={item.scheduled_at}
-            trailing={presentation.text}
+            dateOnly={isClosedPreviewDay(item)}
+            trailing={item.action === 'execute' && item.calendar_status !== 'unavailable'
+              ? <SupplementPreviewSummary value={supplementSummaries.get(Date.parse(item.scheduled_at))} />
+              : presentation.text}
             now={Date.parse(schedulePreview.evaluated_at)}
             tone={presentation.tone}
             className={cascadeRows ? 'schedule-preview-row-in' : ''}
@@ -563,7 +590,13 @@ export function TimerEditor({ tradeChannel, scheduleKind, nightSchedule, value, 
           />
         )
       })}
-      {layout === 'page' && previewWide && schedulePreview.has_more && (
+      {supplementPreviewError && (
+        <div className="flex items-center justify-between gap-2 border-l-2 border-warn px-2 text-[13px] text-warn">
+          <span>补发预览未更新</span>
+          <button type="button" className="shrink-0 font-semibold hover:underline" onClick={() => setSupplementPreviewRetry((value) => value + 1)}>重试</button>
+        </div>
+      )}
+      {schedulePreview.has_more && ((layout === 'page' && previewWide) || previewRows.length < previewTargetRows) && (
         <div ref={previewSentinelRef} className="pt-1">
           {previewLoadingMore ? (
             <div className="space-y-2" aria-label="正在推演更多未来排程">

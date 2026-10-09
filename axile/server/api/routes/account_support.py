@@ -124,7 +124,13 @@ async def _apply_account_job(sched: SchedDep, account: AccountContext, latest_po
     triggers = parse_cron_expr(account.cron_expr)
     desired_trigger = combine_cron_triggers(triggers)
     # CompactOrTrigger.__str__ 只有条数，不能当排程指纹。
-    if existing_job is not None and cron_triggers_equivalent(existing_job.trigger, desired_trigger):
+    from axile.server.execution.scheduler import _scheduled_signal
+
+    if (
+        existing_job is not None
+        and cron_triggers_equivalent(existing_job.trigger, desired_trigger)
+        and (getattr(existing_job, "func", None) == _scheduled_signal) == bool(getattr(account, "supplement", None))
+    ):
         return
 
     if existing_job is not None:
