@@ -5,7 +5,9 @@ import {
   PREVIEW_MAX_ITEMS,
   PREVIEW_MIN_ITEMS,
   previewLimitForHeight,
+  previewRequestLimit,
   schedulePreviewItemPresentation,
+  schedulePreviewRows,
 } from '@/features/setup/previewTimeline'
 import { executionReasonText } from '@/features/account/executionReason'
 
@@ -45,6 +47,32 @@ describe('previewLimitForHeight', () => {
   })
 })
 
+test('请求条数按补发轮次换算，遵守后端单页上限', () => {
+  expect(previewRequestLimit(5, 0)).toBe(5)
+  expect(previewRequestLimit(5, 2)).toBe(15)
+  expect(previewRequestLimit(50, 4)).toBe(PREVIEW_MAX_ITEMS)
+})
+
+describe('schedulePreviewRows', () => {
+  test('同一天的多轮独立展示，每轮补发合并，跨页续取不增加重复行', () => {
+    const firstBase = '2026-08-27T14:00:00+08:00'
+    const secondBase = '2026-08-27T14:15:00+08:00'
+    const first = preview([firstBase, '2026-08-27T14:01:00+08:00'], '2026-08-27T14:01:00+08:00', true)
+    first.items = first.items.map((item, index) => ({ ...item, base_scheduled_at: firstBase, index, effective_count: 2 }))
+    const next = preview(['2026-08-27T14:02:00+08:00', secondBase], secondBase, true)
+    next.items[0] = { ...next.items[0]!, base_scheduled_at: firstBase, index: 2, effective_count: 2 }
+    next.items[1] = { ...next.items[1]!, base_scheduled_at: secondBase, index: 0, effective_count: 2 }
+
+    const merged = appendSchedulePreview(first, next, first.next_cursor!)
+    expect(schedulePreviewRows(merged.items).map((item) => item.scheduled_at)).toEqual([firstBase, secondBase])
+  })
+
+  test('旧 cron 的相邻触发点不推断为补发', () => {
+    const legacy = preview(['2026-08-27T14:00:00+08:00', '2026-08-27T14:01:00+08:00'], null, false)
+    expect(schedulePreviewRows(legacy.items)).toEqual(legacy.items)
+  })
+})
+
 describe('appendSchedulePreview', () => {
   test('边界去重并续接推进后的游标', () => {
     const first = preview(['2026-08-27T15:00:00+08:00', '2026-08-27T15:01:00+08:00'], '2026-08-27T15:01:00+08:00', true)
@@ -80,7 +108,7 @@ describe('schedulePreviewItemPresentation', () => {
       action: 'skip',
       reason_code: 'CALENDAR.NO_NIGHT_SESSION',
     }, executionReasonText)).toEqual({
-      text: '无对应夜盘，已跳过',
+      text: '无对应夜盘',
       tone: 'muted',
     })
     expect(schedulePreviewItemPresentation({
@@ -90,5 +118,40 @@ describe('schedulePreviewItemPresentation', () => {
       text: '日历不可用，按排程执行',
       tone: 'warning',
     })
+  })
+
+  test('一次展示有效补发次数与间隔，不依赖当前页包含全部步骤', () => {
+    const base = {
+      ...preview(['2026-08-27T14:55:00+08:00'], null, false).items[0]!,
+      base_scheduled_at: '2026-08-27T14:55:00+08:00',
+      index: 0,
+      effective_count: 2,
+    }
+    expect(schedulePreviewItemPresentation(base, executionReasonText, 1)).toEqual({
+      text: '补 2 次 · 隔 1 分',
+      tone: 'default',
+    })
+    expect(schedulePreviewItemPresentation({ ...base, effective_count: 1 }, executionReasonText, 3).text).toBe('补 1 次 · 隔 3 分')
+    expect(schedulePreviewItemPresentation({ ...base, effective_count: 0 }, executionReasonText, 1).text).toBe('补 0 次')
+    expect(schedulePreviewItemPresentation({
+      ...base,
+      calendar_status: 'available_closed',
+      action: 'skip',
+      reason_code: 'CALENDAR.CLOSED',
+    }, executionReasonText, 1)).toEqual({ text: '休市', tone: 'muted' })
+  })
+
+  test('从本轮中途预览时保留下一次补发的时间，仅显示尚未到点的次数', () => {
+    const remaining = preview(['2026-08-27T14:57:00+08:00', '2026-08-27T14:58:00+08:00'], null, false)
+    remaining.items = remaining.items.map((item, index) => ({
+      ...item,
+      base_scheduled_at: '2026-08-27T14:55:00+08:00',
+      index: index + 2,
+      effective_count: 3,
+    }))
+    const rows = schedulePreviewRows(remaining.items)
+    expect(rows).toHaveLength(1)
+    expect(rows[0]!.scheduled_at).toBe('2026-08-27T14:57:00+08:00')
+    expect(schedulePreviewItemPresentation(rows[0]!, executionReasonText, 1).text).toBe('待补 2 次 · 隔 1 分')
   })
 })

@@ -34,7 +34,9 @@ import {
   PREVIEW_PREFETCH_ROWS,
   PREVIEW_ROW_PITCH,
   previewLimitForHeight,
+  previewRequestLimit,
   schedulePreviewItemPresentation,
+  schedulePreviewRows,
 } from '@/features/setup/previewTimeline'
 import { previewSchedule, type SchedulePreview } from '@/lib/api/accounts'
 import type { TradeChannel } from '@/types/api'
@@ -278,7 +280,7 @@ export function TimerEditor({ tradeChannel, scheduleKind, nightSchedule, value, 
 
     const controller = new AbortController()
     const timer = window.setTimeout(() => {
-      const limit = layout === 'page' ? previewLimitRef.current : PREVIEW_MIN_ITEMS
+      const limit = previewRequestLimit(layout === 'page' ? previewLimitRef.current : PREVIEW_MIN_ITEMS, v.supN)
       void previewSchedule(tradeChannel, cronExpr, { limit, supplement: v.supN > 0 ? { count: v.supN, interval_minutes: v.supM } : null }, controller.signal)
         .then((next) => {
           if (requestId !== previewRequestId.current) return
@@ -325,7 +327,7 @@ export function TimerEditor({ tradeChannel, scheduleKind, nightSchedule, value, 
     void previewSchedule(
       tradeChannel,
       cronExpr,
-      { after: cursor, limit: previewLimit, supplement: v.supN > 0 ? { count: v.supN, interval_minutes: v.supM } : null },
+      { after: cursor, limit: previewRequestLimit(previewLimit, v.supN), supplement: v.supN > 0 ? { count: v.supN, interval_minutes: v.supM } : null },
       controller.signal,
     )
       .then((next) => {
@@ -430,6 +432,8 @@ export function TimerEditor({ tradeChannel, scheduleKind, nightSchedule, value, 
   const presetCardT =
     'transition-[border-color,background-color,box-shadow] duration-200 ease-[cubic-bezier(0.4,0,0.2,1)] motion-reduce:transition-none'
   const summary = calendarSummary(schedulePreview)
+  const previewRows = schedulePreviewRows(schedulePreview?.items ?? [])
+  const visiblePreviewRows = layout === 'page' && previewWide ? previewRows : previewRows.slice(0, PREVIEW_MIN_ITEMS)
 
   /** 编辑区列：tabs + 当前 tab 内容 + 补发。 */
   const editorColumn = (
@@ -548,11 +552,11 @@ export function TimerEditor({ tradeChannel, scheduleKind, nightSchedule, value, 
     <div className="space-y-2" aria-label="正在加载排程预览">{Array.from({ length: 4 }, (_, index) => <div key={index} className="h-4 w-full animate-pulse rounded bg-fill motion-reduce:animate-none" />)}</div>
   ) : schedulePreview?.items.length ? (
     <div key={previewCascade.generation} role="list" aria-label="未来排程预览" className="space-y-1.5">
-      {schedulePreview.items.map((item, index) => {
-        const presentation = schedulePreviewItemPresentation(item, executionReasonText)
+      {visiblePreviewRows.map((item, index) => {
+        const presentation = schedulePreviewItemPresentation(item, executionReasonText, v.supN > 0 ? v.supM : undefined)
         return (
           <ScheduleTimeRow
-            key={item.scheduled_at}
+            key={item.base_scheduled_at ?? item.scheduled_at}
             scheduledAt={item.scheduled_at}
             trailing={presentation.text}
             now={Date.parse(schedulePreview.evaluated_at)}

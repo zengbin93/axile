@@ -68,6 +68,10 @@ export interface SchedulePreview {
   has_more: boolean
   items: Array<{
     scheduled_at: string
+    base_scheduled_at?: string | null
+    index?: number
+    effective_count?: number
+    is_last?: boolean
     calendar_day: string
     calendar_status: 'available_open' | 'available_closed' | 'unavailable' | 'not_required'
     action: 'execute' | 'skip'
