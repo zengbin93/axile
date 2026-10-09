@@ -11,15 +11,35 @@ export interface SchedulePreviewItemPresentation {
   tone: ScheduleTimeRowTone
 }
 
-/** 补发归入服务端标记的基础轮次；普通 cron 各自保留一行。 */
+/** 整日休市可合并日期；日内市场缝和无对应夜盘仍保留具体时刻。 */
+export function isClosedPreviewDay(item: SchedulePreview['items'][number]): boolean {
+  return item.calendar_status === 'available_closed'
+    && (item.reason_code == null || item.reason_code === 'CALENDAR.CLOSED')
+}
+
+export function schedulePreviewRowKey(item: SchedulePreview['items'][number]): string {
+  return isClosedPreviewDay(item)
+    ? `closed:${item.calendar_day}`
+    : `round:${item.base_scheduled_at ?? item.scheduled_at}`
+}
+
+/** 整日休市合并为日期行，补发合并为基础轮次，普通 cron 各自保留。 */
 export function schedulePreviewRows(items: SchedulePreview['items']): SchedulePreview['items'] {
   const seen = new Set<string>()
   return items.filter((item) => {
-    const key = item.base_scheduled_at ?? item.scheduled_at
+    const key = schedulePreviewRowKey(item)
     if (seen.has(key)) return false
     seen.add(key)
     return true
   })
+}
+
+/** 日期行已代表整日休市，续取从当天结束后开始，避免密集重复拉取。 */
+export function schedulePreviewNextCursor(preview: SchedulePreview): string | null {
+  const last = preview.items.at(-1)
+  if (!preview.next_cursor || !last || !isClosedPreviewDay(last)) return preview.next_cursor
+  const dayEnd = `${last.calendar_day}T23:59:59.999+08:00`
+  return Date.parse(dayEnd) > Date.parse(preview.next_cursor) ? dayEnd : preview.next_cursor
 }
 
 /** 将服务端日历决策收口为排程行的人读结果与颜色语义。 */

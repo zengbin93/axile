@@ -2,11 +2,13 @@ import { describe, expect, test } from 'bun:test'
 import type { SchedulePreview } from '@/lib/api/accounts'
 import {
   appendSchedulePreview,
+  isClosedPreviewDay,
   PREVIEW_MAX_ITEMS,
   PREVIEW_MIN_ITEMS,
   previewLimitForHeight,
   previewRequestLimit,
   schedulePreviewItemPresentation,
+  schedulePreviewNextCursor,
   schedulePreviewRows,
 } from '@/features/setup/previewTimeline'
 import { executionReasonText } from '@/features/account/executionReason'
@@ -54,6 +56,30 @@ test('请求条数按补发轮次换算，遵守后端单页上限', () => {
 })
 
 describe('schedulePreviewRows', () => {
+  test('同一天休市合并为日期行，跨页后仍各日一行并保留有效计划', () => {
+    const closed = preview(['2026-08-29T09:00:00+08:00', '2026-08-29T09:15:00+08:00'], '2026-08-29T09:15:00+08:00', true)
+    closed.items = closed.items.map((item) => ({ ...item, calendar_status: 'available_closed', action: 'skip', reason_code: 'CALENDAR.CLOSED' }))
+    const next = preview(['2026-08-29T09:30:00+08:00', '2026-08-30T09:00:00+08:00', '2026-08-31T09:00:00+08:00'], null, false)
+    next.items = next.items.map((item) => item.calendar_day === '2026-08-31' ? item : {
+      ...item, calendar_status: 'available_closed', action: 'skip', reason_code: 'CALENDAR.CLOSED',
+    })
+    const rows = schedulePreviewRows(appendSchedulePreview(closed, next, closed.next_cursor!).items)
+    expect(rows.map((item) => item.calendar_day)).toEqual(['2026-08-29', '2026-08-30', '2026-08-31'])
+    expect(rows.map(isClosedPreviewDay)).toEqual([true, true, false])
+  })
+
+  test('日内休息、无对应夜盘和日历不可用仍显示各自时刻', () => {
+    const points = preview(['2026-08-28T12:00:00+08:00', '2026-08-28T12:15:00+08:00', '2026-08-28T21:00:00+08:00', '2026-08-28T21:15:00+08:00'], null, false)
+    points.items = points.items.map((item, index) => ({
+      ...item,
+      calendar_status: index === 3 ? 'unavailable' : 'available_closed',
+      action: 'skip',
+      reason_code: index < 2 ? 'CALENDAR.SESSION_CLOSED' : 'CALENDAR.NO_NIGHT_SESSION',
+    }))
+    expect(schedulePreviewRows(points.items)).toEqual(points.items)
+    expect(points.items.every((item) => !isClosedPreviewDay(item))).toBe(true)
+  })
+
   test('同一天的多轮独立展示，每轮补发合并，跨页续取不增加重复行', () => {
     const firstBase = '2026-08-27T14:00:00+08:00'
     const secondBase = '2026-08-27T14:15:00+08:00'
@@ -71,6 +97,17 @@ describe('schedulePreviewRows', () => {
     const legacy = preview(['2026-08-27T14:00:00+08:00', '2026-08-27T14:01:00+08:00'], null, false)
     expect(schedulePreviewRows(legacy.items)).toEqual(legacy.items)
   })
+})
+
+test('整日休市续取从当天结束开始，日内休息及日历不可用按原游标继续', () => {
+  const first = preview(['2026-08-29T09:00:00+08:00'], '2026-08-29T09:00:00+08:00', true)
+  const base = first.items[0]!
+  first.items[0] = { ...base, calendar_status: 'available_closed', action: 'skip', reason_code: 'CALENDAR.CLOSED' }
+  expect(schedulePreviewNextCursor(first)).toBe('2026-08-29T23:59:59.999+08:00')
+  first.items[0] = { ...first.items[0], reason_code: 'CALENDAR.SESSION_CLOSED' }
+  expect(schedulePreviewNextCursor(first)).toBe(first.next_cursor)
+  first.items[0] = { ...base, calendar_status: 'unavailable' }
+  expect(schedulePreviewNextCursor(first)).toBe(first.next_cursor)
 })
 
 describe('appendSchedulePreview', () => {

@@ -30,12 +30,15 @@ import {
 import { TimerAdvanced, TimerCustom } from '@/features/setup/TimerAdvanced'
 import {
   appendSchedulePreview,
+  isClosedPreviewDay,
   PREVIEW_MIN_ITEMS,
   PREVIEW_PREFETCH_ROWS,
   PREVIEW_ROW_PITCH,
   previewLimitForHeight,
   previewRequestLimit,
   schedulePreviewItemPresentation,
+  schedulePreviewNextCursor,
+  schedulePreviewRowKey,
   schedulePreviewRows,
 } from '@/features/setup/previewTimeline'
 import { previewSchedule, type SchedulePreview } from '@/lib/api/accounts'
@@ -203,6 +206,9 @@ export function TimerEditor({ tradeChannel, scheduleKind, nightSchedule, value, 
   // 是否会发起预览请求（与下方 effect 的提前返回条件一致）：首帧据此直接上骨架，
   // 避免「占位文案 → 骨架 → 列表」三段跳闪。
   const expectPreview = Boolean(tradeChannel) && v.autoOn && !rawErr && Boolean(cronExpr)
+  const previewRows = schedulePreviewRows(schedulePreview?.items ?? [])
+  const previewTargetRows = layout === 'page' && previewWide ? previewLimit : PREVIEW_MIN_ITEMS
+  const previewCursor = schedulePreview ? schedulePreviewNextCursor(schedulePreview) : null
 
   // 右栏列表区是真实可视槽：直接量它的高度换算请求条数，窗口尺寸变化由
   // ResizeObserver 驱动；窄视口退回 5 条，避免自然高度布局形成测量反馈环。
@@ -304,17 +310,16 @@ export function TimerEditor({ tradeChannel, scheduleKind, nightSchedule, value, 
   }, [tradeChannel, v.autoOn, v.supN, v.supM, rawErr, cronExpr, layout, previewKey])
 
   const loadMore = useCallback(() => {
-    const cursor = schedulePreview?.next_cursor
+    const cursor = previewCursor
     if (
-      layout !== 'page'
-      || !previewWide
-      || !tradeChannel
+      !tradeChannel
       || !v.autoOn
       || rawErr
       || !cronExpr
       || !previewKey
+      || previewResultKey.current !== previewKey
       || !cursor
-      || !schedulePreview.has_more
+      || !schedulePreview?.has_more
       || previewLoadingMore
       || previewAppendController.current != null
     ) return
@@ -327,7 +332,7 @@ export function TimerEditor({ tradeChannel, scheduleKind, nightSchedule, value, 
     void previewSchedule(
       tradeChannel,
       cronExpr,
-      { after: cursor, limit: previewRequestLimit(previewLimit, v.supN), supplement: v.supN > 0 ? { count: v.supN, interval_minutes: v.supM } : null },
+      { after: cursor, limit: previewRequestLimit(previewTargetRows, v.supN), supplement: v.supN > 0 ? { count: v.supN, interval_minutes: v.supM } : null },
       controller.signal,
     )
       .then((next) => {
@@ -345,8 +350,6 @@ export function TimerEditor({ tradeChannel, scheduleKind, nightSchedule, value, 
         if (previewAppendController.current === controller) previewAppendController.current = null
       })
   }, [
-    layout,
-    previewWide,
     tradeChannel,
     v.autoOn,
     v.supN,
@@ -354,11 +357,16 @@ export function TimerEditor({ tradeChannel, scheduleKind, nightSchedule, value, 
     rawErr,
     cronExpr,
     previewKey,
-    previewLimit,
+    previewTargetRows,
+    previewCursor,
     previewLoadingMore,
     schedulePreview?.has_more,
-    schedulePreview?.next_cursor,
   ])
+
+  // 休市触发合并后，宽窄布局都续取到所需行数；规则切换和失败由现有请求门控处理。
+  useEffect(() => {
+    if (previewRows.length < previewTargetRows && !previewMoreError) loadMore()
+  }, [previewRows.length, previewTargetRows, previewMoreError, loadMore])
 
   // 底部哨兵提前两行触发；续取失败时停住自动重试，交给底部「重试」命令。
   useEffect(() => {
@@ -432,7 +440,6 @@ export function TimerEditor({ tradeChannel, scheduleKind, nightSchedule, value, 
   const presetCardT =
     'transition-[border-color,background-color,box-shadow] duration-200 ease-[cubic-bezier(0.4,0,0.2,1)] motion-reduce:transition-none'
   const summary = calendarSummary(schedulePreview)
-  const previewRows = schedulePreviewRows(schedulePreview?.items ?? [])
   const visiblePreviewRows = layout === 'page' && previewWide ? previewRows : previewRows.slice(0, PREVIEW_MIN_ITEMS)
 
   /** 编辑区列：tabs + 当前 tab 内容 + 补发。 */
@@ -556,8 +563,9 @@ export function TimerEditor({ tradeChannel, scheduleKind, nightSchedule, value, 
         const presentation = schedulePreviewItemPresentation(item, executionReasonText, v.supN > 0 ? v.supM : undefined)
         return (
           <ScheduleTimeRow
-            key={item.base_scheduled_at ?? item.scheduled_at}
+            key={schedulePreviewRowKey(item)}
             scheduledAt={item.scheduled_at}
+            dateOnly={isClosedPreviewDay(item)}
             trailing={presentation.text}
             now={Date.parse(schedulePreview.evaluated_at)}
             tone={presentation.tone}
@@ -568,7 +576,7 @@ export function TimerEditor({ tradeChannel, scheduleKind, nightSchedule, value, 
           />
         )
       })}
-      {layout === 'page' && previewWide && schedulePreview.has_more && (
+      {schedulePreview.has_more && ((layout === 'page' && previewWide) || previewRows.length < previewTargetRows) && (
         <div ref={previewSentinelRef} className="pt-1">
           {previewLoadingMore ? (
             <div className="space-y-2" aria-label="正在推演更多未来排程">

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test'
 
-import { formatBeijingTimestamp, formatPlannedAt, formatRecentExecution, formatTimeUntil } from '@/lib/scheduleTime'
+import { formatBeijingDate, formatBeijingTimestamp, formatPlannedAt, formatPlannedDate, formatRecentExecution, formatTimeUntil } from '@/lib/scheduleTime'
 
 const NOW = Date.parse('2026-08-24T09:30:00+08:00')
 
@@ -18,6 +18,13 @@ describe('formatRecentExecution', () => {
 })
 
 describe('future schedule formatting', () => {
+  it('休市日期按北京时间计算自然日，跨年保留年份', () => {
+    expect(formatPlannedDate('2026-08-24T15:59:00Z', NOW)).toBe('今天')
+    expect(formatPlannedDate('2026-08-24T16:00:00Z', NOW)).toBe('明天')
+    expect(formatBeijingDate('2026-08-24T16:00:00Z')).toBe('2026-08-25')
+    expect(formatPlannedDate('2027-01-02T09:00:00+08:00', NOW)).toBe('2027 年 1 月 2 日')
+  })
+
   it('pairs natural dates with relative time', () => {
     expect(formatPlannedAt('2026-08-24T09:48:00+08:00', NOW)).toBe('今天 09:48')
     expect(formatTimeUntil('2026-08-24T09:48:00+08:00', NOW)).toBe('18 分钟后')

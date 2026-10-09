@@ -7,6 +7,22 @@ import { ScheduleTimeRow } from './ScheduleTimeRow'
 const NOW = Date.parse('2026-08-27T09:00:00+08:00')
 
 describe('ScheduleTimeRow', () => {
+  it('休市行仅显示北京时间日期，日期属性与悬浮提示也省略时刻', () => {
+    const html = renderToStaticMarkup(createElement(ScheduleTimeRow, {
+      scheduledAt: '2026-08-27T16:30:00Z',
+      dateOnly: true,
+      trailing: '休市',
+      now: NOW,
+      tone: 'muted',
+    }))
+    expect(html).toContain('dateTime="2026-08-28"')
+    expect(html).toContain('2026-08-28（北京时间）')
+    expect(html).toContain('>明天</time>')
+    expect(html).toContain('休市')
+    expect(html).not.toContain('16:30')
+    expect(html).not.toContain('00:30')
+  })
+
   it('renders a natural date with an exact Beijing timestamp', () => {
     const html = renderToStaticMarkup(createElement(ScheduleTimeRow, {
       scheduledAt: '2026-08-27T15:00:00+08:00',
