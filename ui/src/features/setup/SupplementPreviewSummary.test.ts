@@ -3,21 +3,19 @@ import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { SupplementPreviewSummary } from '@/features/setup/SupplementPreviewSummary'
 
-test('补发摘要保留可访问的完整文案，首帧不播放换字动画', () => {
-  const html = renderToStaticMarkup(createElement(SupplementPreviewSummary, {
-    value: { enabled: true, count: 2, interval: 1 }, fallback: '交易日，执行',
-  }))
-  expect(html).toContain('aria-label="补 2 次 · 隔 1 分"')
-  expect(html).not.toContain('ink-rewrite-in')
+function render(count: number, configuredCount: number) {
+  return renderToStaticMarkup(createElement(SupplementPreviewSummary, { value: { count, configuredCount } }))
+}
+
+test('正常轮次和未设置补发的轮次不显示重复说明', () => {
+  expect(render(2, 2)).not.toContain('<span aria-label=')
+  expect(render(0, 0)).not.toContain('<span aria-label=')
+  expect(renderToStaticMarkup(createElement(SupplementPreviewSummary))).toBe('')
 })
 
-test('补发关闭时显示不补发；裁剪为零时保留补发零次的区别', () => {
-  const off = renderToStaticMarkup(createElement(SupplementPreviewSummary, {
-    value: { enabled: false, count: 0, interval: 1 }, fallback: '交易日，执行',
-  }))
-  expect(off).toContain('aria-label="不补发"')
-  const clipped = renderToStaticMarkup(createElement(SupplementPreviewSummary, {
-    value: { enabled: true, count: 0, interval: 1 }, fallback: '交易日，执行',
-  }))
-  expect(clipped).toContain('aria-label="补 0 次"')
+test('仅提示补发裁剪，首帧不播放换字动画', () => {
+  const clipped = render(1, 2)
+  expect(clipped).toContain('aria-label="仅补 1 次"')
+  expect(clipped).not.toContain('ink-rewrite-in')
+  expect(render(0, 2)).toContain('aria-label="无补发"')
 })

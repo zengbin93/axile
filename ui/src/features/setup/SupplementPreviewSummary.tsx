@@ -3,9 +3,8 @@ import { InkRewrite } from '@/components/ui/InkRewrite'
 import { MOTION_LAYOUT } from '@/lib/viewTransition'
 
 export interface SupplementPreviewValue {
-  enabled: boolean
   count: number
-  interval: number
+  configuredCount: number
 }
 
 const NUMBER_PROPS = {
@@ -15,20 +14,20 @@ const NUMBER_PROPS = {
   respectMotionPreference: true,
 }
 
-/** 摘要首次就位；数字在原槽滚动，开关仅改写补发标签。 */
-export function SupplementPreviewSummary({ value, fallback }: { value?: SupplementPreviewValue; fallback: string }) {
-  if (!value) return fallback
-  const { enabled, count, interval } = value
-  const text = enabled ? `补 ${count} 次${count > 0 ? ` · 隔 ${interval} 分` : ''}` : '不补发'
+/** 正常轮次留白，仅提示被交易时段或下一轮基础触发裁剪的补发。 */
+export function SupplementPreviewSummary({ value }: { value?: SupplementPreviewValue }) {
+  if (!value) return null
+  const { count, configuredCount } = value
+  const clipped = count < configuredCount
+  const text = clipped ? (count > 0 ? `仅补 ${count} 次` : '无补发') : ''
   return (
-    <span aria-label={text} title={text} className="inline-flex max-w-full items-baseline justify-end align-baseline">
-      <span aria-hidden="true"><InkRewrite text={enabled ? '补' : '不补发'} /></span>
-      <span aria-hidden="true" className={`grid transition-[grid-template-columns] ${MOTION_LAYOUT} ${enabled ? 'grid-cols-[1fr]' : 'grid-cols-[0fr]'}`}>
-        <span className="min-w-0 overflow-hidden">
-          <span className="inline-flex w-max items-baseline whitespace-pre">
-            <NumberFlow {...NUMBER_PROPS} value={count} prefix=" " suffix=" 次" animated={enabled} />
-            <span className={count > 0 ? 'inline' : 'hidden'}>
-              <NumberFlow {...NUMBER_PROPS} value={interval} prefix=" · 隔 " suffix=" 分" animated={enabled} />
+    <span aria-label={text || undefined} title={text || undefined} className="relative inline-block h-[1lh] w-full align-bottom">
+      <span className="absolute right-0 top-0 inline-flex max-w-full items-baseline">
+        <span aria-hidden="true"><InkRewrite text={clipped ? (count > 0 ? '仅补' : '无补发') : ''} /></span>
+        <span aria-hidden="true" className={`grid transition-[grid-template-columns] ${MOTION_LAYOUT} ${clipped && count > 0 ? 'grid-cols-[1fr]' : 'grid-cols-[0fr]'}`}>
+          <span className="min-w-0 overflow-hidden">
+            <span className="inline-flex w-max items-baseline whitespace-pre">
+              <NumberFlow {...NUMBER_PROPS} value={count} prefix=" " suffix=" 次" animated={clipped && count > 0} />
             </span>
           </span>
         </span>

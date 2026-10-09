@@ -292,7 +292,7 @@ export function TimerEditor({ tradeChannel, scheduleKind, nightSchedule, value, 
     const bases = schedulePreviewRows(schedulePreview.items).filter((item) => item.action === 'execute' && item.calendar_status !== 'unavailable')
     setSupplementPreviewError(false)
     if (v.supN === 0) {
-      const values = new Map(bases.map((item) => [Date.parse(item.scheduled_at), { enabled: false, count: 0, interval: v.supM }]))
+      const values = new Map(bases.map((item) => [Date.parse(item.scheduled_at), { count: 0, configuredCount: 0 }]))
       cache.values = values
       setSupplementSummaries(values)
       return
@@ -310,7 +310,7 @@ export function TimerEditor({ tradeChannel, scheduleKind, nightSchedule, value, 
             }, controller.signal)
             if (controller.signal.aborted || supplementCache.current !== cache) return
             const updates = response.items.map((item) => [Date.parse(item.scheduled_at), {
-              enabled: true, count: item.effective_count ?? 0, interval: v.supM,
+              count: item.effective_count ?? 0, configuredCount: v.supN,
             }] as const)
             for (const [time, summary] of updates) cache.values.set(time, summary)
             setSupplementSummaries((current) => new Map([...current, ...updates]))
@@ -579,7 +579,7 @@ export function TimerEditor({ tradeChannel, scheduleKind, nightSchedule, value, 
             scheduledAt={item.scheduled_at}
             dateOnly={isClosedPreviewDay(item)}
             trailing={item.action === 'execute' && item.calendar_status !== 'unavailable'
-              ? <SupplementPreviewSummary value={supplementSummaries.get(Date.parse(item.scheduled_at))} fallback={presentation.text} />
+              ? <SupplementPreviewSummary value={supplementSummaries.get(Date.parse(item.scheduled_at))} />
               : presentation.text}
             now={Date.parse(schedulePreview.evaluated_at)}
             tone={presentation.tone}

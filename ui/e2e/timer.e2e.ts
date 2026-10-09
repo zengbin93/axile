@@ -53,62 +53,43 @@ async function mockPreview(page: Page) {
   }
 }
 
-test('补发编辑仅更新摘要，保留滚动位置和全部已加载时间节点', async ({ page }) => {
+test('正常轮次留白，补发裁剪才提示，编辑保留时间节点和滚动位置', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 760 })
-  await page.addInitScript(() => {
-    const state = window as typeof window & { supplementAnimations: number }
-    state.supplementAnimations = 0
-    const original = Element.prototype.animate
-    Element.prototype.animate = function (...args) {
-      const root = this.getRootNode()
-      const host = root instanceof ShadowRoot ? root.host : this
-      if (host.closest('span[aria-label^="补 "]')) state.supplementAnimations++
-      return original.apply(this, args)
-    }
-  })
   const mock = await mockPreview(page)
   await page.goto('/e2e/timer.html')
   const list = page.getByRole('list', { name: '未来排程预览' })
-  await expect(list.locator('[aria-label="补 2 次 · 隔 1 分"]').first()).toBeVisible()
+  await expect.poll(() => mock.requests.some((request) => Boolean(request.scheduled_ats))).toBe(true)
+  await expect(list.locator('time').first()).toBeVisible()
+  await expect(list.locator('[aria-label^="仅补"], [aria-label="无补发"]')).toHaveCount(0)
+  await expect(list.getByText('休市', { exact: true }).first()).toBeVisible()
   const scroll = page.getByRole('complementary').locator('.quiet-scrollbar')
   const initialRows = await list.locator('time').count()
   await scroll.evaluate((node) => { node.scrollTop = node.scrollHeight })
-  await expect.poll(() => mock.requests.filter((request) => !request.scheduled_ats).length).toBeGreaterThan(1)
   await expect.poll(() => list.locator('time').count()).toBeGreaterThan(initialRows)
-  await expect.poll(async () => {
-    const rows = await list.getByRole('listitem').count()
-    const closed = await list.getByText('休市', { exact: true }).count()
-    return await list.locator('[aria-label="补 2 次 · 隔 1 分"]').count() === rows - closed
-  }).toBe(true)
   await scroll.evaluate((node) => { node.scrollTop = 100 })
   const dates = await list.locator('time').allTextContents()
   const timeNode = await list.locator('time').first().elementHandle()
   const listNode = await list.elementHandle()
   const baseRequests = mock.requests.filter((request) => !request.scheduled_ats).length
-  expect(await page.evaluate(() => (window as typeof window & { supplementAnimations: number }).supplementAnimations)).toBe(0)
   await page.getByRole('button', { name: '下一档补发次数', exact: true }).click()
-  await expect(list.locator('[aria-label="补 3 次 · 隔 1 分"]').first()).toBeAttached()
-  await expect.poll(async () => list.locator('[aria-label="补 2 次 · 隔 1 分"]').count()).toBe(0)
-  await expect.poll(() => page.evaluate(() => (window as typeof window & { supplementAnimations: number }).supplementAnimations)).toBeGreaterThan(0)
+  await expect.poll(() => mock.requests.some((request) => request.supplement?.count === 3)).toBe(true)
+  await page.getByRole('button', { name: '下一档补发间隔分钟', exact: true }).click()
+  await expect(list.locator('[aria-label="仅补 2 次"]').first()).toBeAttached()
   expect(mock.requests.filter((request) => !request.scheduled_ats)).toHaveLength(baseRequests)
   expect(await list.locator('time').allTextContents()).toEqual(dates)
   expect(await timeNode!.evaluate((node) => node.isConnected)).toBe(true)
   expect(await listNode!.evaluate((node) => node.isConnected)).toBe(true)
   expect(await scroll.evaluate((node) => node.scrollTop)).toBe(100)
   await expect(page.getByLabel('正在加载排程预览')).toHaveCount(0)
-  await page.getByRole('complementary').screenshot({ path: 'test-results/timer-preview-summary.png', animations: 'disabled' })
+  await page.getByRole('spinbutton', { name: '补发间隔分钟', exact: true }).focus()
+  await page.keyboard.press('End')
+  await expect(list.locator('[aria-label="无补发"]').first()).toBeAttached()
+  await page.getByRole('complementary').screenshot({ path: 'test-results/timer-preview-clipped.png', animations: 'disabled' })
   await page.getByRole('spinbutton', { name: '补发次数', exact: true }).focus()
   await page.keyboard.press('Home')
-  await expect(list.locator('[aria-label="不补发"]').first()).toBeAttached()
-  expect(await timeNode!.evaluate((node) => node.isConnected)).toBe(true)
+  await expect(list.locator('[aria-label^="仅补"], [aria-label="无补发"]')).toHaveCount(0)
   expect(await scroll.evaluate((node) => node.scrollTop)).toBe(100)
-  await page.getByRole('complementary').screenshot({ path: 'test-results/timer-preview-disabled.png', animations: 'disabled' })
-  await page.getByRole('button', { name: '下一档补发次数', exact: true }).click()
-  await expect(list.locator('[aria-label="补 1 次 · 隔 1 分"]').first()).toBeAttached()
-  await page.getByRole('switch', { name: '自动调仓', exact: true }).click()
-  await expect(page.getByText('开启自动调仓后显示。')).toBeVisible()
-  await page.getByRole('switch', { name: '自动调仓', exact: true }).click()
-  await expect(list.locator('[aria-label="补 1 次 · 隔 1 分"]').first()).toBeAttached()
+  await page.getByRole('complementary').screenshot({ path: 'test-results/timer-preview-normal.png', animations: 'disabled' })
 })
 
 test('摘要失败可重试，快速换间隔时旧响应不能覆盖新值', async ({ page }) => {
@@ -116,7 +97,8 @@ test('摘要失败可重试，快速换间隔时旧响应不能覆盖新值', as
   const mock = await mockPreview(page)
   await page.goto('/e2e/timer.html')
   const list = page.getByRole('list', { name: '未来排程预览' })
-  await expect(list.locator('[aria-label="补 2 次 · 隔 1 分"]').first()).toBeAttached()
+  await expect.poll(() => mock.requests.some((request) => Boolean(request.scheduled_ats))).toBe(true)
+  await expect(list.locator('time').first()).toBeVisible()
   const dates = await list.locator('time').allTextContents()
   const baseRequests = mock.requests.filter((request) => !request.scheduled_ats).length
   mock.fail()
@@ -124,14 +106,14 @@ test('摘要失败可重试，快速换间隔时旧响应不能覆盖新值', as
   await expect(page.getByText('补发预览未更新')).toBeVisible()
   expect(await list.locator('time').allTextContents()).toEqual(dates)
   await page.getByRole('button', { name: '重试', exact: true }).click()
-  await expect(list.locator('[aria-label="补 2 次 · 隔 2 分"]').first()).toBeAttached()
+  await expect(page.getByText('补发预览未更新')).toHaveCount(0)
   mock.delay(3)
   await page.getByRole('button', { name: '下一档补发间隔分钟', exact: true }).click()
   await expect.poll(() => mock.requests.some((request) => request.supplement?.interval_minutes === 3)).toBe(true)
   await page.getByRole('button', { name: '下一档补发间隔分钟', exact: true }).click()
-  await expect(list.locator('[aria-label="补 1 次 · 隔 4 分"]').first()).toBeAttached()
+  await expect(list.locator('[aria-label="仅补 1 次"]').first()).toBeAttached()
   mock.release()
   expect(await list.locator('time').allTextContents()).toEqual(dates)
   expect(mock.requests.filter((request) => !request.scheduled_ats)).toHaveLength(baseRequests)
-  await expect(list.locator('[aria-label="补 1 次 · 隔 3 分"]')).toHaveCount(0)
+  await expect(list.locator('[aria-label="仅补 1 次"]').first()).toBeAttached()
 })
