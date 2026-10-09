@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from typing import NamedTuple
+from typing import Literal, NamedTuple
 
 from fastapi import APIRouter, HTTPException, status
 from loguru import logger
@@ -52,6 +52,7 @@ class AccountNotificationFunctionTestRequest(BaseModel):
     """使用当前编辑草稿试跑账户执行通知函数。"""
 
     code: str
+    event_type: Literal["execution.finished", "supplement.cancelled"] = "execution.finished"
     feishu_key: str | None = None
 
 
@@ -302,6 +303,43 @@ async def test_account_notification_function(
     account = await _get_account_or_404(session, account_id)
     output = await _build_sample_output(session, account, UnifiedAccountAssets.unavailable())
     context = build_execution_notification_context(_TestNotificationSource(account.name), output, is_test=True)
+    execution = context.get("execution")
+    if isinstance(execution, dict):
+        current = clock_now().isoformat()
+        execution["supplements"] = (
+            [
+                {
+                    "group_id": "test",
+                    "base_scheduled_at": current,
+                    "scheduled_at": current,
+                    "index": account.supplement.count,
+                    "configured_count": account.supplement.count,
+                    "effective_count": account.supplement.count,
+                    "is_last": True,
+                    "group_status": "completed",
+                    "end_reason": None,
+                }
+            ]
+            if account.supplement
+            else []
+        )
+    if payload.event_type == "supplement.cancelled":
+        context = {
+            "event_id": "supplement:test:cancelled",
+            "event_type": "supplement.cancelled",
+            "account": {"id": account.id, "name": account.name},
+            "execution": None,
+            "is_test": True,
+            "supplement": {
+                "group_id": "test",
+                "base_scheduled_at": clock_now().isoformat(),
+                "reason": "terminated",
+                "cancel_requested_at": clock_now().isoformat(),
+                "steps": [],
+            },
+            "last_execution": context,
+            "last_execution_at": clock_now().isoformat(),
+        }
     key = payload.feishu_key if "feishu_key" in payload.model_fields_set else account.feishu_key
     if payload.code.strip() == DEFAULT_ACCOUNT_NOTIFICATION_CODE.strip() and not key:
         return AccountFeishuTestResult(ok=False, message="请返回基本信息页配置飞书 Webhook")

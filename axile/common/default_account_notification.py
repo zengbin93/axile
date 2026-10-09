@@ -1,4 +1,4 @@
-"""账户默认飞书执行通知函数的可编辑源码。"""
+"""账户默认飞书通知函数的可编辑源码。"""
 
 DEFAULT_ACCOUNT_NOTIFICATION_CODE = '''import os
 
@@ -10,6 +10,15 @@ def notify(context: AccountNotificationContext) -> None:
     """发送与内置默认通知一致的飞书卡片。"""
     key = os.environ.get("AXILE_ACCOUNT_FEISHU_KEY")
     if not key:
+        return
+
+    if context.get("event_type") == "supplement.cancelled":
+        group = context["supplement"]
+        card = {
+            "header": {"title": {"tag": "plain_text", "content": "剩余补发已取消"}},
+            "elements": [{"tag": "markdown", "content": f"账户：{context['account'].get('name', '')}\\n原因：{group['reason']}\\n请求时间：{group['cancel_requested_at']}"}],
+        }
+        push_feishu_card(card, key, timeout=10)
         return
 
     # 保留原默认卡片的口径；可以在这里修改字段、持仓或成交的展示。

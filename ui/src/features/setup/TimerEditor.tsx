@@ -83,7 +83,7 @@ function SupRow({
 }) {
   return (
     <div className="flex flex-wrap items-center gap-2 text-sm">
-      <span className="text-ink-3">到点后补发</span>
+      <span className="text-ink-3">{supN === 0 ? '未设置补发' : '到点后补发'}</span>
       <Select<number>
         ariaLabel="补发次数"
         value={supN}
@@ -195,9 +195,9 @@ export function TimerEditor({ tradeChannel, scheduleKind, nightSchedule, value, 
 
   const customEmpty = v.timerTab === 'custom' && !v.rawCron.trim()
   const rawErr = v.timerTab === 'custom' && !customEmpty ? cronError(v.rawCron) : null
-  const cronList = v.autoOn ? resolveCronList(scheduleKind, v, nightSchedule) : []
+  const cronList = v.autoOn ? resolveCronList(scheduleKind, { ...v, supN: 0 }, nightSchedule) : []
   const cronExpr = rawErr ? '' : cronToExpr(cronList)
-  const previewKey = tradeChannel && cronExpr ? `${tradeChannel}\u0000${cronExpr}` : ''
+  const previewKey = tradeChannel && cronExpr ? `${tradeChannel}\u0000${cronExpr}\u0000${v.supN}:${v.supM}` : ''
   // 是否会发起预览请求（与下方 effect 的提前返回条件一致）：首帧据此直接上骨架，
   // 避免「占位文案 → 骨架 → 列表」三段跳闪。
   const expectPreview = Boolean(tradeChannel) && v.autoOn && !rawErr && Boolean(cronExpr)
@@ -279,7 +279,7 @@ export function TimerEditor({ tradeChannel, scheduleKind, nightSchedule, value, 
     const controller = new AbortController()
     const timer = window.setTimeout(() => {
       const limit = layout === 'page' ? previewLimitRef.current : PREVIEW_MIN_ITEMS
-      void previewSchedule(tradeChannel, cronExpr, { limit }, controller.signal)
+      void previewSchedule(tradeChannel, cronExpr, { limit, supplement: v.supN > 0 ? { count: v.supN, interval_minutes: v.supM } : null }, controller.signal)
         .then((next) => {
           if (requestId !== previewRequestId.current) return
           previewResultKey.current = previewKey
@@ -299,7 +299,7 @@ export function TimerEditor({ tradeChannel, scheduleKind, nightSchedule, value, 
       window.clearTimeout(timer)
       controller.abort()
     }
-  }, [tradeChannel, v.autoOn, rawErr, cronExpr, layout, previewKey])
+  }, [tradeChannel, v.autoOn, v.supN, v.supM, rawErr, cronExpr, layout, previewKey])
 
   const loadMore = useCallback(() => {
     const cursor = schedulePreview?.next_cursor
@@ -325,7 +325,7 @@ export function TimerEditor({ tradeChannel, scheduleKind, nightSchedule, value, 
     void previewSchedule(
       tradeChannel,
       cronExpr,
-      { after: cursor, limit: previewLimit },
+      { after: cursor, limit: previewLimit, supplement: v.supN > 0 ? { count: v.supN, interval_minutes: v.supM } : null },
       controller.signal,
     )
       .then((next) => {
@@ -347,6 +347,8 @@ export function TimerEditor({ tradeChannel, scheduleKind, nightSchedule, value, 
     previewWide,
     tradeChannel,
     v.autoOn,
+    v.supN,
+    v.supM,
     rawErr,
     cronExpr,
     previewKey,
@@ -397,7 +399,7 @@ export function TimerEditor({ tradeChannel, scheduleKind, nightSchedule, value, 
     if (tab === 'custom') {
       const rawCron = v.rawCron.trim()
         ? v.rawCron
-        : cronToExpr(resolveCronList(scheduleKind, v, nightSchedule))
+        : cronToExpr(resolveCronList(scheduleKind, { ...v, supN: 0 }, nightSchedule))
       patch({ timerTab: 'custom', rawCron })
       return
     }
@@ -502,9 +504,8 @@ export function TimerEditor({ tradeChannel, scheduleKind, nightSchedule, value, 
       </div>
 
       <div
-        inert={v.timerTab === 'custom'}
         className={`grid transition-[grid-template-rows] ${MOTION_LAYOUT} ${
-          v.timerTab === 'custom' ? 'grid-rows-[0fr]' : 'grid-rows-[1fr]'
+          'grid-rows-[1fr]'
         }`}
       >
         <div className="min-h-0 overflow-hidden">

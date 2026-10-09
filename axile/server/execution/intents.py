@@ -173,6 +173,17 @@ async def cas_intent_status(
             .values(status=target, **fields)
         )
         result = cast("CursorResult[Any]", await session.execute(statement))
+        if result.rowcount == 1 and target in {
+            ExecutionTaskStatus.TERMINATED,
+            ExecutionTaskStatus.FAILED,
+            ExecutionTaskStatus.SUCCEEDED,
+        }:
+            from axile.server.execution.supplement_notifications import finish_supplement_execution
+
+            row = (
+                await session.scalars(select(ExecutionIntent).where(ExecutionIntent.execution_id == execution_id))
+            ).one()
+            await finish_supplement_execution(session, row)
         await session.commit()
     return result.rowcount == 1
 
@@ -203,7 +214,13 @@ async def mark_intent_finished(
         if error is not None:
             row.error = error
         session.add(row)
+        from axile.server.execution.supplement_notifications import finish_supplement_execution
+
+        await finish_supplement_execution(session, row)
         await session.commit()
+    from axile.server.execution.notification_outbox import wake_notifications
+
+    wake_notifications(row.account_id)
 
 
 def serialize_intent(intent: IntentSnapshot) -> dict[str, object]:
@@ -351,7 +368,11 @@ async def _insert_intent(
         payload=payload,
     )
     async with SessionLocal() as session:
+        from axile.server.execution.supplements import attach_step
+
         session.add(row)
+        await session.flush()
+        await attach_step(session, row, cast("str | None", payload.get("supplement_step_id")))
         await session.commit()
         await session.refresh(row)
         snap = _snapshot(row)
@@ -410,6 +431,35 @@ async def submit_intent(
     payload: dict[str, object] | None = None,
     on_conflict: Literal["raise", "skip"] = "raise",
 ) -> SubmitResult:
+    """串行化账户入队与补发取消；关联在入队事务内提交。"""
+    from axile.server.execution.supplements import account_lock
+
+    async with account_lock(account_id):
+        return await _submit_intent(account_id, kind, trigger_source, payload=payload, on_conflict=on_conflict)
+
+
+async def _coalesce(execution_id: str, account_id: int, payload: dict[str, object]) -> SubmitResult:
+    """保留共享执行承接的每一条触发需求。"""
+    from axile.server.execution.supplements import attach_step
+
+    async with SessionLocal() as session:
+        row = (
+            await session.execute(select(ExecutionIntent).where(ExecutionIntent.execution_id == execution_id))
+        ).scalar_one()
+        await attach_step(session, row, cast("str | None", payload.get("supplement_step_id")))
+        session.add(row)
+        await session.commit()
+    return SubmitResult(outcome="coalesced", execution_id=execution_id, account_id=account_id)
+
+
+async def _submit_intent(
+    account_id: int,
+    kind: ExecutionKind,
+    trigger_source: str,
+    *,
+    payload: dict[str, object] | None = None,
+    on_conflict: Literal["raise", "skip"] = "raise",
+) -> SubmitResult:
     """
     为账户提交一张执行票.
 
@@ -455,7 +505,7 @@ async def submit_intent(
     if not has_running and queued_kind == ExecutionKind.CLEAR_POSITIONS:
         if kind == ExecutionKind.CLEAR_POSITIONS:
             execution_id = queued.execution_id if queued is not None else cast("str", memory_queued_id)
-            return SubmitResult(outcome="coalesced", execution_id=execution_id, account_id=account_id)
+            return await _coalesce(execution_id, account_id, payload)
         return _conflict(kind=kind, on_conflict=on_conflict, account_id=account_id, message=busy_msg)
 
     if not has_running and queued_kind == ExecutionKind.REBALANCE:
@@ -464,7 +514,7 @@ async def submit_intent(
                 return _conflict(kind=kind, on_conflict=on_conflict, account_id=account_id, message=busy_msg)
             created = await _supersede_queued_with_clear(account, queued, trigger_source, payload)
             if created is None:
-                return await submit_intent(
+                return await _submit_intent(
                     account_id,
                     kind,
                     trigger_source,
@@ -475,14 +525,14 @@ async def submit_intent(
             _wake(account_id)
             return SubmitResult(outcome="created", execution_id=created.execution_id, account_id=account_id)
         execution_id = queued.execution_id if queued is not None else cast("str", memory_queued_id)
-        return SubmitResult(outcome="coalesced", execution_id=execution_id, account_id=account_id)
+        return await _coalesce(execution_id, account_id, payload)
 
     if has_running and has_queued:
         if kind == ExecutionKind.CLEAR_POSITIONS:
             return _conflict(kind=kind, on_conflict=on_conflict, account_id=account_id, message=busy_msg)
         if queued_kind == ExecutionKind.REBALANCE:
             execution_id = queued.execution_id if queued is not None else cast("str", memory_queued_id)
-            return SubmitResult(outcome="coalesced", execution_id=execution_id, account_id=account_id)
+            return await _coalesce(execution_id, account_id, payload)
         return _conflict(kind=kind, on_conflict=on_conflict, account_id=account_id, message=busy_msg)
 
     if has_running and not has_queued:
@@ -498,11 +548,7 @@ async def submit_intent(
         except IntegrityError:
             running_now, queued_now = await load_active_intents(account_id)
             if queued_now is not None:
-                return SubmitResult(
-                    outcome="coalesced",
-                    execution_id=queued_now.execution_id,
-                    account_id=account_id,
-                )
+                return await _coalesce(queued_now.execution_id, account_id, payload)
             raise
         _sync_live(account_id)
         return SubmitResult(outcome="created", execution_id=created.execution_id, account_id=account_id)
@@ -517,7 +563,7 @@ async def submit_intent(
     except IntegrityError:
         # 并发首次提交可能同时读到空槽位；唯一索引决出胜者后，
         # 重新走冲突表，让败者得到 coalesced / busy 而不是 500。
-        return await submit_intent(
+        return await _submit_intent(
             account_id,
             kind,
             trigger_source,
@@ -536,6 +582,19 @@ def _wake(account_id: int) -> None:
 
 
 async def promote_intent_to_running(execution_id: str, account_id: int) -> None:
+    """取消和开跑共享账户锁，防止失效补发越过准入。"""
+    from axile.server.execution.supplement_notifications import validate_execution_requests
+    from axile.server.execution.supplements import account_lock
+
+    async with account_lock(account_id):
+        if not await validate_execution_requests(execution_id):
+            await mark_intent_finished(execution_id, ExecutionTaskStatus.TERMINATED)
+            clear_queued_execution(account_id, execution_id)
+            raise IntentNotRunnable("补发需求已取消或过期")
+        await _promote_intent_to_running(execution_id, account_id)
+
+
+async def _promote_intent_to_running(execution_id: str, account_id: int) -> None:
     """在真正下单前把 QUEUED 推进 RUNNING，并占用渠道锁.
 
     Parameters

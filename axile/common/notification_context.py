@@ -1,11 +1,26 @@
 """自定义通知函数接收的公开数据结构。"""
 
-from typing import TypedDict
+from typing import Literal, NotRequired, TypedDict
+
+
+class SupplementNotificationItem(TypedDict):
+    """一次基础或补发触发在通知中的身份与结束状态。"""
+
+    group_id: str
+    base_scheduled_at: str
+    scheduled_at: str
+    index: int
+    configured_count: int
+    effective_count: int
+    is_last: bool
+    group_status: str
+    end_reason: str | None
 
 
 class AccountNotificationExecution(TypedDict):
     """账户执行通知中的执行摘要。"""
 
+    supplements: NotRequired[list[SupplementNotificationItem]]
     id: str | None
     kind: str | None
     trigger_source: str | None
@@ -38,9 +53,14 @@ class AccountNotificationSummary(TypedDict):
 class AccountNotificationContext(TypedDict):
     """账户执行结束时交给 ``notify`` 的脱敏快照。"""
 
+    is_test: NotRequired[bool]
     event_id: str | None
     account: dict[str, object]
-    execution: AccountNotificationExecution
+    event_type: NotRequired[Literal["execution.finished", "supplement.cancelled"]]
+    supplement: NotRequired[dict[str, object]]
+    last_execution: NotRequired[dict[str, object] | None]
+    last_execution_at: NotRequired[str | None]
+    execution: AccountNotificationExecution | None
     strategy: dict[str, object]
     assets: dict[str, object]
     targets: dict[str, object]

@@ -51,8 +51,8 @@ export function useTerminateAction(accountId: number, isRunning: boolean, onRequ
     pendingRef.current = true
     setTerminating(true)
     try {
-      await terminateExecution(accountId)
-      toast('已请求终止执行')
+      const result = await terminateExecution(accountId)
+      toast(result.message)
       requestedRef.current?.()
     } catch (err) {
       // 请求失败回滚 pending，允许重试（后端幂等，重试无副作用）。

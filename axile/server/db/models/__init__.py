@@ -87,6 +87,7 @@ from axile.server.db.models.schedule import (
     ScheduleSkip,
     ScheduleSkipActivity,
 )
+from axile.server.db.models.supplement import NotificationEvent, SupplementGroup, SupplementStep
 from axile.server.db.models.system_notification import SystemNotificationState, SystemNotificationStatePublic
 from axile.server.db.models.target_weight_snapshot import (
     TargetSizingAvailability,
@@ -101,9 +102,14 @@ Portfolio.model_rebuild()
 Account.model_rebuild()
 AccountAssetSnapshot.model_rebuild()
 PortfolioAccount.model_rebuild()
+
 ExecuteRecord.model_rebuild()
 
+
 __all__ = [
+    "NotificationEvent",
+    "SupplementGroup",
+    "SupplementStep",
     "SystemNotificationState",
     "SystemNotificationStatePublic",
     "AccountSettings",

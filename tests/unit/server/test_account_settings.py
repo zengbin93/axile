@@ -89,6 +89,7 @@ def test_migration_preserves_all_settings_and_binding_rows():
             metadata = sa.MetaData()
             account = sa.Table("account", metadata, autoload_with=connection)
             values = Account(**account_data()).model_dump()
+            values = {key: value for key, value in values.items() if key in account.c}
             values["trade_channel"] = "ctp"
             connection.execute(account.insert().values(**values))
             connection.execute(

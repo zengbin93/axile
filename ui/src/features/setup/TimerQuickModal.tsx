@@ -17,7 +17,9 @@ import {
   defaultTimerEditorState,
   fmtFire,
   nextFires,
-  parseTimerIntent,
+  parseSavedTimer,
+  timerSupplement,
+  type Supplement,
   resolveCronList,
   ruleFromPreset,
   timerStateToCronExpr,
@@ -57,8 +59,9 @@ function draftFromCron(
   market: ScheduleKind,
   cronExpr: string,
   night?: NightSchedule | null,
+  supplement?: Supplement | null,
 ): { state: TimerEditorState; fromComplex: boolean } {
-  const parsed = parseTimerIntent(market, cronExpr, night)
+  const parsed = parseSavedTimer(market, cronExpr, night, supplement)
   const quick = parsed.timerTab === 'quick'
   if (quick) return { state: { ...parsed, timerTab: 'quick', rawCron: '' }, fromComplex: false }
 
@@ -96,6 +99,7 @@ export interface TimerQuickModalProps {
   tradeChannel: string
   /** 当前存储的 cron_expr。 */
   cronExpr: string
+  supplement?: Supplement | null
   onClose: () => void
   /** 保存成功后刷新详情 / next_run / 仪表盘。 */
   onSaved: () => void
@@ -111,12 +115,13 @@ function TimerQuickModalReady({
   scheduleKind,
   nightSchedule,
   cronExpr,
+  supplement,
   onClose,
   onSaved,
 }: TimerQuickModalProps & { scheduleKind: ScheduleKind; nightSchedule?: NightSchedule | null }) {
   const toast = useToastStore((s) => s.toast)
   const market = scheduleKind
-  const [state, setState] = useState<TimerEditorState>(() => draftFromCron(market, cronExpr, nightSchedule).state)
+  const [state, setState] = useState<TimerEditorState>(() => draftFromCron(market, cronExpr, nightSchedule, supplement).state)
   // 开关切到「开」的那一帧才播入场；初次以开挂载不播（首帧就位）。
   const autoOnFade = useRemountFade(state.autoOn)
   const [fromComplex, setFromComplex] = useState(false)
@@ -125,12 +130,12 @@ function TimerQuickModalReady({
 
   useEffect(() => {
     if (!open) return
-    const d = draftFromCron(market, cronExpr, nightSchedule)
+    const d = draftFromCron(market, cronExpr, nightSchedule, supplement)
     setState(d.state)
     setFromComplex(d.fromComplex)
     setSaving(false)
     setSaveError(null)
-  }, [open, market, cronExpr, nightSchedule])
+  }, [open, market, cronExpr, nightSchedule, supplement])
 
   useEffect(() => {
     if (!open) return
@@ -159,19 +164,24 @@ function TimerQuickModalReady({
   }
 
   const intent = asQuickIntent(market, state)
-  const cronNext = timerStateToCronExpr(market, intent, nightSchedule)
-  const dirty = !cronExprEqual(cronNext, cronExpr)
-  const fires = state.autoOn ? nextFires(resolveCronList(market, intent, nightSchedule), 4) : []
+  const cronNext = fromComplex && state.autoOn ? cronExpr : timerStateToCronExpr(market, intent, nightSchedule)
+  const nextSupplement = timerSupplement(state)
+  const dirty = !cronExprEqual(cronNext, cronExpr) || JSON.stringify(nextSupplement) !== JSON.stringify(supplement ?? null)
+  const fires = state.autoOn ? nextFires(resolveCronList(market, { ...intent, supN: 0 }, nightSchedule), 4) : []
 
   const save = async () => {
     if (!dirty) {
       onClose()
       return
     }
+    if (fromComplex && state.supN > 0) {
+      toast('请先选择并确认基础节奏，再启用独立补发')
+      return
+    }
     setSaving(true)
     setSaveError(null)
     try {
-      await updateAccount(accountId, { cron_expr: cronNext })
+      await updateAccount(accountId, { cron_expr: cronNext, supplement: nextSupplement })
       toast(cronNext ? '节奏已更新' : '已关闭自动调仓节奏')
       onSaved()
       onClose()

@@ -414,3 +414,35 @@ def test_final_account_observation_source_controls_output(monkeypatch, source, s
     assert output.error == (None if source in {"real", "simulation", "custom-channel"} else "最终持仓尚未确认")
     assert output.account_assets == assets
     assert output.symbol_results == {"A": result}
+
+
+@pytest.mark.parametrize("capture_fails", [False, True])
+def test_server_notification_captures_without_sending_or_changing_trade(monkeypatch, capture_fails):
+    """服务端托管通知只保存快照；快照异常不能改写交易结果。"""
+    from axile.executor.abstract_executor import execution_lifecycle
+
+    executor = _LifecycleRecorderExecutor()
+    output = _output()
+
+    class Engine:
+        def run(self, _input):
+            return output
+
+    sent = []
+
+    def capture(*_args):
+        if capture_fails:
+            raise RuntimeError("snapshot unavailable")
+        return {"account": {"mark": "original-channel-mark"}}
+
+    monkeypatch.setattr(executor, "_execution_engine", lambda: Engine())
+    monkeypatch.setattr(execution_lifecycle, "build_execution_notification_context", capture)
+    monkeypatch.setattr(execution_lifecycle, "enqueue_execute_results_to_feishu", lambda *_args: sent.append(True))
+    inputs = _standard_input()
+    inputs.extra["server_notification"] = True
+    inputs.execution_notification_code = "def notify(context): pass"
+    result = executor.execute(inputs)
+    assert result.success
+    assert sent == []
+    if not capture_fails:
+        assert result.extra["server_notification_context"]["account"]["mark"] == "original-channel-mark"

@@ -7,6 +7,7 @@ interface AccountActionsProps {
   name: string
   isStarted: boolean
   running: boolean
+  hasPendingSupplement?: boolean
   /** 真正在下单：禁用清仓。queued 时仍可清仓。 */
   executing: boolean
   /** 终止请求在途：按钮切「终止中…」并禁用，防连点；由 useTerminateAction 驱动。 */
@@ -116,22 +117,22 @@ export function AccountActions(props: AccountActionsProps) {
     <div className="ml-auto flex flex-none items-center gap-2">
       {/* 主操作槽：同一按钮跨 running 存活，壳/提示/动作随态切，标签走日记式换字。
           两态若拆成两个分支会各自挂载，InkRewrite 当首帧不播——必须合一。 */}
-      <Tooltip content={props.running ? terminateTip : execTip} delay={ACTION_TIP_MS} arrow>
+      <Tooltip content={(props.running || props.hasPendingSupplement) ? terminateTip : execTip} delay={ACTION_TIP_MS} arrow>
         <button
           className={
-            props.running
+            (props.running || props.hasPendingSupplement)
               ? `${BTN} border-bad/40 font-[550] text-bad hover:bg-bad/10 disabled:opacity-45 disabled:cursor-default disabled:hover:bg-transparent`
               : `${BTN} border-ink-1 bg-ink-1 font-[550] text-surface`
           }
-          onClick={props.running ? props.onTerminate : props.onExec}
+          onClick={(props.running || props.hasPendingSupplement) ? props.onTerminate : props.onExec}
           // 终止在途禁用防连点；disabled 吞指针事件、气泡不触发，故补原生 title 兜「为何不可点」。
           disabled={props.terminating}
           title={props.terminating ? '终止请求已发出，正在停止…' : undefined}
-          aria-label={props.terminating ? '终止中' : props.running ? '终止执行' : '立即执行'}
+          aria-label={props.terminating ? '终止中' : (props.running || props.hasPendingSupplement) ? '终止执行' : '立即执行'}
         >
           {/* 同槽日记式换字：立即执行↔终止↔终止中，纯 opacity crossfade，无 FLIP。 */}
           <InkRewrite
-            text={props.terminating ? '■ 终止中…' : props.running ? '■ 终止执行' : '▶ 立即执行'}
+            text={props.terminating ? '■ 终止中…' : (props.running || props.hasPendingSupplement) ? '■ 终止执行' : '▶ 立即执行'}
             tone="label"
           />
         </button>

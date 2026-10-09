@@ -15,7 +15,7 @@ from axile.executor.account_control.models import AccountControlOverride
 from axile.executor.models.unified_input import DEFAULT_EXECUTION_TIMEOUT_SECONDS
 from axile.server.db.models.account_notification import AccountNotificationState, AccountNotificationStatePublic
 from axile.server.db.models.account_runtime_sync import AccountRuntimeSyncPublic
-from axile.server.db.models.account_settings import SETTINGS_FIELDS, AccountSettings
+from axile.server.db.models.account_settings import SETTINGS_FIELDS, AccountSettings, SupplementSettings
 from axile.server.db.models.account_validation import (
     _MAX_EXECUTION_TIMEOUT,
     _validate_algorithm_config,
@@ -30,6 +30,7 @@ if TYPE_CHECKING:
     from axile.server.db.models.account_asset import AccountAssetSnapshot
     from axile.server.db.models.execution import ExecuteRecord
     from axile.server.db.models.portfolio import Portfolio
+    from axile.server.db.models.supplement import SupplementGroup
 
 
 class AccountBase(BaseModel):
@@ -61,6 +62,7 @@ class AccountBase(BaseModel):
     is_started: bool = Field(
         description="账户是否已启动, 布尔值, 必填",
     )
+    supplement: SupplementSettings | None = None
     cron_expr: str = Field(
         description="定时任务表达式, 符合crontab语法, 必填",
     )
@@ -173,6 +175,15 @@ class Account(SQLModel, AsyncAttrs, table=True):
     updated_at: str = Field(default_factory=now_str, sa_column=Column(Text, nullable=False))
     created_at: str = Field(default_factory=now_str, sa_column=Column(Text, nullable=False))
 
+    supplement_groups: list["SupplementGroup"] = Relationship(
+        sa_relationship=relationship("SupplementGroup", lazy="selectin", cascade="all, delete-orphan")
+    )
+
+    @property
+    def has_pending_supplement(self) -> bool:
+        """存在尚未结束的补发组时允许复用账户终止入口。"""
+        return any(group.status in {"active", "cancelling"} for group in self.supplement_groups)
+
     notification_state: AccountNotificationState | None = Relationship(
         sa_relationship=relationship(
             "AccountNotificationState", uselist=False, lazy="selectin", cascade="all, delete-orphan", single_parent=True
@@ -279,6 +290,8 @@ class AccountPublic(SQLModel):
     connection_values: dict[str, Any] = Field(default_factory=dict)
     is_started: bool
     cron_expr: str
+    supplement: SupplementSettings | None = None
+    has_pending_supplement: bool = False
     remark: Optional[str] = None
     brokerage: str
     weight_precision: float
@@ -474,6 +487,7 @@ class AccountUpdate(SQLModel):
     account_config: Optional[Dict[str, Any]] = None
     is_started: Optional[bool] = None
     cron_expr: Optional[str] = None
+    supplement: SupplementSettings | None = None
     remark: Optional[str] = None
     brokerage: Optional[str] = None
     login_secret: Optional[str] = None

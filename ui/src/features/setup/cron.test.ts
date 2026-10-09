@@ -11,6 +11,8 @@ import {
   makeEmptySlot,
   nextFires,
   parseTimerIntent,
+  parseSavedTimer,
+  timerSupplement,
   resolveCronList,
   timerStateToCronExpr,
   type ScheduleRule,
@@ -227,8 +229,8 @@ describe('describeRule', () => {
 })
 
 describe('describeCron · cron 反解人话', () => {
-  it('每 15 分钟 + 补发 2 次（与图示同款展开）', () => {
-    expect(describeCron('continuous', '0,1,2,15,16,17,30,31,32,45,46,47 * * * *')).toBe('每 15 分钟 · 补发 2 次')
+  it('旧展开表达式不反推补发配置，保留为自定义 cron', () => {
+    expect(describeCron('continuous', '0,1,2,15,16,17,30,31,32,45,46,47 * * * *')).toBeNull()
   })
 
   it('每天带时间、无补发不加后缀', () => {
@@ -306,12 +308,11 @@ describe('parseTimerIntent · 编辑页回填', () => {
     expect(timerStateToCronExpr('continuous', s)).toBe('')
   })
 
-  it('每 15 分 + 补 2 次 → 快捷预设（编辑页裸 cron 同款）', () => {
+  it('旧偏移 cron 保留为自定义表达式，不推断补发', () => {
     const s = parseTimerIntent('continuous', '0,1,2,15,16,17,30,31,32,45,46,47 * * * *')
     expect(s.autoOn).toBe(true)
-    expect(s.timerTab).toBe('quick')
-    expect(s.presetIds).toEqual(['m15'])
-    expect(s.supN).toBe(2)
+    expect(s.timerTab).toBe('custom')
+    expect(s.supN).toBe(0)
     expect(s.supM).toBe(1)
     expect(timerStateToCronExpr('continuous', s)).toBe('0,1,2,15,16,17,30,31,32,45,46,47 * * * *')
   })
@@ -353,5 +354,22 @@ describe('timerEditorError · 自定义模式', () => {
   it('内容有效或自动调仓关闭时不报错', () => {
     expect(timerEditorError(state)).toBeNull()
     expect(timerEditorError({ ...state, autoOn: false, rawCron: '' })).toBeNull()
+  })
+})
+
+
+describe('独立补发配置', () => {
+  it('旧展开表达式原样保留，不反推补发', () => {
+    const expr = '0,1,2,15,16,17,30,31,32,45,46,47 * * * *'
+    const state = parseSavedTimer('continuous', expr)
+    expect(state.supN).toBe(0)
+    expect(timerSupplement(state)).toBeNull()
+    expect(timerStateToCronExpr('continuous', state)).toBe(expr)
+  })
+  it('基础 cron 与补发配置分别编译，零次存 null', () => {
+    const state = parseSavedTimer('continuous', '*/15 * * * *', undefined, { count: 2, interval_minutes: 1 })
+    expect(timerStateToCronExpr('continuous', state)).not.toContain('0,1,2,')
+    expect(timerSupplement(state)).toEqual({ count: 2, interval_minutes: 1 })
+    expect(timerSupplement({ ...state, supN: 0 })).toBeNull()
   })
 })

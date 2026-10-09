@@ -265,8 +265,8 @@ class ExecutionTerminateResponse(SQLModel):
 
     message: str
     account_id: int
-    execution_id: str
-    status: ExecutionTaskStatus
+    execution_id: str | None = None
+    status: ExecutionTaskStatus | None = None
 
 
 class ExecutionStatusPublic(SQLModel):

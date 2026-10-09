@@ -350,6 +350,13 @@ async def _build_rebalance_backend_request(
         execution_id=execution_id,
         trigger_source=trigger_source,
     )
+    if execution_id and account.supplement:
+        from axile.server.execution.supplement_notifications import execution_steps
+
+        async with SessionLocal() as session:
+            if await execution_steps(session, execution_id):
+                standard_input.execution_notification_code = None
+                standard_input.extra = {**standard_input.extra, "server_notification": True}
     long_leverage, short_leverage = resolve_account_leverages(account)
     audit_input = sanitize_standard_input_for_audit(standard_input)
     audit_input["strategy_target"] = dict(curr_target)

@@ -164,12 +164,13 @@ export function AccountDetail({
   const refreshAssetSnapshots = assetSnapshots.refresh
   // 执行终态时记录与资产快照已落库：立刻重读观测面，避免目标单飞、权益/持仓停在上一帧。
   const refreshObservedState = useCallback(() => {
+    void refreshAccount()
     refreshActivity()
     void reloadTargetSnapshot()
     void refreshAssetSnapshots()
     void refreshComparison()
     onDashboardRefresh?.()
-  }, [refreshActivity, reloadTargetSnapshot, refreshAssetSnapshots, refreshComparison, onDashboardRefresh])
+  }, [refreshAccount, refreshActivity, reloadTargetSnapshot, refreshAssetSnapshots, refreshComparison, onDashboardRefresh])
   const runner = useExecutionRunner(accountId, refreshObservedState)
   // 服务端真源的在途执行（SSE/轮询汇入 liveExec store）：任何来源发起的执行都可见。
   const live = useRunning(accountId)
@@ -239,7 +240,7 @@ export function AccountDetail({
   // 执行态：服务端 live 优先，runner 仅首帧前乐观。queued ≠ 正在下单。
   const isBusy = !!(live || runner.running)
   // 终止动作 + 防连点：点后乐观进「终止中…」并禁用按钮，执行离开运行态即复位。
-  const { terminating, terminate } = useTerminateAction(accountId, isBusy, activity.refresh)
+  const { terminating, terminate } = useTerminateAction(accountId, isBusy || !!account.data?.has_pending_supplement, () => { activity.refresh(); account.refresh() })
   const isExecuting = live != null && isExecutingStatus(live.status)
   const isTerminating = terminating || live?.status === 'terminating'
   const isActivelyExecuting = live?.status === 'running'
@@ -411,6 +412,7 @@ export function AccountDetail({
             name={item.name}
             isStarted={isStarted}
             running={isBusy}
+            hasPendingSupplement={!!account.data?.has_pending_supplement}
             executing={isExecuting}
             terminating={terminating}
             onExec={() => runner.start('exec')}
@@ -748,7 +750,7 @@ export function AccountDetail({
               ) : (
                 <OverflowText
                   className="min-w-0 flex-1 text-right font-medium text-ink-1"
-                  text={cronExpr ? (cronHuman ?? '自定义执行节奏') : '—'}
+                  text={cronExpr ? `${cronHuman ?? '自定义执行节奏'} · ${account.data?.supplement ? `补发 ${account.data.supplement.count} 次` : '未设置补发'}` : '—'}
                 />
               )}
               <span className="ml-1.5 flex-none text-ink-3" aria-hidden>
@@ -787,6 +789,7 @@ export function AccountDetail({
         accountName={item.name}
         tradeChannel={item.trade_channel}
         cronExpr={cronExpr}
+        supplement={account.data?.supplement}
         onClose={() => setTimerOpen(false)}
         onSaved={() => {
           account.refresh()

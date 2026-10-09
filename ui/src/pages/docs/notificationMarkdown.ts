@@ -3,7 +3,8 @@ export interface NotificationField { name: string; type: string; desc: string }
 export const NOTIFICATION_FIELDS: NotificationField[] = [
   { name: 'event_id', type: 'str | None', desc: '由 execution ID 生成的事件标识；试跑样例可能没有 ID。' },
   { name: 'account', type: 'dict', desc: '账户 ID、名称、市场、交易渠道等公开配置；不包含连接凭据。' },
-  { name: 'execution', type: 'dict', desc: '本次执行的 ID、类型、触发来源、状态、结论、错误与通知时间。' },
+  { name: 'event_type', type: 'str', desc: 'execution.finished 或 supplement.cancelled。' },
+  { name: 'execution', type: 'dict | None', desc: '本次执行的 ID、类型、触发来源、状态、结论、错误与通知时间。' },
   { name: 'strategy', type: 'dict', desc: '算法、品种算法和交易规则等配置；疑似凭据字段会被移除。' },
   { name: 'assets', type: 'dict', desc: '总资产、可用资金、持仓市值、币种、来源和快照时间；不可用时金额为 None。' },
   { name: 'targets', type: 'dict', desc: 'current、previous 和 target_volume，分别表示本次目标、上次目标和目标数量。' },
@@ -36,13 +37,14 @@ from axile.common.notification_context import AccountNotificationContext
 
 def notify(context: AccountNotificationContext) -> None:
     # 试跑执行当前草稿；如不想发送真实消息，先检查此标记。
-    if context["execution"]["is_test"]:
+    execution = context["execution"]
+    if context.get("is_test") or (execution is not None and execution["is_test"]):
         return
 
     webhook = os.environ["AXILE_NOTIFY_WEBHOOK"]
     message = {
         "account": context["account"].get("name"),
-        "status": context["execution"]["status"],
+        "status": execution["status"] if execution is not None else "supplement.cancelled",
         "trades": context["summary"]["trade_count"],
     }
     data = json.dumps(message, ensure_ascii=False).encode("utf-8")
@@ -57,11 +59,12 @@ from axile.common.notification_context import AccountNotificationContext
 
 
 async def notify(context: AccountNotificationContext) -> None:
-    if context["execution"]["is_test"]:
+    execution = context["execution"]
+    if context.get("is_test") or (execution is not None and execution["is_test"]):
         return
 
     webhook = os.environ["AXILE_NOTIFY_WEBHOOK"]
-    message = {"account": context["account"].get("name"), "status": context["execution"]["status"]}
+    message = {"account": context["account"].get("name"), "status": execution["status"] if execution is not None else "supplement.cancelled"}
     async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=5)) as session:
         async with session.post(webhook, json=message) as response:
             response.raise_for_status()
@@ -78,7 +81,7 @@ export const CONTRACT_RULES = [
 
 export const TEST_RULES = [
   '点击“试跑函数”会执行编辑器中的当前草稿，无需先保存。试跑可能真的向外发送消息。',
-  '试跑使用脱敏的样例执行结果，`context["execution"]["is_test"]` 为 `True`；真实通知为 `False`。',
+  '两类试跑的 `context["is_test"]` 均为 `True`；执行完成样例同时保留 `execution.is_test`。取消样例的 execution 为 None。',
   '试跑成功只表示函数在样例上下文中执行成功；不能保证真实事件的字段都有值，或外部服务始终可用。',
   '保存后，后续账户执行通知使用已保存的唯一函数源码；清空并保存即可关闭。',
 ]
@@ -133,6 +136,29 @@ context 是执行结束时的 JSON 可序列化快照。资产不可用时相关
 ## 试跑与真实执行
 
 ${bullets(TEST_RULES)}
+
+## 独立补发
+
+每次实际执行均调用同一个 hook。\`event_type=execution.finished\` 保留执行上下文，\`execution.supplements[]\` 提供 group_id、base_scheduled_at、scheduled_at、index（首轮为 0）、configured_count、effective_count、is_last、group_status、end_reason。合并执行保留所有触发关联，只通知一次。
+
+\`event_type=supplement.cancelled\` 的 \`execution=null\`。\`supplement\` 包含 reason、cancel_requested_at、取消步骤及 execution_id。相关执行收尾后才通知；\`last_execution\` 为可空快照，\`last_execution_at\` 标明快照时间。
+
+待投递事件持久化，按账户顺序派发。静默返回仍算函数成功；失败和调用结果未知均不自动重试，重启只恢复尚未开始的调用。
+
+仅末次和取消通知，可把以下过滤条件放在自定义发送逻辑之前（send 由用户实现）：
+
+\`\`\`python
+def notify(context):
+    if context.get("event_type") == "supplement.cancelled":
+        send(context)
+        return
+    groups = (context.get("execution") or {}).get("supplements", [])
+    if any(item["group_status"] == "cancelling" for item in groups):
+        return
+    if groups and not any(item["is_last"] for item in groups):
+        return
+    send(context)
+\`\`\`
 
 ## 常见错误
 

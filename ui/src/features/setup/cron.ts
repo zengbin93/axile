@@ -632,7 +632,6 @@ function normCronSet(expr: string): string {
 }
 
 /** 补发档位（与设置向导下拉一致），用于穷举反解。 */
-const SUP_N = [0, 1, 2, 3, 4]
 const SUP_M = [1, 2, 3, 5]
 
 interface FixedCronTime {
@@ -695,11 +694,9 @@ function describeCommonCron(expr: string): string | null {
 }
 
 /**
- * 反解 cron 为设置向导同款人话（预设名 + 补发次数）。
+ * 反解基础 cron 为设置向导同款人话。
  *
- * 复用正向 {@link buildCronList} 穷举「单预设 × 补发档位」，规范化后与目标比对，命中即
- * 得如「每 15 分钟 · 补发 2 次」的短语；命不中任何预设组合（多选 / 自定义节奏 / 裸 cron）
- * 时再尝试通用五段 Cron 人话描述；仍无法无损表达时返回 ``null``。
+ * 仅匹配基础预设，其余尝试通用五段描述，不从偏移推断补发。
  *
  * @param market 目标市场，决定候选预设集。
  * @param cronExpr 存储的 crontab（多条以 `|` 或换行分隔）。
@@ -713,7 +710,7 @@ export function describeCron(
   const target = normCronSet(cronExpr)
   if (!target) return null
   for (const p of PRESETS[market]) {
-    for (const n of SUP_N) {
+    for (const n of [0]) {
       for (const m of SUP_M) {
         for (const nightOn of night ? [false, true] : [false]) {
           if (normCronSet(buildCronList(market, [p.id], n, m, night, nightOn).join(' | ')) !== target) continue
@@ -805,7 +802,7 @@ function tryParseDailyRules(cronExpr: string): ScheduleRule[] | null {
 }
 
 /**
- * 穷举单预设 × 补发档位，命中则返回快捷 tab 意图。
+ * 仅匹配基础预设，不从旧 cron 推断补发。
  */
 function tryMatchPreset(
   market: ScheduleKind,
@@ -813,7 +810,7 @@ function tryMatchPreset(
   night?: NightSchedule | null,
 ): Pick<TimerEditorState, 'presetIds' | 'nightOn' | 'supN' | 'supM'> | null {
   for (const p of PRESETS[market]) {
-    for (const n of SUP_N) {
+    for (const n of [0]) {
       for (const m of SUP_M) {
         for (const nightOn of night ? [false, true] : [false]) {
           if (normCronSet(buildCronList(market, [p.id], n, m, night, nightOn).join(' | ')) === target) {
@@ -829,7 +826,7 @@ function tryMatchPreset(
 /**
  * 从存储的 ``cron_expr`` 反解为定时编辑器状态（向导 / 账户编辑共用）。
  *
- * 优先级：空 → 关自动；单预设+补发 → 快捷；纯日频多时刻 → 高级规则；其余 → 高级+自定义表达式。
+ * 优先级：空 → 关自动；单基础预设 → 快捷；纯日频多时刻 → 高级规则；其余 → 高级+自定义表达式。
  *
  * Parameters
  * ----------
@@ -909,7 +906,7 @@ export function timerStateToCronExpr(
   night?: NightSchedule | null,
 ): string {
   if (!state.autoOn) return ''
-  return cronToExpr(resolveCronList(market, state, night))
+  return cronToExpr(resolveCronList(market, { ...state, supN: 0 }, night))
 }
 
 /**
@@ -923,4 +920,17 @@ export function cronExprEqual(a: string, b: string): boolean {
 export function timerEditorError(state: TimerEditorState): string | null {
   if (!state.autoOn || state.timerTab !== 'custom') return null
   return state.rawCron.trim() ? cronError(state.rawCron) : '自定义节奏不能为空。'
+}
+
+
+export type Supplement = { count: number; interval_minutes: number }
+
+/** 读取独立配置；旧表达式绝不反推补发关系。 */
+export function parseSavedTimer(market: ScheduleKind, cronExpr: string, night?: NightSchedule | null, supplement?: Supplement | null): TimerEditorState {
+  const parsed = parseTimerIntent(market, cronExpr, night)
+  return { ...parsed, supN: supplement?.count ?? 0, supM: supplement?.interval_minutes ?? 1 }
+}
+
+export function timerSupplement(state: Pick<TimerEditorState, 'autoOn' | 'supN' | 'supM'>): Supplement | null {
+  return state.autoOn && state.supN > 0 ? { count: state.supN, interval_minutes: state.supM } : null
 }

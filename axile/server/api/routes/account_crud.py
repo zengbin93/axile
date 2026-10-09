@@ -8,13 +8,14 @@ from typing import Annotated, Any, cast
 from fastapi import APIRouter, Header, HTTPException, Response, status
 from loguru import logger
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
-from sqlmodel import and_, delete, desc, func, select
+from sqlmodel import and_, col, delete, desc, func, select
 
 from axile.channels import get_channel
 from axile.common.default_account_notification import DEFAULT_ACCOUNT_NOTIFICATION_CODE
 from axile.common.notification_function import validate_notification_function
 from axile.common.trade_channel import TradeChannel
 from axile.executor.account_control.models import AccountControlOverride
+from axile.executor.algorithms.utils.clock import clock_now
 from axile.server.api.deps import HistoryPaginationDep, SchedDep, SessionDep
 from axile.server.api.routes.account_support import _get_account_or_404
 from axile.server.cron import SCHEDULER_TIMEZONE, parse_cron_expr
@@ -363,6 +364,11 @@ async def create_account(
             detail=f"服务器错误: {str(exc)}",
         ) from exc
 
+    from axile.server.execution.notification_outbox import wake_notifications
+    from axile.server.execution.supplements import reap_cancelled_queue
+
+    await reap_cancelled_queue(cast("int", db_account.id))
+    wake_notifications(cast("int", db_account.id))
     sync = await _reconcile_committed_runtime(session, sched, cast("int", db_account.id))
     if sync.status != "synchronized":
         response.status_code = status.HTTP_202_ACCEPTED
@@ -648,6 +654,41 @@ async def account_next_run_time(
     job = sched.get_job(str(account_id))  # type: ignore[no-untyped-call]
     next_run_times = _next_job_run_times(job) if job is not None else []
     next_execution_times = _next_job_execution_times(job, account.trade_channel) if job is not None else []
+    if account.supplement and job is not None:
+        from axile.server.api.routes.account_schedule import SchedulePreviewRequest, schedule_preview
+        from axile.server.db.models.supplement import SupplementGroup, SupplementStep
+
+        preview = await schedule_preview(
+            SchedulePreviewRequest(
+                trade_channel=account.trade_channel,
+                cron_expr=account.cron_expr,
+                supplement=account.supplement,
+                limit=30,
+            )
+        )
+        now = clock_now(tz=SCHEDULER_TIMEZONE)
+        pending = (
+            await session.scalars(
+                select(SupplementStep)
+                .join(SupplementGroup, col(SupplementGroup.id) == col(SupplementStep.group_id))
+                .where(
+                    SupplementGroup.account_id == account_id,
+                    SupplementGroup.status == "active",
+                    SupplementStep.status == "pending",
+                )
+            )
+        ).all()
+        times = {
+            item.scheduled_at
+            for item in preview.items
+            if item.action == "execute" and (item.base_scheduled_at is None or item.base_scheduled_at >= now)
+        }
+        times.update(
+            datetime.fromisoformat(step.scheduled_at)
+            for step in pending
+            if datetime.fromisoformat(step.scheduled_at) > now
+        )
+        next_execution_times = [value.isoformat() for value in sorted(times)[:3]]
     return AccountNextRunPublic(
         account_id=account_id,
         is_scheduled=job is not None,
@@ -662,6 +703,20 @@ async def account_next_run_time(
     response_model=AccountPublic,
 )
 async def update_account(
+    session: SessionDep,
+    sched: SchedDep,
+    account_id: int,
+    account: AccountUpdate,
+    response: Response,
+) -> AccountPublic:
+    """更新账户."""
+    from axile.server.execution.supplements import account_lock
+
+    async with account_lock(account_id):
+        return await _update_account(session, sched, account_id, account, response)
+
+
+async def _update_account(
     session: SessionDep,
     sched: SchedDep,
     account_id: int,
@@ -697,6 +752,8 @@ async def update_account(
         _check_algorithm_channel_compat(next_empty_algorithm, str(next_trade_channel), "清仓算法")
 
         data = _build_account_update_data(account)
+        if "supplement" in data and data["supplement"] is not None and "cron_expr" not in data:
+            raise ValueError("启用或修改补发时必须同时提交基础 cron_expr")
         if (
             isinstance(data.get("execution_notification_code"), str)
             and not str(data["execution_notification_code"]).strip()
@@ -715,6 +772,24 @@ async def update_account(
         if account.account_config is not None or account.trade_channel is not None:
             data["account_config"] = normalized_account_config
         runtime_changed = bool({"account_config", "trade_channel", "is_started"} & data.keys())
+        from axile.server.execution.supplements import cancel_groups_in_session
+
+        changed_schedule = any(
+            key in data
+            and data[key]
+            != (
+                getattr(db_account, key).model_dump(mode="json")
+                if isinstance(getattr(db_account, key), BaseModel)
+                else getattr(db_account, key)
+            )
+            for key in ("cron_expr", "supplement", "trade_channel", "portfolio_id")
+        )
+        if (db_account.supplement or db_account.has_pending_supplement) and (
+            changed_schedule or data.get("is_started") is False
+        ):
+            await cancel_groups_in_session(
+                session, account_id, "account_stopped" if data.get("is_started") is False else "configuration_changed"
+            )
         await _sync_portfolio_binding_update(session, db_account, account_id, data)
         db_account.sqlmodel_update(data)
 
@@ -732,6 +807,11 @@ async def update_account(
             detail=f"服务器错误: {str(exc)}",
         ) from exc
 
+    from axile.server.execution.notification_outbox import wake_notifications
+    from axile.server.execution.supplements import reap_cancelled_queue
+
+    await reap_cancelled_queue(cast("int", db_account.id))
+    wake_notifications(cast("int", db_account.id))
     sync = await _reconcile_committed_runtime(session, sched, cast("int", db_account.id))
     if sync.status != "synchronized":
         response.status_code = status.HTTP_202_ACCEPTED

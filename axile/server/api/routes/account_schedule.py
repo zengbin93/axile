@@ -24,6 +24,7 @@ from axile.server.db.models import (
     ScheduleSkip,
     ScheduleSkipActivity,
 )
+from axile.server.db.models.account_settings import SupplementSettings
 from axile.server.db.models.performance import CostSummary
 from axile.server.db.models.schedule import (
     ActivityExecutionRecord,
@@ -32,6 +33,7 @@ from axile.server.db.models.schedule import (
     ScheduleSkipReason,
 )
 from axile.server.performance_costs import mapping, project_execution, summarize
+from axile.server.supplement_plan import plan_supplements
 from axile.server.trading_calendar import (
     CalendarDecisionStatus,
     CalendarSkipReason,
@@ -106,6 +108,7 @@ class SchedulePreviewRequest(BaseModel):
 
     trade_channel: TradeChannel
     cron_expr: str
+    supplement: SupplementSettings | None = None
     after: AwareDatetime | None = None
     limit: int = Field(default=5, ge=1, le=100)
 
@@ -126,6 +129,10 @@ class SchedulePreviewItem(BaseModel):
     """单个未来 Cron 触发点及其轻量日历动作。"""
 
     scheduled_at: datetime
+    base_scheduled_at: datetime | None = None
+    index: int = 0
+    effective_count: int = 0
+    is_last: bool = True
     calendar_day: date
     calendar_status: CalendarDecisionStatus
     action: Literal["execute", "skip"]
@@ -221,6 +228,31 @@ async def schedule_preview(payload: SchedulePreviewRequest) -> SchedulePreviewRe
         limit=payload.limit + 1,
         exclusive=payload.after is not None,
     )
+    metadata = {}
+    if payload.supplement:
+        # 包含游标所在旧组的未来补发，再合并基础触发；旧组不从 cron 反推。
+        from datetime import timedelta
+
+        lookback = start - timedelta(minutes=payload.supplement.count * payload.supplement.interval_minutes)
+        bases = _next_schedule_times(
+            triggers, start=lookback, limit=(payload.supplement.count + 1) * (payload.limit + 2)
+        )
+        expanded = []
+        for base in bases:
+            decision = evaluate_channel_calendar_moment(payload.trade_channel, base)
+            points = [base]
+            if decision.status not in {CalendarDecisionStatus.AVAILABLE_CLOSED, CalendarDecisionStatus.UNAVAILABLE}:
+                points, _ = plan_supplements(payload.trade_channel, payload.cron_expr, payload.supplement, base)
+            for index, point in enumerate(points):
+                if point > start or (payload.after is None and point == start):
+                    expanded.append(point)
+                    metadata[point] = {
+                        "base_scheduled_at": base,
+                        "index": index,
+                        "effective_count": len(points) - 1,
+                        "is_last": index == len(points) - 1,
+                    }
+        scheduled = sorted(set(expanded))[: payload.limit + 1]
     has_more = len(scheduled) > payload.limit
     page = scheduled[: payload.limit]
     items = []
@@ -230,6 +262,7 @@ async def schedule_preview(payload: SchedulePreviewRequest) -> SchedulePreviewRe
         items.append(
             SchedulePreviewItem(
                 scheduled_at=local_time,
+                **metadata.get(scheduled_at, {}),
                 calendar_day=decision.day,
                 calendar_status=decision.status,
                 action=(

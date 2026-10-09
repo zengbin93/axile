@@ -694,7 +694,7 @@ export function AcctConfirm() {
   >({ status: 'idle' })
   const [createError, setCreateError] = useState<Error | null>(null)
 
-  const cronList = scheduleKind ? resolveCronList(scheduleKind, acct, descriptor?.schedule.night) : []
+  const cronList = scheduleKind ? resolveCronList(scheduleKind, { ...acct, supN: 0 }, descriptor?.schedule.night) : []
   const cronExpr = cronToExpr(cronList)
   const scheduleDescription = scheduleKind
     ? describeCron(scheduleKind, cronExpr, descriptor?.schedule.night)
@@ -761,6 +761,7 @@ export function AcctConfirm() {
         account_config: visibleChannelAccountConfig(accountFields(descriptor), acct.config),
         is_started: acct.autoOn,
         cron_expr: cronExpr,
+        supplement: acct.supN > 0 ? { count: acct.supN, interval_minutes: acct.supM } : null,
         remark: null,
         brokerage: acct.channel,
         weight_precision: 0.01,

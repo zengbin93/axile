@@ -72,12 +72,18 @@ def get_system_notification_result() -> SystemNotificationStatePublic:
 
 
 def record_notification_result(
-    account_id: int, execution_id: str | None, finished_at: str, ok: bool, error: str | None
+    account_id: int,
+    execution_id: str | None,
+    finished_at: str,
+    ok: bool,
+    error: str | None,
+    event_type: str = "execution.finished",
 ) -> None:
     """保存最近完成的通知结果；失败保留此前成功摘要。"""
     from axile.server.db.models import Account
 
     values = {
+        "last_attempt_event_type": event_type,
         "last_attempt_at": finished_at,
         "last_attempt_execution_id": execution_id,
         "last_attempt_ok": ok,

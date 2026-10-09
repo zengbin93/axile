@@ -223,7 +223,16 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     register_china_channel_jobs(scheduler)
     scheduler.start()
     await init_scheduler()
-    await recover_intents_on_startup()
+    from axile.server.execution import notification_outbox
+    from axile.server.execution.supplements import recover_supplements
+
+    notification_outbox.recovering = True
+    try:
+        await recover_supplements()
+        await recover_intents_on_startup()
+    finally:
+        notification_outbox.recovering = False
+    await notification_outbox.recover_notifications()
     analysis = AnalysisManager(SessionLocal)
     _.state.analysis_manager = analysis
     await analysis.start()

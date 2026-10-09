@@ -15,6 +15,7 @@ class AccountNotificationState(SQLModel, table=True):
     last_success_at: str | None = Field(default=None, sa_column=Column(Text, nullable=True))
     execution_id: str | None = Field(default=None, sa_column=Column(Text, nullable=True))
 
+    last_attempt_event_type: str | None = None
     last_attempt_at: str | None = None
     last_attempt_execution_id: str | None = None
     last_attempt_ok: bool | None = None
@@ -26,6 +27,7 @@ class AccountNotificationStatePublic(SQLModel):
 
     last_success_at: str | None = None
     execution_id: str | None = None
+    last_attempt_event_type: str | None = None
     last_attempt_at: str | None = None
     last_attempt_execution_id: str | None = None
     last_attempt_ok: bool | None = None

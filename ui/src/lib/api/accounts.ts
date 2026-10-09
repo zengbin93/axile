@@ -38,9 +38,10 @@ export function testAccountFeishu(
 }
 
 /** 用当前页面草稿运行一次样例执行通知函数。 */
-export function testAccountNotificationFunction(id: number, code: string, feishuKey?: string | null): Promise<AccountFeishuTestResult> {
+export function testAccountNotificationFunction(id: number, code: string, feishuKey?: string | null, eventType: 'execution.finished' | 'supplement.cancelled' = 'execution.finished'): Promise<AccountFeishuTestResult> {
   return apiSend<AccountFeishuTestResult>('POST', `/account/${id}/notification/test`, {
     code,
+    event_type: eventType,
     ...(feishuKey !== undefined ? { feishu_key: feishuKey } : {}),
   })
 }
@@ -185,12 +186,13 @@ export function getNextRun(id: number, signal?: AbortSignal): Promise<AccountNex
 export function previewSchedule(
   tradeChannel: string,
   cronExpr: string,
-  params: { after?: string | null; limit?: number } = {},
+  params: { after?: string | null; limit?: number; supplement?: { count: number; interval_minutes: number } | null } = {},
   signal?: AbortSignal,
 ): Promise<SchedulePreview> {
   return apiSend<SchedulePreview>('POST', '/account/schedule-preview', {
     trade_channel: tradeChannel,
     cron_expr: cronExpr,
+    supplement: params.supplement ?? null,
     after: params.after ?? null,
     limit: params.limit ?? 5,
   }, signal)

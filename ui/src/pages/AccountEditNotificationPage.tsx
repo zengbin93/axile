@@ -54,9 +54,10 @@ export function AccountEditNotificationPage() {
   }, [accountId])
   useEffect(() => { void loadTemplate() }, [loadTemplate])
 
+  const [eventType, setEventType] = useState<'execution.finished' | 'supplement.cancelled'>('execution.finished')
   const trial = usePythonRun<AccountFeishuTestResult>({
     code: code ?? '', enabled: !saveState.saving,
-    execute: (draft) => testAccountNotificationFunction(accountId, draft),
+    execute: (draft) => testAccountNotificationFunction(accountId, draft, undefined, eventType),
     failed: (cause) => ({ ok: false, message: cause instanceof Error ? cause.message : String(cause) }),
     toEditorResult: (test) => ({ valid: test.ok, errorMessage: test.ok ? null : test.message }),
   })
@@ -94,6 +95,7 @@ export function AccountEditNotificationPage() {
       header={<>
         <Link to={`/accounts/${accountId}/edit`} className="mb-3 inline-block text-[13px] text-accent hover:underline">返回基本信息</Link>
         <div className="flex flex-wrap items-baseline gap-2"><AccountPageTitle accountId={accountId} page="执行通知函数" name={acc.name} channel={acc.trade_channel} market={acc.market} /></div>
+        <label className="mt-2 block text-[13px] text-ink-3">试跑事件 <select value={eventType} onChange={(event) => setEventType(event.target.value as typeof eventType)} disabled={trial.running}><option value="execution.finished">执行完成</option><option value="supplement.cancelled">补发取消</option></select></label>
         <p className="mt-2 text-[13px] text-ink-3">{savedNotificationStatus}{code !== savedCode ? ' · 当前草稿未保存' : ''}</p>
       </>}
       code={code}
