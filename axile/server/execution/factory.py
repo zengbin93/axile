@@ -5,6 +5,7 @@ from axile.executor.abstract_executor.base import AbstractExecutor
 from axile.executor.trading_calendar import ShinnyTradingCalendar
 from axile.server.db.models.account import AccountContext
 from axile.server.execution.notification_state import record_notification_result
+from axile.server.execution.resources import close_executor
 
 
 def create_executor_instance(account: AccountContext, *, initialize: bool = True) -> AbstractExecutor:
@@ -34,24 +35,28 @@ def create_executor_instance(account: AccountContext, *, initialize: bool = True
     config_data["channel_type"] = account.trade_channel
     config = plugin.account_config_model.model_validate(config_data)
     executor = plugin.create_executor(config)
-    account_id = getattr(account, "id", None)
-    if account_id is not None:
+    try:
+        account_id = getattr(account, "id", None)
+        if account_id is not None:
 
-        def notification_result(execution_id: str | None, finished_at: str, ok: bool, error: str | None) -> None:
-            record_notification_result(account_id, execution_id, finished_at, ok, error)
+            def notification_result(execution_id: str | None, finished_at: str, ok: bool, error: str | None) -> None:
+                record_notification_result(account_id, execution_id, finished_at, ok, error)
 
-        setattr(executor, "_notification_result_callback", notification_result)
-    setattr(executor, "_requires_connection_initialization", plugin.requires_pre_connect_guard and not initialize)
-    set_trading_calendar = getattr(executor, "set_trading_calendar", None)
-    if callable(set_trading_calendar):
-        set_trading_calendar(ShinnyTradingCalendar())
-    declaration = plugin.descriptor.calendar
-    set_channel_calendar = getattr(executor, "set_channel_calendar", None)
-    if callable(set_channel_calendar):
-        set_channel_calendar(declaration.calendar_id if declaration is not None else None)
-    if plugin.requires_pre_connect_guard and initialize:
-        executor._initialize_connection(config)
-        setattr(executor, "_requires_connection_initialization", False)
+            setattr(executor, "_notification_result_callback", notification_result)
+        setattr(executor, "_requires_connection_initialization", plugin.requires_pre_connect_guard and not initialize)
+        set_trading_calendar = getattr(executor, "set_trading_calendar", None)
+        if callable(set_trading_calendar):
+            set_trading_calendar(ShinnyTradingCalendar())
+        declaration = plugin.descriptor.calendar
+        set_channel_calendar = getattr(executor, "set_channel_calendar", None)
+        if callable(set_channel_calendar):
+            set_channel_calendar(declaration.calendar_id if declaration is not None else None)
+        if plugin.requires_pre_connect_guard and initialize:
+            executor._initialize_connection(config)
+            setattr(executor, "_requires_connection_initialization", False)
+    except BaseException:
+        close_executor(executor)
+        raise
     return executor
 
 

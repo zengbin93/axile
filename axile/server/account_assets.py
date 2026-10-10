@@ -8,6 +8,7 @@ from axile.executor.models.unified_account_assets import UnifiedAccountAssets
 from axile.server.db.models.account import AccountContext
 from axile.server.execution.dispatch import ExecutionBackendKind, resolve_execution_backend_kind
 from axile.server.execution.factory import create_executor_instance
+from axile.server.execution.resources import close_executor
 from axile.server.execution.worker_backend.manager import (
     WorkerBackendTimeoutError,
     get_worker_backend_manager,
@@ -22,12 +23,7 @@ def _query_inline_account_assets(account: AccountContext) -> UnifiedAccountAsset
     try:
         return executor.get_account_assets()
     finally:
-        stop = getattr(executor, "stop", None)
-        close = getattr(executor, "close", None)
-        if callable(stop):
-            stop()
-        elif callable(close):
-            close()
+        close_executor(executor)
 
 
 async def query_account_assets(account: AccountContext) -> UnifiedAccountAssets:

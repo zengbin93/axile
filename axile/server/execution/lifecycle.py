@@ -63,6 +63,7 @@ from axile.server.execution.registry import (
     get_execution_task_state,
     update_execution_task_state,
 )
+from axile.server.execution.resources import close_executor
 from axile.server.execution_audit import append_execution_artifact, append_execution_event
 
 type ExecutionRunner = Callable[[str], Awaitable[ExecuteRecord | None]]
@@ -417,14 +418,8 @@ async def prepare_executor_runtime(
         if callable(prepare_execution_runtime):
             prepare_execution_runtime()
         return executor
-    except Exception:
-        await flush_account_control_records(executor)
-        stop = getattr(executor, "stop", None)
-        close = getattr(executor, "close", None)
-        if callable(stop):
-            stop()
-        elif callable(close):
-            close()
+    except BaseException:
+        await cleanup_executor_runtime(executor)
         raise
 
 
@@ -445,10 +440,19 @@ async def cleanup_executor_runtime(executor: object | None) -> None:
     if executor is None:
         return
 
-    await flush_account_control_records(executor)
-    clear_execution_runtime = getattr(executor, "clear_execution_runtime", None)
-    if callable(clear_execution_runtime):
-        clear_execution_runtime()
+    try:
+        await flush_account_control_records(executor)
+    except Exception:
+        loguru.logger.exception("一次性执行器账户控制记录刷入失败")
+    finally:
+        try:
+            clear_execution_runtime = getattr(executor, "clear_execution_runtime", None)
+            if callable(clear_execution_runtime):
+                clear_execution_runtime()
+        except Exception:
+            loguru.logger.exception("一次性执行器上下文清理失败")
+        finally:
+            await asyncio.to_thread(close_executor, executor)
 
 
 async def append_execution_result_artifacts(
